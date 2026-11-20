@@ -394,9 +394,9 @@ fn RuntimeConfigDocument() -> Element {
                                                                 command_id,
                                                                 current_command.fingerprint,
                                                                 current_command.document,
-                                                            ).await.map_err(|error| error.code)?;
+                                                            ).await?;
                                                             let next_form = RuntimeConfigForm::from_response(&result)
-                                                                .map_err(|()| "invalid_response".to_owned())?;
+                                                                .map_err(|()| crate::api::AdminWriteFailure::outcome_unknown("invalid_response"))?;
                                                             Ok((result, next_form))
                                                         }
                                                     },
@@ -544,11 +544,12 @@ mod tests {
         VirtualDom,
     };
     use dioxus::prelude::*;
+    use gloo_net::http::Method;
     use serde_json::json;
 
     use super::draft::{ConfigDraft, ConfigValidationStub, use_config_draft};
     use super::{ConfigCommand, ConfigNotice, RuntimeConfigDocument};
-    use crate::api::{AdminApiFailure, stub_runtime_config};
+    use crate::api::{AdminApiFailure, stub_runtime_config, update_admin_runtime_config};
     use crate::surface::auctions::draft_page_tests::{
         RecordRead, assert_field, button, click_button, has_live_text, mount_writer, settle_writer,
         submit_button_disabled, writer_form,
@@ -556,12 +557,113 @@ mod tests {
     use crate::surface::config::model::RuntimeConfigForm;
     use crate::surface::config::reading::ConfigReadGate;
     use crate::surface::config::review::{ConfigChange, changes};
+    use crate::surface::pending::{PendingCommandPanel, use_pending_commands};
     use crate::surface::realtime::{TestPage, text_attributes};
     use crate::surface::test_events::{dispatch_click_event, dispatch_form_event};
+
+    const CONFIG_CONFLICT: &str =
+        r#"{"code":"state_conflict","message":"配置命令冲突","data":null,"request_id":null}"#;
+    const CONFIG_UNAVAILABLE: &str =
+        r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#;
+    const CONFIG_SAVE_URL: &str = "/api/v1/admin/config?include_equipment_taxonomy=true&include=fulfillment_collection_overdue_age_seconds";
 
     fn draft_harness() -> Element {
         use_config_draft();
         VNode::empty()
+    }
+
+    fn stub_config_save_reply(page: &TestPage, status: u16, body: &'static str) {
+        page.dom().in_scope(ScopeId::APP, || {
+            AdminApiFailure::stub_write_response(CONFIG_SAVE_URL, Method::PUT, status, body);
+        });
+    }
+
+    #[test]
+    fn config_state_conflict_keeps_the_previously_unknown_command_retryable() {
+        let writes = Rc::new(RefCell::new(Vec::new()));
+        let fingerprint = format!("sha256:{}", "0".repeat(64));
+        let document = json!({"operations":{"forum":{"lease_duration_seconds":600}}});
+        let (mut page, _) = mount_writer({
+            let writes = writes.clone();
+            let fingerprint = fingerprint.clone();
+            let document = document.clone();
+            move || {
+                let pending =
+                    use_pending_commands(use_signal(|| 0), |entity| entity == "runtime-config");
+                let writes = writes.clone();
+                let fingerprint = fingerprint.clone();
+                let document = document.clone();
+                rsx! {
+                    button { onclick: move |_| {
+                        let writes = writes.clone();
+                        let fingerprint = fingerprint.clone();
+                        let document = document.clone();
+                        assert!(pending.submit(
+                            "runtime-config".to_owned(), "写入配置".to_owned(),
+                            move |command_id| {
+                                writes.borrow_mut().push(AdminRuntimeConfigUpdateRequest {
+                                    command_id, expected_fingerprint: fingerprint.clone(), document: document.clone(),
+                                });
+                                update_admin_runtime_config(command_id, fingerprint.clone(), document.clone())
+                            },
+                            |_| panic!("拒绝回执不能推进配置基线"), |_| {},
+                        ));
+                    }, {"提交配置命令".to_owned()} }
+                    PendingCommandPanel { owner: pending }
+                }
+            }
+        });
+        stub_config_save_reply(&page, 503, CONFIG_UNAVAILABLE);
+        click_button(&mut page, "提交配置命令");
+        stub_config_save_reply(&page, 409, CONFIG_CONFLICT);
+        click_button(&mut page, "原样重试");
+        assert!(button(&page, "原样重试").is_some());
+        stub_config_save_reply(&page, 503, CONFIG_UNAVAILABLE);
+        click_button(&mut page, "原样重试");
+        let writes = writes.borrow();
+        assert_eq!(writes.len(), 3);
+        assert!(!writes[0].command_id.is_nil());
+        for write in writes.iter() {
+            assert_eq!(write.command_id, writes[0].command_id);
+            assert_eq!(write.expected_fingerprint, fingerprint);
+            assert_eq!(write.document, document);
+        }
+    }
+
+    #[test]
+    fn config_state_conflict_keeps_the_unsaved_edits_visible() {
+        let mut response: ApiResponse<AdminRuntimeConfigResponse> =
+            serde_json::from_str(include_str!(
+                "../../../../auction-contracts/tests/fixtures/admin/runtime-config-default.json"
+            ))
+            .unwrap();
+        let forum = &mut response.data.document["operations"]["forum"];
+        forum["managed"] = json!(true);
+        forum["lease_duration_seconds"] = json!(300);
+        forum["item_timeout_seconds"] = json!(240);
+        let (mut page, _) = mount_writer(move || {
+            use_config_draft();
+            use_context_provider(|| response.clone());
+            let mut draft = use_context::<ConfigDraft>();
+            rsx! {
+                button { onclick: move |_| {
+                    draft.form.write().set_input("operations.forum.lease_duration_seconds", "600".to_owned());
+                    draft.checked_signature.set(draft.form.peek().signature().unwrap());
+                }, {"准备已校验的候选".to_owned()} }
+                RuntimeConfigDocument {}
+            }
+        });
+        let unsaved = "有未保存的修改。站内切页会保留草稿；退出登录将清除草稿。";
+        assert!(!has_live_text(&page, unsaved));
+        click_button(&mut page, "准备已校验的候选");
+        click_button(&mut page, "写入配置");
+        stub_config_save_reply(&page, 503, CONFIG_UNAVAILABLE);
+        click_button(&mut page, "确认");
+        assert!(has_live_text(&page, unsaved));
+
+        stub_config_save_reply(&page, 409, CONFIG_CONFLICT);
+        click_button(&mut page, "原样重试");
+        assert!(has_live_text(&page, unsaved));
     }
 
     fn find_in_tree<T>(
@@ -1138,17 +1240,33 @@ mod tests {
             reads: Cell::new(0),
             writes: Cell::new(0),
         });
+        let bodies = Rc::new(RefCell::new(Vec::new()));
         let (mut page, _) = mount_writer({
+            let bodies = bodies.clone();
             let requests = requests.clone();
             move || {
                 use_config_draft();
                 use_hook({
                     let reads = requests.clone();
                     let writes = requests.clone();
+                    let bodies = bodies.clone();
                     move || {
                         stub_runtime_config(
                             move || reads.read(),
-                            move |command| writes.save(command),
+                            move |command| {
+                                bodies.borrow_mut().push(serde_json::to_string(&command).unwrap());
+                                if writes.writes.get() == 0 {
+                                    writes.writes.set(1);
+                                    let mut mismatch = writes.projection.borrow().clone();
+                                    mismatch.fingerprint = format!("sha256:{}", "2".repeat(64));
+                                    mismatch.restart_required = true;
+                                    mismatch.worker_restart_state = None;
+                                    mismatch.document["operations"]["forum"]["lease_duration_seconds"] =
+                                        json!(601);
+                                    return mismatch;
+                                }
+                                writes.save(command)
+                            },
                         );
                     }
                 });
@@ -1173,8 +1291,20 @@ mod tests {
         let region = worker_status_region(&page, worker_restart, true);
         click_button(&mut page, "准备已校验的候选");
         click_button(&mut page, "写入配置");
-        let failed_read = click_button(&mut page, "确认");
+        let original_fingerprint = requests.projection.borrow().fingerprint.clone();
+        click_button(&mut page, "确认");
         assert_eq!(requests.writes.get(), 1);
+        assert_eq!(requests.reads.get(), 1);
+        assert!(has_live_text(&page, &original_fingerprint));
+        assert!(!has_live_text(&page, saved));
+        assert!(button(&page, "原样重试").is_some_and(|(_, disabled)| !disabled));
+
+        let failed_read = click_button(&mut page, "原样重试");
+        assert!(button(&page, "原样重试").is_none());
+        assert_eq!(requests.writes.get(), 2);
+        let bodies = bodies.borrow();
+        assert_eq!(bodies.len(), 2);
+        assert_eq!(bodies[0], bodies[1]);
         assert_eq!(requests.reads.get(), 2);
         assert!(has_live_text(&page, error));
         assert!(button(&page, "写入配置").is_some_and(|(_, disabled)| disabled));

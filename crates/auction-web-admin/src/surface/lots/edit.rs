@@ -4,8 +4,8 @@ use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
 use super::super::auctions::{
-    DraftFeedback, DraftRead, DraftRefreshButton, close_edit_draft, close_matching_draft,
-    focus_draft_field_after_render, observe_draft_write,
+    DraftFeedback, DraftRead, DraftRefreshButton, DraftWriteFeedback, close_edit_draft,
+    close_matching_draft, focus_draft_field_after_render, observe_draft_write,
 };
 use super::presentation::{MAX_START_PRICE, admin_lot_code_for, parse_start_price};
 use super::state::{LotDialog, LotUpdateNotice};
@@ -74,7 +74,7 @@ pub(super) fn AdminLotEditDialog(
     notice: Signal<Option<LotUpdateNotice>>,
 ) -> Element {
     let owner = use_context::<PendingCommands>();
-    let mut failure_code = use_signal(|| None::<String>);
+    let mut failure_code = use_signal(|| None::<DraftWriteFeedback>);
     let mut invalid_price = use_signal(|| false);
     let Some(edit) = draft() else {
         return rsx! {};
@@ -84,7 +84,7 @@ pub(super) fn AdminLotEditDialog(
     let busy = owner.is_busy(&entity);
     let failure = failure_code();
     let conflict = !frozen
-        && (failure.as_deref() == Some("stale_lot_state")
+        && (failure.as_ref().is_some_and(|feedback| feedback.stale_write)
             || read.version_changed(edit.base.state_version, latest_version));
     let can_submit =
         read.is_ready() && !frozen && !conflict && latest_version == Some(edit.base.state_version);
@@ -165,7 +165,7 @@ pub(super) fn AdminLotEditDialog(
                     p { {t!("admin-lots-withdraw-warning", seller: seller)} }
                 }
                 if !frozen {
-                    DraftFeedback { conflict, read: read.clone(), failure }
+                    DraftFeedback { conflict, read: read.clone(), failure: failure.map(|feedback| feedback.display_code) }
                 }
                 div { class: "admin-shell__dialog-actions",
                     if !conflict {
@@ -208,7 +208,7 @@ fn submit_lot_update(
     edit: &LotEdit,
     price: Option<i64>,
     draft: Signal<Option<LotEdit>>,
-    failure: Signal<Option<String>>,
+    failure: Signal<Option<DraftWriteFeedback>>,
     notice: Signal<Option<LotUpdateNotice>>,
 ) -> bool {
     let (action, success, label) = match edit.kind {
@@ -232,6 +232,7 @@ fn submit_lot_update(
             observe_draft_write(
                 update_admin_lot(command_id, lot_id.clone(), state_version, action, price),
                 failure,
+                "stale_lot_state",
             )
         },
         move |_| {
@@ -564,6 +565,30 @@ mod tests {
             test.submit(form);
             assert!(test.writes.take_writes().is_empty());
         }
+    }
+
+    #[test]
+    fn wrong_status_price_conflict_keeps_the_intent_until_a_verified_retry() {
+        let mut test = LotCommandTest::mount();
+        let (form, input) = test.editing_price();
+        test.writes.reply_http(
+            422,
+            r#"{"code":"stale_lot_state","message":"版本已变化","data":null,"request_id":null}"#,
+        );
+        test.submit(form);
+        let first = test.take_request();
+        assert_lot_request(&first, 7, "set_start_price", Some(777));
+        assert!(test.occupied());
+        assert_eq!(test.test.reads.started(), 1);
+        assert!(!has_live_text(&test.page, "这条记录已被其他操作更新，本次修改没有生效。"));
+        let (retry, disabled) = command_button(&test.page, first.command_id(), "原样重试").unwrap();
+        assert!(!disabled);
+
+        test.writes.reply_conflict("stale_lot_state");
+        let rejected = test.page.dispatch("click", retry, "");
+        assert_eq!(test.take_request(), first);
+        test.assert_conflict(&rejected, input);
+        assert_eq!(test.test.reads.started(), 2);
     }
 
     #[test]

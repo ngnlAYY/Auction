@@ -7,7 +7,9 @@ use dioxus::prelude::*;
 use super::super::poll::{AutoPollControls, use_auto_poll};
 use super::super::query::use_realtime_query_state;
 use super::event::RealtimeEventTable;
-use super::failure::RealtimeFailureTable;
+use super::failure::{
+    FailureReadRetry, FailureReads, RealtimeFailureTable, retry_failure_read, use_failure_reads,
+};
 use super::filter_field::fetch_filtered;
 use super::filters::{RealtimeEventFilters, RealtimeFailureFilters, RealtimeFailureStateFilter};
 use super::lag::RealtimeLagTable;
@@ -15,12 +17,41 @@ use super::overview::{
     activity_count_state, consumer_count_state, failure_count_state, metric_card, metric_value,
 };
 use crate::api::{
-    RealtimeFailure, fetch_realtime_event_page, fetch_realtime_event_total,
-    fetch_realtime_failure_page, fetch_realtime_lag_page, replay_realtime_failure,
+    RealtimeFailure, RealtimeFailurePage, fetch_realtime_event_page, fetch_realtime_event_total,
+    fetch_realtime_lag_page, replay_realtime_failure,
 };
 use crate::surface::pagination::{AdminPager, use_admin_page_with_state, use_admin_pagination};
 use crate::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
 use crate::surface::{AdminActionFeedback, admin_api_error_message};
+
+#[derive(Clone, Copy, Default)]
+struct ReplaySelection {
+    processed: bool,
+}
+
+impl ReplaySelection {
+    fn eligible(
+        selected: &RealtimeFailure,
+        snapshot: Option<&Result<RealtimeFailurePage, String>>,
+    ) -> Option<bool> {
+        let page = snapshot?.as_ref().ok()?;
+        Some(page.failures.iter().any(|failure| {
+            failure.id == selected.id
+                && failure.event_id == selected.event_id
+                && failure.stream_key == selected.stream_key
+                && !failure.resolved
+        }))
+    }
+
+    // 旧确认框一旦失效，后续刷新不再恢复它的提交资格。
+    fn observe(self, eligible: Option<bool>) -> Self {
+        Self { processed: self.processed || eligible == Some(false) }
+    }
+
+    fn available(self, eligible: impl FnOnce() -> Option<bool>) -> bool {
+        !self.processed && eligible() == Some(true)
+    }
+}
 
 /// Outbox 路由展示已持久化事件元数据与 realtime failure/lag/replay 安全投影；未冻结的外部
 /// 广播 sink 不在页面中虚构状态或成功结果。
@@ -33,13 +64,14 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let mut failure_refresh = use_signal(|| 0_u64);
     let mut lag_refresh = use_signal(|| 0_u64);
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
-    let mut selected_failure = use_signal(|| None::<String>);
+    let mut selected_failure = use_signal(|| None::<RealtimeFailure>);
     let replay_refresh = use_signal(|| 0_u64);
     let pending =
         use_pending_commands(replay_refresh, |entity| entity.starts_with("realtime-failure:"));
     let mut schema_version = use_signal(|| "1".to_owned());
     let mut public_payload = use_signal(|| "{}".to_owned());
     let mut replay_invalid = use_signal(|| false);
+    let mut replay_selection = use_signal(ReplaySelection::default);
     let replay_busy = move || pending.any_busy();
     // 已应用的事件/failure 筛选与三个分区的分页跟地址栏双向同步；筛选输入框草稿（留在
     // 筛选组件本地）、replay 对话框与负载输入是瞬态，不入 URL。
@@ -91,33 +123,29 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             fetch_realtime_lag_page(page, String::new(), String::new(), size).await
         },
     );
-    let (failures, failures_status) = use_admin_page_with_state(
-        failure_pagination.clone(),
-        move || {
-            let _ = replay_refresh();
-            let _ = failure_refresh();
-            failure_query()
-        },
-        |request, size| {
-            fetch_filtered(request, move |(page, stream, consumer, code, state)| {
-                fetch_realtime_failure_page(page, stream, consumer, code, state, size)
-            })
-        },
-    );
-    let unresolved_failures = use_resource(move || {
-        let _ = replay_refresh();
-        let _ = failure_refresh();
-        fetch_filtered(failure_allowed().then_some(()), |()| {
-            fetch_realtime_failure_page(
-                1,
-                String::new(),
-                String::new(),
-                String::new(),
-                "dead_letter".to_owned(),
-                10,
-            )
-        })
+    let FailureReads { page: failures, status: failures_status, unresolved: unresolved_failures } =
+        use_failure_reads(
+            failure_pagination.clone(),
+            failure_query,
+            failure_allowed,
+            failure_refresh,
+            replay_refresh,
+        );
+    // 只用当前查询的成功快照确认目标仍可重放，读取失败不能当作记录已处理。
+    let replay_eligible = move || {
+        let selection = selected_failure.read();
+        let selected = selection.as_ref().filter(|_| failure_allowed())?;
+        ReplaySelection::eligible(selected, failures.read().as_ref())
+    };
+    use_effect(move || {
+        let eligible = replay_eligible();
+        let current = *replay_selection.peek();
+        let next = current.observe(eligible);
+        if next.processed != current.processed {
+            replay_selection.set(next);
+        }
     });
+    let replay_available = move || replay_selection().available(replay_eligible);
     // 各分区只在自己的读取（含配套计数）完成后轮询；慢请求不能被下一节拍取消。
     let poll_seconds = use_memo(move || query_state.read().poll_seconds);
     use_auto_poll(poll_seconds, move || {
@@ -170,16 +198,6 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         .copied();
     let consumer_total = lag_page.map(|page| page.pagination.total);
     let failure_total = unresolved_failure_page.map(|page| page.pagination.total);
-    let selected_id = selected_failure();
-    let selected = (*failure_state)
-        .as_ref()
-        .filter(|_| failure_allowed())
-        .and_then(|result| result.as_ref().ok())
-        .and_then(|page| {
-            selected_id
-                .as_ref()
-                .and_then(|id| page.failures.iter().find(|failure| &failure.id == id).cloned())
-        });
     let event_content = match &*event_state {
         None => rsx! {
             AsyncState {
@@ -222,6 +240,10 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         }
         _ => rsx! {},
     };
+    let failure_read_error = match &*failure_state {
+        Some(Err(error)) if failure_allowed() => Some(error),
+        _ => None,
+    };
     let failure_content = match &*failure_state {
         None => rsx! {
             AsyncState {
@@ -235,9 +257,8 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                 kind: AsyncStateKind::Error,
                 title: admin_api_error_message(error),
                 detail: "",
-                // 错误态提供页内重试入口：仅重载 failure 分区（含未解决计数）。
                 retry_label: t!("admin-retry"),
-                on_retry: move |_| failure_refresh.set(failure_refresh().saturating_add(1)),
+                on_retry: move |_| retry_failure_read(failures_status.cloned(), failure_refresh),
             }
         },
         Some(Ok(failure_page)) => rsx! {
@@ -248,7 +269,8 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                     schema_version.set("1".to_owned());
                     public_payload.set("{}".to_owned());
                     replay_invalid.set(false);
-                    selected_failure.set(Some(failure.id));
+                    replay_selection.set(ReplaySelection::default());
+                    selected_failure.set(Some(failure));
                     notice.set(None);
                 },
             }
@@ -437,7 +459,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                     on_load: load_failures,
                 }
             }
-            if let Some(failure) = selected {
+            if let Some(failure) = selected_failure() {
                 // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；.admin-realtime-dialog
                 // 内容样式挂在面板内的包装 div；共享组件暂不支持 aria_describedby。
                 Dialog {
@@ -451,6 +473,19 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                         p {
                             class: "admin-panel__note",
                             {t!("realtime-replay-warning", event_id: failure.event_id.clone())}
+                        }
+                        div { role: "status",
+                            if replay_selection().processed || replay_eligible() == Some(false) {
+                                p { class: "admin-panel__note", {t!("realtime-replay-processed")} }
+                            }
+                        }
+                        div { role: "alert",
+                            if let Some(error) = failure_read_error {
+                                p { class: "admin-panel__note action-feedback action-feedback--error", {admin_api_error_message(error)} }
+                            }
+                        }
+                        if failure_read_error.is_some() {
+                            FailureReadRetry { status: failures_status, refresh: failure_refresh }
                         }
                         label {
                             {t!("realtime-replay-schema")}
@@ -487,12 +522,13 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                         div { class: "admin-shell__dialog-actions",
                             button {
                                 r#type: "button",
-                                disabled: replay_busy(),
+                                disabled: replay_busy() || !replay_available(),
                                 onclick: move |_| {
-                                    if replay_busy() || pending.contains(&format!("realtime-failure:{}", failure.id)) {
+                                    if replay_busy() || !replay_available()
+                                        || pending.contains(&format!("realtime-failure:{}", failure.id))
+                                    {
                                         return;
                                     }
-                                    let failure_id = failure.id.clone();
                                     let schema_input = schema_version();
                                     let payload = public_payload();
                                     let schema = schema_input.parse::<i32>();
@@ -508,15 +544,17 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                                     }
                                     replay_invalid.set(false);
                                     notice.set(None);
+                                    // 已登记的命令只使用冻结目标、schema 与负载，原样重试无需读列表。
+                                    let failure = failure.clone();
                                     let submitted = pending.submit(
-                                        format!("realtime-failure:{failure_id}"),
+                                        format!("realtime-failure:{}", failure.id),
                                         t!("realtime-replay-submit"),
                                         move |command_id| {
-                                            let failure_id = failure_id.clone();
+                                            let failure = failure.clone();
                                             let payload = payload.clone();
                                             async move {
                                                 replay_realtime_failure(
-                                                    failure_id,
+                                                    &failure,
                                                     command_id,
                                                     schema,
                                                     payload,
@@ -556,16 +594,31 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
-    use auction_contracts::AdminRealtimePaginationResponse;
-    use dioxus::dioxus_core::{DynamicNode, ElementId, Mutation, TemplateNode, VNode};
-    use dioxus::prelude::{VirtualDom, use_context_provider};
+    use auction_contracts::{
+        AdminRealtimeFailurePaginationResponse, AdminRealtimePaginationResponse,
+    };
+    use dioxus::dioxus_core::{DynamicNode, ElementId, Mutation, ScopeId, TemplateNode, VNode};
+    use dioxus::prelude::{
+        ReadableExt, UseResourceState, VirtualDom, dioxus_core, dioxus_elements, dioxus_signals,
+        rsx, spawn, use_context_provider, use_hook, use_memo, use_signal,
+    };
+    use gloo_net::http::Method;
+    use uuid::Uuid;
 
-    use super::outbox_page;
-    use crate::api::{AdminApiFailure, RealtimeLagPage};
-    use crate::surface::auctions::draft_page_tests::{click_button, has_live_text, mount_writer};
+    use super::super::failure::{FailureReadRetry, use_failure_reads};
+    use super::{ReplaySelection, outbox_page};
+    use crate::api::{
+        AdminApiFailure, AdminWriteFailure, RealtimeFailure, RealtimeFailurePage, RealtimeLagPage,
+        Rejection, replay_realtime_failure,
+    };
+    use crate::surface::auctions::draft_page_tests::{
+        button, click_button, has_live_text, mount_writer,
+    };
+    use crate::surface::pagination::use_admin_pagination;
+    use crate::surface::pending::{PendingCommandPanel, use_pending_commands};
     use crate::surface::realtime::filters::{EVENT_FILTER_FORM_ID, FAILURE_FILTER_FORM_ID};
     use crate::surface::realtime::{
         TestPage, get_parameter, selected_options, submit_forms, text_attributes,
@@ -617,6 +670,237 @@ mod tests {
         assert_eq!(*reads.0.borrow(), [first; 2]);
         assert!(has_live_text(&page, empty));
         assert!(!has_live_text(&page, failed));
+    }
+
+    const REPLAY_URL: &str =
+        "/api/v1/admin/realtime/failures/00000000-0000-4000-8000-000000000027/replay";
+    const REPLAY_CONFLICT: &str =
+        r#"{"code":"conflict","message":"命令冲突","data":null,"request_id":null}"#;
+
+    fn replay_target() -> RealtimeFailure {
+        RealtimeFailure {
+            id: "00000000-0000-4000-8000-000000000027".into(),
+            event_id: "00000000-0000-4000-8000-000000000026".into(),
+            stream_key: "auction:0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b".into(),
+            consumer_key: "public-realtime".into(),
+            code: "invalid_event".into(),
+            safe_detail: "示例失败".into(),
+            failed_at: "2025-11-15T09:46:40.110000Z".into(),
+            resolved_at: None,
+            resolved: false,
+        }
+    }
+
+    #[test]
+    fn realtime_replay_requires_a_new_dialog_after_confirmed_invalidation() {
+        let target = replay_target();
+        let snapshot = |failure| {
+            Ok(RealtimeFailurePage {
+                failures: vec![failure],
+                pagination: AdminRealtimeFailurePaginationResponse {
+                    page: 1,
+                    page_size: 10,
+                    has_more: false,
+                    total: 1,
+                },
+            })
+        };
+        let valid = snapshot(target.clone());
+        let failed = Err("storage_unavailable".into());
+        let mut resolved = target.clone();
+        resolved.resolved = true;
+        resolved.resolved_at = Some("2025-11-15T10:00:00Z".into());
+        let resolved = snapshot(resolved);
+        let eligible = |snapshot| ReplaySelection::eligible(&target, Some(snapshot));
+        let mut selection = ReplaySelection::default();
+
+        for (result, available) in [
+            (&valid, true),
+            (&valid, true),
+            (&failed, false),
+            (&valid, true),
+            (&resolved, false),
+            (&valid, false),
+        ] {
+            let eligible = eligible(result);
+            selection = selection.observe(eligible);
+            assert_eq!(selection.available(|| eligible), available, "读取结果 {result:?}");
+        }
+        let reopened = ReplaySelection::default();
+        assert!(reopened.available(|| eligible(&valid)));
+    }
+
+    #[test]
+    fn realtime_replay_dialog_retry_reads_only_the_failure_list_and_count() {
+        let (mut page, _) = mount_writer(|| {
+            let refresh = use_signal(|| 0_u64);
+            let replay_refresh = use_signal(|| 0_u64);
+            let status = use_signal(|| UseResourceState::Ready);
+            let pagination = use_admin_pagination(
+                "realtime-failures",
+                &["failure_page_size"],
+                Some(200),
+                1_000_000,
+            );
+            let query = use_memo(|| {
+                Some((2, String::new(), "public-realtime".into(), String::new(), String::new()))
+            });
+            let allowed = use_memo(move || query.read().is_some());
+            let _reads = use_failure_reads(pagination, query, allowed, refresh, replay_refresh);
+            rsx! { FailureReadRetry { status, refresh } }
+        });
+        let expected = [
+            "/api/v1/admin/realtime/failures?page=1&page_size=10&resolved=false",
+            "/api/v1/admin/realtime/failures?page=2&page_size=10&consumer_key=public-realtime",
+        ];
+        let mut initial = page.take_gets();
+        initial.sort();
+        assert_eq!(initial, expected);
+        click_button(&mut page, "重试");
+        let mut retried = page.take_gets();
+        retried.sort();
+        assert_eq!(retried, expected);
+    }
+
+    #[test]
+    fn realtime_replay_distinguishes_unsent_json_from_verified_conflict() {
+        let outcome = Rc::new(Cell::new(None));
+        let reply = outcome.clone();
+        let _mounted = mount_writer(move || {
+            let reply = reply.clone();
+            use_hook(move || {
+                AdminApiFailure::stub_write_response(
+                    REPLAY_URL,
+                    Method::POST,
+                    409,
+                    REPLAY_CONFLICT,
+                );
+                spawn(async move {
+                    let target = replay_target();
+                    let id = Uuid::parse_str("00000000-0000-4000-8000-000000000029").unwrap();
+                    let unsent =
+                        replay_realtime_failure(&target, id, 3, "{".into()).await.unwrap_err();
+                    let conflict =
+                        replay_realtime_failure(&target, id, 3, r#"{"checked":true}"#.into())
+                            .await
+                            .unwrap_err();
+                    reply.set(Some((unsent, conflict)));
+                });
+            });
+            VNode::empty()
+        });
+        let (unsent, conflict) = outcome.take().expect("两次尝试都应返回回执裁定");
+        assert!(matches!(unsent.classify(), Rejection::ThisAttempt));
+        assert_eq!(unsent.display_code(), "invalid_request");
+        assert_eq!(unsent.observed_response_status(), None);
+        assert!(matches!(conflict.classify(), Rejection::ReplayChecked));
+        assert_eq!(conflict.display_code(), "conflict");
+        assert_eq!(conflict.observed_response_status(), Some(409));
+    }
+
+    #[test]
+    fn realtime_replay_reuses_its_command_id_until_a_verified_conflict_settles_it() {
+        let attempts = Rc::new(RefCell::new(Vec::new()));
+        let (mut page, _) = mount_writer({
+            let attempts = attempts.clone();
+            move || {
+                let target = replay_target();
+                let entity = format!("realtime-failure:{}", target.id);
+                let attempts = attempts.clone();
+                let refresh = use_signal(|| 0_u64);
+                let pending =
+                    use_pending_commands(refresh, |key| key.starts_with("realtime-failure:"));
+                let label = "确认重放";
+                rsx! {
+                    PendingCommandPanel { owner: pending }
+                    button {
+                        disabled: pending.contains(&entity),
+                        onclick: move |_| {
+                            let target = target.clone();
+                            let attempts = attempts.clone();
+                            pending.submit(entity.clone(), label.into(),
+                                move |id| {
+                                    attempts.borrow_mut().push(id);
+                                    let target = target.clone();
+                                    async move {
+                                        replay_realtime_failure(&target, id, 3, r#"{"checked":true}"#.into()).await
+                                    }
+                                },
+                                |_| panic!("冲突流程不应交付成功回执"),
+                                |_| (),
+                            );
+                        },
+                        "{label}"
+                    }
+                }
+            }
+        });
+        page.dom().in_scope(ScopeId::APP, || {
+            AdminApiFailure::stub_write_response(REPLAY_URL, Method::POST, 503,
+                r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#);
+        });
+        click_button(&mut page, "确认重放");
+        assert!(button(&page, "确认重放").unwrap().1);
+        let first = attempts.borrow()[0];
+
+        page.dom().in_scope(ScopeId::APP, || {
+            AdminApiFailure::stub_write_response(REPLAY_URL, Method::POST, 409, REPLAY_CONFLICT);
+        });
+        click_button(&mut page, "原样重试");
+        assert_eq!(*attempts.borrow(), [first, first]);
+        assert!(button(&page, "关闭已拒绝操作").is_some());
+        assert!(!button(&page, "确认重放").unwrap().1);
+    }
+
+    #[test]
+    fn realtime_replay_host_keeps_unknown_and_delivers_the_matching_result_once() {
+        let attempts = Rc::new(RefCell::new(Vec::new()));
+        let delivered = Rc::new(Cell::new(0));
+        let (mut page, _) = mount_writer({
+            let attempts = attempts.clone();
+            let delivered = delivered.clone();
+            move || {
+                let entity = format!("realtime-failure:{}", replay_target().id);
+                let refresh = use_signal(|| 0_u64);
+                let pending =
+                    use_pending_commands(refresh, |key| key.starts_with("realtime-failure:"));
+                let attempts = attempts.clone();
+                let delivered = delivered.clone();
+                let label = "确认重放";
+                rsx! {
+                    PendingCommandPanel { owner: pending }
+                    button {
+                        disabled: pending.contains(&entity),
+                        onclick: move |_| {
+                            let attempts = attempts.clone();
+                            let delivered = delivered.clone();
+                            pending.submit(entity.clone(), "重放".into(), move |id| {
+                                let mut attempts = attempts.borrow_mut();
+                                attempts.push(id);
+                                let result = match attempts.len() {
+                                    1 => Err(AdminWriteFailure::outcome_unknown("invalid_response")),
+                                    2 => Ok(()),
+                                    _ => panic!("已了结的重放不能再次执行"),
+                                };
+                                std::future::ready(result)
+                            }, move |()| delivered.set(delivered.get() + 1), |_| ());
+                        },
+                        "{label}"
+                    }
+                }
+            }
+        });
+        click_button(&mut page, "确认重放");
+        assert!(button(&page, "确认重放").unwrap().1);
+        assert_eq!(delivered.get(), 0);
+        let first = attempts.borrow()[0];
+
+        click_button(&mut page, "原样重试");
+        page.rerender();
+        assert_eq!(*attempts.borrow(), [first, first]);
+        assert!(button(&page, "原样重试").is_none());
+        assert!(!button(&page, "确认重放").unwrap().1);
+        assert_eq!(delivered.get(), 1);
     }
 
     #[derive(Clone, Copy)]

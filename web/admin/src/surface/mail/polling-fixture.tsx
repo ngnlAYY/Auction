@@ -2,7 +2,7 @@
 
 import { createCell } from "@auction/web-shared/reactive/cell";
 import type { JSX } from "@solidjs/web";
-import { For } from "solid-js";
+import { For, Show } from "solid-js";
 import type { AdminMailPolling } from "../../api/mail";
 import { requirePendingCommandHost } from "../pending";
 import { PendingCommandNotices } from "../pending/panel";
@@ -31,7 +31,7 @@ export function pausedPollingWire() {
 }
 
 /** 单次挂载真实邮箱命令组件，切箱通过按钮且按邮箱重挂卡片。 */
-export function PollingActionsFixture(): JSX.Element {
+export function PollingActionsFixture(props: { readonly initiallyPaused?: boolean }): JSX.Element {
   const host = requirePendingCommandHost();
   const refresh = createCommandReload();
   const mailbox = createCell("mail-a");
@@ -45,7 +45,11 @@ export function PollingActionsFixture(): JSX.Element {
       <MailPollingCommands refresh={refresh} activeMailbox={mailbox}>
         <For each={[mailbox()]} keyed={(key) => key}>
           {(key) => (
-            <MailPollingCard polling={polling(key())} refresh={refresh} loadedGeneration={0n} />
+            <MailPollingCard
+              polling={{ ...polling(key()), paused: props.initiallyPaused ?? false }}
+              refresh={refresh}
+              loadedGeneration={0n}
+            />
           )}
         </For>
       </MailPollingCommands>
@@ -60,6 +64,21 @@ export function MailPageFixture(): JSX.Element {
     <>
       <PendingCommandNotices host={host} />
       {page()}
+    </>
+  );
+}
+
+/** 保留会话，允许在业务回执返回前卸载邮件页。 */
+export function UnmountableMailPageFixture(): JSX.Element {
+  const host = requirePendingCommandHost();
+  const visible = createCell(true);
+  return (
+    <>
+      <PendingCommandNotices host={host} />
+      <button type="button" onClick={() => visible.set(!visible.peek())}>
+        切换邮件页
+      </button>
+      <Show when={visible()}>{page()}</Show>
     </>
   );
 }

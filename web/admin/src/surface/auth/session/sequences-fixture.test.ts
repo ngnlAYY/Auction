@@ -5,20 +5,28 @@ import { expect, test } from "bun:test";
 import {
   type Cookie,
   cookiesEqual,
+  type Effect,
   type Event,
+  initialState,
   type LogoutOutcome,
   phaseVerified,
   type ReadOutcome,
   type RenewalOutcome,
   type Request,
   type State,
+  stateView,
   type Ticket,
 } from "./index";
-import { verifyTransition } from "./sequences-invariants-fixture.test";
+import {
+  advanceLogoutLock,
+  type LogoutLock,
+  verifyTransition,
+} from "./sequences-invariants-fixture.test";
 import {
   apply,
   authenticated,
   loginAfterOldSessionExpires,
+  logoutTicket,
   NOW,
   projectionAfter,
   readTicket,
@@ -44,43 +52,91 @@ function projectionsFor(token: string): Projections {
 }
 
 /** 执行到指定长度的全部事件序列，并核对序列总数与每一项状态不变量。 */
-export function runExhaustive(maxLength: number): void {
+export function runExhaustive(maxLength: number, boundaryOnly = false): number {
   const cases: Cases = {
     current: projectionsFor("current-cookie"),
     previous: projectionsFor("previous-cookie"),
   };
-  const seeds = initialStates(cases);
-  const eventCount = EVENTS.reduce((count, kind) => count + (hasResult(kind) ? 2 : 1), 0);
-  expect(seeds).toHaveLength(14);
-  expect(eventCount).toBe(47);
-  let count = 0;
-  for (const seed of seeds) {
-    count += visit(cases, seed, 0, maxLength);
+  const starting = initialStates(cases);
+  const seeds = boundaryOnly ? starting.competing : starting.all;
+  const kinds = boundaryOnly ? BOUNDARY_EVENTS : EVENTS;
+  const eventCount = eventsPerState(kinds);
+  let frontier: Frontier = new Map();
+  for (const { state, lock } of seeds) {
+    const identity = stateView(state).session;
+    addPrefix(frontier, state, { identity: identity?.csrfToken ?? null, ended: false }, lock, 1);
+  }
+  let count = seeds.length;
+  for (let depth = 0; depth < maxLength; depth += 1) {
+    const next: Frontier = new Map();
+    for (const { state, notice, lock, paths } of frontier.values()) {
+      const before = stateView(state);
+      for (const [event, observed] of eventsFor(cases, state, kinds)) {
+        const [following, effects] = step(state, event, observed, NOW + depth * 100);
+        const view = following === state ? before : stateView(following);
+        const nextLock = advanceLogoutLock(lock, state, event, observed, effects, view);
+        if (nextLock !== null && view.canWrite) {
+          const ticket = event.kind === "read_finished" ? event.ticket : "无";
+          throw new Error(
+            `退出结果仍未知却恢复写入：第 ${depth + 1} 步 ${state.phase.kind} → ${event.kind}，票 ${ticket}，人工票 ${lock?.stay?.ticket ?? "无"}`,
+          );
+        }
+        const notified = verifyTransition(state, event, observed, following, effects, before, view);
+        const identity = view.session?.csrfToken ?? notice.identity;
+        const ended = identity === notice.identity && notice.ended;
+        if (ended && notified) {
+          throw new Error(`同一身份重复发出结束通知：第 ${depth + 1} 步 ${event.kind}`);
+        }
+        count += paths;
+        if (depth + 1 < maxLength) {
+          addPrefix(next, following, { identity, ended: ended || notified }, nextLock, paths);
+        }
+      }
+    }
+    frontier = next;
   }
   let expected = 0;
   for (let length = 0; length <= maxLength; length += 1) {
-    expected += eventCount ** length;
+    expected += seeds.length * eventCount ** length;
   }
-  expected *= seeds.length;
   expect(count).toBe(expected);
+  return count;
 }
 
-function initialStates(cases: Cases): readonly State[] {
+interface NoticeHistory {
+  readonly identity: string | null;
+  readonly ended: boolean;
+}
+
+interface Prefix {
+  readonly state: State;
+  readonly lock: LogoutLock | null;
+}
+
+type Frontier = Map<string, Prefix & { notice: NoticeHistory; paths: number }>;
+
+function addPrefix(
+  frontier: Frontier,
+  state: State,
+  notice: NoticeHistory,
+  lock: LogoutLock | null,
+  paths: number,
+): void {
+  // 同深度、同生产状态、同通知历史及影子锁的前缀才可合并。
+  const key = JSON.stringify([state, notice, lock], (_, value) =>
+    typeof value === "bigint" ? `${value}n` : value,
+  );
+  const existing = frontier.get(key);
+  if (existing === undefined) {
+    frontier.set(key, { state, notice, lock, paths });
+  } else {
+    existing.paths += paths;
+  }
+}
+
+function initialStates(cases: Cases): { all: readonly Prefix[]; competing: readonly Prefix[] } {
   const current = cases.current.initial;
-  const initial: State = {
-    phase: { kind: "starting" },
-    check: null,
-    bufferedRenewal: null,
-    renewal: null,
-    login: null,
-    loginError: null,
-    activity: { timing: null, latestInput: null, retryNotBefore: 0 },
-    checkTimer: null,
-    renewalTimer: null,
-    nextTicket: 0,
-    viewEpoch: 0,
-    logoutError: null,
-  };
+  const initial = initialState();
   const [startingCheck, startEffects] = apply(current, initial, { kind: "start" });
   const [anonymous] = apply(current, startingCheck, {
     kind: "read_finished",
@@ -97,10 +153,57 @@ function initialStates(cases: Cases): readonly State[] {
     outcome: { kind: "failed", error: "storage_unavailable" },
   });
   const [explicit] = apply(current, signedIn, { kind: "check_requested" });
-  const [loggingOut] = apply(current, signedIn, { kind: "logout_clicked" });
+  const [startingLogout, logoutEffects] = apply(current, signedIn, { kind: "logout_clicked" });
+  const logout = logoutTicket(logoutEffects);
+  const [loggingOut] = apply(current, startingLogout, { kind: "logout_sending", ticket: logout });
+  function logoutStep(prefix: Prefix, event: Event): readonly [Prefix, readonly Effect[]] {
+    const [state, effects] = apply(current, prefix.state, event);
+    const lock = advanceLogoutLock(
+      prefix.lock,
+      prefix.state,
+      event,
+      current.cookie,
+      effects,
+      stateView(state),
+    );
+    return [{ state, lock }, effects];
+  }
+  const [unconfirmed, review] = logoutStep(
+    { state: loggingOut, lock: null },
+    logoutEvent(logout, current.cookie, { kind: "unknown", error: "request_timeout" }),
+  );
+  const reviewTicket = readTicket(review);
+  const [failedReview] = logoutStep(
+    unconfirmed,
+    readEvent(reviewTicket, current.cookie, { kind: "failed", error: "storage_unavailable" }),
+  );
+  const [unconfirmedIdle] = logoutStep(
+    unconfirmed,
+    readEvent(reviewTicket, current.cookie, {
+      kind: "authenticated",
+      session: current.session,
+    }),
+  );
+  const [staying] = logoutStep(unconfirmedIdle, { kind: "stay_after_logout" });
+  function seed(state: State): Prefix {
+    return { state, lock: null };
+  }
+  const [discovering] = apply(current, anonymous, { kind: "visible" });
   const [logoutWithBroadcast] = apply(current, loggingOut, { kind: "broadcast" });
   const [renewing] = startRenewal(current, signedIn);
-  const [logoutWithRenewal] = apply(current, renewing, { kind: "logout_clicked" });
+  const [logoutStarted, logoutStartedEffects] = apply(current, renewing, {
+    kind: "logout_clicked",
+  });
+  const withRenewal = logoutTicket(logoutStartedEffects);
+  const [logoutWithRenewal] = apply(current, logoutStarted, {
+    kind: "logout_sending",
+    ticket: withRenewal,
+  });
+  const [rateLimited] = apply(
+    current,
+    logoutWithRenewal,
+    logoutEvent(withRenewal, current.cookie, { kind: "rate_limited", error: "rate_limited" }),
+  );
   const [renewingWithInput] = apply(current, renewing, { kind: "input", onLogout: false });
   const loggingIn = startLogin(anonymous);
   if (loggingIn === null) throw new Error("匿名状态应能开始登录");
@@ -111,22 +214,32 @@ function initialStates(cases: Cases): readonly State[] {
     NOW,
   );
   const [loginWithOldRenewal] = loginAfterOldSessionExpires(cases.previous.initial);
-  return [
-    initial,
-    startingCheck,
-    anonymous,
-    signedIn,
-    routine,
-    unavailable,
-    explicit,
-    loggingOut,
-    logoutWithBroadcast,
-    logoutWithRenewal,
-    renewingWithInput,
-    loggingIn.state,
-    loginWithBroadcast,
-    loginWithOldRenewal,
-  ];
+  return {
+    all: [
+      ...[
+        initial,
+        startingCheck,
+        anonymous,
+        signedIn,
+        routine,
+        unavailable,
+        explicit,
+        loggingOut,
+        logoutWithBroadcast,
+        logoutWithRenewal,
+        renewingWithInput,
+        loggingIn.state,
+        loginWithBroadcast,
+        loginWithOldRenewal,
+        discovering,
+      ].map(seed),
+      unconfirmed,
+      unconfirmedIdle,
+      staying,
+      failedReview,
+    ],
+    competing: [seed(logoutWithRenewal), seed(rateLimited), unconfirmed, staying, failedReview],
+  };
 }
 
 const EVENTS = [
@@ -139,15 +252,25 @@ const EVENTS = [
   "input_continue",
   "input_logout",
   "exit",
+  "continue_logout",
+  "stay_after_logout",
+  "read_sending",
+  "logout_sending",
+  "renewal_sending",
+  "external_unauthenticated",
+  "old_external_unauthenticated",
   "timer_check",
   "timer_renewal",
   "read_ok_initial",
   "read_ok_extended",
+  "read_other_body",
+  "read_retired_ok",
   "read_unauthorized",
   "read_failed",
   "logout_ok",
   "logout_cleared",
   "logout_rejected",
+  "logout_not_sent",
   "logout_unknown",
   "logout_limited",
   "renewal_ok_initial",
@@ -163,37 +286,55 @@ const EVENTS = [
 
 type Kind = (typeof EVENTS)[number];
 
+const BOUNDARY_EVENTS: readonly Kind[] = [
+  "visible",
+  "explicit",
+  "broadcast_after_cookie_clear",
+  "exit",
+  "continue_logout",
+  "stay_after_logout",
+  "read_sending",
+  "logout_sending",
+  "renewal_sending",
+  "external_unauthenticated",
+  "old_external_unauthenticated",
+  "timer_check",
+  "read_other_body",
+  "read_ok_initial",
+  "read_retired_ok",
+  "read_unauthorized",
+  "read_failed",
+  "logout_cleared",
+  "logout_unknown",
+  "logout_limited",
+  "renewal_ok_initial",
+  "renewal_unauthorized",
+];
+
 function hasResult(kind: Kind): boolean {
   return (
     kind === "login_finished" ||
-    kind.startsWith("read_") ||
+    (kind.startsWith("read_") && kind !== "read_retired_ok") ||
     (kind.startsWith("logout_") && kind !== "logout_cleared") ||
     kind.startsWith("renewal_")
   );
 }
 
-function visit(cases: Cases, state: State, depth: number, maxLength: number): number {
-  if (depth === maxLength) {
-    return 1;
-  }
-  const now = NOW + depth * 100;
-  let count = 1;
-  for (const kind of EVENTS) {
-    for (const old of hasResult(kind) ? [false, true] : [false]) {
-      const [event, observed] = eventFor(cases, state, kind, old);
-      const [next, effects] = step(state, event, observed, now);
-      try {
-        verifyTransition(state, event, observed, next, effects, now);
-      } catch (error) {
-        throw new Error(
-          `深度 ${depth} 事件 ${kind} old=${old} observed=${JSON.stringify(observed)} 前态=${JSON.stringify(state, (_, value) => (typeof value === "bigint" ? `${value}n` : value))} 后态=${JSON.stringify(next, (_, value) => (typeof value === "bigint" ? `${value}n` : value))}\n原因=${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
-          { cause: error },
-        );
-      }
-      count += visit(cases, next, depth + 1, maxLength);
+function eventsPerState(kinds: readonly Kind[]): number {
+  return kinds.reduce((count, kind) => count + (hasResult(kind) ? 2 : 1), 0);
+}
+
+function* eventsFor(
+  cases: Cases,
+  state: State,
+  kinds: readonly Kind[],
+): Iterable<readonly [Event, Cookie]> {
+  for (const kind of kinds) {
+    yield eventFor(cases, state, kind, false);
+    if (hasResult(kind)) {
+      yield eventFor(cases, state, kind, true);
     }
   }
-  return count;
 }
 
 function eventFor(cases: Cases, state: State, kind: Kind, old: boolean): readonly [Event, Cookie] {
@@ -247,6 +388,21 @@ function eventFor(cases: Cases, state: State, kind: Kind, old: boolean): readonl
     case "exit":
       event = { kind: "logout_clicked" };
       break;
+    case "continue_logout":
+    case "stay_after_logout":
+    case "read_sending":
+    case "logout_sending":
+    case "renewal_sending":
+      event = { kind, ticket };
+      break;
+    case "external_unauthenticated":
+    case "old_external_unauthenticated":
+      event = {
+        kind: "external_unauthenticated",
+        epoch: state.viewEpoch - (kind === "old_external_unauthenticated" ? 1 : 0),
+        session: phaseVerified(state.phase)?.session ?? fixture.initial.session,
+      };
+      break;
     case "timer_check":
       event = { kind: "timer_elapsed", timer: "check", ticket: state.checkTimer ?? 0 };
       break;
@@ -265,6 +421,18 @@ function eventFor(cases: Cases, state: State, kind: Kind, old: boolean): readonl
         session: fixture.extended.session,
       });
       break;
+    case "read_other_body":
+      event = readEvent(ticket, cookie, {
+        kind: "authenticated",
+        session: replacement.initial.session,
+      });
+      break;
+    case "read_retired_ok":
+      event = readEvent(ticket > 0 ? ticket - 1 : 0, cookie, {
+        kind: "authenticated",
+        session: fixture.initial.session,
+      });
+      break;
     case "read_unauthorized":
       event = readEvent(ticket, cookie, { kind: "unauthenticated" });
       break;
@@ -279,6 +447,14 @@ function eventFor(cases: Cases, state: State, kind: Kind, old: boolean): readonl
       break;
     case "logout_rejected":
       event = logoutEvent(ticket, cookie, { kind: "rejected", error: "origin_forbidden" });
+      break;
+    case "logout_not_sent":
+      event = {
+        kind: "logout_not_sent",
+        ticket,
+        cookie,
+        outcome: { kind: "rejected", error: "invalid_request" },
+      };
       break;
     case "logout_unknown":
       event = logoutEvent(ticket, cookie, { kind: "unknown", error: "request_timeout" });
@@ -349,12 +525,13 @@ function activeLogout(state: State): Request | null {
   return state.phase.kind === "logging_out" ? state.phase.logout.request : null;
 }
 
-test("穷举夹具从单个种子生成空序列及全部一阶事件变体", () => {
+test("穷举夹具保留全部起点及一阶事件变体", () => {
   const cases = {
     current: projectionsFor("current-cookie"),
     previous: projectionsFor("previous-cookie"),
   };
   const state = authenticated(cases.current.initial);
-  expect(visit(cases, state, 0, 0)).toBe(1);
-  expect(visit(cases, state, 0, 1)).toBe(48);
+  expect([...eventsFor(cases, state, EVENTS)]).toHaveLength(62);
+  expect(initialStates(cases).all).toHaveLength(19);
+  expect(initialStates(cases).competing).toHaveLength(5);
 });

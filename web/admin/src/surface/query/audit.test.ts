@@ -1,10 +1,12 @@
 // 审计 query：提交与恢复共用一套 URL 身份，时间链接规范化后仍表示同一时刻。
 
 import { expect, test } from "bun:test";
-
+import { writeLocationPreservingScroll } from "@auction/web-shared/router";
 import { type AdminAuditFilter, adminAuditFilterDefault } from "../../api/audit";
 import { parseStrictRfc3339 } from "../../api/session-time";
+import { loadRenderModule } from "../../solid-render-fixture.test";
 import type { AuditField } from "../audit/filter-state";
+import { byId, okReply, withPage } from "../browser-page-fixture.test";
 import {
   type AuditQuery,
   auditQueryDefault,
@@ -219,4 +221,68 @@ test("审计恢复保留重复键与控制字符", () => {
       }
     }
   }
+});
+
+test("已挂载的审计表单随同页导航及历史切换 GET 参数", async () => {
+  const { page } = await loadRenderModule<Pick<typeof import("../audit"), "page">>(
+    new URL("../audit/index.tsx", import.meta.url).pathname,
+    "page",
+  );
+  await withPage(
+    "/audit?actor=alice&page=3&sort=actor&dir=desc&page_size=50",
+    page,
+    ({ url }) => {
+      const page = Number(url.searchParams.get("page"));
+      const pageSize = Number(url.searchParams.get("page_size"));
+      return okReply({
+        records: [],
+        page,
+        page_size: pageSize,
+        total: 200,
+        has_more: page * pageSize < 200,
+        next_cursor: null,
+        next_cursor_token: "",
+      });
+    },
+    async (mounted) => {
+      const requests = () =>
+        mounted
+          .takeRequests()
+          .map(({ method, url }) => [method, url.pathname, Object.fromEntries(url.searchParams)]);
+      const filtered = [
+        ["GET", "/api/v1/admin/audit", { page: "3", page_size: "50", actor: "alice" }],
+      ];
+      const defaults = [["GET", "/api/v1/admin/audit", { page: "1", page_size: "10" }]];
+      const actor = byId(mounted.document, "audit-actor");
+      const descending = () =>
+        mounted.document.find((node) => node.getAttribute("aria-sort") === "descending");
+      expect(requests()).toEqual(filtered);
+      expect(actor.value).toBe("alice");
+      expect(descending()?.textContent).toContain("操作者");
+
+      expect(writeLocationPreservingScroll("/audit", "push")).toBe(true);
+      await mounted.translateIn("zh-CN");
+      expect(requests()).toEqual(defaults);
+      expect(actor.value).toBe("");
+      expect(descending()).toBeNull();
+      await mounted.back();
+      expect(requests()).toEqual(filtered);
+      expect(actor.value).toBe("alice");
+      expect(descending()?.textContent).toContain("操作者");
+      await mounted.forward();
+      expect(requests()).toEqual(defaults);
+      expect(actor.value).toBe("");
+      expect(descending()).toBeNull();
+
+      expect(writeLocationPreservingScroll("/audit?actor=bob&actor=carol", "replace")).toBe(true);
+      await mounted.translateIn("zh-CN");
+      expect(requests()).toEqual([]);
+      expect(writeLocationPreservingScroll("/audit?actor=dave&page=2", "replace")).toBe(true);
+      await mounted.translateIn("zh-CN");
+      expect(requests()).toEqual([
+        ["GET", "/api/v1/admin/audit", { page: "2", page_size: "10", actor: "dave" }],
+      ]);
+      expect(actor.value).toBe("dave");
+    },
+  );
 });

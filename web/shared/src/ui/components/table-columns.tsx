@@ -1,7 +1,7 @@
 // 表格列比例的渲染原语；字段顺序与具体比例由各业务表格拥有。
 
 import type { JSX } from "@solidjs/web";
-import { createEffect, For } from "solid-js";
+import { createEffect, For, untrack } from "solid-js";
 
 import { createValueMemo } from "../../reactive/memo";
 
@@ -46,7 +46,8 @@ function TableColumn(props: { style: string }): JSX.Element {
     <col
       ref={(element) => {
         column = element;
-        element.setAttribute("style", props.style);
+        const style = untrack(() => props.style);
+        element.setAttribute("style", style);
       }}
     />
   );

@@ -2,7 +2,7 @@
 
 import { expect, jest, test } from "bun:test";
 import { parseJson } from "@auction/web-shared/net/wire";
-import { err, ok } from "@auction/web-shared/result";
+import { err } from "@auction/web-shared/result";
 import { flush } from "solid-js";
 import { installBrowserRequest, installWriteFetch } from "../../api/api-request-fixture";
 import {
@@ -89,10 +89,9 @@ test("畸形 UTF-8 保留模板命令直到收到有效拒绝", async () => {
           }
           const prepared = prepare(commandId);
           if (!prepared.ok) {
-            return err(prepared.error.code);
+            return prepared;
           }
-          const result = await submitMailTemplate(harness.host.sessionHost, prepared.value, signal);
-          return result.ok ? ok(result.value) : err(result.error.code);
+          return submitMailTemplate(harness.host.sessionHost, prepared.value, signal);
         },
         () => {
           successCalls += 1;

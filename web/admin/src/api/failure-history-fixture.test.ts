@@ -13,9 +13,15 @@ import {
   type PendingCommands,
   usePendingCommandHost,
 } from "../surface/pending";
+import { createPendingHarness, waitForAttempt } from "../surface/pending/pending-command-fixture";
 import type { CommandSource } from "../surface/pending/sources";
 import { installBrowserRequest } from "./api-request-fixture";
-import { type AdminApiFailure, adminApiFailureDisplayCode } from "./failure";
+import {
+  type AdminWriteFailure,
+  adminWriteFailureDisplayCode,
+  observedResponseStatus,
+  writeOutcomeUnknown,
+} from "./failure";
 import { prepareMailTemplateAttemptOnce, submitMailTemplate } from "./notification-templates";
 import { type AdminSession, confirmedAdminSession, registerAdminSessionHost } from "./session";
 import { spyOnBrowserFetch } from "./t1-request-fixture.test";
@@ -44,16 +50,11 @@ const SESSION_BODY = {
 const SESSION_URL = "/api/v1/admin/session?include=server_time";
 const TEMPLATE_KEY = "settlement_seller_payout";
 const WRITE_URL = "/api/v1/admin/mail-templates/settlement_seller_payout";
-
-async function waitFor(condition: () => boolean, label: string): Promise<void> {
-  const deadline = Date.now() + 1_000;
-  while (!condition()) {
-    if (Date.now() > deadline) {
-      throw new Error(`等待超时：${label}`);
-    }
-    await Bun.sleep(0);
-  }
-}
+const SETTLED_BY_HISTORY = {
+  unknown: [false, false],
+  this_attempt: [true, false],
+  replay_checked: [true, true],
+} as const;
 
 async function withPendingCommands<T>(
   session: AdminSession | null,
@@ -90,48 +91,91 @@ async function withPendingCommands<T>(
   }
 }
 
-/** 建立一次未知结果，再用给定稳定码重试；返回是否按 Rust 规则清除了旧历史。 */
-export async function runHistoryCase(code: string, clears: boolean): Promise<void> {
-  await withPendingCommands(null, async (hostRef, commands) => {
-    const ids: string[] = [];
-    let attempt = 0;
-    expect(
-      commands.submitWithReceipt(
-        "mail-template:1",
-        "save",
-        async (commandId) => {
-          attempt += 1;
-          ids.push(commandId);
-          // 无 HTTP 状态的普通失败没有拒绝证据，先保留未知历史。
-          return attempt === 1 ? err("network_error") : err(code);
-        },
-        () => ({ kind: "delivered" }),
-        () => {},
-      ),
-    ).toBe(true);
-    await waitFor(() => hostRef.entries.peek()[0]?.unknown === true, "首次未知结果");
-    const commandId = hostRef.entries.peek()[0]?.identity.commandId;
-    if (commandId === undefined) throw new Error("未登记首次命令");
+/** 用同一份失败分别裁定首次尝试和已有未知结果的重试。 */
+export async function runHistoryCase(
+  failure: AdminWriteFailure,
+  expected: {
+    readonly display: string;
+    readonly scope: keyof typeof SETTLED_BY_HISTORY;
+  },
+): Promise<void> {
+  for (const [index, settled] of SETTLED_BY_HISTORY[expected.scope].entries()) {
+    const earlierUnknown = index === 1;
+    const harness = createPendingHarness();
+    try {
+      const { host, origin } = harness;
+      const entity = "mail-template:1";
+      const ids: string[] = [];
+      const displayed: string[] = [];
+      const label = `${expected.display}（${earlierUnknown ? "已有未知" : "首次尝试"}）`;
+      expect(
+        origin.commands.submit(
+          entity,
+          "save",
+          async (commandId) => {
+            ids.push(commandId);
+            return earlierUnknown && ids.length === 1
+              ? err(writeOutcomeUnknown("request_timeout"))
+              : err(failure);
+          },
+          () => {
+            throw new Error("失败不能交付成功回执");
+          },
+          (code) => displayed.push(code),
+        ),
+        label,
+      ).toBe(true);
+      await waitForAttempt(() => origin.commands.isBusy(entity));
+      const commandId = ids[0];
+      if (commandId === undefined) throw new Error("未登记首次命令");
 
-    hostRef.retry(commandId);
-    if (clears) {
-      await waitFor(() => attempt === 2 && hostRef.entries.peek().length === 0, "重放检查后清除");
-    } else {
-      await waitFor(() => attempt === 2 && hostRef.entries.peek()[0]?.busy === false, "保留旧历史");
-      const entry = hostRef.entries.peek()[0];
-      expect(entry?.unknown, code).toBe(true);
-      expect(entry?.error, code).toBe(adminApiFailureDisplayCode(code));
+      if (earlierUnknown) {
+        expect(host.entries.peek()[0], label).toMatchObject({
+          identity: { commandId },
+          unknown: true,
+          error: "request_timeout",
+        });
+        expect(origin.rejections.peek(), label).toEqual([]);
+        expect(origin.reload.peek(), label).toBe(0n);
+        host.retry(commandId);
+        await waitForAttempt(() => origin.commands.isBusy(entity));
+      }
+
+      expect(origin.commands.contains(entity), label).toBe(!settled);
+      expect(host.entries.peek(), label).toHaveLength(settled ? 0 : 1);
+      expect(origin.reload.peek(), label).toBe(settled ? 1n : 0n);
+      expect(host.notices.peek(), label).toEqual([]);
+      if (settled) {
+        expect(origin.rejections.peek(), label).toHaveLength(1);
+        expect(origin.rejections.peek()[0], label).toMatchObject({
+          identity: { commandId },
+          result: err(expected.display),
+        });
+      } else {
+        expect(origin.rejections.peek(), label).toEqual([]);
+        expect(host.entries.peek()[0], label).toMatchObject({
+          identity: { commandId },
+          busy: false,
+          unknown: true,
+          error: expected.display,
+        });
+      }
+      expect(ids, label).toEqual(earlierUnknown ? [commandId, commandId] : [commandId]);
+      expect(displayed, label).toEqual(
+        earlierUnknown ? ["request_timeout", expected.display] : [expected.display],
+      );
+    } finally {
+      harness.dispose();
     }
-    // 重试必须复用首次生成的命令 ID，不能用新 ID 改写未知历史。
-    expect(ids, code).toEqual([commandId, commandId]);
-  });
+  }
 }
 
 interface HistoryRetry {
   readonly target: "session" | "write";
   readonly status: number;
-  readonly body: string;
+  readonly body: string | Uint8Array<ArrayBuffer>;
   readonly display: string;
+  readonly invalidEnvelope?: true;
   readonly clears: boolean;
 }
 
@@ -139,13 +183,17 @@ interface HistoryRetry {
 export async function runMailTemplateHistory(
   label: string,
   retries: readonly HistoryRetry[],
+  firstUnknownReply?: Pick<HistoryRetry, "status" | "body" | "display">,
 ): Promise<void> {
   const restoreRequest = installBrowserRequest();
   try {
     const fetch = spyOnBrowserFetch();
     try {
       await withPendingCommands(SESSION, async (host, commands, checks) => {
-        let reply: HistoryRetry | null = null;
+        let reply: HistoryRetry | null =
+          firstUnknownReply === undefined
+            ? null
+            : { ...firstUnknownReply, target: "write", clears: false };
         const requests: Array<readonly [string, string]> = [];
         const writeBodies: string[] = [];
         fetch.respondWith(async (input, init) => {
@@ -167,11 +215,12 @@ export async function runMailTemplateHistory(
         });
 
         const ids: string[] = [];
-        const failures: Array<AdminApiFailure | null> = [];
+        const failures: Array<AdminWriteFailure | null> = [];
+        const entity = `mail-template:${TEMPLATE_KEY}`;
         let prepare: ReturnType<typeof prepareMailTemplateAttemptOnce> | null = null;
         expect(
           commands.submit(
-            `mail-template:${TEMPLATE_KEY}`,
+            entity,
             "save",
             async (commandId, signal) => {
               ids.push(commandId);
@@ -186,20 +235,27 @@ export async function runMailTemplateHistory(
                 ? await submitMailTemplate(host.sessionHost, prepared.value, signal)
                 : prepared;
               failures.push(result.ok ? null : result.error);
-              return result.ok ? result : err(result.error.code);
+              return result;
             },
             () => {},
             () => {},
           ),
           label,
         ).toBe(true);
-        await waitFor(() => host.entries.peek()[0]?.unknown === true, label);
+        await waitForAttempt(() => commands.isBusy(entity));
         expect(host.entries.peek(), label).toHaveLength(1);
         const initial = host.entries.peek()[0];
         if (initial === undefined) throw new Error("未登记首次命令");
         const { commandId } = initial.identity;
-        expect(failures, label).toEqual([{ status: null, code: "network_error" }]);
-        expect(initial.error, label).toBe("network_error");
+        expect(initial.unknown, label).toBe(true);
+        expect(failures, label).toEqual([
+          {
+            kind: "outcome-unknown",
+            code: firstUnknownReply?.display ?? "network_error",
+            responseStatus: firstUnknownReply?.status ?? null,
+          },
+        ]);
+        expect(initial.error, label).toBe(firstUnknownReply?.display ?? "network_error");
         expect(ids, label).toEqual([commandId]);
         expect(requests, label).toEqual([
           ["GET", SESSION_URL],
@@ -221,10 +277,7 @@ export async function runMailTemplateHistory(
           const beforeWrites = writeBodies.length;
           const beforeChecks = checks.length;
           host.retry(commandId);
-          await waitFor(
-            () => failures.length === index + 2 && !host.entries.peek().some((entry) => entry.busy),
-            step,
-          );
+          await waitForAttempt(() => commands.isBusy(entity));
           const preflight = retry.target === "session";
           expect(requests.slice(beforeRequests), step).toEqual(
             preflight
@@ -236,12 +289,13 @@ export async function runMailTemplateHistory(
           );
           expect(writeBodies.slice(beforeWrites), step).toEqual(preflight ? [] : [initialBody]);
           expect(checks.length - beforeChecks, step).toBe(preflight ? 1 : 0);
-          expect(failures[index + 1], step).toEqual({
-            status: preflight ? null : retry.status,
-            code: preflight
-              ? `not_sent:${retry.display}`
-              : `write_endpoint:mail-template:${retry.status}:${retry.display}`,
-          });
+          const failure = failures[index + 1];
+          if (failure == null) throw new Error(`未收到失败证据：${step}`);
+          expect(failure.kind, step).toBe(
+            preflight ? "not-sent" : retry.invalidEnvelope ? "outcome-unknown" : "verified-http",
+          );
+          expect(observedResponseStatus(failure), step).toBe(preflight ? null : retry.status);
+          expect(adminWriteFailureDisplayCode(failure), step).toBe(retry.display);
           expect(ids, step).toEqual(Array.from({ length: index + 2 }, () => commandId));
           const entries = host.entries.peek();
           expect(entries, step).toHaveLength(retry.clears ? 0 : 1);

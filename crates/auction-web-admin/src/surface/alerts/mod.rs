@@ -457,7 +457,7 @@ fn submit_alert_command(
                         .await
                     }
                 };
-                result.map(|_| ()).map_err(|failure| failure.code)
+                result.map(|_| ())
             }
         },
         move |()| set_if_alive(notice, Some(AdminActionFeedback::Success)),

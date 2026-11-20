@@ -181,11 +181,6 @@ export function lifecycleActionConfirmNote(action: AdminAuctionLifecycleAction):
   }
 }
 
-/** 写入准备阶段的同名错误不能作为已拒绝的版本冲突回执。 */
-export function staleAuctionFailure(code: string): boolean {
-  return code === "stale_auction_state";
-}
-
 // 镜像 Admin 生命周期 HTTP 入口的原因约束，长度按 UTF-8 字节计算。
 const MAX_LIFECYCLE_REASON_BYTES = 1_024;
 

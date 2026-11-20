@@ -33,7 +33,13 @@ function registerRenderer(): void {
       }));
       build.onLoad({ filter: /.*/u, namespace: NAMESPACE }, ({ path }) => {
         requireSource(path);
-        const { code } = transform(readFileSync(path, "utf8"), {
+        const source = readFileSync(path, "utf8");
+        // 只在内存渲染模块中暴露真实路由宿主，避免改变生产入口的可见性。
+        const renderSource =
+          path === resolve(ADMIN_ROOT, "surface/index.tsx")
+            ? `${source}\nexport { RouterHost };\n`
+            : source;
+        const { code } = transform(renderSource, {
           filename: path,
           generate: "universal",
           moduleName: RUNTIME,

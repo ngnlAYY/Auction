@@ -6,7 +6,13 @@ import { pageComponent, type Router, RouterContext, useRouter } from "@auction/w
 import { type LocaleSession, LocaleSessionContext } from "@auction/web-shared/ui/i18n/session";
 import type { JSX } from "@solidjs/web";
 import { createContext, onCleanup, useContext } from "solid-js";
-import { type AdminApiFailure, adminApiFailureFromHttpBody } from "../../../api/failure";
+import { writeFailureFromReply } from "../../../api/api-request-fixture";
+import {
+  type AdminApiFailure,
+  type AdminWriteFailure,
+  adminWriteFailureDisplayCode,
+  observedResponseStatus,
+} from "../../../api/failure";
 import { type AdminSessionHost, requestAdminSessionCheck } from "../../../api/session";
 import { preserveProperty } from "../../../test-scope-fixture";
 import type { PendingCommandHost } from "../../pending";
@@ -63,7 +69,7 @@ function CommandPage(): JSX.Element {
   function submit(
     entity: string,
     action: string,
-    operation: (signal: AbortSignal) => Promise<Result<void, string>>,
+    operation: (signal: AbortSignal) => Promise<Result<void, AdminWriteFailure>>,
   ): void {
     const started = commands.submit(
       entity,
@@ -83,16 +89,19 @@ function CommandPage(): JSX.Element {
     }
   }
 
-  async function unavailable(): Promise<Result<void, string>> {
-    const reply = adminApiFailureFromHttpBody(
+  async function unavailable(): Promise<Result<void, AdminWriteFailure>> {
+    const reply = await writeFailureFromReply(
       503,
       '{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}',
     );
-    observed.replies.push(reply);
-    return err(reply.code);
+    observed.replies.push({
+      status: observedResponseStatus(reply),
+      code: adminWriteFailureDisplayCode(reply),
+    });
+    return err(reply);
   }
 
-  function pending(signal: AbortSignal): Promise<Result<void, string>> {
+  function pending(signal: AbortSignal): Promise<Result<void, AdminWriteFailure>> {
     return new Promise((_resolve, reject) => {
       signal.addEventListener(
         "abort",

@@ -4,7 +4,7 @@
 
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
-import { err, type Result } from "@auction/web-shared/result";
+import { err } from "@auction/web-shared/result";
 import { compareText } from "@auction/web-shared/text";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { Dialog } from "@auction/web-shared/ui/components/dialog";
@@ -15,6 +15,7 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { For, Match, onCleanup, Show, Switch } from "solid-js";
 
+import { writeNotSent } from "../api/failure";
 import type { AdminRename, AdminRenamePage, AdminRenameRevertCommand } from "../api/renames";
 import { fetchAdminRenames, prepareAdminRenameRevert, revertAdminRename } from "../api/renames";
 import { useAdminSessionHost } from "./auth/shell";
@@ -31,11 +32,7 @@ import {
   createCommandReload,
   usePendingCommandsWithGate,
 } from "./pending/sources";
-import {
-  type AdminActionFeedback,
-  adminActionFeedbackMessage,
-  adminApiErrorMessage,
-} from "./presentation";
+import { type AdminActionFeedback, adminApiErrorMessage } from "./presentation";
 import { useRenamesQueryState } from "./query/renames";
 import { SortableTh, type SortDirection, sortRows } from "./sort";
 import { userCommandEntity } from "./users";
@@ -98,20 +95,19 @@ export function page(): JSX.Element {
     const submitted = pending.submit(
       userCommandEntity(rename.user_id),
       t("admin-renames-revert"),
-      async (commandId, signal): Promise<Result<unknown, string>> => {
+      async (commandId, signal) => {
         if (frozen === null) {
           const prepared = await prepareAdminRenameRevert(host, commandId, rename, signal);
           // 任务取消后准备结果随 future 一起丢弃，不能写回闭包里的 fence。
           if (signal.aborted) {
-            return err("network_error");
+            return err(writeNotSent("network_error"));
           }
           if (!prepared.ok) {
             return prepared;
           }
           frozen = prepared.value;
         }
-        const result = await revertAdminRename(host, frozen, signal);
-        return result.ok ? result : err(result.error);
+        return revertAdminRename(host, frozen, signal);
       },
       () => setIfAlive(notice, { kind: "success" }, lifetime.active),
       (code) => {
@@ -145,6 +141,10 @@ export function page(): JSX.Element {
     const current = view();
     return current.kind === "error" ? current : null;
   });
+  const revertError = createValueMemo(() => {
+    const feedback = notice();
+    return feedback?.kind === "error" ? feedback : null;
+  });
 
   return (
     <PendingCommandsContext value={pending}>
@@ -172,6 +172,12 @@ export function page(): JSX.Element {
             />
           </label>
         </div>
+        {/* 已确认的回滚在来源页交付，列表读取状态不影响回执展示。 */}
+        <Show when={notice()?.kind === "success"}>
+          <p class="action-feedback action-feedback--success" role="status">
+            {t("admin-renames-revert-success")}
+          </p>
+        </Show>
         <Switch fallback={null}>
           <Match when={view().kind === "loading"}>
             <AsyncState kind="loading" title={t("admin-renames-loading")} detail="" />
@@ -208,17 +214,10 @@ export function page(): JSX.Element {
               <Show when={current().renames.length === 0}>
                 <AsyncState kind="empty" title={t("admin-renames-empty")} detail="" />
               </Show>
-              <Show when={notice()}>
+              <Show when={revertError()}>
                 {(feedback) => (
-                  <p
-                    class={
-                      feedback().kind === "success"
-                        ? "action-feedback action-feedback--success"
-                        : "action-feedback action-feedback--error"
-                    }
-                    role={feedback().kind === "success" ? "status" : "alert"}
-                  >
-                    {adminActionFeedbackMessage(feedback(), t("admin-renames-revert-success"))}
+                  <p class="action-feedback action-feedback--error" role="alert">
+                    {adminApiErrorMessage(feedback().code)}
                   </p>
                 )}
               </Show>

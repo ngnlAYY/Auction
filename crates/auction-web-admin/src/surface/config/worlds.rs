@@ -225,7 +225,7 @@ fn BusinessWorldCard(
                                             world_id,
                                             target_enabled,
                                             world.policy_revision,
-                                        ).await.map_err(|error| error.code)
+                                        ).await
                                     }
                                 },
                                 move |result| {
@@ -288,15 +288,17 @@ mod tests {
     use std::rc::Rc;
 
     use dioxus::prelude::*;
+    use gloo_net::http::Method;
 
     use super::AdminBusinessWorlds;
-    use crate::api::{AdminApiFailure, AdminBusinessWorld};
+    use crate::api::{AdminApiFailure, AdminBusinessWorld, AdminWriteEndpoint, AdminWriteFailure};
     use crate::surface::auctions::draft_page_tests::{
         RecordRead, button, click_button, has_live_text, mount_writer, settle_writer,
     };
     use crate::surface::pending::{
         PendingCommandHost, PendingCommandNotices, use_pending_commands,
     };
+    use crate::surface::realtime::{TestPage, text_attributes};
 
     pub(super) struct WorldReads {
         count: Cell<usize>,
@@ -335,9 +337,11 @@ mod tests {
                     move |_| {
                         let previous = writes.replace(writes.get() + 1);
                         ready((previous != 0).ok_or_else(|| {
-                            AdminApiFailure::from_http_body(
-                                503, r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
-                            ).code
+                            AdminWriteFailure::from_test_http(
+                                AdminWriteEndpoint::General,
+                                503,
+                                r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+                            )
                         }))
                     }, |()| {}, |_| {},
                 ));
@@ -382,5 +386,43 @@ mod tests {
         settle_writer(&mut page);
         click_button(&mut page, "开放业务世界");
         assert!(has_live_text(&page, "确认开放业务世界"));
+    }
+
+    #[test]
+    fn world_stale_rejection_reloads_without_discarding_earlier_unknown() {
+        const URL: &str = "/api/v1/admin/worlds/main";
+        const UNAVAILABLE: &str =
+            r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#;
+        const STALE: &str =
+            r#"{"code":"stale_world_state","message":"版本已变化","data":null,"request_id":null}"#;
+        let reads = Rc::new(WorldReads { count: Cell::new(0), refreshed: RecordRead::new() });
+        let (mut page, _) = mount_writer({
+            let reads = reads.clone();
+            move || {
+                use_context_provider(|| reads.clone());
+                rsx! { AdminBusinessWorlds {} }
+            }
+        });
+        let set_reply = |page: &TestPage, status, body| {
+            page.dom().in_scope(ScopeId::APP, || {
+                AdminApiFailure::stub_write_response(URL, Method::PATCH, status, body);
+            });
+        };
+        set_reply(&page, 503, UNAVAILABLE);
+        let dialog = click_button(&mut page, "关闭业务世界");
+        assert!(has_live_text(&page, "确认关闭业务世界"));
+        let confirm = text_attributes(&dialog, "class")
+            .find_map(|(id, class)| (class == "admin-btn-danger").then_some(id))
+            .unwrap();
+        page.dispatch("click", confirm, "");
+        set_reply(&page, 429, STALE);
+        click_button(&mut page, "原样重试");
+        assert_eq!(reads.count.get(), 1);
+        assert!(button(&page, "原样重试").is_some());
+
+        set_reply(&page, 409, STALE);
+        click_button(&mut page, "原样重试");
+        assert!(reads.count.get() > 1);
+        assert!(button(&page, "原样重试").is_some());
     }
 }

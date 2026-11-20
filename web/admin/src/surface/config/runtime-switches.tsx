@@ -8,12 +8,12 @@ import { sleep } from "@auction/web-shared/platform/timer";
 import { createPageVisibility } from "@auction/web-shared/platform/visibility";
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
-import { err, ok, type Result } from "@auction/web-shared/result";
+import { err, type Result } from "@auction/web-shared/result";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { For, Match, onSettled, Show, Switch } from "solid-js";
-
+import { type AdminWriteFailure, writeOutcomeUnknown } from "../../api/failure";
 import {
   EXTERNAL_ACCESS_PAUSE_MAX_REASON_BYTES,
   type ExternalAccessPauseAttempt,
@@ -89,7 +89,7 @@ function createPauseControlState(
     const acceptedByHost = pending.submitWithReceipt(
       PAUSE_ENTITY,
       action,
-      async (commandId, signal): Promise<Result<RuntimeSwitchIntentDto, string>> => {
+      async (commandId, signal): Promise<Result<RuntimeSwitchIntentDto, AdminWriteFailure>> => {
         try {
           let prepare = prepared;
           if (prepare === null) {
@@ -106,13 +106,13 @@ function createPauseControlState(
           }
           const command = prepare(commandId);
           if (!command.ok) {
-            return err(command.error.code);
+            return command;
           }
           const result = await submitExternalAccessPause(host, command.value, signal);
-          return result.ok ? ok(result.value) : err(result.error.code);
+          return result;
         } catch {
           // 执行体异常按结果未知处理；异常对象与消息不进入控制台。
-          return err("network_error");
+          return err(writeOutcomeUnknown("network_error"));
         }
       },
       (_value, sourceAlive): CommandDelivery => {

@@ -4,15 +4,15 @@ use auction_web_shared::{Dialog, t, use_second_tick};
 use dioxus::prelude::*;
 
 use super::super::editor::{
-    DraftFeedback, DraftRead, DraftRefreshButton, close_edit_draft, close_matching_draft,
-    focus_draft_field_after_render, observe_draft_write,
+    DraftFeedback, DraftRead, DraftRefreshButton, DraftWriteFeedback, close_edit_draft,
+    close_matching_draft, focus_draft_field_after_render, observe_draft_write,
 };
 use super::super::presentation::current_time_millis;
 use super::AuctionDrafts;
 use super::model::{
     AdminAuctionNotice, LifecycleReasonIssue, lifecycle_action_button_class,
     lifecycle_action_confirm_note, lifecycle_action_confirm_title, lifecycle_action_label,
-    lifecycle_action_submit_label, lifecycle_actions, pending_open_millis, stale_auction_failure,
+    lifecycle_action_submit_label, lifecycle_actions, pending_open_millis,
     validate_lifecycle_reason,
 };
 use crate::api::{
@@ -185,7 +185,7 @@ pub(super) fn AdminAuctionActionDialog(
 ) -> Element {
     let owner = use_context::<PendingCommands>();
     let mut issue = use_signal(|| None::<LifecycleReasonIssue>);
-    let mut feedback = use_signal(|| None::<String>);
+    let mut feedback = use_signal(|| None::<DraftWriteFeedback>);
     let Some(draft) = pending() else {
         return rsx! {};
     };
@@ -198,7 +198,7 @@ pub(super) fn AdminAuctionActionDialog(
     let blocked = owner.contains(&entity);
     let error = feedback();
     let conflict = !blocked
-        && (error.as_deref().is_some_and(stale_auction_failure)
+        && (error.as_ref().is_some_and(|feedback| feedback.stale_write)
             || read.version_changed(draft.target.state_version, latest_version));
     let can_submit = read.is_ready()
         && !blocked
@@ -278,7 +278,7 @@ pub(super) fn AdminAuctionActionDialog(
                     FieldError { id: error_id, message: issue().map(LifecycleReasonIssue::message) }
                 }
                 if !blocked {
-                    DraftFeedback { conflict, read: read.clone(), failure: error }
+                    DraftFeedback { conflict, read: read.clone(), failure: error.map(|feedback| feedback.display_code) }
                 }
                 div { class: "admin-shell__dialog-actions",
                     if !conflict {
@@ -316,7 +316,7 @@ fn run_lifecycle_action(
     owner: PendingCommands,
     draft: LifecycleDraft,
     reason: Option<String>,
-    feedback: Signal<Option<String>>,
+    feedback: Signal<Option<DraftWriteFeedback>>,
     notice: Signal<Option<AdminAuctionNotice>>,
     pending: Signal<Option<LifecycleDraft>>,
 ) -> bool {
@@ -335,6 +335,7 @@ fn run_lifecycle_action(
                     reason.clone(),
                 ),
                 feedback,
+                "stale_auction_state",
             )
         },
         move |_| {

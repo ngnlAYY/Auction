@@ -4,9 +4,13 @@
 // 复核。页面明确区分“已寄出”（邮件发出）、“退回仍在收件箱”、“已领回”与“代管”。
 
 import type { AdminSettlementReturnDetailResponse } from "@auction/contracts/dto/admin/returns";
+import { focusElementById } from "@auction/web-shared/platform/a11y";
+import { topModal } from "@auction/web-shared/platform/a11y/escape";
+import { sleep } from "@auction/web-shared/platform/timer";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
+import { createTaskScope } from "@auction/web-shared/reactive/tasks";
 import type { Result } from "@auction/web-shared/result";
 import { Link } from "@auction/web-shared/router";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
@@ -66,6 +70,26 @@ function ReturnDetailPage(props: ReturnDetailPageProps): JSX.Element {
   const target = `settlement-return:${returnId}`;
   const commands = usePendingCommands(refresh, (entity) => entity === target);
   const notice = createCell<AdminActionFeedback | null>(null);
+  // 动作区会随详情重读而卸载，还焦任务由保留标题的详情页持有。
+  const focusTasks = createTaskScope();
+  const restoreFocus = (): void => {
+    focusTasks.spawn(async (context) => {
+      if (
+        !(await sleep(0, context.signal)) ||
+        !context.alive() ||
+        typeof document === "undefined"
+      ) {
+        return;
+      }
+      const focus = document.activeElement;
+      if (
+        (focus === null || focus === document.body || focus === document.documentElement) &&
+        topModal(document) === null
+      ) {
+        focusElementById("settlement-return-detail-title");
+      }
+    });
+  };
   const detail = createTaskResource(
     () => [returnId, refresh()] as const,
     async ([id, generation], context): Promise<DetailRead> => {
@@ -111,7 +135,9 @@ function ReturnDetailPage(props: ReturnDetailPageProps): JSX.Element {
         aria-labelledby="settlement-return-detail-title"
       >
         <div class="admin-settlement-return-detail__head">
-          <h1 id="settlement-return-detail-title">{t("settlement-return-detail-title")}</h1>
+          <h1 id="settlement-return-detail-title" tabindex="-1">
+            {t("settlement-return-detail-title")}
+          </h1>
           <Link href="/settlement-returns" class="admin-settlement-return-detail__back">
             {t("settlement-return-detail-back")}
           </Link>
@@ -180,6 +206,7 @@ function ReturnDetailPage(props: ReturnDetailPageProps): JSX.Element {
                   notice={notice}
                   refresh={refresh}
                   loadedGeneration={refresh()}
+                  restoreFocus={restoreFocus}
                 />
                 <Show when={showsAssetLocation(loadedDetail().summary.status)}>
                   <TakeSection

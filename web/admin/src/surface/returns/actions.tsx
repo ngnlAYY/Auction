@@ -10,15 +10,15 @@ import type {
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
-import { err, ok } from "@auction/web-shared/result";
 import { Dialog } from "@auction/web-shared/ui/components/dialog";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { For, Show } from "solid-js";
+import { For, onCleanup, Show } from "solid-js";
 
+import { rejectionStatus } from "../../api/rejection";
 import { prepareSettlementReturnActionOnce, submitSettlementReturnAction } from "../../api/returns";
 import { useAdminSessionHost } from "../auth/shell";
-import { definiteRejection, requirePendingCommands, setIfAlive } from "../pending";
+import { requirePendingCommands, setIfAlive } from "../pending";
 import { advanceCommandReload } from "../pending/sources";
 import type { AdminActionFeedback } from "../presentation";
 import { actionEffectKey, actionKey, blockerKey, label } from "./labels";
@@ -30,12 +30,18 @@ interface PendingAction {
   readonly expectedVersion: number;
 }
 
+// 回调只收到显示码。写前网络失败也沿用原规则，不因此额外推进读取世代。
+function returnFailureTriggersReload(code: string): boolean {
+  return code === "invalid_request" || rejectionStatus(null, code) !== null;
+}
+
 /** 详情页动作区：按钮、阻断原因与确认框。 */
 export function ActionSection(props: {
   readonly detail: AdminSettlementReturnDetailResponse;
   readonly notice: Cell<AdminActionFeedback | null>;
   readonly refresh: Cell<bigint>;
   readonly loadedGeneration: bigint;
+  readonly restoreFocus: () => void;
 }): JSX.Element {
   const commands = requirePendingCommands();
   const confirming = createCell<PendingAction | null>(null);
@@ -111,6 +117,7 @@ export function ActionSection(props: {
             notice={props.notice}
             refresh={props.refresh}
             loadedGeneration={loadedGeneration()}
+            restoreFocus={props.restoreFocus}
           />
         )}
       </Show>
@@ -126,9 +133,11 @@ function ConfirmDialog(props: {
   readonly notice: Cell<AdminActionFeedback | null>;
   readonly refresh: Cell<bigint>;
   readonly loadedGeneration: bigint;
+  readonly restoreFocus: () => void;
 }): JSX.Element {
   const host = useAdminSessionHost();
   const commands = requirePendingCommands();
+  onCleanup(() => props.restoreFocus());
   const summary = () => props.summary;
   const pending = () => props.pending;
   const recipient = createValueMemo(() => summary().recipient ?? t("value-empty"));
@@ -175,7 +184,7 @@ function ConfirmDialog(props: {
       label(actionKey, submission.intent.action),
       async (commandId, signal) => {
         const result = await submitSettlementReturnAction(host, commandId, submission, signal);
-        return result.ok ? ok(result.value) : err(result.error.code);
+        return result;
       },
       () => {
         // 命令宿主只在来源详情页仍存活时调用回执；notice 就属于该页。动作区可能因重读
@@ -185,7 +194,7 @@ function ConfirmDialog(props: {
       (code) => {
         // 明确拒绝（版本已变、状态或资格不符）说明案件已不同于页面所见：重读后再决定；
         // 结果未知不重读，原 command_id 留在未决区原样重试。
-        if (definiteRejection(code)) {
+        if (returnFailureTriggersReload(code)) {
           advanceCommandReload(refresh);
         }
         setIfAlive(notice, { kind: "error", code }, () => true);

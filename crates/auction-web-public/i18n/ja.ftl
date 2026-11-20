@@ -607,6 +607,7 @@ command-retry-unchanged = 結果はまだ不明です。このページを離れ
 command-retry-price-changed = 価格が変わりました。やり直す前に出品の現在価格を確認してください。
 command-unknown-count = 結果が不明な操作：{ $count } 件
 command-memory-only = 記録はこのタブのメモリに保持されます。ページを再読み込みするか閉じると消去されます。
+command-reload-confirm = 再読み込みすると、このタブにある未完了の入札・代理入札の記録と未確認の結果が消去されます。再読み込みしますか？
 command-create-proxy = 代理入札を設定
 command-lot-unresolved = この出品には結果が不明な操作があります。開いて対処方法を確認してください。
 command-recovery-open = 出品 { $code } の操作を確認
@@ -647,6 +648,7 @@ watch-save-error = マークを保存できません。サーバーのマーク�
 watch-retry-command = 元の保存を再試行
 
 boot-error = ページでエラーが発生しました。再読み込みしてください。
+page-load-failed = このページを読み込めませんでした。
 stale-build-notice = 新しいバージョンが公開されました。このページを再読み込みしてください。現在の入力は自動送信されません。
 stale-build-refresh = ページを再読み込み
 

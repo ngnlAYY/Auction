@@ -1,7 +1,6 @@
 // Admin recovery 表格、命令确认对话框和幂等提交交互。
 
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
-import { err, ok } from "@auction/web-shared/result";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { Dialog } from "@auction/web-shared/ui/components/dialog";
 import { TableColumns } from "@auction/web-shared/ui/components/table-columns";
@@ -11,7 +10,7 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { type Accessor, For, Show } from "solid-js";
 
-import { adminApiFailureIsConflict } from "../../api/failure";
+import { observedResponseStatus } from "../../api/failure";
 import {
   type AdminRecovery,
   type AdminRecoveryReport,
@@ -68,7 +67,7 @@ export function recoveryReadIsCurrent(read: RecoveryRead): boolean {
   return read.reload() === read.generation[0] && read.recoveryReload() === read.generation[1];
 }
 
-/** 恢复报告表格；报告为空时显示空状态，报告缺失时只保留标题。 */
+/** 恢复报告的表格与分页；空报告显示空状态。 */
 export function AdminRecoveryTable(props: {
   readonly report: AdminRecoveryReport | null;
   readonly currentPage: number;
@@ -87,65 +86,59 @@ export function AdminRecoveryTable(props: {
       : pageSlice(report.recoveries, props.currentPage, props.pagination.size());
   };
   return (
-    <section
-      class="admin-auction-report admin-auction-recovery"
-      aria-labelledby="settlement-recovery-title"
-    >
-      <h2 id="settlement-recovery-title">{t("admin-recovery-title")}</h2>
-      <Show when={props.report}>
-        {(report) => (
-          <>
-            <Show
-              when={report().recoveries.length === 0}
-              fallback={
-                <div class="admin-settlement__table-wrap">
-                  <table
-                    class="admin-shell__table admin-auction-table"
-                    aria-label={t("admin-recovery-title")}
-                  >
-                    <TableColumns layout="admin-recovery" widths={[6, 27, 10, 18, 14, 12, 13]} />
-                    <thead>
-                      <tr>
-                        <th scope="col">{t("admin-recovery-lot")}</th>
-                        <th scope="col">{t("admin-recovery-equipment")}</th>
-                        <th scope="col">{t("admin-recovery-stage")}</th>
-                        <th scope="col">{t("admin-recovery-deadline")}</th>
-                        <th scope="col">{t("admin-recovery-evidence")}</th>
-                        <th scope="col">{t("admin-recovery-actions")}</th>
-                        <th scope="col">{t("admin-recovery-commands")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <For each={rows()} keyed={false}>
-                        {(recovery) => (
-                          <AdminRecoveryRow
-                            recovery={recovery()}
-                            actionBusy={props.actionBusy}
-                            recoveryRead={props.recoveryRead}
-                            confirmation={props.confirmation}
-                            reason={props.reason}
-                            actionFeedback={props.actionFeedback}
-                          />
-                        )}
-                      </For>
-                    </tbody>
-                  </table>
-                </div>
-              }
-            >
-              <AsyncState kind="empty" title={t("admin-recovery-empty")} detail="" />
-            </Show>
-            <AdminSettlementPager
-              currentPage={props.page()}
-              totalRows={report().recoveries.length}
-              pagination={props.pagination}
-              page={props.page}
-              label={t("admin-recovery-pagination")}
-            />
-          </>
-        )}
-      </Show>
-    </section>
+    <Show when={props.report}>
+      {(report) => (
+        <>
+          <Show
+            when={report().recoveries.length === 0}
+            fallback={
+              <div class="admin-settlement__table-wrap">
+                <table
+                  class="admin-shell__table admin-auction-table"
+                  aria-label={t("admin-recovery-title")}
+                >
+                  <TableColumns layout="admin-recovery" widths={[6, 27, 10, 18, 14, 12, 13]} />
+                  <thead>
+                    <tr>
+                      <th scope="col">{t("admin-recovery-lot")}</th>
+                      <th scope="col">{t("admin-recovery-equipment")}</th>
+                      <th scope="col">{t("admin-recovery-stage")}</th>
+                      <th scope="col">{t("admin-recovery-deadline")}</th>
+                      <th scope="col">{t("admin-recovery-evidence")}</th>
+                      <th scope="col">{t("admin-recovery-actions")}</th>
+                      <th scope="col">{t("admin-recovery-commands")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For each={rows()} keyed={false}>
+                      {(recovery) => (
+                        <AdminRecoveryRow
+                          recovery={recovery()}
+                          actionBusy={props.actionBusy}
+                          recoveryRead={props.recoveryRead}
+                          confirmation={props.confirmation}
+                          reason={props.reason}
+                          actionFeedback={props.actionFeedback}
+                        />
+                      )}
+                    </For>
+                  </tbody>
+                </table>
+              </div>
+            }
+          >
+            <AsyncState kind="empty" title={t("admin-recovery-empty")} detail="" />
+          </Show>
+          <AdminSettlementPager
+            currentPage={props.page()}
+            totalRows={report().recoveries.length}
+            pagination={props.pagination}
+            page={props.page}
+            label={t("admin-recovery-pagination")}
+          />
+        </>
+      )}
+    </Show>
   );
 }
 
@@ -258,7 +251,7 @@ export function AdminRecoveryDialog(props: {
   const selectedAuctionId = props.selectedAuctionId;
   const selectionGeneration = props.selectionGeneration;
   const recoveryReloadGeneration = props.recoveryReloadGeneration;
-  const openedGeneration = selectionGeneration();
+  const openedGeneration = selectionGeneration.peek();
   const requiresReason = (): boolean => props.draft.action !== "reclaimed";
   const showsRefund = (): boolean => activatesBuyerRefund(props.draft.action);
   const entity = (): string => settlementRecoveryEntity(props.draft.recoveryId);
@@ -338,11 +331,11 @@ export function AdminRecoveryDialog(props: {
             async (commandId, signal) => {
               const result = await confirmAdminRecovery(host, commandId, submission, signal);
               if (signal.aborted) {
-                return result.ok ? ok(result.value) : err(result.error.code);
+                return result;
               }
               if (
                 !result.ok &&
-                adminApiFailureIsConflict(result.error) &&
+                observedResponseStatus(result.error) === 409 &&
                 sameRecoverySelection(
                   selectionAlive,
                   selectedAuctionId,
@@ -353,7 +346,7 @@ export function AdminRecoveryDialog(props: {
               ) {
                 recoveryReloadGeneration.set(saturatingIncrement(recoveryReloadGeneration.peek()));
               }
-              return result.ok ? ok(result.value) : err(result.error.code);
+              return result;
             },
             (_value, sourceAlive) => {
               const delivered =

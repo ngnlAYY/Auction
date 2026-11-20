@@ -1,7 +1,6 @@
 // Realtime failure 的 replay 对话框：冻结提交输入，并把结果交给会话命令宿主。
 
 import type { Cell } from "@auction/web-shared/reactive/cell";
-import { err, ok, type Result } from "@auction/web-shared/result";
 import { Dialog } from "@auction/web-shared/ui/components/dialog";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
@@ -14,7 +13,7 @@ import {
 } from "../../api/realtime";
 import type { AdminSessionHost } from "../../api/session";
 import { type PendingCommands, setIfAlive } from "../pending";
-import type { AdminActionFeedback } from "../presentation";
+import { type AdminActionFeedback, adminApiErrorMessage } from "../presentation";
 
 const I32_MIN_MAGNITUDE = 2_147_483_648;
 const I32_MAX = 2_147_483_647;
@@ -36,19 +35,25 @@ export interface RealtimeReplayDialogProps {
   readonly publicPayload: Cell<string>;
   readonly replayInvalid: Cell<boolean>;
   readonly busy: () => boolean;
+  readonly available: () => boolean;
+  readonly processed: boolean;
+  readonly readError: string | null;
+  readonly readPending: boolean;
+  readonly onRetryRead: () => void;
   readonly pageAlive: () => boolean;
   readonly onClose: () => void;
   readonly onSubmitted: () => void;
 }
 
-/** Replay 对话框；schema 与 payload 在提交时冻结，执行体不读取草稿。 */
+/** Replay 对话框；目标、schema 与 payload 在提交时冻结，执行体不读取草稿。 */
 export function RealtimeReplayDialog(props: RealtimeReplayDialogProps): JSX.Element {
   const busy = (): boolean => props.busy();
+  const submitDisabled = (): boolean => busy() || !props.available();
   const submitReplay = (): void => {
-    if (busy() || props.pending.contains(`realtime-failure:${props.failure.id}`)) {
+    const { id, event_id, stream_key } = props.failure;
+    if (submitDisabled() || props.pending.contains(`realtime-failure:${id}`)) {
       return;
     }
-    const failureId = props.failure.id;
     const schemaInput = props.schemaVersion();
     const payload = props.publicPayload();
     const schema = parseI32(schemaInput);
@@ -69,21 +74,13 @@ export function RealtimeReplayDialog(props: RealtimeReplayDialogProps): JSX.Elem
     }
     props.replayInvalid.set(false);
     props.notice.set(null);
-    // 提交时冻结 schema 与 payload；执行体只使用冻结值，重试复用同一份正文。
+    // 已登记的命令只使用冻结目标、schema 与负载，原样重试无需读列表。
+    const failure = { id, event_id, stream_key };
     const prepare = prepareRealtimeReplay(schema, payload);
     const submitted = props.pending.submit(
-      `realtime-failure:${failureId}`,
+      `realtime-failure:${id}`,
       t("realtime-replay-submit"),
-      async (commandId, signal): Promise<Result<void, string>> => {
-        const result = await replayRealtimeFailure(
-          props.host,
-          failureId,
-          commandId,
-          prepare,
-          signal,
-        );
-        return result.ok ? ok(undefined) : err(result.error.code);
-      },
+      (commandId, signal) => replayRealtimeFailure(props.host, failure, commandId, prepare, signal),
       () => {
         setIfAlive(props.notice, { kind: "success" }, props.pageAlive);
       },
@@ -109,6 +106,30 @@ export function RealtimeReplayDialog(props: RealtimeReplayDialogProps): JSX.Elem
         <p class="admin-panel__note">
           {t("realtime-replay-warning", { event_id: props.failure.event_id })}
         </p>
+        <div role="status">
+          <Show when={props.processed}>
+            <p class="admin-panel__note">{t("realtime-replay-processed")}</p>
+          </Show>
+        </div>
+        <div role="alert">
+          <Show when={props.readError}>
+            {(code) => (
+              <p class="admin-panel__note action-feedback action-feedback--error">
+                {adminApiErrorMessage(code())}
+              </p>
+            )}
+          </Show>
+        </div>
+        <Show when={props.readError !== null}>
+          <button
+            type="button"
+            class="admin-btn-secondary"
+            disabled={props.readPending}
+            onClick={() => props.onRetryRead()}
+          >
+            {t("admin-retry")}
+          </button>
+        </Show>
         <label>
           {t("realtime-replay-schema")}
           <input
@@ -146,7 +167,7 @@ export function RealtimeReplayDialog(props: RealtimeReplayDialogProps): JSX.Elem
           <p role="alert">{t("realtime-replay-invalid")}</p>
         </Show>
         <div class="admin-shell__dialog-actions">
-          <button type="button" disabled={busy()} onClick={submitReplay}>
+          <button type="button" disabled={submitDisabled()} onClick={submitReplay}>
             {t("realtime-replay-submit")}
           </button>
           <button

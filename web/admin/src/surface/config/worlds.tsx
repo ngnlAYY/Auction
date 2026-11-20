@@ -3,13 +3,13 @@
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
-import { err, ok, type Result } from "@auction/web-shared/result";
+import { err, type Result } from "@auction/web-shared/result";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { Dialog } from "@auction/web-shared/ui/components/dialog";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { For, Match, Show, Switch } from "solid-js";
-
+import { writeOutcomeUnknown } from "../../api/failure";
 import {
   type AdminBusinessWorld,
   fetchAdminBusinessWorlds,
@@ -221,13 +221,13 @@ function BusinessWorldCard(props: {
         try {
           const prepared = prepare(commandId);
           if (!prepared.ok) {
-            return err(prepared.error.code);
+            return prepared;
           }
           const result = await setAdminBusinessWorldEnabled(host, prepared.value, signal);
-          return result.ok ? ok(result.value) : err(result.error.code);
+          return result;
         } catch {
           // 执行体异常按结果未知处理；异常对象与消息不进入控制台。
-          return err("network_error");
+          return err(writeOutcomeUnknown("network_error"));
         }
       },
       (result) => {

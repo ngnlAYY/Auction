@@ -4,25 +4,30 @@ import { expect, test } from "bun:test";
 import { err, ok } from "@auction/web-shared/result";
 import { t } from "@auction/web-shared/ui/i18n";
 import { createComponent, createRoot, flush } from "solid-js";
-import { adminApiFailureFromHttpBody, adminApiFailureNotSentCode } from "../../api/failure";
+import { writeFailureFromReply } from "../../api/api-request-fixture";
+import {
+  type AdminWriteFailure,
+  adminApiFailureDefiniteRejection as definiteRejection,
+  writeNotSent,
+  writeOutcomeUnknown,
+} from "../../api/failure";
 import { loadRenderModule } from "../../solid-render-fixture.test";
 import { cleanupScope } from "../../test-scope-fixture";
 import { installAdminTranslation } from "../admin-locale-fixture.test";
 import { adminApiErrorMessage } from "../presentation";
 import { createElement, findAll, insert, installTestDocument } from "../solid-dom-fixture";
-import { definiteRejection } from ".";
-import { createPendingHarness, settlePending } from "./pending-command-fixture";
+import { createPendingHarness, settlePending, waitForAttempt } from "./pending-command-fixture";
 
 const { PendingCommandPanel } = await loadRenderModule<typeof import("./panel")>(
   new URL("panel.tsx", import.meta.url).pathname,
   "PendingCommandPanel",
 );
 
-function failure(status: number, code: string, message: string): string {
-  return adminApiFailureFromHttpBody(
+function failure(status: number, code: string, message = "请求失败"): Promise<AdminWriteFailure> {
+  return writeFailureFromReply(
     status,
     JSON.stringify({ code, message, data: null, request_id: null }),
-  ).code;
+  );
 }
 
 test("被拒绝的条目显示各自的稳定错误文案且不提供原样重试", async () => {
@@ -33,15 +38,16 @@ test("被拒绝的条目显示各自的稳定错误文案且不提供原样重�
     const harness = createPendingHarness();
     scope.defer(harness.dispose);
     let successCalls = 0;
-    for (const [status, code] of [
-      [409, "alert_stale"],
-      [413, "body_too_large"],
-    ] as const) {
+    const replies = [
+      ["alert_stale", await failure(409, "alert_stale", "写入已拒绝")],
+      ["body_too_large", await failure(413, "body_too_large", "写入已拒绝")],
+    ] as const;
+    for (const [code, rejection] of replies) {
       expect(
         harness.origin.commands.submit(
           code,
           "测试写入",
-          async () => err(failure(status, code, "写入已拒绝")),
+          async () => err(rejection),
           () => {
             successCalls += 1;
             throw new Error("拒绝不能交付成功回执");
@@ -226,15 +232,15 @@ test("未经重放检查的拒绝不能清除较早的未知尝试", async () =>
           attempt += 1;
           switch (attempt) {
             case 1:
-              return err("request_timeout");
+              return err(writeOutcomeUnknown("request_timeout"));
             case 2:
-              return err(adminApiFailureNotSentCode("alert_stale"));
+              return err(writeNotSent("alert_stale"));
             case 3:
-              return err("rate_limited");
+              return err(await failure(429, "rate_limited"));
             case 4:
-              return err("unauthenticated");
+              return err(await failure(401, "unauthenticated"));
             case 5:
-              return err("rename_name_taken");
+              return err(await failure(409, "rename_name_taken"));
             default:
               return ok(undefined);
           }
@@ -250,8 +256,11 @@ test("未经重放检查的拒绝不能清除较早的未知尝试", async () =>
 
     for (let retry = 0; retry < 4; retry += 1) {
       harness.host.retry(commandId);
-      await settlePending();
-      expect(harness.host.entries.peek()[0]?.unknown).toBe(true);
+      await waitForAttempt(() => harness.origin.commands.isBusy("first"));
+      expect(harness.host.entries.peek()[0]).toMatchObject({
+        identity: { commandId },
+        unknown: true,
+      });
       harness.origin.commands.dismiss(commandId);
       expect(
         harness.origin.commands.submit(
@@ -266,7 +275,7 @@ test("未经重放检查的拒绝不能清除较早的未知尝试", async () =>
     }
 
     harness.host.retry(commandId);
-    await settlePending();
+    await waitForAttempt(() => harness.origin.commands.isBusy("first"));
     expect(harness.origin.commands.contains("first")).toBe(false);
     expect(ids).toEqual([commandId, commandId, commandId, commandId, commandId, commandId]);
   } finally {
@@ -284,7 +293,11 @@ test("重放检查过的告警拒绝清除较早的未知尝试", async () => {
         "silence",
         async (commandId) => {
           ids.push(commandId);
-          return err(ids.length === 1 ? "request_timeout" : "alert_stale");
+          return err(
+            ids.length === 1
+              ? writeOutcomeUnknown("request_timeout")
+              : await failure(409, "alert_stale"),
+          );
         },
         () => {},
         () => {},
@@ -296,7 +309,7 @@ test("重放检查过的告警拒绝清除较早的未知尝试", async () => {
     expect(harness.host.entries.peek()[0]?.unknown).toBe(true);
 
     harness.host.retry(commandId);
-    await settlePending();
+    await waitForAttempt(() => harness.origin.commands.isBusy("alert"));
     expect(ids).toEqual([commandId, commandId]);
     expect(harness.host.entries.peek()).toEqual([]);
     expect(harness.origin.rejections.peek()[0]?.result).toEqual(err("alert_stale"));
@@ -323,12 +336,14 @@ test("重放检查过的告警拒绝清除较早的未知尝试", async () => {
 test("新命令替换同一实体的旧拒绝通知", async () => {
   const harness = createPendingHarness();
   try {
+    const oldRejection = await failure(429, "rate_limited");
+    const otherRejection = await failure(400, "invalid_json");
     const failures: string[] = [];
     expect(
       harness.origin.commands.submit(
         "first",
         "old",
-        async () => err("rate_limited"),
+        async () => err(oldRejection),
         () => {},
         (code) => failures.push(code),
       ),
@@ -348,7 +363,7 @@ test("新命令替换同一实体的旧拒绝通知", async () => {
       harness.origin.commands.submit(
         "other",
         "other",
-        async () => err("invalid_json"),
+        async () => err(otherRejection),
         () => {},
         () => {},
       ),
@@ -369,12 +384,12 @@ test("新命令替换同一实体的旧拒绝通知", async () => {
       harness.origin.commands.submit(
         "first",
         "new",
-        async () => err("invalid_json"),
+        async () => err(await failure(400, "invalid_json")),
         () => {},
         () => {},
       ),
     ).toBe(true);
-    await settlePending();
+    await waitForAttempt(() => harness.origin.commands.isBusy("first"));
     expect(harness.host.entries.peek()).toEqual([]);
     const notices = harness.origin.rejections.peek();
     expect(notices).toHaveLength(2);
@@ -389,14 +404,14 @@ test("新命令替换同一实体的旧拒绝通知", async () => {
 });
 
 test("首次确定失败可以关闭", async () => {
-  for (const code of [adminApiFailureNotSentCode("network_error"), "stale_lot_state"]) {
+  for (const rejection of [writeNotSent("network_error"), await failure(409, "stale_lot_state")]) {
     const harness = createPendingHarness();
     try {
       expect(
         harness.origin.commands.submit(
           "first",
           "test",
-          async () => err(code),
+          async () => err(rejection),
           () => {},
           () => {},
         ),
@@ -421,7 +436,7 @@ test("未发送错误以展示码交给发起页", async () => {
       harness.origin.commands.submit(
         "first",
         "test",
-        async () => err(adminApiFailureNotSentCode("network_error")),
+        async () => err(writeNotSent("network_error")),
         () => {},
         (code) => {
           observed.value = code;

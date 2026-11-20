@@ -607,6 +607,7 @@ command-retry-unchanged = 결과를 아직 알 수 없습니다. 이 페이지�
 command-retry-price-changed = 가격이 바뀌었습니다. 다시 시도하기 전에 출품의 현재 가격을 확인하세요.
 command-unknown-count = 결과를 알 수 없는 명령: { $count }건
 command-memory-only = 이 기록은 현재 탭의 메모리에만 남습니다. 페이지를 새로고침하거나 닫으면 기록이 지워집니다.
+command-reload-confirm = 새로고침하면 이 탭에 남은 미완료 입찰·자동 입찰 기록과 아직 확인하지 않은 결과가 지워집니다. 그래도 새로고침할까요?
 command-create-proxy = 자동 입찰 설정
 command-lot-unresolved = 이 출품에는 결과를 알 수 없는 명령이 있습니다. 열어서 처리 방법을 확인하세요.
 command-recovery-open = 출품 { $code }의 명령 확인
@@ -647,6 +648,7 @@ watch-save-error = 표시를 저장하지 못했습니다. 서버 표시를 새�
 watch-retry-command = 원래 저장 재시도
 
 boot-error = 페이지에 오류가 발생했습니다. 새로고침해 주세요.
+page-load-failed = 이 페이지를 불러오지 못했습니다.
 stale-build-notice = 새 버전이 배포되었습니다. 이 페이지를 새로 고쳐 주세요. 현재 입력은 자동으로 제출되지 않습니다.
 stale-build-refresh = 페이지 새로 고침
 

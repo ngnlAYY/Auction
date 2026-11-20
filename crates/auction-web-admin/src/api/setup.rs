@@ -1,7 +1,9 @@
 //! 一次性本机初始化接口；不会复用常规 Admin 会话或 CSRF API。
 
 use auction_contracts::{SetupErrorResponse, SetupRequest, SetupResponse};
-use gloo_net::http::{Request, Response};
+use gloo_net::http::Request;
+
+use super::transport::AdminResponse;
 
 /// 配置表单开放前先独立验证部署码；不发送配置或使用普通 Admin 会话。
 pub(crate) async fn verify_first_run(token: &str) -> Result<bool, String> {
@@ -62,7 +64,7 @@ fn encode_target(host: &str, port: u16, name: &str) -> String {
         .finish()
 }
 
-async fn setup_response(response: Response, expected: &str) -> Result<SetupResponse, String> {
+async fn setup_response(response: AdminResponse, expected: &str) -> Result<SetupResponse, String> {
     if !response.ok() {
         return Err(response
             .json::<SetupErrorResponse>()

@@ -189,9 +189,9 @@ test("default_sent_preview_and_acknowledgement_contract_fixtures", async () => {
         [body, DELIVERY_ID, 2],
         [body, ACKNOWLEDGE_ID, 3],
       ] as const) {
-        expect(await postAcknowledgement(response, deliveryId, fencingVersion)).toEqual({
+        expect(await postAcknowledgement(response, deliveryId, fencingVersion)).toEqual<unknown>({
           ok: false,
-          error: { status: null, code: "invalid_response" },
+          error: { kind: "outcome-unknown", responseStatus: null, code: "invalid_response" },
         });
         expect(report.mock.calls).toEqual([["dto_decode"]]);
         report.mockClear();

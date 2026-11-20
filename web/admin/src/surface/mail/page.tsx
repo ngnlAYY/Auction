@@ -1,17 +1,23 @@
 // Admin 邮件页面加载、筛选和整体布局。
 
 import type { QueryState } from "@auction/web-shared/net/query";
-import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createCell } from "@auction/web-shared/reactive/cell";
+import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
 import { err, ok, type Result } from "@auction/web-shared/result";
+import { compareText } from "@auction/web-shared/text";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { For, Match, Show, Switch } from "solid-js";
+import { createEffect, For, Match, Switch } from "solid-js";
 
-import type { AdminMailIntakeDetail, AdminMailIntakePage, AdminMailPolling } from "../../api/mail";
+import type {
+  AdminMailIntakeDetail,
+  AdminMailIntakePage,
+  AdminMailIntakeQuery,
+  AdminMailPolling,
+} from "../../api/mail";
 import { fetchMailIntakeDetail, fetchMailIntakes, fetchMailState } from "../../api/mail";
 import { useAdminSessionHost } from "../auth/shell";
 import { actionFeedbackMessage } from "../deliveries/labels";
@@ -27,6 +33,7 @@ import {
 } from "../presentation";
 import { type MailQuery, mailQueryToIntakeQuery, useMailQueryState } from "../query/mail";
 import { MailPollingCard, MailPollingCommands, MailTriggerButton } from "./actions";
+import type { MailDeliveryNoticeWriter } from "./deliveries";
 import { MailIntakeDetailPanel } from "./detail";
 import { MailIntakeTable } from "./table";
 
@@ -41,6 +48,11 @@ interface PollingRead {
 interface DetailRead {
   readonly intakeId: string | null;
   readonly result: Result<AdminMailIntakeDetail | null, string>;
+}
+
+interface IntakeSelection {
+  readonly intakeId: string;
+  readonly filters: AdminMailIntakeQuery;
 }
 
 type IntakeView =
@@ -68,17 +80,50 @@ export function page(): JSX.Element {
   const host = useAdminSessionHost();
   const query = useMailQueryState();
   const queryState = query.state;
-  const requestedQuery = createValueMemo(() => {
-    const current = queryState();
-    return { query: mailQueryToIntakeQuery(current), page: current.page } as const;
-  });
+  const intakeFilters = createValueMemo(() => mailQueryToIntakeQuery(queryState()));
+  const requestedQuery = createValueMemo(() => ({
+    query: intakeFilters(),
+    page: queryState().page,
+  }));
   const mailboxKey = createCell("");
   const activeMailbox = createCell("");
   const refresh = createCommandReload(0n);
   const pollingRefresh = createCommandReload(0n);
-  // 重排反馈由页面持有，详情刷新或切换期间不会把成功排队误报为已送达。
-  const deliveryNotice = createCell<readonly [string, AdminActionFeedback] | null>(null);
-  const selectedIntake = createCell<string | null>(null);
+  // 重排反馈按投递归属保存，切换收件时迟到回执不能覆盖其他投递的结果。
+  const deliveryNotices = createCell<ReadonlyMap<string, readonly [string, AdminActionFeedback]>>(
+    new Map(),
+  );
+  const deliveryNotice: MailDeliveryNoticeWriter = {
+    set(notice, deliveryId) {
+      deliveryNotices.update((current) => {
+        const next = new Map(current);
+        if (notice === null) {
+          next.delete(deliveryId);
+        } else {
+          next.set(deliveryId, notice);
+        }
+        return next;
+      });
+    },
+  };
+  const selectedIntake = createCell<IntakeSelection | null>(null);
+  const activeIntake = createValueMemo(() => {
+    const selection = selectedIntake();
+    const filters = intakeFilters();
+    return selection !== null && structuralEquals(selection.filters, filters)
+      ? selection.intakeId
+      : null;
+  });
+  // 手动筛选与历史恢复都使旧选择失效，返回原筛选也不能重新打开已清除的详情。
+  createEffect(intakeFilters, () => {
+    const selection = selectedIntake.peek();
+    if (
+      selection !== null &&
+      !structuralEquals(selection.filters, mailQueryToIntakeQuery(queryState.peek()))
+    ) {
+      selectedIntake.set(null);
+    }
+  });
 
   const polling = createTaskResource(
     () => [pollingRefresh(), activeMailbox()] as const,
@@ -104,7 +149,7 @@ export function page(): JSX.Element {
     (request, size, signal) => fetchMailIntakes(host, request.query, request.page, size, signal),
   );
   const detail = createTaskResource(
-    () => [refresh(), selectedIntake()] as const,
+    () => [refresh(), activeIntake()] as const,
     async ([, intakeId], context): Promise<DetailRead> => {
       if (intakeId === null) {
         return { intakeId, result: ok(null) };
@@ -124,12 +169,15 @@ export function page(): JSX.Element {
       return false;
     }
     const deliveryId = entity.slice(prefix.length);
-    const selected = selectedIntake.peek();
-    if (selected === null) {
+    const selection = selectedIntake.peek();
+    if (
+      selection === null ||
+      !structuralEquals(selection.filters, mailQueryToIntakeQuery(queryState.peek()))
+    ) {
       return false;
     }
     const snapshot = detail.peek();
-    if (snapshot === undefined || snapshot.intakeId !== selected) {
+    if (snapshot === undefined || snapshot.intakeId !== selection.intakeId) {
       return true;
     }
     if (!snapshot.result.ok) {
@@ -175,13 +223,20 @@ export function page(): JSX.Element {
   // Resource 重启会保留旧值；只有同一收件的快照可继续展示和操作。
   const detailView = createValueMemo((): DetailView => {
     const snapshot = detail();
-    if (snapshot === undefined || snapshot.intakeId !== selectedIntake()) {
+    if (snapshot === undefined || snapshot.intakeId !== activeIntake()) {
       return { detail: null, loading: true, error: null };
     }
     if (!snapshot.result.ok) {
       return { detail: null, loading: false, error: snapshot.result.error };
     }
     return { detail: snapshot.result.value, loading: false, error: null };
+  });
+  const currentNotices = createValueMemo(() => {
+    const intakeId = activeIntake();
+    return [...deliveryNotices()]
+      .filter(([, [owner]]) => owner === intakeId)
+      .map(([deliveryId, [, feedback]]) => ({ deliveryId, feedback }))
+      .sort((left, right) => compareText(left.deliveryId, right.deliveryId));
   });
   // 只保留当前邮箱的完成快照；切换邮箱不能继续显示或操作上一邮箱的轮询状态。
   const pollingView = createValueMemo((): PollingView => {
@@ -226,7 +281,7 @@ export function page(): JSX.Element {
               value={queryState().world}
               onChange={(event) => {
                 const value = event.currentTarget.value;
-                applyMailFilter(worldQuery, selectedIntake, (next) => {
+                applyMailFilter(worldQuery, (next) => {
                   next.world = value;
                 });
               }}
@@ -246,7 +301,7 @@ export function page(): JSX.Element {
               value={queryState().status}
               onChange={(event) => {
                 const value = event.currentTarget.value;
-                applyMailFilter(statusQuery, selectedIntake, (next) => {
+                applyMailFilter(statusQuery, (next) => {
                   next.status = value;
                 });
               }}
@@ -267,7 +322,7 @@ export function page(): JSX.Element {
               value={queryState().kind}
               onChange={(event) => {
                 const value = event.currentTarget.value;
-                applyMailFilter(kindQuery, selectedIntake, (next) => {
+                applyMailFilter(kindQuery, (next) => {
                   next.kind = value;
                 });
               }}
@@ -315,43 +370,50 @@ export function page(): JSX.Element {
                   query.push(next);
                 }}
                 onSelect={(intakeId) => {
-                  deliveryNotice.set(null);
-                  selectedIntake.set(intakeId);
+                  selectedIntake.set({
+                    intakeId,
+                    filters: mailQueryToIntakeQuery(queryState.peek()),
+                  });
                 }}
               />
             )}
           </Match>
         </Switch>
         <MailIntakeDetailPanel
-          visible={selectedIntake() !== null}
+          visible={activeIntake() !== null}
           detail={detailView().detail}
           loading={detailView().loading}
           error={detailView().error}
           refresh={refresh}
           deliveryNotice={deliveryNotice}
           onClose={() => {
-            deliveryNotice.set(null);
+            const selection = selectedIntake.peek();
+            if (selection !== null) {
+              deliveryNotices.update(
+                (current) =>
+                  new Map([...current].filter(([, [owner]]) => owner !== selection.intakeId)),
+              );
+            }
             selectedIntake.set(null);
           }}
         />
-        <Show when={deliveryNotice()}>
-          {(notice) => (
-            <Show when={selectedIntake() === notice()[0]}>
+        <For each={currentNotices()} keyed={(notice) => notice.deliveryId}>
+          {(notice) => {
+            const success = () => adminActionFeedbackIsSuccess(notice().feedback);
+            return (
               <p
                 class={[
                   "admin-panel__note",
                   "action-feedback",
-                  adminActionFeedbackIsSuccess(notice()[1])
-                    ? "action-feedback--success"
-                    : "action-feedback--error",
+                  success() ? "action-feedback--success" : "action-feedback--error",
                 ]}
-                role={adminActionFeedbackIsSuccess(notice()[1]) ? "status" : "alert"}
+                role={success() ? "status" : "alert"}
               >
-                {actionFeedbackMessage(notice()[1], t("admin-mail-delivery-requeued"))}
+                {`${notice().deliveryId} · ${actionFeedbackMessage(notice().feedback, t("admin-mail-delivery-requeued"))}`}
               </p>
-            </Show>
-          )}
-        </Show>
+            );
+          }}
+        </For>
         <details class="admin-mail-polling">
           <summary id="mail-polling-title">{t("admin-mail-polling-title")}</summary>
           <form class="admin-mail-search" onSubmit={loadPolling}>
@@ -410,18 +472,12 @@ export function page(): JSX.Element {
   );
 }
 
-/** 闭集筛选选择变化后立即生效：push 到地址栏并回到第一页，同时清理详情——
- * 旧选择不再属于新结果集。查询资源响应 `query.state` 变化自动重新加载，无需手动刷新。 */
-function applyMailFilter(
-  query: QueryState<MailQuery>,
-  selectedIntake: Cell<string | null>,
-  update: (next: MailQuery) => void,
-): void {
-  const next: MailQuery = { ...query.state() };
+/** 闭集筛选写入地址栏并回到第一页，列表与详情共同响应筛选变化。 */
+function applyMailFilter(query: QueryState<MailQuery>, update: (next: MailQuery) => void): void {
+  const next: MailQuery = { ...query.state.peek() };
   update(next);
   next.page = 1n;
   query.push(next);
-  selectedIntake.set(null);
 }
 
 /** Rust `str::trim` 的空白集合；JS 的 `trim` 会漏掉 U+0085 等字符，不能替换。 */

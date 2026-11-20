@@ -1,3 +1,5 @@
+//! Admin 会话状态机与宿主的测试夹具。
+
 use std::cell::Cell;
 use std::future::{pending, ready};
 use std::mem::DropGuard;
@@ -13,14 +15,20 @@ use super::{
     CheckReason, Cookie, Effect, Event, LogoutOutcome, Phase, ReadOutcome, RenewalOutcome, State,
     Ticket, Timer, step,
 };
-use crate::api::{AdminApiFailure, AdminSession};
+use crate::api::{AdminSession, AdminSessionWriteReview, AdminWriteEndpoint, AdminWriteFailure};
 use crate::surface::auctions::draft_page_tests::{
     button, click_button, has_live_text, init_i18n, mount_writer,
 };
 use crate::surface::pending::use_pending_commands;
-use crate::surface::realtime::TestPage;
+use crate::surface::realtime::{TestPage, text_attributes};
 use crate::surface::router::{Route, TestNotFoundPage};
+use crate::surface::test_events::dispatch_click_event;
+use crate::surface::users::AdminUserGeneratedKey;
 
+mod identity;
+mod invalidation;
+mod logout;
+mod pages;
 mod projections;
 mod sequences;
 
@@ -332,6 +340,7 @@ fn late_old_401_does_not_end_another_tabs_new_login() {
     let old = SessionFixture::new("old-cookie", 900);
     let new = SessionFixture::new("new-cookie", 60);
     let (tab_a, effects) = old.apply(old.authenticated(), Event::LogoutClicked, NOW);
+    let old_epoch = tab_a.view().epoch;
     let logout = logout_ticket(&effects);
     let (tab_a, effects) = old.apply(
         tab_a,
@@ -353,14 +362,21 @@ fn late_old_401_does_not_end_another_tabs_new_login() {
 
     let (tab_a, effects) = new.apply(
         tab_a,
-        Event::ReadFinished(late_check, old.cookie, ReadOutcome::Unauthenticated),
+        Event::ReadFinished(late_check, old.cookie.clone(), ReadOutcome::Unauthenticated),
         NOW,
     );
     assert_eq!(count_notices(&effects), 0);
-    assert!(tab_a.view().session.is_none());
+    assert_eq!(tab_a.view().session.as_deref(), Some(old.session.as_ref()));
+    assert_eq!(tab_a.view().epoch, old_epoch);
+    assert!(tab_a.view().key_visibility.hidden);
     assert!(!tab_a.view().can_write);
     assert!(tab_b.view().can_write);
     assert_eq!(tab_b.view().session.as_deref(), Some(new.session.as_ref()));
+    let (tab_a, effects) = new.apply(tab_a, new.read_ok(read_ticket(&effects)), NOW);
+    assert!(tab_a.view().logged_out);
+    assert!(tab_a.view().epoch > old_epoch);
+    assert_eq!(count_notices(&effects), 0);
+    let (tab_a, effects) = new.apply(tab_a, Event::Visible, NOW);
     let (tab_a, _) = new.apply(tab_a, new.read_ok(read_ticket(&effects)), NOW);
     assert!(tab_a.view().can_write);
     assert_eq!(tab_a.view().session.as_deref(), Some(new.session.as_ref()));
@@ -398,7 +414,8 @@ fn broadcast_then_old_get_success_cannot_interrupt_delete_success() {
 
     let succeeded = Event::LogoutFinished(logout, current.cookie, LogoutOutcome::Succeeded);
     let (state, effects) = step(state, succeeded.clone(), Cookie::Missing, NOW);
-    assert_eq!(count_notices(&effects), 1);
+    // 对端已报告同一次结束，迟到的本地成功只结清退出。
+    assert_eq!(count_notices(&effects), 0);
     assert!(!state.view().can_write);
     assert!(!state.view().logging_out);
     let check = read_ticket(&effects);
@@ -591,14 +608,22 @@ fn stale_successful_logout_only_checks_the_replacement_cookie() {
     let (state, effects) = previous.apply(previous.authenticated(), Event::LogoutClicked, NOW);
     let (state, effects) = current.apply(
         state,
-        Event::LogoutFinished(logout_ticket(&effects), previous.cookie, LogoutOutcome::Succeeded),
+        Event::LogoutFinished(
+            logout_ticket(&effects),
+            previous.cookie.clone(),
+            LogoutOutcome::Succeeded,
+        ),
         NOW,
     );
     assert_eq!(count_notices(&effects), 0);
-    assert!(state.view().session.is_none());
+    assert_eq!(state.view().session.as_deref(), Some(previous.session.as_ref()));
+    assert!(state.view().key_visibility.hidden);
     assert!(!state.view().can_write);
-    let (state, _) = current.apply(state, current.read_ok(read_ticket(&effects)), NOW);
-    assert_eq!(state.view().session.as_deref(), Some(current.session.as_ref()));
+    let epoch = state.view().epoch;
+    let (state, effects) = current.apply(state, current.read_ok(read_ticket(&effects)), NOW);
+    assert!(state.view().logged_out);
+    assert!(state.view().epoch > epoch);
+    assert_eq!(count_notices(&effects), 0);
 }
 
 #[test]
@@ -606,12 +631,63 @@ fn request_dispatched_after_cookie_change_only_rereads_current_cookie() {
     let previous = SessionFixture::new("old-cookie", 900);
     let current = SessionFixture::new("new-cookie", 900);
     let (state, effects) = previous.apply(previous.authenticated(), Event::Visible, NOW);
-    let (state, effects) = current.apply(state, current.read_ok(read_ticket(&effects)), NOW);
+    let ticket = read_ticket(&effects);
+    assert!(state.view().can_write);
+    assert!(!state.view().key_visibility.hidden);
+    let (state, effects) = current.apply(state, Event::ReadSending(ticket), NOW);
+    assert_review_hides_previous_session(&state, &previous);
+    assert!(!effects.iter().any(|effect| matches!(effect, Effect::Read(_))));
+    assert!(state.has_read(ticket));
+    assert_replacement_read_ends_previous_session(state, &current, ticket);
+}
+
+#[test]
+fn request_dispatched_before_cookie_change_rereads_after_old_response() {
+    let previous = SessionFixture::new("old-cookie", 900);
+    let current = SessionFixture::new("new-cookie", 900);
+    let (state, effects) = previous.apply(previous.authenticated(), Event::Visible, NOW);
+    let ticket = read_ticket(&effects);
+    let (state, effects) = previous.apply(state, Event::ReadSending(ticket), NOW);
+    assert!(!effects.iter().any(|effect| matches!(effect, Effect::Read(_))));
+    assert!(state.view().can_write);
+    assert!(!state.view().key_visibility.hidden);
+
+    let (state, effects) = current.apply(state, previous.read_ok(ticket), NOW);
+    assert_review_hides_previous_session(&state, &previous);
+    assert_eq!(count_notices(&effects), 0);
+    let replacement = read_ticket(&effects);
+    assert_ne!(replacement, ticket);
+    let (state, effects) = current.apply(state, Event::ReadSending(replacement), NOW);
+    assert!(!effects.iter().any(|effect| matches!(effect, Effect::Read(_))));
+    assert_replacement_read_ends_previous_session(state, &current, replacement);
+}
+
+fn assert_review_hides_previous_session(state: &State, previous: &SessionFixture) {
+    assert_eq!(state.view().session.as_deref(), Some(previous.session.as_ref()));
+    assert!(state.view().key_visibility.hidden);
+    assert!(!state.view().can_write);
+}
+
+fn assert_replacement_read_ends_previous_session(
+    state: State,
+    current: &SessionFixture,
+    ticket: Ticket,
+) {
+    let epoch = state.view().epoch;
+    let (state, effects) = current.apply(state, current.read_ok(ticket), NOW);
+    assert!(state.view().logged_out);
+    assert!(state.view().epoch > epoch);
     assert!(state.view().session.is_none());
     assert!(!state.view().can_write);
     assert_eq!(count_notices(&effects), 0);
-    let (state, _) = current.apply(state, current.read_ok(read_ticket(&effects)), NOW);
+    assert!(!effects.iter().any(|effect| matches!(effect, Effect::Read(_))));
+
+    let (state, effects) = current.apply(state, Event::Visible, NOW);
+    let ticket = read_ticket(&effects);
+    let (state, _) = current.apply(state, Event::ReadSending(ticket), NOW);
+    let (state, _) = current.apply(state, current.read_ok(ticket), NOW);
     assert_eq!(state.view().session.as_deref(), Some(current.session.as_ref()));
+    assert!(state.view().can_write);
 }
 
 #[test]
@@ -677,11 +753,36 @@ struct CommandRequests {
 fn AuthenticatedCommands() -> Element {
     let reload = use_signal(|| 0);
     let commands = use_pending_commands(reload, |_| true);
+    let review = use_context::<AdminSessionWriteReview>();
+    let session = use_context::<AdminSession>();
     let requests = use_context::<Rc<CommandRequests>>();
     let navigation = navigator();
     requests.navigation.set(Some(navigation));
     let delayed = requests.clone();
     rsx! {
+        button { onclick: move |_| {
+            assert!(commands.submit_with_receipt(
+                "user:fixture".to_owned(), "测试生成 Key".to_owned(),
+                |_| ready(Ok::<_, AdminWriteFailure>("仅供会话测试的一次性 Key".to_owned())),
+                |key, _| AdminUserGeneratedKey::delivery(Some(key), false),
+                |_| {},
+            ));
+        }, {"生成测试 Key".to_owned()} }
+        button { onclick: move |_| {
+            assert!(commands.submit_with_receipt(
+                "user:second".to_owned(), "生成第二张 Key 回执".to_owned(),
+                |_| ready(Ok::<_, AdminWriteFailure>("第二张回执的测试 Key".to_owned())),
+                |key, _| AdminUserGeneratedKey::delivery(Some(key), false),
+                |_| {},
+            ));
+        }, {"生成第二张测试 Key".to_owned()} }
+        button { onclick: move |_| {
+            let replacement = SessionFixture::new("replacement-cookie", 900);
+            review.observe.call((review.epoch, replacement.session.as_ref().clone()));
+        }, {"写前复核发现换代".to_owned()} }
+        button { onclick: move |_| {
+            review.invalidate.call((review.epoch, session.clone()));
+        }, {"业务请求收到失效证据".to_owned()} }
         button { onclick: move |_| {
             let _ = navigation.push(Route::Status {});
         }, {"离开命令页".to_owned()} }
@@ -690,11 +791,12 @@ fn AuthenticatedCommands() -> Element {
             assert!(commands.submit(
                 "alert:fixture".to_owned(), "测试静默".to_owned(), move |_| {
                     requests.sent.set(requests.sent.get() + 1);
-                    let reply = AdminApiFailure::from_http_body(
+                    let reply = AdminWriteFailure::from_test_http(
+                        AdminWriteEndpoint::General,
                         503,
                         r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
                     );
-                    ready(Err::<(), _>(reply.code))
+                    ready(Err::<(), _>(reply))
                 },
                 |()| panic!("故障替身没有返回成功回执"), |_| {},
             ));
@@ -709,7 +811,7 @@ fn AuthenticatedCommands() -> Element {
                         let _request = DropGuard::new(delayed, |requests| {
                             requests.cancelled.set(true);
                         });
-                        pending::<Result<(), String>>().await
+                        pending::<Result<(), AdminWriteFailure>>().await
                     }
                 },
                 |()| panic!("已结束的会话不能交付旧命令"), |_| {},
@@ -838,6 +940,64 @@ fn pending_commands_survive_session_review_but_cannot_retry_until_confirmed() {
     click_button(&mut page, "复核通过");
     click_button(&mut page, "原样重试");
     assert_eq!(requests.sent.get(), 2);
+}
+
+#[test]
+fn session_shell_hides_open_key_and_retains_receipt_and_command_until_reconfirmed() {
+    for evidence in ["写前复核发现换代", "业务请求收到失效证据"] {
+        let (mut page, requests) = mount_session_commands(SessionEnd::IdleExpiration);
+        click_button(&mut page, "发送会话命令");
+        click_button(&mut page, "生成测试 Key");
+        click_button(&mut page, "查看生成的 Key");
+        let key = "仅供会话测试的一次性 Key";
+        assert!(has_live_text(&page, key));
+
+        click_button(&mut page, evidence);
+        assert!(!has_live_text(&page, key));
+        assert!(button(&page, "查看生成的 Key").unwrap().1);
+        assert!(button(&page, "原样重试").unwrap().1);
+        assert!(!requests.source_unmounted.get());
+        assert_eq!(requests.sent.get(), 1);
+
+        click_button(&mut page, "复核通过");
+        assert!(!has_live_text(&page, key));
+        assert!(!button(&page, "查看生成的 Key").unwrap().1);
+        click_button(&mut page, "查看生成的 Key");
+        assert!(has_live_text(&page, key));
+        click_button(&mut page, "结束测试会话");
+        assert!(!has_live_text(&page, key));
+        assert!(button(&page, "查看生成的 Key").is_none());
+        assert!(button(&page, "原样重试").is_none());
+    }
+}
+
+#[test]
+fn session_shell_ignores_the_previous_key_dialogs_late_close() {
+    let (mut page, _) = mount_session_commands(SessionEnd::Logout);
+    click_button(&mut page, "生成测试 Key");
+    click_button(&mut page, "查看生成的 Key");
+    let first = "仅供会话测试的一次性 Key";
+    let second = "第二张回执的测试 Key";
+    assert!(has_live_text(&page, first));
+    let (old_close, _) = button(&page, "关闭").unwrap();
+    let edits = click_button(&mut page, "生成第二张测试 Key");
+    let second_button = text_attributes(&edits, "id")
+        .find_map(|(id, value)| value.starts_with("admin-command-receipt-").then_some(id))
+        .expect("第二张回执有独立的查看按钮");
+
+    // 同一渲染批次中，打开第二张后仍能收到第一张对话框创建的关闭动作。
+    dispatch_click_event(page.dom(), second_button);
+    page.dispatch("click", old_close, "");
+    assert!(!has_live_text(&page, first));
+    assert!(has_live_text(&page, second));
+    assert!(button(&page, "关闭").is_some());
+
+    // 关闭当前对话框只消费第二张，随后仍能打开并确认第一张。
+    click_button(&mut page, "关闭");
+    click_button(&mut page, "查看生成的 Key");
+    assert!(has_live_text(&page, first));
+    click_button(&mut page, "关闭");
+    assert!(button(&page, "查看生成的 Key").is_none());
 }
 
 #[test]

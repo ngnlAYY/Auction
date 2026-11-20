@@ -406,6 +406,10 @@ fn SelectField(
     on_dirty: EventHandler<()>,
 ) -> Element {
     let value = use_memo(use_reactive((&path,), move |(path,)| form.read().input(path)));
+    // 没有匹配项时沿用首项占位，候选文档中的值由操作者显式更改。
+    let selected = value.with(|current| {
+        options.iter().position(|(option_value, _)| option_value == current).unwrap_or(0)
+    });
     rsx! {
         label { class: "admin-runtime-field",
             span { "{label}" }
@@ -415,13 +419,17 @@ fn SelectField(
                 autocomplete: "off",
                 "data-runtime-label": label,
                 disabled,
-                value: value(),
                 onchange: move |event: FormEvent| {
                     form.write().set_input(path, event.value());
                     on_dirty.call(());
                 },
-                for (option_value, option_label) in options {
-                    option { value: option_value, "{option_label}" }
+                for (index, (option_value, option_label)) in options.into_iter().enumerate() {
+                    option {
+                        key: "{option_value}",
+                        value: "{option_value}",
+                        selected: index == selected,
+                        "{option_label}"
+                    }
                 }
             }
         }
@@ -442,7 +450,7 @@ mod tests {
     use serde_json::json;
     use unic_langid::langid;
 
-    use super::RuntimeConfigFields;
+    use super::{RuntimeConfigFields, SelectField};
     use crate::api::fetch_admin_runtime_config;
     use crate::surface::ADMIN_LOCALE_CATALOG;
     use crate::surface::config::model::RuntimeConfigForm;
@@ -451,6 +459,7 @@ mod tests {
     use crate::surface::config::validation::{self, FormIssues};
     #[cfg(not(target_arch = "wasm32"))]
     use crate::surface::config::validation::{NumberControl, NumberDocument};
+    use crate::surface::realtime::selected_options;
 
     fn projection() -> ApiResponse<AdminRuntimeConfigResponse> {
         serde_json::from_str(include_str!(
@@ -516,6 +525,47 @@ mod tests {
                 _ => None,
             })
             .unwrap()
+    }
+
+    #[test]
+    fn config_selects_show_unix_and_thursday_on_mount() {
+        let mut response = projection();
+        response.data.document["listener"]["mode"] = json!("unix");
+        response.data.document["listener"]["address"] = json!("");
+        response.data.document["listener"]["socket_path"] = json!("/run/hv-auction/admin.sock");
+        response.data.document["operations"]["schedule"]["managed"] = json!(true);
+        let model = read_form(response);
+        let mut dom = VirtualDom::new_with_props(EditorFields, EditorFieldsProps { model });
+        let edits = dom.rebuild_to_vec().edits;
+        let selected = selected_options(&edits);
+        assert!(selected.contains(&"unix"));
+        assert!(selected.contains(&"Thursday"));
+        assert!(!selected.contains(&"tcp"));
+        assert!(!selected.contains(&"Monday"));
+    }
+
+    #[test]
+    fn missing_select_option_uses_first_without_rewriting_the_candidate() {
+        let mut response = projection();
+        response.data.document["listener"]["mode"] = json!("unix");
+        let model = read_form(response);
+        let (page, edits) = crate::surface::auctions::draft_page_tests::mount_writer(move || {
+            let form = use_signal(|| model.clone());
+            use_context_provider(|| form);
+            rsx! {
+                SelectField { form, disabled: false, path: "listener.mode", label: "监听器模式",
+                    options: vec![("tcp".to_owned(), "TCP".to_owned())], on_dirty: |_| {} }
+            }
+        });
+        assert_eq!(selected_options(&edits), ["tcp"]);
+        assert_eq!(
+            page.dom().in_scope(ScopeId::APP, || consume_context::<Signal<RuntimeConfigForm>>()
+                .read()
+                .to_document()
+                .unwrap()["listener"]["mode"]
+                .clone()),
+            "unix"
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]

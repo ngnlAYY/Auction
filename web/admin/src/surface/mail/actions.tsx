@@ -91,10 +91,10 @@ export function MailTriggerButton(): JSX.Element {
             async (commandId, signal) => {
               const prepared = prepare(commandId);
               if (!prepared.ok) {
-                return err(prepared.error.code);
+                return prepared;
               }
               const result = await triggerMailPoll(host, prepared.value, signal);
-              return result.ok ? ok(result.value) : err(result.error.code);
+              return result;
             },
             (pollers, sourceAlive) => {
               const delivered = sourceAlive && trySetIfAlive(notice, ok(pollers), lifetime.active);
@@ -198,10 +198,10 @@ export function MailPollingCard(props: MailPollingCardProps): JSX.Element {
             async (commandId, signal) => {
               const prepared = prepare(commandId);
               if (!prepared.ok) {
-                return err(prepared.error.code);
+                return prepared;
               }
               const result = await setMailPaused(host, prepared.value, signal);
-              return result.ok ? ok(result.value) : err(result.error.code);
+              return result;
             },
             (_updated, sourceAlive) => {
               if (sourceAlive) {

@@ -1,14 +1,22 @@
 // 对照 Rust 生命周期动作、时钟与原因校验。
 
 import { expect, test } from "bun:test";
+import { createCell } from "@auction/web-shared/reactive/cell";
 import { utf8ByteLength } from "@auction/web-shared/text";
+import {
+  AUCTION_ID,
+  COMMAND_ID,
+  requestFixture,
+  SESSION_REPLY,
+  SESSION_REQUEST,
+} from "../../../api/auction-contract-fixture.test";
 import type { AdminAuctionCapabilities } from "../../../api/auctions";
 import {
-  lifecycleActions,
-  pendingOpenMillis,
-  staleAuctionFailure,
-  validateLifecycleReason,
-} from "./model";
+  executeAdminAuctionLifecycle,
+  prepareAdminAuctionLifecycleOnce,
+} from "../../../api/lifecycle";
+import { type DraftWriteFeedback, observeDraftWrite } from "../editor";
+import { lifecycleActions, pendingOpenMillis, validateLifecycleReason } from "./model";
 
 const OPEN_AT = "2026-11-14T12:00:00Z";
 const OPEN_MILLIS = 1_794_657_600_000;
@@ -81,14 +89,41 @@ test("lifecycle_reason_obeys_utf8_and_control_character_rules", () => {
   }
 });
 
-test("only_version_rejections_enter_the_auction_stale_path", () => {
-  expect(staleAuctionFailure("stale_auction_state")).toBe(true);
-  for (const code of [
-    "stale_state_version",
-    "not_sent:stale_auction_state",
-    "command_conflict",
-    "outcome_unknown",
-  ]) {
-    expect(staleAuctionFailure(code)).toBe(false);
+test("only_verified_version_rejections_lock_the_auction_draft", async () => {
+  const path = `/api/v1/admin/auctions/${AUCTION_ID}/cancel`;
+  const body = `{"command_id":"${COMMAND_ID}","expected_state_version":7,"reason":"核对"}`;
+  for (const [stage, status, code, displayCode, staleWrite] of [
+    ["write", 409, "stale_auction_state", "stale_auction_state", true],
+    ["write", 422, "stale_auction_state", "http_422", false],
+    ["review", 409, "stale_auction_state", "stale_auction_state", false],
+    ["write", 409, "stale_state_version", "stale_state_version", false],
+    ["write", 409, "command_conflict", "command_conflict", false],
+    ["write", 409, "outcome_unknown", "outcome_unknown", false],
+  ] as const) {
+    const failure = {
+      status,
+      body: JSON.stringify({ code, message: "拒绝", data: null, request_id: null }),
+    };
+    const feedback = createCell<DraftWriteFeedback | null>(null);
+    const result = await requestFixture(
+      stage === "write" ? [SESSION_REPLY, failure] : [failure],
+      stage === "write" ? [SESSION_REQUEST, ["POST", path, body]] : [SESSION_REQUEST],
+      (host, signal) =>
+        observeDraftWrite(
+          executeAdminAuctionLifecycle(
+            host,
+            COMMAND_ID,
+            AUCTION_ID,
+            "cancel",
+            prepareAdminAuctionLifecycleOnce(7, "核对"),
+            signal,
+          ),
+          "stale_auction_state",
+          feedback,
+          () => true,
+        ),
+    );
+    expect(result.ok).toBe(false);
+    expect(feedback()).toEqual({ displayCode, staleWrite });
   }
 });

@@ -21,7 +21,12 @@ import { utf8ByteLength } from "@auction/web-shared/text";
 import { validUuid } from "@auction/web-shared/ui/validation";
 import * as v from "valibot";
 
-import { decodeAdminReceipt, invalidResponseError } from "../failure";
+import {
+  type AdminWriteFailure,
+  decodeAdminReceipt,
+  invalidResponseError,
+  writeOutcomeUnknown,
+} from "../failure";
 import { validResponse } from "../pagination";
 import { type AdminSessionHost, adminSessionHostLive } from "../session";
 import {
@@ -235,16 +240,30 @@ function validGeneratedKey(value: string): boolean {
   return length >= 32 && length <= 256 && !/\p{Cc}/u.test(value);
 }
 
-/** 解码用户写命令回执；`wantKey` 对应创建生成 Key 与重签 Key。 */
+/** 写回执只可确认提交时冻结的用户与紧邻版本；错配时保留命令供原样重试。 */
+export function matchesUserMutationTarget(
+  user: AdminUser,
+  userId: string,
+  expectedStateVersion: number,
+): boolean {
+  return (
+    user.id === userId &&
+    Number.isSafeInteger(expectedStateVersion) &&
+    expectedStateVersion > 0 &&
+    user.state_version === expectedStateVersion + 1
+  );
+}
+
+/** 按命令类型解码含 Key 或无 Key 的闭集回执，调用方须再核对冻结字段。 */
 export async function decodeUserMutation(
   host: AdminSessionHost,
   response: TransportResponse,
   wantKey: boolean,
   signal: AbortSignal,
-): Promise<Result<AdminUserMutationResult, string>> {
+): Promise<Result<AdminUserMutationResult, AdminWriteFailure>> {
   // 回执正文已缓冲，但任务取消或宿主注销仍对应 Rust 被丢弃的 future。
   if (signal.aborted || !adminSessionHostLive(host)) {
-    return err("network_error");
+    return err(writeOutcomeUnknown("network_error"));
   }
   if (wantKey) {
     const receipt = decodeAdminReceipt(
@@ -253,15 +272,15 @@ export async function decodeUserMutation(
       ADMIN_USER_MUTATION_WITH_KEY_RESPONSE_FIELD_POLICY,
     );
     if (!receipt.ok) {
-      return err(receipt.error);
+      return err(writeOutcomeUnknown(receipt.error));
     }
     const generatedKey = receipt.value.data.generated_key;
     if (!validGeneratedKey(generatedKey)) {
-      return err("invalid_response");
+      return err(writeOutcomeUnknown("invalid_response"));
     }
     const user = decodeUser(receipt.value.data.user);
     if (!user.ok) {
-      return err(invalidResponseError(user));
+      return err(writeOutcomeUnknown(invalidResponseError(user)));
     }
     // 结果是含一次性 Key 的普通对象；TS 没有 Rust 的 Debug 脱敏，禁止整体记录。
     return ok({ user: adminUserFromResponse(user.value), generated_key: generatedKey });
@@ -272,11 +291,11 @@ export async function decodeUserMutation(
     ADMIN_USER_MUTATION_WITHOUT_KEY_RESPONSE_FIELD_POLICY,
   );
   if (!receipt.ok) {
-    return err(receipt.error);
+    return err(writeOutcomeUnknown(receipt.error));
   }
   const user = decodeUser(receipt.value.data.user);
   if (!user.ok) {
-    return err(invalidResponseError(user));
+    return err(writeOutcomeUnknown(invalidResponseError(user)));
   }
   return ok({ user: adminUserFromResponse(user.value), generated_key: null });
 }

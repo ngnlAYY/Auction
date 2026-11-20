@@ -479,3 +479,130 @@ fn show_history_tooltip(
         placement: if above { "above" } else { "below" },
     }));
 }
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use dioxus::core::Mutation;
+    use dioxus::prelude::*;
+
+    use super::AdminUserRow;
+    use crate::api::{AdminApiFailure, AdminUser};
+    use crate::surface::auctions::draft_page_tests::{
+        button, click_button, has_live_text, init_i18n, mount_writer,
+    };
+    use crate::surface::pending::{use_pending_command_gate, use_pending_commands_with_gate};
+    use crate::surface::realtime::text_attributes;
+    use crate::surface::users::{SourceGeneratedKey, SourceKeyDelivery};
+
+    #[test]
+    fn reissue_key_success_is_displayed_once_and_acknowledged() {
+        const KEY: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        const USER_ID: &str = "00000000-0000-4000-8000-000000000026";
+        const SUCCESS: &str = r#"{
+            "code": "ok",
+            "message": "已重签",
+            "data": {
+                "user": {
+                    "id": "00000000-0000-4000-8000-000000000026",
+                    "username": "ExamplePlayer",
+                    "forum_account_id": null,
+                    "status": "active",
+                    "key_status": "active",
+                    "state_version": 4,
+                    "created_at": "2025-11-15T09:46:40.110000Z",
+                    "updated_at": "2026-11-14T00:00:00Z"
+                },
+                "generated_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            }
+        }"#;
+        let attempts = Rc::new(Cell::new(0));
+        let (mut page, _) = mount_writer({
+            let attempts = attempts.clone();
+            move || {
+                init_i18n();
+                let reload = use_signal(|| 0);
+                let feedback = use_signal(|| None);
+                let busy = use_signal(|| false);
+                let delivered_revision = use_signal(|| None);
+                use_context_provider(|| SourceKeyDelivery(delivered_revision));
+                let gate = use_pending_command_gate();
+                let owner = use_pending_commands_with_gate(reload, Some(gate), |_| true);
+                let attempts = attempts.clone();
+                use_hook(move || {
+                    AdminApiFailure::stub_user_mutation_success(move |command| {
+                        assert_eq!(command.action, "reissue_key");
+                        assert_eq!(command.user_id, USER_ID);
+                        assert_eq!(command.expected_state_version, 3);
+                        attempts.set(attempts.get() + 1);
+                        SUCCESS
+                    });
+                });
+                let user = AdminUser {
+                    id: USER_ID.to_owned(),
+                    username: "ExamplePlayer".to_owned(),
+                    forum_account_id: None,
+                    status: "active".to_owned(),
+                    key_status: "active".to_owned(),
+                    state_version: 3,
+                    created_at: "2025-11-15T09:46:40.110000Z".to_owned(),
+                    updated_at: "2025-11-15T09:46:40.110000Z".to_owned(),
+                    blacklist_count: 0,
+                    blacklist_history: Vec::new(),
+                };
+                rsx! {
+                    table {
+                        tbody {
+                            AdminUserRow {
+                                user,
+                                reload_generation: reload,
+                                loaded_generation: 0,
+                                busy,
+                                feedback,
+                            }
+                        }
+                    }
+                    if let Some((command_id, key)) = owner.generated_key() {
+                        SourceGeneratedKey {
+                            generated: key,
+                            delivered_revision: delivered_revision(),
+                            on_acknowledge: move |_| owner.acknowledge_key(command_id),
+                        }
+                    }
+                }
+            }
+        });
+        assert!(!has_live_text(&page, KEY));
+        let opened = click_button(&mut page, "重新签发 Key");
+        assert_eq!(attempts.get(), 0);
+        assert!(!has_live_text(&page, KEY));
+        assert!(has_live_text(&page, "为 ExamplePlayer 重新签发 Key"));
+        // 确认按钮的文案分支由 Dioxus 渲染为片段，通过弹窗新挂载的按钮定位。
+        let confirm = text_attributes(&opened, "class")
+            .find_map(|(button, class)| (class == "admin-btn-primary").then_some(button))
+            .expect("重签对话框已挂载确认按钮");
+        let edits = page.dispatch("click", confirm, "");
+        assert_eq!(
+            edits
+                .iter()
+                .filter(|edit| {
+                    matches!(
+                        edit,
+                        Mutation::CreateTextNode { value, .. } | Mutation::SetText { value, .. }
+                            if value == KEY
+                    )
+                })
+                .count(),
+            1,
+            "真实用户行成功后应显示一次新 Key"
+        );
+        assert!(has_live_text(&page, KEY));
+        click_button(&mut page, "关闭");
+        page.rerender();
+        assert!(!has_live_text(&page, KEY));
+        assert!(button(&page, "关闭").is_none());
+        assert_eq!(attempts.get(), 1);
+    }
+}

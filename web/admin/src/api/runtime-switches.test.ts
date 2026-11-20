@@ -193,9 +193,9 @@ test("运行时开关读取与命令契约样本", async () => {
   expect(removeAt(missingRevision, "/data/accepted/revision")).toBe(2);
   expect(decode(commandSchema, missingRevision).ok).toBe(false);
   const missingReceipt = await submitWithResponse(prepared, JSON.stringify(missingRevision));
-  expect(missingReceipt.result).toEqual({
+  expect(missingReceipt.result).toEqual<unknown>({
     ok: false,
-    error: { status: null, code: "invalid_response" },
+    error: { kind: "outcome-unknown", code: "invalid_response", responseStatus: null },
   });
   expect(requestLines(missingReceipt.requests)).toEqual([
     ["GET", SESSION_URL],
@@ -210,9 +210,9 @@ test("运行时开关读取与命令契约样本", async () => {
     reason: "manual account use",
   });
   const wrongDirection = await submitWithResponse(paused, commandBody);
-  expect(wrongDirection.result).toEqual({
+  expect(wrongDirection.result).toEqual<unknown>({
     ok: false,
-    error: { status: null, code: "invalid_response" },
+    error: { kind: "outcome-unknown", code: "invalid_response", responseStatus: null },
   });
   expect(requestLines(wrongDirection.requests)).toEqual([
     ["GET", SESSION_URL],
@@ -225,11 +225,90 @@ test("运行时开关读取与命令契约样本", async () => {
   );
   setAt(invalid, "/data/accepted/name", "metrics_sli_snapshot_enabled");
   const wrongName = await submitWithResponse(prepared, JSON.stringify(invalid));
-  expect(wrongName.result).toEqual({
+  expect(wrongName.result).toEqual<unknown>({
     ok: false,
-    error: { status: null, code: "invalid_response" },
+    error: { kind: "outcome-unknown", code: "invalid_response", responseStatus: null },
   });
   expect(requestLines(wrongName.requests)).toEqual([
+    ["GET", SESSION_URL],
+    ["POST", COMMAND_URL],
+  ]);
+});
+
+test("暂停回执逐字段核对冻结意图", async () => {
+  const prepared = prepare({
+    commandId: COMMAND_ID,
+    expectedRevision: 7,
+    paused: true,
+    expiresAt: "2026-11-20T06:00:00Z",
+    reason: "演练",
+  });
+  const intent = {
+    name: "external_access_paused",
+    operation: "set",
+    revision: 8,
+    expires_at: "2026-11-20T01:00:00-05:00",
+    value: true,
+    reason: "演练",
+    entrypoint: "admin",
+    actor_id: "operator",
+  };
+  const submit = (accepted: Readonly<Record<string, unknown>>) =>
+    submitWithResponse(prepared, JSON.stringify({ code: "ok", message: "", data: { accepted } }));
+  const first = await submit(intent);
+  expect(first.result).toMatchObject({ ok: true, value: { name: intent.name, revision: 8 } });
+  const frozen = first.requests[1]?.body;
+  expect(JSON.parse(frozen ?? "")).toEqual({
+    command_id: COMMAND_ID,
+    expected_revision: 7,
+    paused: true,
+    expires_at: "2026-11-20T06:00:00Z",
+    reason: "演练",
+  });
+  for (const [field, value] of [
+    ["name", "metrics_sli_snapshot_enabled"],
+    ["operation", "clear"],
+    ["revision", 9],
+    ["expires_at", "2026-11-20T06:00:01Z"],
+    ["value", false],
+    ["reason", "另一原因"],
+    ["entrypoint", "cli"],
+  ] as const) {
+    const invalid = await submit({ ...intent, [field]: value });
+    expect(invalid.result, field).toEqual({
+      ok: false,
+      error: { kind: "outcome-unknown", code: "invalid_response", responseStatus: null },
+    });
+    expect(requestLines(invalid.requests)).toEqual([
+      ["GET", SESSION_URL],
+      ["POST", COMMAND_URL],
+    ]);
+    expect(invalid.requests[1]?.body).toBe(frozen);
+  }
+  const replay = await submit(intent);
+  expect(replay.result).toEqual(first.result);
+  expect(replay.requests[1]?.body).toBe(frozen);
+});
+
+test("恢复外部访问拒绝修订号不符的成功回执", async () => {
+  const prepared = prepare({
+    commandId: COMMAND_ID,
+    expectedRevision: 1,
+    paused: false,
+    expiresAt: null,
+    reason: "resume regular polling",
+  });
+  const body = parseJsonObject(
+    fixtureText("runtime-switch-command"),
+    "runtime-switch-command.json",
+  );
+  setAt(body, "/data/accepted/revision", 3);
+  const receipt = await submitWithResponse(prepared, JSON.stringify(body));
+  expect(receipt.result).toEqual({
+    ok: false,
+    error: { kind: "outcome-unknown", code: "invalid_response", responseStatus: null },
+  });
+  expect(requestLines(receipt.requests)).toEqual([
     ["GET", SESSION_URL],
     ["POST", COMMAND_URL],
   ]);

@@ -1,6 +1,6 @@
 // Admin 凭据管理 API 客户端。
-// 浏览器只保存凭据安全投影。导入的密码/CK 仅留在当前表单与请求内存中，成功后清空，
-// 未知结果只允许原样手动重试；列表和命令响应都不包含凭据内容。
+// 导入的密码和 Cookie 随会话命令驻留内存，未知结果只允许原样手动重试。
+// 列表和命令响应只包含凭据安全投影。
 
 import {
   ADMIN_CREDENTIAL_DELETE_RESPONSE_FIELD_POLICY,
@@ -23,14 +23,21 @@ import type { JsonFieldPolicy } from "@auction/web-shared/net/wire";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { validUuid } from "@auction/web-shared/ui/validation";
 import {
-  type AdminApiFailure,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   decodeAdminReceipt,
   invalidResponseError,
   responseError,
+  writeOutcomeUnknown,
 } from "../failure";
 import { validate as validatePagination } from "../pagination";
 import type { AdminSessionHost } from "../session";
-import { prepareJsonCommand, sendGet, sendPreparedJsonWrite } from "../transport";
+import {
+  prepareJsonCommand,
+  sendGet,
+  sendPreparedJsonPreview,
+  sendPreparedJsonWrite,
+} from "../transport";
 import { MAX_JSON_SAFE_INTEGER } from "../validation";
 import {
   type AdminCredential,
@@ -54,6 +61,7 @@ export type {
 } from "./prepare";
 export {
   prepareAdminCredentialCreate,
+  prepareAdminCredentialCreateOnce,
   prepareAdminCredentialDelete,
   prepareAdminCredentialMutation,
 } from "./prepare";
@@ -124,10 +132,9 @@ export async function checkAdminCredential(
   if (!prepared.ok) {
     return err("invalid_request");
   }
-  const response = await sendPreparedJsonWrite(
+  const response = await sendPreparedJsonPreview(
     host,
     `/api/v1/admin/credentials/${credentialId}/check`,
-    "POST",
     prepared.value,
     signal,
     credentialCheckTimeout(decoded.value),
@@ -220,26 +227,25 @@ export async function fetchAdminCredentials(
   });
 }
 
-/** 导入一条凭据；`prepared` 由 `prepareAdminCredentialCreate` 在首次提交时生成。 */
+/** 发送已固定的导入正文，并核对响应的凭据投影。 */
 export async function createAdminCredential(
   host: AdminSessionHost,
-  prepared: Result<PreparedAdminCredentialCreate, AdminApiFailure>,
+  prepared: Result<PreparedAdminCredentialCreate, AdminWriteNotSent>,
   signal: AbortSignal,
-): Promise<Result<AdminCredentialMutationResponse, string>> {
+): Promise<Result<AdminCredentialMutationResponse, AdminWriteFailure>> {
   if (!prepared.ok) {
-    return err(prepared.error.code);
+    return err(prepared.error);
   }
   const command = prepared.value;
   const response = await sendPreparedJsonWrite(
     host,
-    "/api/v1/admin/credentials",
-    "POST",
+    { url: "/api/v1/admin/credentials", method: "POST", endpoint: "general" },
     command.prepared,
     signal,
     CREDENTIAL_IMPORT_TIMEOUT_MILLIS,
   );
   if (!response.ok) {
-    return err(response.error.code);
+    return err(response.error);
   }
   const payload = decodeAdminReceipt(
     response.value,
@@ -247,11 +253,11 @@ export async function createAdminCredential(
     ADMIN_CREDENTIAL_MUTATION_RESPONSE_FIELD_POLICY,
   );
   if (!payload.ok) {
-    return err(payload.error);
+    return err(writeOutcomeUnknown(payload.error));
   }
   const decoded = decodeCredentialData(payload.value.data);
   if (!decoded.ok) {
-    return err(invalidResponseError(decoded.error));
+    return err(writeOutcomeUnknown(invalidResponseError(decoded.error)));
   }
   const data = decoded.value;
   if (
@@ -260,7 +266,7 @@ export async function createAdminCredential(
     data.credential.label !== command.label ||
     data.credential.player_name !== command.player_name
   ) {
-    return err("invalid_response");
+    return err(writeOutcomeUnknown("invalid_response"));
   }
   return ok(data);
 }
@@ -268,22 +274,21 @@ export async function createAdminCredential(
 /** 修改凭据标签或状态；`prepared` 已同时固定正文、路径参数与回执核对字段。 */
 export async function mutateAdminCredential(
   host: AdminSessionHost,
-  prepared: Result<PreparedAdminCredentialMutation, AdminApiFailure>,
+  prepared: Result<PreparedAdminCredentialMutation, AdminWriteNotSent>,
   signal: AbortSignal,
-): Promise<Result<AdminCredentialMutationResponse, string>> {
+): Promise<Result<AdminCredentialMutationResponse, AdminWriteFailure>> {
   if (!prepared.ok) {
-    return err(prepared.error.code);
+    return err(prepared.error);
   }
   const command = prepared.value;
   const response = await sendPreparedJsonWrite(
     host,
-    "/api/v1/admin/credentials",
-    "PATCH",
+    { url: "/api/v1/admin/credentials", method: "PATCH", endpoint: "general" },
     command.prepared,
     signal,
   );
   if (!response.ok) {
-    return err(response.error.code);
+    return err(response.error);
   }
   const payload = decodeAdminReceipt(
     response.value,
@@ -291,11 +296,11 @@ export async function mutateAdminCredential(
     ADMIN_CREDENTIAL_MUTATION_RESPONSE_FIELD_POLICY,
   );
   if (!payload.ok) {
-    return err(payload.error);
+    return err(writeOutcomeUnknown(payload.error));
   }
   const decoded = decodeCredentialData(payload.value.data);
   if (!decoded.ok) {
-    return err(invalidResponseError(decoded.error));
+    return err(writeOutcomeUnknown(invalidResponseError(decoded.error)));
   }
   const data = decoded.value;
   const updated = data.credential;
@@ -319,7 +324,7 @@ export async function mutateAdminCredential(
           updated.label !== command.previous.label
         : true)
   ) {
-    return err("invalid_response");
+    return err(writeOutcomeUnknown("invalid_response"));
   }
   return ok(data);
 }
@@ -327,22 +332,21 @@ export async function mutateAdminCredential(
 /** 删除凭据；`prepared` 已同时固定正文、路径参数与回执核对字段。 */
 export async function deleteAdminCredential(
   host: AdminSessionHost,
-  prepared: Result<PreparedAdminCredentialDelete, AdminApiFailure>,
+  prepared: Result<PreparedAdminCredentialDelete, AdminWriteNotSent>,
   signal: AbortSignal,
-): Promise<Result<AdminCredentialDeleteResult, string>> {
+): Promise<Result<AdminCredentialDeleteResult, AdminWriteFailure>> {
   if (!prepared.ok) {
-    return err(prepared.error.code);
+    return err(prepared.error);
   }
   const command = prepared.value;
   const response = await sendPreparedJsonWrite(
     host,
-    "/api/v1/admin/credentials",
-    "DELETE",
+    { url: "/api/v1/admin/credentials", method: "DELETE", endpoint: "general" },
     command.prepared,
     signal,
   );
   if (!response.ok) {
-    return err(response.error.code);
+    return err(response.error);
   }
   const payload = decodeAdminReceipt(
     response.value,
@@ -350,7 +354,7 @@ export async function deleteAdminCredential(
     ADMIN_CREDENTIAL_DELETE_RESPONSE_FIELD_POLICY,
   );
   if (!payload.ok) {
-    return err(payload.error);
+    return err(writeOutcomeUnknown(payload.error));
   }
   const decoded = decodeCredentialDelete(
     payload.value.data,
@@ -358,7 +362,7 @@ export async function deleteAdminCredential(
     command.previous.state_version,
   );
   if (!decoded.ok) {
-    return err(invalidResponseError(decoded.error));
+    return err(writeOutcomeUnknown(invalidResponseError(decoded.error)));
   }
   return ok(decoded.value);
 }

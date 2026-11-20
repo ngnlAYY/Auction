@@ -310,7 +310,6 @@ pub(super) fn AdminRulesWorkspace(
                                                     candidate.markdown,
                                                 )
                                                 .await
-                                                .map_err(|error| error.code)
                                             }
                                         },
                                         move |_, source_alive| {
@@ -372,28 +371,27 @@ pub(super) fn AdminRulesWorkspace(
 
 #[cfg(test)]
 mod tests {
-    use dioxus::core::Mutation;
+    use dioxus::core::{ElementId, Mutation};
     use dioxus::prelude::*;
     use gloo_net::http::Method;
 
     use super::{AdminRulesWorkspace, RulesBaseline};
     use crate::api::{AdminApiFailure, AdminDocumentKind, AdminRules, AdminRulesCandidate};
-    use crate::surface::auctions::draft_page_tests::{has_live_text, init_i18n, mount_writer};
-    use crate::surface::pending::use_pending_commands;
-    use crate::surface::realtime::text_attributes;
+    use crate::surface::auctions::draft_page_tests::{
+        button, click_button, has_live_text, init_i18n, mount_writer,
+    };
+    use crate::surface::pending::{PendingCommandPanel, use_pending_commands};
+    use crate::surface::realtime::{TestPage, text_attributes};
 
-    #[test]
-    fn oversized_publish_explains_how_to_correct_the_draft() {
-        let (mut page, edits) = mount_writer(|| {
+    fn mount_workspace(
+        kind: AdminDocumentKind,
+        url: &'static str,
+        status: u16,
+        body: &'static str,
+    ) -> (TestPage, Vec<Mutation>) {
+        mount_writer(move || {
             init_i18n();
-            use_hook(|| {
-                AdminApiFailure::stub_write_response(
-                    "/api/v1/admin/rules",
-                    Method::PUT,
-                    413,
-                    r#"{"code":"body_too_large","message":"请求体过大","data":null,"request_id":null}"#,
-                );
-            });
+            use_hook(move || AdminApiFailure::stub_write_response(url, Method::PUT, status, body));
             let document = AdminRules {
                 locale: "zh-CN".to_owned(),
                 title: "原规则".to_owned(),
@@ -417,28 +415,69 @@ mod tests {
             let reload_generation = use_signal(|| 0);
             let pending = use_pending_commands(reload_generation, |_| true);
             rsx! {
+                PendingCommandPanel { owner: pending }
                 AdminRulesWorkspace {
-                    kind: AdminDocumentKind::Rules, document, target: target_signal(), target_signal,
+                    kind, document, target: target_signal(), target_signal,
                     draft, checked_candidate, baseline, notice, busy, reload_generation, pending, dirty,
                 }
             }
-        });
-        assert!(!has_live_text(&page, "请求体过大。请缩短内容后重试。"));
-        assert!(has_live_text(&page, "保存并发布"));
-        let publish = edits
+        })
+    }
+
+    fn publish_button(edits: &[Mutation]) -> ElementId {
+        edits
             .iter()
             .rev()
             .find_map(|edit| match edit {
                 Mutation::NewEventListener { name, id } if name == "click" => Some(*id),
                 _ => None,
             })
-            .unwrap();
-        page.dispatch("click", publish, "");
+            .unwrap()
+    }
+
+    #[test]
+    fn oversized_publish_explains_how_to_correct_the_draft() {
+        let (mut page, edits) = mount_workspace(
+            AdminDocumentKind::Rules,
+            "/api/v1/admin/rules",
+            413,
+            r#"{"code":"body_too_large","message":"请求体过大","data":null,"request_id":null}"#,
+        );
+        assert!(!has_live_text(&page, "请求体过大。请缩短内容后重试。"));
+        assert!(has_live_text(&page, "保存并发布"));
+        page.dispatch("click", publish_button(&edits), "");
         assert!(has_live_text(&page, "请求体过大。请缩短内容后重试。"));
         let markdown = text_attributes(&edits, "value")
             .find_map(|(id, value)| (value == "更新的正文").then_some(id))
             .unwrap();
         let edited = page.dispatch("input", markdown, "短正文");
         assert!(text_attributes(&edited, "value").any(|entry| entry == (markdown, "短正文")));
+    }
+
+    #[test]
+    fn only_a_verified_publication_conflict_settles_rules_and_about() {
+        const CONFLICT: &str = include_str!(
+            "../../../../auction-contracts/tests/fixtures/admin/error-document-state-conflict.json"
+        );
+        const UNAVAILABLE: &str =
+            r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#;
+        for (kind, url) in [
+            (AdminDocumentKind::Rules, "/api/v1/admin/rules"),
+            (AdminDocumentKind::About, "/api/v1/admin/about"),
+        ] {
+            let (mut page, edits) = mount_workspace(kind, url, 503, UNAVAILABLE);
+            page.dispatch("click", publish_button(&edits), "");
+            assert!(button(&page, "原样重试").is_some());
+            page.dom().in_scope(ScopeId::APP, || {
+                AdminApiFailure::stub_write_response(url, Method::PUT, 429, CONFLICT);
+            });
+            click_button(&mut page, "原样重试");
+            assert!(button(&page, "原样重试").is_some());
+            page.dom().in_scope(ScopeId::APP, || {
+                AdminApiFailure::stub_write_response(url, Method::PUT, 409, CONFLICT);
+            });
+            click_button(&mut page, "原样重试");
+            assert!(button(&page, "原样重试").is_none());
+        }
     }
 }

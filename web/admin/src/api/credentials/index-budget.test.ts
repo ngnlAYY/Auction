@@ -1,4 +1,4 @@
-// 凭据只读检查经实际接口把预算交给写传输。
+// 凭据只读检查经实际接口把预算交给预览传输。
 
 import { expect, spyOn, test } from "bun:test";
 import {
@@ -33,10 +33,10 @@ test("only_shared_mail_check_extends_the_browser_budget", async () => {
     [{ ...credential, kind: "forum_cookie" }, ["shared"], 10_000],
   ] as const) {
     const harness = createAdminRequestHarness();
-    let restoreWrite: (() => void) | undefined;
+    let restorePreview: (() => void) | undefined;
     try {
-      const write = spyOn(transport, "sendPreparedJsonWrite");
-      restoreWrite = () => write.mockRestore();
+      const preview = spyOn(transport, "sendPreparedJsonPreview");
+      restorePreview = () => preview.mockRestore();
       harness.installBrowserRequest();
       const { host } = harness.registerHost();
       const requests = harness.installFetch([
@@ -55,8 +55,8 @@ test("only_shared_mail_check_extends_the_browser_budget", async () => {
         },
       ]);
       mustSucceed(await checkAdminCredential(host, input, new AbortController().signal));
-      expect(write).toHaveBeenCalledTimes(1);
-      expect(write.mock.calls[0]?.[5]).toBe(budget);
+      expect(preview).toHaveBeenCalledTimes(1);
+      expect(preview.mock.calls[0]?.[4]).toBe(budget);
       expect(requests.map(({ method, url }) => [method, url])).toEqual([
         ["GET", "/api/v1/admin/session?include=server_time"],
         ["POST", CHECK_PATH],
@@ -66,7 +66,7 @@ test("only_shared_mail_check_extends_the_browser_budget", async () => {
       expect(parseJsonObject(check.body, "凭据检查正文")).toEqual({ expected_state_version: 7 });
     } finally {
       try {
-        restoreWrite?.();
+        restorePreview?.();
       } finally {
         harness.cleanup();
       }

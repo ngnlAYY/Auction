@@ -6,6 +6,7 @@ use std::rc::Rc;
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
+use crate::api::AdminWriteFailure;
 use crate::surface::admin_api_error_message;
 use crate::surface::pagination::{AdminPagination, use_admin_page};
 use crate::surface::pending::set_if_alive;
@@ -170,13 +171,27 @@ pub(in crate::surface) fn close_edit_draft<T: 'static>(
     }
 }
 
-/// 保留回执分类证据，避免把准备阶段的同名错误当成写命令的版本拒绝。
+/// 来源草稿使用显示码和独立的版本冲突证据。
+#[derive(Clone)]
+pub(in crate::surface) struct DraftWriteFeedback {
+    /// 供原有文案翻译的稳定码。
+    pub(in crate::surface) display_code: String,
+    /// 对应版本拒绝来自实际业务写请求。
+    pub(in crate::surface) stale_write: bool,
+}
+
+/// 只有已验证的写回执可以让草稿进入只能关闭的版本冲突状态。
 pub(in crate::surface) async fn observe_draft_write<T>(
-    request: impl Future<Output = Result<T, String>>,
-    feedback: Signal<Option<String>>,
-) -> Result<T, String> {
+    request: impl Future<Output = Result<T, AdminWriteFailure>>,
+    feedback: Signal<Option<DraftWriteFeedback>>,
+    stale_code: &str,
+) -> Result<T, AdminWriteFailure> {
     let result = request.await;
-    set_if_alive(feedback, result.as_ref().err().cloned());
+    let failure = result.as_ref().err().map(|failure| DraftWriteFeedback {
+        display_code: failure.display_code().into_owned(),
+        stale_write: failure.is_verified_rejection(stale_code),
+    });
+    set_if_alive(feedback, failure);
     result
 }
 
@@ -213,7 +228,9 @@ pub(in crate::surface) mod tests {
     use auction_contracts::ApiErrorResponse;
     use auction_web_shared::TransportError;
     use auction_web_shared::i18n::{DEFAULT_ADMIN_LOCALE, LocaleSession, build_bundle};
-    use dioxus::dioxus_core::{AttributeValue, DynamicNode, ElementId, Mutation, VNode};
+    use dioxus::dioxus_core::{
+        AttributeValue, DynamicNode, ElementId, Mutation, TemplateAttribute, TemplateNode, VNode,
+    };
     use dioxus::prelude::{Element, VirtualDom, use_context_provider, use_hook, use_memo};
     use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
     use gloo_net::http::Method;
@@ -333,6 +350,32 @@ pub(in crate::surface) mod tests {
         if read_only && let Some(AttributeValue::Text(kind)) = attribute("type") {
             assert_eq!(kind, "text");
         }
+    }
+
+    /// 按模板中的静态 DOM id 定位真实表单控件，避免依赖监听器的挂载顺序。
+    pub(in crate::surface) fn field_by_static_id(page: &TestPage, field_id: &str) -> ElementId {
+        let dom = page.dom();
+        find_in_tree(dom, dom.base_scope().root_node(), &|node| {
+            node.template.attr_paths.iter().enumerate().find_map(|(index, path)| {
+                let (&root, children) = path.split_first()?;
+                let template = children.iter().try_fold(
+                    &node.template.roots[usize::from(root)],
+                    |template, &child| match template {
+                        TemplateNode::Element { children, .. } => children.get(usize::from(child)),
+                        _ => None,
+                    },
+                )?;
+                let TemplateNode::Element { attrs, .. } = template else { return None };
+                if attrs.iter().any(|attr| {
+                    matches!(attr, TemplateAttribute::Static { name: "id", value, .. } if *value == field_id)
+                }) {
+                    node.mounted_dynamic_attribute(index, dom)
+                } else {
+                    None
+                }
+            })
+        })
+        .unwrap_or_else(|| panic!("缺少控件 {field_id}"))
     }
 
     pub(in crate::surface) fn command_button(
@@ -457,13 +500,13 @@ pub(in crate::surface) mod tests {
         }
     }
 
-    pub(in crate::surface) struct RecordRead<T> {
+    pub(in crate::surface) struct RecordRead<T, E = String> {
         started: Cell<usize>,
-        result: RefCell<Option<Result<T, String>>>,
+        result: RefCell<Option<Result<T, E>>>,
         waiting: RefCell<Option<Waker>>,
     }
 
-    impl<T> RecordRead<T> {
+    impl<T, E> RecordRead<T, E> {
         pub(in crate::surface) fn new() -> Self {
             Self { started: Cell::new(0), result: RefCell::new(None), waiting: RefCell::new(None) }
         }
@@ -472,7 +515,7 @@ pub(in crate::surface) mod tests {
             self.started.get()
         }
 
-        pub(in crate::surface) async fn fetch(&self) -> Result<T, String> {
+        pub(in crate::surface) async fn fetch(&self) -> Result<T, E> {
             self.started.set(self.started.get() + 1);
             poll_fn(|context| {
                 if let Some(result) = self.result.borrow_mut().take() {
@@ -485,11 +528,13 @@ pub(in crate::surface) mod tests {
             .await
         }
 
-        pub(in crate::surface) fn respond(&self, result: Result<T, String>) {
+        pub(in crate::surface) fn respond(&self, result: Result<T, E>) {
             assert!(self.result.replace(Some(result)).is_none());
             self.waiting.borrow_mut().take().expect("读取已启动").wake();
         }
+    }
 
+    impl<T> RecordRead<T> {
         pub(in crate::surface) fn respond_unavailable(&self) {
             self.respond(Err(AdminApiFailure::from_http_body(
                 503,

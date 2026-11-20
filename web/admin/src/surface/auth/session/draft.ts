@@ -6,12 +6,14 @@ import type {
   Check,
   Cookie,
   Effect,
+  LogoutIntent,
   Phase,
   Renewal,
   State,
   Ticket,
   Verified,
 } from "./index";
+import type { EndNotices } from "./notices";
 
 /** 单次事件携带的观测值与顺序执行的副作用队列。 */
 export interface Actions {
@@ -27,6 +29,11 @@ export interface Draft {
   bufferedRenewal: Verified | null;
   renewal: Renewal | null;
   login: Ticket | null;
+  logoutIntent: LogoutIntent | null;
+  notices: EndNotices;
+  identityUnconfirmed: boolean;
+  sawOtherGeneration: boolean;
+  keyVisibilityRevision: number;
   loginError: string | null;
   activity: Activity;
   checkTimer: Ticket | null;
@@ -42,11 +49,13 @@ export function stateDraft(state: State): Draft {
     phase: state.phase,
     check: state.check,
     bufferedRenewal: state.bufferedRenewal,
-    renewal:
-      state.renewal === null
-        ? null
-        : { request: state.renewal.request, source: state.renewal.source },
+    renewal: state.renewal === null ? null : { ...state.renewal },
     login: state.login,
+    logoutIntent: state.logoutIntent,
+    notices: { ...state.notices },
+    identityUnconfirmed: state.identityUnconfirmed,
+    sawOtherGeneration: state.sawOtherGeneration,
+    keyVisibilityRevision: state.keyVisibilityRevision,
     loginError: state.loginError,
     activity: { ...state.activity },
     checkTimer: state.checkTimer,
@@ -66,6 +75,11 @@ export function commitDraft(state: State, draft: Draft): State {
     bufferedRenewal: draft.bufferedRenewal,
     renewal: draft.renewal,
     login: draft.login,
+    logoutIntent: draft.logoutIntent,
+    notices: draft.notices,
+    identityUnconfirmed: draft.identityUnconfirmed,
+    sawOtherGeneration: draft.sawOtherGeneration,
+    keyVisibilityRevision: draft.keyVisibilityRevision,
     loginError: draft.loginError,
     activity: draft.activity,
     checkTimer: draft.checkTimer,

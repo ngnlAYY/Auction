@@ -18,10 +18,12 @@ import { validUuid } from "@auction/web-shared/ui/validation";
 
 import { decodeAuction, sendAuctionEdit } from "./auctions";
 import {
-  type AdminApiFailure,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   decodeAdminReceipt,
   invalidResponseError,
   responseError,
+  writeOutcomeUnknown,
 } from "./failure";
 import { validate, validPageEcho } from "./pagination";
 import type { AdminSessionHost } from "./session";
@@ -347,12 +349,12 @@ export async function updateAdminLot(
   host: AdminSessionHost,
   lotId: string,
   commandId: string,
-  prepare: (commandId: string) => Result<PreparedJsonCommand, AdminApiFailure>,
+  prepare: (commandId: string) => Result<PreparedJsonCommand, AdminWriteNotSent>,
   signal: AbortSignal,
-): Promise<Result<AdminLot, string>> {
+): Promise<Result<AdminLot, AdminWriteFailure>> {
   const prepared = prepare(commandId);
   if (!prepared.ok) {
-    return err(prepared.error.code);
+    return err(prepared.error);
   }
   const receipt = await sendAuctionEdit(
     host,
@@ -368,10 +370,10 @@ export async function updateAdminLot(
   }
   const lot = decodeLot(receipt.value.data.lot);
   if (!lot.ok) {
-    return err(invalidResponseError(lot));
+    return err(writeOutcomeUnknown(invalidResponseError(lot)));
   }
   if (lot.value.id !== lotId || lot.value.state_version <= 0) {
-    return err("invalid_response");
+    return err(writeOutcomeUnknown("invalid_response"));
   }
   return ok(lot.value);
 }
@@ -490,7 +492,7 @@ export function prepareAdminLotUpdateOnce(
   expectedStateVersion: number,
   action: AdminLotUpdateAction,
   startPrice: number | null,
-): (commandId: string) => Result<PreparedJsonCommand, AdminApiFailure> {
+): (commandId: string) => Result<PreparedJsonCommand, AdminWriteNotSent> {
   return prepareJsonCommandOnce((commandId) =>
     prepareAdminLotUpdate(commandId, expectedStateVersion, action, startPrice),
   );

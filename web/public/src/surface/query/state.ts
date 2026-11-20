@@ -57,6 +57,8 @@ export function usePublicQueryState(): PublicQueryState {
     PUBLIC_QUERY_KEYS,
     () => readPublicQuery(initial, router),
     managedPublicQueryPairs,
+    // 页内查询写回由下方已有的 Router 订阅恢复，避免共享层再解析一次。
+    { watchRouteWrites: false },
   );
   bindPublicQueryRouter(query.state, router, initial);
   if (initial !== null) {

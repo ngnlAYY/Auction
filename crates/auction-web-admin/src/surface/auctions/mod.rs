@@ -21,10 +21,14 @@ use actions::{AdminAuctionDraftDialogs, AdminAuctionNotice, use_auction_drafts};
 #[cfg(test)]
 pub(super) use editor::tests as draft_page_tests;
 pub(super) use editor::{
-    DraftFeedback, DraftRead, DraftRefreshButton, close_edit_draft, close_matching_draft,
-    focus_draft_field_after_render, observe_draft_write, use_draft_page,
+    DraftFeedback, DraftRead, DraftRefreshButton, DraftWriteFeedback, close_edit_draft,
+    close_matching_draft, focus_draft_field_after_render, observe_draft_write, use_draft_page,
 };
 use table::AdminAuctionTable;
+
+fn invalidates_auction_list(entity: &str) -> bool {
+    entity == "create-auction" || entity.starts_with("auction:") || entity.starts_with("intake:")
+}
 
 /// 加载并展示 Admin 拍卖列表。
 pub(super) fn page() -> Element {
@@ -32,11 +36,7 @@ pub(super) fn page() -> Element {
     let query = use_auctions_query_state();
     let query_state = query.state;
     let mut reload_generation = use_signal(|| 0_u64);
-    let pending = use_pending_commands(reload_generation, |entity| {
-        entity == "create-auction"
-            || entity.starts_with("auction:")
-            || entity.starts_with("intake:")
-    });
+    let pending = use_pending_commands(reload_generation, invalidates_auction_list);
     let pagination = use_admin_pagination("auctions", &["page_size"], Some(100), 100_000);
     let drafts = use_auction_drafts();
     let notice = use_signal(|| None::<AdminAuctionNotice>);
@@ -93,5 +93,18 @@ pub(super) fn page() -> Element {
         if edited_auction.is_some() {
             AdminAuctionDraftDialogs { drafts, latest_version, read, notice, reload_generation }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::invalidates_auction_list;
+
+    #[test]
+    fn auction_list_reloads_for_intake_in_either_world() {
+        assert!(invalidates_auction_list("intake:main"));
+        assert!(invalidates_auction_list("intake:isekai"));
+        assert!(invalidates_auction_list("auction:0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b"));
+        assert!(!invalidates_auction_list("lot:00000000-0000-4000-8000-000000000023"));
     }
 }

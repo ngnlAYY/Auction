@@ -1,10 +1,10 @@
 //! Admin 结算报表的世界、期号选择器与目录分页。
 
-use auction_web_shared::t;
+use auction_web_shared::{QueryWriteMode, t};
 use dioxus::prelude::*;
 
 use super::page::reset_detail_state;
-use super::query::{SettlementQuery, push_settlement_query};
+use super::query::{SettlementLocation, SettlementQuery};
 use super::recovery::RecoveryConfirmationDraft;
 use crate::api::{AdminSettlementCatalogEntry, AdminSettlementCatalogPage};
 use crate::surface::pagination::{AdminPager as Pager, AdminPagination};
@@ -13,6 +13,7 @@ use crate::surface::{AdminActionFeedback, admin_world_label, format_admin_time};
 #[component]
 pub(super) fn AdminSettlementPicker(
     catalog: Option<AdminSettlementCatalogPage>,
+    location: SettlementLocation,
     mut world_filter: Signal<String>,
     mut requested_sequence: Signal<Option<i64>>,
     mut selected_auction_id: Signal<String>,
@@ -37,7 +38,7 @@ pub(super) fn AdminSettlementPicker(
                     value: world_filter(),
                     onchange: move |event| {
                         let next_world = event.value();
-                        if !matches!(next_world.as_str(), "all" | "main" | "isekai") {
+                        if !location.is_current() || !matches!(next_world.as_str(), "all" | "main" | "isekai") {
                             return;
                         }
                         world_filter.set(next_world.clone());
@@ -52,10 +53,10 @@ pub(super) fn AdminSettlementPicker(
                             action_feedback,
                             selection_generation,
                         );
-                        push_settlement_query(&SettlementQuery {
+                        location.write(SettlementQuery {
                             world_id: next_world,
                             ..SettlementQuery::default()
-                        });
+                        }, QueryWriteMode::Push);
                     },
                     option { value: "all", {t!("admin-settlement-world-all")} }
                     option { value: "main", {admin_world_label("main")} }
@@ -69,6 +70,9 @@ pub(super) fn AdminSettlementPicker(
                     disabled: period_disabled,
                     value: selected_auction_id(),
                     onchange: move |event| {
+                        if !location.is_current() {
+                            return;
+                        }
                         let auction_id = event.value();
                         let selected = selection_entries
                             .iter()
@@ -87,18 +91,20 @@ pub(super) fn AdminSettlementPicker(
                             action_feedback,
                             selection_generation,
                         );
-                        push_settlement_query(&SettlementQuery {
+                        location.write(SettlementQuery {
                             world_id: world_filter(),
                             auction_id: selected.auction_id,
                             sequence: Some(selected.sequence),
                             page: catalog_page(),
-                        });
+                        }, QueryWriteMode::Push);
                     },
                     if entries.is_empty() {
                         option { value: "", {t!("admin-settlement-no-periods")} }
                     } else {
                         for entry in entries {
                             option {
+                                // 补查可能在 select 的值已应用之后才把目标场次加入选项。
+                                selected: entry.auction_id == *selected_auction_id.read(),
                                 value: entry.auction_id,
                                 {period_option_label(&entry)}
                             }
@@ -115,6 +121,9 @@ pub(super) fn AdminSettlementCatalogPager(
     page: i64,
     page_size: i64,
     total: i64,
+    world_id: String,
+    location: SettlementLocation,
+    catalog_revision: u64,
     pagination: AdminPagination,
     world_filter: Signal<String>,
     mut requested_sequence: Signal<Option<i64>>,
@@ -127,6 +136,15 @@ pub(super) fn AdminSettlementCatalogPager(
     mut action_feedback: Signal<Option<AdminActionFeedback>>,
     mut selection_generation: Signal<u64>,
 ) -> Element {
+    let size = pagination.size_signal();
+    let source_is_current = use_callback(move |()| {
+        // 排队的分页回调只有在原目录身份仍对应当前位置时才可修改筛选和历史。
+        location.is_current()
+            && *location.applied_revision.peek() == catalog_revision
+            && world_filter.peek().as_str() == world_id
+            && *catalog_page.peek() == page
+            && *size.peek() == page_size
+    });
     rsx! {
         Pager {
             pagination,
@@ -134,17 +152,22 @@ pub(super) fn AdminSettlementCatalogPager(
             page_size: page_size.max(1),
             total: Some(total),
             label: t!("admin-settlement-auction-pagination"),
+            can_change_page_size: source_is_current,
             on_size_reset: move |_| {
                 // 数量只重置目录页；保持选定场次、两个报告分页及未结束的命令上下文。
                 catalog_page.set(1);
-                push_settlement_query(&SettlementQuery {
+                location.write(SettlementQuery {
                     world_id: world_filter(),
                     auction_id: selected_auction_id(),
                     sequence: requested_sequence(),
                     page: 1,
-                });
+                }, QueryWriteMode::Push);
+                true
             },
             on_page_change: move |next_page| {
+                if !source_is_current.call(()) {
+                    return;
+                }
                 catalog_page.set(next_page);
                 requested_sequence.set(None);
                 selected_auction_id.set(String::new());
@@ -156,11 +179,11 @@ pub(super) fn AdminSettlementCatalogPager(
                     action_feedback,
                     selection_generation,
                 );
-                push_settlement_query(&SettlementQuery {
+                location.write(SettlementQuery {
                     world_id: world_filter(),
                     page: next_page,
                     ..SettlementQuery::default()
-                });
+                }, QueryWriteMode::Push);
             },
         }
     }

@@ -2,9 +2,12 @@
 
 import type { AdminDeliveryActionBlocker } from "@auction/contracts/dto/admin/delivery";
 import { unreachable } from "@auction/web-shared/result";
+import { utf8ByteLength } from "@auction/web-shared/text";
 import { t } from "@auction/web-shared/ui/i18n";
 
+import { MAX_DELIVERY_REASON_BYTES, validDeliveryReason } from "../../api/delivery";
 import type { Delivery } from "../../api/delivery/decode";
+import { trimRustWhitespace } from "../../api/session-time";
 import { type AdminActionFeedback, adminActionFeedbackMessage } from "../presentation";
 
 /** 服务端准入阻断原因的本地化文案。 */
@@ -62,6 +65,21 @@ export function actionFeedbackMessage(feedback: AdminActionFeedback, success: st
     }
   }
   return adminActionFeedbackMessage(feedback, success);
+}
+
+/** 把接口校验拒绝的理由草稿映射为字段提示。 */
+export function deliveryReasonError(reason: string): string | null {
+  const trimmed = trimRustWhitespace(reason);
+  if (validDeliveryReason(trimmed)) {
+    return null;
+  }
+  if (trimmed === "") {
+    return t("admin-field-required");
+  }
+  if (utf8ByteLength(trimmed) > MAX_DELIVERY_REASON_BYTES) {
+    return t("admin-field-max-utf8-bytes", { max: MAX_DELIVERY_REASON_BYTES });
+  }
+  return t("admin-field-no-control-characters");
 }
 
 export const DELIVERY_STATUS_VALUES: readonly string[] = [

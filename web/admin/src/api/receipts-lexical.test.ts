@@ -6,7 +6,7 @@ import { parseJson } from "@auction/web-shared/net/wire";
 import { err, type Result } from "@auction/web-shared/result";
 import { adminAuditFilterDefault, fetchAdminAudit } from "./audit";
 import { fetchDashboard } from "./dashboard";
-import { adminApiFailureDefiniteRejection, adminApiFailureDisplayCode } from "./failure";
+import { adminWriteFailureDisplayCode, classifyAdminWriteFailure } from "./failure";
 import { addAdminIntake, prepareAdminIntakeOnce } from "./intake";
 import { fetchAdminLots, prepareAdminLotUpdateOnce, updateAdminLot } from "./lots";
 import { fetchMailState } from "./mail";
@@ -39,7 +39,11 @@ const LOT_ID = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c";
 const AUCTION_ID = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
 const RETURN_ID = "00000000-0000-4000-8000-000000000024";
 const INVALID_RESPONSE = "invalid_response";
-const INVALID_WRITE_RECEIPT = { status: null, code: INVALID_RESPONSE };
+const INVALID_WRITE_RECEIPT = {
+  kind: "outcome-unknown",
+  code: INVALID_RESPONSE,
+  responseStatus: null,
+} as const;
 const SESSION_PATH = "/api/v1/admin/session?include=server_time";
 const SESSION_BODY = adminContract("session");
 
@@ -212,7 +216,7 @@ test("录入准备按整数词法解析装备等级，允许浮点属性", () =>
   const prepare = (text: string) => prepareAdminIntakeOnce("json", "", text, 1000, "Player");
   expect(prepare(body)(COMMAND_ID).ok).toBe(true);
   expect(prepare(decimalField(body, "/level"))(COMMAND_ID)).toEqual(
-    err({ status: null, code: "invalid_request" }),
+    err({ kind: "not-sent", code: "invalid_request" }),
   );
 });
 
@@ -238,7 +242,7 @@ test("录入命令回执拒绝拍品编号的小数词法", async () => {
           signal,
         ),
       ),
-    INVALID_RESPONSE,
+    INVALID_WRITE_RECEIPT,
   );
 });
 
@@ -272,7 +276,7 @@ test("拍品修改回执拒绝版本的小数词法", async () => {
       writeFixture(text, "PATCH", `/api/v1/admin/lots/${lotId}`, (host, signal) =>
         updateAdminLot(host, lotId, COMMAND_ID, prepare, signal),
       ),
-    INVALID_RESPONSE,
+    INVALID_WRITE_RECEIPT,
   );
 });
 
@@ -325,10 +329,10 @@ test.each(["7.0", "7e0", "7"])("改名回滚按前置版本词法 %s 决定是�
         },
       ]);
     } else {
-      expect(prepared).toEqual(err("not_sent:invalid_response"));
+      expect(prepared).toEqual(err({ kind: "not-sent", code: INVALID_RESPONSE }));
       if (prepared.ok) throw new Error("异常版本进入了回滚准备结果");
-      expect(adminApiFailureDefiniteRejection(prepared.error)).toBe(true);
-      expect(adminApiFailureDisplayCode(prepared.error)).toBe("invalid_response");
+      expect(classifyAdminWriteFailure(prepared.error) !== "unknown").toBe(true);
+      expect(adminWriteFailureDisplayCode(prepared.error)).toBe("invalid_response");
       expect(requests).toEqual([historyRequest]);
     }
   });
@@ -361,7 +365,7 @@ test("规则读取拒绝文档修订的小数词法", async () => {
     "/data/revision",
     "/api/v1/admin/rules?lang=en",
     (host, signal) => fetchAdminRules(host, "rules", "en", signal),
-    INVALID_WRITE_RECEIPT,
+    { status: null, code: INVALID_RESPONSE },
   );
 });
 
@@ -528,9 +532,14 @@ test("实时重放回执拒绝事件序号的小数词法", async () => {
   const failures = requireOk(parseJson(adminContract("realtime-failures")));
   const failureId = valueAt(failures, "/data/failures/0/id");
   const originalEventId = valueAt(failures, "/data/failures/0/event_id");
+  const streamKey = valueAt(failures, "/data/failures/0/stream_key");
   const event = object(valueAt(events, "/data/events/0"));
-  if (typeof failureId !== "string" || typeof originalEventId !== "string") {
-    throw new Error("失败列表样本缺少原事件或失败记录 ID");
+  if (
+    typeof failureId !== "string" ||
+    typeof originalEventId !== "string" ||
+    typeof streamKey !== "string"
+  ) {
+    throw new Error("失败列表样本缺少原事件 ID、失败记录 ID 或流键");
   }
   const body = JSON.stringify({
     code: "ok",
@@ -548,7 +557,14 @@ test("实时重放回执拒绝事件序号的小数词法", async () => {
         text,
         "POST",
         `/api/v1/admin/realtime/failures/${failureId}/replay`,
-        (host, signal) => replayRealtimeFailure(host, failureId, COMMAND_ID, prepare, signal),
+        (host, signal) =>
+          replayRealtimeFailure(
+            host,
+            { id: failureId, event_id: originalEventId, stream_key: streamKey },
+            COMMAND_ID,
+            prepare,
+            signal,
+          ),
       ),
     INVALID_WRITE_RECEIPT,
   );

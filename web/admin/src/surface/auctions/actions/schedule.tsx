@@ -26,6 +26,7 @@ import {
   DraftFeedback,
   type DraftRead,
   DraftRefreshButton,
+  type DraftWriteFeedback,
   draftReadIsReady,
   draftReadRetryAfterClose,
   draftReadVersionChanged,
@@ -42,7 +43,7 @@ import {
   scheduleIssueMessage,
   validateSchedule,
 } from "../presentation";
-import { type AdminAuctionNotice, staleAuctionFailure } from "./model";
+import type { AdminAuctionNotice } from "./model";
 
 const SCHEDULE_FIELDS: readonly ScheduleField[] = ["preview", "open", "end"];
 
@@ -59,7 +60,7 @@ export interface AdminAuctionScheduleDialogProps {
 export function AdminAuctionScheduleDialog(props: AdminAuctionScheduleDialogProps): JSX.Element {
   const owner = requirePendingCommands();
   const host = useAdminSessionHost();
-  const feedback = createCell<string | null>(null);
+  const feedback = createCell<DraftWriteFeedback | null>(null);
   const issue = createCell<readonly [ScheduleField, ScheduleIssue] | null>(null);
   let alive = true;
   onCleanup(() => {
@@ -81,9 +82,8 @@ export function AdminAuctionScheduleDialog(props: AdminAuctionScheduleDialogProp
           if (blocked()) {
             return false;
           }
-          const code = failure();
           return (
-            (code !== null && staleAuctionFailure(code)) ||
+            failure()?.staleWrite === true ||
             draftReadVersionChanged(props.read, openDraft().stateVersion, props.latestVersion)
           );
         });
@@ -158,7 +158,11 @@ export function AdminAuctionScheduleDialog(props: AdminAuctionScheduleDialogProp
                 )}
               </For>
               <Show when={!blocked()}>
-                <DraftFeedback conflict={conflict()} read={props.read} failure={failure()} />
+                <DraftFeedback
+                  conflict={conflict()}
+                  read={props.read}
+                  failure={failure()?.displayCode ?? null}
+                />
               </Show>
               <div class="admin-shell__dialog-actions">
                 <Show when={!conflict()}>
@@ -451,7 +455,7 @@ function submitSchedule(
   times: ScheduleTimes,
   notice: Cell<AdminAuctionNotice | null>,
   open: Cell<ScheduleDraft | null>,
-  feedback: Cell<string | null>,
+  feedback: Cell<DraftWriteFeedback | null>,
   feedbackAlive: () => boolean,
 ): boolean {
   const submittedId = draft.auctionId;
@@ -477,6 +481,7 @@ function submitSchedule(
           prepare,
           signal,
         ),
+        "stale_auction_state",
         feedback,
         () => feedbackAlive() && !signal.aborted,
       ),

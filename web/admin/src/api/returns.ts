@@ -39,11 +39,13 @@ import { validUuid } from "@auction/web-shared/ui/validation";
 
 import { validStatus } from "./delivery/decode";
 import {
-  type AdminApiFailure,
-  adminApiFailureClient,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   decodeAdminReceipt,
   invalidResponseError,
   responseError,
+  writeNotSent,
+  writeOutcomeUnknown,
 } from "./failure";
 import { validate, validPageEcho } from "./pagination";
 import type { AdminSessionHost } from "./session";
@@ -228,7 +230,7 @@ const settlementReturnActionSubmissionBrand: unique symbol = Symbol(
 export interface SettlementReturnActionSubmission {
   readonly [settlementReturnActionSubmissionBrand]: true;
   readonly intent: SettlementReturnActionIntent;
-  readonly prepare: (commandId: string) => Result<PreparedJsonCommand, AdminApiFailure>;
+  readonly prepare: (commandId: string) => Result<PreparedJsonCommand, AdminWriteNotSent>;
 }
 
 /** 冻结提交意图并创建正文工厂；执行体第一次运行时结合 command ID 生成正文。 */
@@ -261,7 +263,7 @@ export async function submitSettlementReturnAction(
   commandId: string,
   submission: SettlementReturnActionSubmission,
   signal: AbortSignal,
-): Promise<Result<AdminSettlementReturnCommandResponse, AdminApiFailure>> {
+): Promise<Result<AdminSettlementReturnCommandResponse, AdminWriteFailure>> {
   const intent = submission.intent;
   if (
     commandId === NIL_UUID ||
@@ -272,7 +274,7 @@ export async function submitSettlementReturnAction(
     intent.expectedVersion > MAX_JSON_SAFE_INTEGER ||
     !inClosedSet(ADMIN_SETTLEMENT_RETURN_ACTIONS, intent.action)
   ) {
-    return err(adminApiFailureClient("invalid_settlement_return_command"));
+    return err(writeNotSent("invalid_settlement_return_command"));
   }
   const prepared = submission.prepare(commandId);
   if (!prepared.ok) {
@@ -304,7 +306,7 @@ export async function submitSettlementReturnAction(
       intent.expectedVersion,
     )
   ) {
-    return err(adminApiFailureClient(invalidResponseError("settlement return command")));
+    return err(writeOutcomeUnknown(invalidResponseError("settlement return command")));
   }
   return result;
 }
@@ -314,8 +316,13 @@ async function postCommand(
   url: string,
   prepared: PreparedJsonCommand,
   signal: AbortSignal,
-): Promise<Result<AdminSettlementReturnCommandResponse, AdminApiFailure>> {
-  const response = await sendPreparedJsonWrite(host, url, "POST", prepared, signal);
+): Promise<Result<AdminSettlementReturnCommandResponse, AdminWriteFailure>> {
+  const response = await sendPreparedJsonWrite(
+    host,
+    { url, method: "POST", endpoint: "general" },
+    prepared,
+    signal,
+  );
   if (!response.ok) {
     return response;
   }
@@ -325,10 +332,10 @@ async function postCommand(
     ADMIN_SETTLEMENT_RETURN_COMMAND_RESPONSE_FIELD_POLICY,
   );
   if (!payload.ok) {
-    return err(adminApiFailureClient(payload.error));
+    return err(writeOutcomeUnknown(payload.error));
   }
   if (!validSuccessCode(payload.value.code)) {
-    return err(adminApiFailureClient(invalidResponseError("settlement return command")));
+    return err(writeOutcomeUnknown(invalidResponseError("settlement return command")));
   }
   return ok(payload.value.data);
 }

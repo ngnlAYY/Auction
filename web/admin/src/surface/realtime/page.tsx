@@ -7,7 +7,7 @@ import { err } from "@auction/web-shared/result";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { Match, onCleanup, Show, Switch } from "solid-js";
+import { createEffect, Match, onCleanup, Show, Switch } from "solid-js";
 
 import {
   fetchRealtimeEventPage,
@@ -67,7 +67,7 @@ function pageWithCopy(): JSX.Element {
   const failureRefresh = createCell(0n);
   const lagRefresh = createCell(0n);
   const notice = createCell<AdminActionFeedback | null>(null);
-  const selectedFailure = createCell<string | null>(null);
+  const selectedFailure = createCell<RealtimeFailure | null>(null);
   const replayRefresh = createCommandReload(0n);
   const pending = usePendingCommands(replayRefresh, (entity) =>
     entity.startsWith("realtime-failure:"),
@@ -75,6 +75,7 @@ function pageWithCopy(): JSX.Element {
   const schemaVersion = createCell("1");
   const publicPayload = createCell("{}");
   const replayInvalid = createCell(false);
+  const replayProcessed = createCell(false);
   const replayBusy = (): boolean => pending.anyBusy();
   let alive = true;
   onCleanup(() => {
@@ -169,6 +170,12 @@ function pageWithCopy(): JSX.Element {
             );
       }),
   );
+  // 列表和弹窗共用只读重试，仅更新失败分区，保留已选目标与草稿。
+  const retryFailureRead = (): void => {
+    if (failuresStatus() === "ready") {
+      bumpRefresh(failureRefresh);
+    }
+  };
   const unresolvedFailures = createTaskResource(
     () => {
       replayRefresh();
@@ -233,15 +240,28 @@ function pageWithCopy(): JSX.Element {
     const current = unresolvedFailurePage();
     return current === null ? null : current.pagination.total;
   });
-  // 直接借用已完成快照；选择只在当前 failure 页的快照里解析。
-  const selected = createValueMemo((): RealtimeFailure | null => {
-    const id = selectedFailure();
-    const page = failurePage();
-    if (!failureAllowed() || id === null || page === null) {
+  // 只用当前查询的成功快照确认目标仍可重放，读取失败不能当作记录已处理。
+  const replayEligible = (): boolean | null => {
+    const selected = selectedFailure();
+    const result = failures();
+    if (selected === null || !failureAllowed() || result === null || !result.ok) {
       return null;
     }
-    return page.failures.find((failure) => failure.id === id) ?? null;
+    return result.value.failures.some(
+      (failure) =>
+        failure.id === selected.id &&
+        failure.event_id === selected.event_id &&
+        failure.stream_key === selected.stream_key &&
+        !failure.resolved,
+    );
+  };
+  createEffect(replayEligible, (eligible) => {
+    // 旧确认框一旦失效，后续刷新不再恢复它的提交资格。
+    if (eligible === false) {
+      replayProcessed.set(true);
+    }
   });
+  const replayAvailable = (): boolean => !replayProcessed() && replayEligible() === true;
 
   const refreshAll = (): void => {
     selectedFailure.set(null);
@@ -266,7 +286,8 @@ function pageWithCopy(): JSX.Element {
     schemaVersion.set("1");
     publicPayload.set("{}");
     replayInvalid.set(false);
-    selectedFailure.set(failure.id);
+    replayProcessed.set(false);
+    selectedFailure.set(failure);
     notice.set(null);
   };
 
@@ -429,9 +450,8 @@ function pageWithCopy(): JSX.Element {
                     kind="error"
                     title={adminApiErrorMessage(error().code)}
                     detail=""
-                    // 错误态提供页内重试入口：仅重载 failure 分区（含未解决计数）。
                     retryLabel={t("admin-retry")}
-                    onRetry={() => bumpRefresh(failureRefresh)}
+                    onRetry={retryFailureRead}
                   />
                 )}
               </Match>
@@ -477,7 +497,7 @@ function pageWithCopy(): JSX.Element {
           />
         </section>
 
-        <Show when={selected()}>
+        <Show when={selectedFailure()}>
           {(failure) => (
             <RealtimeReplayDialog
               failure={failure()}
@@ -488,6 +508,11 @@ function pageWithCopy(): JSX.Element {
               publicPayload={publicPayload}
               replayInvalid={replayInvalid}
               busy={replayBusy}
+              available={replayAvailable}
+              processed={replayProcessed() || replayEligible() === false}
+              readError={failureAllowed() ? (failureError()?.code ?? null) : null}
+              readPending={failuresStatus() !== "ready"}
+              onRetryRead={retryFailureRead}
               pageAlive={() => alive}
               onClose={() => selectedFailure.set(null)}
               onSubmitted={() => selectedFailure.set(null)}

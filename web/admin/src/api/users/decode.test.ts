@@ -88,8 +88,50 @@ test("generated_user_key_receipt_contract_fixture", async () => {
     const shortKey = JSON.stringify(invalid);
     expect(decodeReceipt(shortKey).ok).toBe(true);
     expect(await decodeUserMutation(host, bufferedAdminResponse(shortKey), true, signal)).toEqual(
-      err("invalid_response"),
+      err({ kind: "outcome-unknown", code: "invalid_response", responseStatus: null }),
     );
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test("generated_user_key_requires_exactly_one_id_version_and_key", async () => {
+  const text = adminFixtureText("user-create-command");
+  const manual = withoutFixtureField(text, "/data/generated_key");
+  const harness = createAdminRequestHarness();
+  try {
+    const { host } = harness.registerHost();
+    const signal = new AbortController().signal;
+    const read = (body: string, wantKey: boolean) =>
+      decodeUserMutation(host, bufferedAdminResponse(body), wantKey, signal);
+    const result = mustSucceed(await read(text, true));
+    expect(result.user.username).toBe("ExamplePlayer");
+    expect(result.user.state_version).toBe(1);
+    expect(result.generated_key).toBe("A".repeat(43));
+    const keyless = mustSucceed(await read(manual, false));
+    expect(keyless.user.username).toBe("ExamplePlayer");
+    expect(keyless.generated_key).toBeNull();
+
+    for (const [field, extra] of [
+      ["id", '"id":"00000000-0000-4000-8000-000000000004",'],
+      ["state_version", '"state_version":7,'],
+      ["generated_key", `"generated_key":"${"B".repeat(43)}",`],
+    ]) {
+      const key = `"${field}"`;
+      const duplicate = text.replace(key, `${extra}${key}`);
+      expect(duplicate).not.toBe(text);
+      expect(await read(duplicate, true)).toEqual(
+        err({ kind: "outcome-unknown", code: "invalid_response", responseStatus: null }),
+      );
+    }
+    for (const [body, wantKey] of [
+      [manual, true],
+      [text, false],
+    ] as const) {
+      expect(await read(body, wantKey)).toEqual(
+        err({ kind: "outcome-unknown", code: "invalid_response", responseStatus: null }),
+      );
+    }
   } finally {
     harness.cleanup();
   }

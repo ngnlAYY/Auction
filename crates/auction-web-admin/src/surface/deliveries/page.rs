@@ -1,8 +1,11 @@
 //! Delivery 页面状态、查询资源和动作编排。
 
+use std::future::Future;
+
 use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
+use uuid::Uuid;
 
 use super::super::query::use_deliveries_query_state;
 use super::delivery_command_entity;
@@ -14,9 +17,13 @@ use super::model::{
     DeliveryActionRequest, DeliveryDialogKind, DeliveryDialogState, DeliveryReconcileDraft,
 };
 use super::table::DeliveryTable;
-use crate::api::{Delivery, DeliveryAction, execute_delivery, fetch_deliveries, valid_uuid};
+use crate::api::{
+    AdminWriteFailure, Delivery, DeliveryAction, execute_delivery, fetch_deliveries, valid_uuid,
+};
 use crate::surface::pagination::{AdminPager, use_admin_page, use_admin_pagination};
-use crate::surface::pending::{PendingCommandPanel, set_if_alive, use_pending_commands};
+use crate::surface::pending::{
+    PendingCommandPanel, PendingCommands, set_if_alive, use_pending_commands,
+};
 use crate::surface::{AdminActionFeedback, admin_api_error_message};
 
 /// 加载 delivery 安全投影并编排带 fencing 的操作员动作。
@@ -102,55 +109,23 @@ pub fn page() -> Element {
             }));
             return;
         }
-        let DeliveryActionRequest {
-            delivery_id,
-            action,
-            expected_fencing_version,
-            external_reference,
-            failure_code,
-        } = request;
         notice.set(None);
         success_action.set(None);
-        let submitted = commands.submit(
-            delivery_command_entity(&delivery_id),
-            match action {
-                DeliveryAction::Release => t!("delivery-release"),
-                DeliveryAction::Retry => t!("delivery-retry"),
-                DeliveryAction::ReconcileRetry => t!("delivery-reconcile-action-retry"),
-                DeliveryAction::ReconcileSucceeded => t!("delivery-reconcile-action-succeeded"),
-                DeliveryAction::ReconcileFailed => t!("delivery-reconcile-action-failed"),
-            },
-            move |command_id| {
-                let delivery_id = delivery_id.clone();
-                let external_reference = external_reference.clone();
-                let failure_code = failure_code.clone();
-                async move {
-                    execute_delivery(
-                        command_id,
-                        delivery_id,
-                        action,
-                        expected_fencing_version,
-                        external_reference,
-                        failure_code,
-                    )
-                    .await
-                    .map_err(|error| error.code)
-                }
-            },
-            move |_| {
-                set_if_alive(notice, Some(AdminActionFeedback::Success));
-                set_if_alive(success_action, Some(action));
-            },
-            move |code| {
-                // 新的版本拒绝不能抹掉更早一次未知；原 fence 与 UUID 仍由宿主保留。
-                if matches!(
-                    code.as_str(),
-                    "stale_delivery_state" | "stale_state_version" | "delivery_recipient_renamed"
-                ) {
-                    let mut refresh = refresh;
-                    refresh.set(refresh().saturating_add(1));
-                }
-                set_if_alive(notice, Some(AdminActionFeedback::Error(code)));
+        let submitted = submit_queue_action(
+            commands,
+            request,
+            refresh,
+            notice,
+            success_action,
+            |id, request| {
+                execute_delivery(
+                    id,
+                    request.delivery_id,
+                    request.action,
+                    request.expected_fencing_version,
+                    request.external_reference,
+                    request.failure_code,
+                )
             },
         );
         if submitted {
@@ -318,6 +293,46 @@ pub fn page() -> Element {
     }
 }
 
+fn submit_queue_action<F>(
+    commands: PendingCommands,
+    request: DeliveryActionRequest,
+    refresh: Signal<u64>,
+    notice: Signal<Option<AdminActionFeedback>>,
+    success_action: Signal<Option<DeliveryAction>>,
+    send: impl Fn(Uuid, DeliveryActionRequest) -> F + 'static,
+) -> bool
+where
+    F: Future<Output = Result<Delivery, AdminWriteFailure>> + 'static,
+{
+    let action = request.action;
+    commands.submit(
+        delivery_command_entity(&request.delivery_id),
+        match action {
+            DeliveryAction::Release => t!("delivery-release"),
+            DeliveryAction::Retry => t!("delivery-retry"),
+            DeliveryAction::ReconcileRetry => t!("delivery-reconcile-action-retry"),
+            DeliveryAction::ReconcileSucceeded => t!("delivery-reconcile-action-succeeded"),
+            DeliveryAction::ReconcileFailed => t!("delivery-reconcile-action-failed"),
+        },
+        move |command_id| send(command_id, request.clone()),
+        move |_| {
+            set_if_alive(notice, Some(AdminActionFeedback::Success));
+            set_if_alive(success_action, Some(action));
+        },
+        move |code| {
+            // 新的版本拒绝不能抹掉更早一次未知；原 fence 与 UUID 仍由宿主保留。
+            if matches!(
+                code.as_str(),
+                "stale_delivery_state" | "stale_state_version" | "delivery_recipient_renamed"
+            ) {
+                let mut refresh = refresh;
+                refresh.set(refresh().saturating_add(1));
+            }
+            set_if_alive(notice, Some(AdminActionFeedback::Error(code)));
+        },
+    )
+}
+
 fn delivery_success_message(action: Option<DeliveryAction>) -> String {
     match action {
         Some(DeliveryAction::Release) => t!("delivery-action-released"),
@@ -328,5 +343,168 @@ fn delivery_success_message(action: Option<DeliveryAction>) -> String {
             | DeliveryAction::ReconcileFailed,
         ) => t!("delivery-action-reconciled"),
         None => t!("delivery-action-success"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use dioxus::prelude::*;
+    use gloo_net::http::Method;
+
+    use super::submit_queue_action;
+    use crate::api::{AdminApiFailure, AdminWriteFailure, DeliveryAction, execute_delivery};
+    use crate::surface::auctions::draft_page_tests::{
+        button, click_button, command_button, has_live_text, init_i18n, mount_writer, settle_writer,
+    };
+    use crate::surface::deliveries::delivery_command_entity;
+    use crate::surface::deliveries::model::DeliveryActionRequest;
+    use crate::surface::pending::{PendingCommandPanel, use_pending_commands};
+
+    #[test]
+    fn queue_rereads_after_stale_or_renamed_but_keeps_the_frozen_retry() {
+        const ID: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        const PATH: &str =
+            "/api/v1/admin/deliveries/0f8fad5b-d9cb-469f-a165-70867728950e/reconcile";
+        let request = DeliveryActionRequest {
+            delivery_id: ID.to_owned(),
+            action: DeliveryAction::ReconcileFailed,
+            expected_fencing_version: 4,
+            external_reference: None,
+            failure_code: Some("verified_not_sent".to_owned()),
+        };
+        for (code, body) in [
+            (
+                "stale_delivery_state",
+                r#"{"code":"stale_delivery_state","message":"队列已变化","data":null,"request_id":null}"#,
+            ),
+            (
+                "stale_state_version",
+                r#"{"code":"stale_state_version","message":"队列已变化","data":null,"request_id":null}"#,
+            ),
+            (
+                "delivery_recipient_renamed",
+                r#"{"code":"delivery_recipient_renamed","message":"队列已变化","data":null,"request_id":null}"#,
+            ),
+        ] {
+            let attempts = Rc::new(RefCell::new(Vec::new()));
+            let (mut dom, _) = mount_writer({
+                let attempts = attempts.clone();
+                let request = request.clone();
+                move || {
+                    init_i18n();
+                    let refresh = use_signal(|| 0_u64);
+                    let notice = use_signal(|| None);
+                    let success = use_signal(|| None);
+                    let commands =
+                        use_pending_commands(refresh, |entity| entity.starts_with("delivery:"));
+                    let attempts = attempts.clone();
+                    let request = request.clone();
+                    rsx! {
+                        p { "队列读取世代 {refresh()}" }
+                        button {
+                            onclick: move |_| {
+                                let attempts = attempts.clone();
+                                assert!(submit_queue_action(
+                                    commands, request.clone(), refresh, notice, success,
+                                    move |command_id, request| {
+                                        let first = attempts.borrow().is_empty();
+                                        attempts.borrow_mut().push((command_id, request.clone()));
+                                        async move {
+                                            if first {
+                                                return Err(AdminWriteFailure::outcome_unknown("network_error"));
+                                            }
+                                            AdminApiFailure::stub_write_response(PATH, Method::POST, 409, body);
+                                            execute_delivery(
+                                                command_id, request.delivery_id, request.action,
+                                                request.expected_fencing_version, request.external_reference,
+                                                request.failure_code,
+                                            ).await
+                                        }
+                                    },
+                                ));
+                            },
+                            {"确认队列处置".to_owned()}
+                        }
+                        PendingCommandPanel { owner: commands }
+                    }
+                }
+            });
+            click_button(&mut dom, "确认队列处置");
+            settle_writer(&mut dom);
+            assert!(has_live_text(&dom, "队列读取世代 0"), "{code}");
+            let (id, first_request) = attempts.borrow()[0].clone();
+            assert_eq!(first_request, request);
+            let (retry, disabled) = command_button(&dom, id, "原样重试").unwrap();
+            assert!(!disabled, "{code}");
+
+            dom.dispatch("click", retry, "");
+            settle_writer(&mut dom);
+            assert!(has_live_text(&dom, "队列读取世代 1"), "{code}");
+            assert_eq!(
+                attempts.borrow().as_slice(),
+                [(id, request.clone()), (id, request.clone())]
+            );
+            assert!(!command_button(&dom, id, "原样重试").unwrap().1, "{code}");
+        }
+    }
+
+    #[test]
+    fn queue_http_conflict_keeps_the_earlier_unknown_command_id() {
+        const ID: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        const PATH: &str = "/api/v1/admin/deliveries/0f8fad5b-d9cb-469f-a165-70867728950e/retry";
+        for body in [
+            r#"{"code":"stale_delivery_state","message":"队列已变化","data":null,"request_id":null}"#,
+            r#"{"code":"delivery_recipient_renamed","message":"队列已变化","data":null,"request_id":null}"#,
+        ] {
+            let command_ids = Rc::new(RefCell::new(Vec::new()));
+            let (mut dom, _) = mount_writer({
+                let command_ids = command_ids.clone();
+                move || {
+                    init_i18n();
+                    let command_ids = command_ids.clone();
+                    let commands = use_pending_commands(use_signal(|| 0), |_| false);
+                    rsx! {
+                        button {
+                            onclick: move |_| {
+                                let command_ids = command_ids.clone();
+                                assert!(commands.submit(
+                                    delivery_command_entity(ID),
+                                    "重试投递".to_owned(),
+                                    move |command_id| {
+                                        let command_ids = command_ids.clone();
+                                        async move {
+                                            let first = command_ids.borrow().is_empty();
+                                            command_ids.borrow_mut().push(command_id);
+                                            if first {
+                                                AdminApiFailure::stub_write_response(PATH, Method::POST, 503, "{");
+                                            } else {
+                                                AdminApiFailure::stub_write_response(PATH, Method::POST, 409, body);
+                                            }
+                                            execute_delivery(command_id, ID.to_owned(), DeliveryAction::Retry, 4, None, None).await
+                                        }
+                                    },
+                                    |_| panic!("非成功回执不能交付"),
+                                    |_| {},
+                                ));
+                            },
+                            {"重试投递".to_owned()}
+                        }
+                        PendingCommandPanel { owner: commands }
+                    }
+                }
+            });
+            click_button(&mut dom, "重试投递");
+            settle_writer(&mut dom);
+            assert!(!button(&dom, "原样重试").unwrap().1);
+            click_button(&mut dom, "原样重试");
+            settle_writer(&mut dom);
+            let ids = command_ids.borrow();
+            assert_eq!(ids.len(), 2);
+            assert_eq!(ids[0], ids[1]);
+            assert!(!button(&dom, "原样重试").unwrap().1);
+        }
     }
 }

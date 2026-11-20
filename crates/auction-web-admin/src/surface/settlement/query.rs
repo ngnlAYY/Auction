@@ -1,18 +1,11 @@
 //! Admin 结算报表筛选的 URL 状态与浏览器历史同步。
-//! 不迁到统一的 `use_query_state`：本页 URL 状态拆成四个独立 signal
-//! （world/auction/sequence/page），popstate 经 `use_settlement_location_revision` 的 revision
-//! 驱动页面 effect 一次性恢复，并同时复位详情上下文（`selection_generation` 防止 recovery
-//! 确认的异步回写落到已切换的选择上，见 recovery.rs 提交回调里的同代比较）；目录加载后还要
-//! 按服务端事实 canonical 化地址（auction 与 sequence 必须成对、空目录页钳制到末页、解析失败
-//! 保留地址显式报错）。这些语义超出通用 hook 的单一状态模型，因此保留本模块的
-//! read + push/replace + location revision 三件套，底层地址栏读写与 popstate 监听复用
-//! `auction_web_shared::query` 的 `read_query_pairs` / `write_query_pairs` / `use_popstate_revision`。
+//! 共享查询订阅推进位置版本，页面按版本恢复世界、场次、期号与页码，并复位相关的详情上下文。
+//! 目录加载后按服务端事实规范化地址，无效链接保留原文供核对。
 
-use std::collections::HashSet;
+use std::{cell::Cell, collections::HashSet, rc::Rc};
 
-use auction_web_shared::{
-    QueryWriteMode, read_query_pairs, use_popstate_revision, write_query_pairs,
-};
+use auction_web_shared::query::{location_parts, query_location};
+use auction_web_shared::{QueryWriteMode, read_query_pairs, use_query_state, write_query_pairs};
 use dioxus::prelude::*;
 
 use crate::api::{MAX_JSON_SAFE_INTEGER, valid_uuid};
@@ -100,21 +93,103 @@ fn positive_integer(value: &str) -> Option<i64> {
     value.parse().ok().filter(|number| *number > 0)
 }
 
-pub(super) fn replace_settlement_query(query: &SettlementQuery) {
-    // 位置已改变时，在旧目录响应写回前再次检查，保留无效链接原文。
-    if read_settlement_query().is_err() {
-        return;
-    }
-    write_query_pairs(
-        SETTLEMENT_QUERY_KEYS,
-        &settlement_query_pairs(query),
-        QueryWriteMode::Replace,
-    );
+/// 页面已接纳的位置版本和地址筛选，供分页与回执在执行时复核。
+#[derive(Clone, Copy, PartialEq)]
+pub(super) struct SettlementLocation {
+    pub(super) applied_revision: Signal<u64>,
+    revision: Signal<u64>,
+    path: Signal<Option<String>>,
+    address: Signal<SettlementAddress>,
 }
 
-/// 用户主动切换筛选或分页时创建可返回的浏览器历史项。
-pub(super) fn push_settlement_query(query: &SettlementQuery) {
-    write_query_pairs(SETTLEMENT_QUERY_KEYS, &settlement_query_pairs(query), QueryWriteMode::Push);
+struct SettlementAddress {
+    query: SettlementQuery,
+    refused_at: Option<String>,
+}
+
+impl SettlementLocation {
+    /// 共享订阅和筛选恢复之间均可能到达回执，须同时核对浏览器地址与已应用版本。
+    pub(super) fn is_current(self) -> bool {
+        self.revision.try_peek().is_ok_and(|revision| {
+            self.applied_revision.try_peek().is_ok_and(|applied| *revision == *applied)
+        }) && self.matches_address()
+    }
+
+    /// 核对仍是页面接纳的路径与筛选。各报告的每页数量由各自的分页状态处理。
+    pub(super) fn matches_address(self) -> bool {
+        self.path.try_peek().is_ok_and(|path| *path == current_path())
+            && self.address.try_peek().is_ok_and(|address| {
+                read_settlement_query().is_ok_and(|query| query == address.query)
+            })
+    }
+
+    /// 拒写后页面选择只在本地。若原地址再发生变化，交给外壳保留可能被恢复清除的回执。
+    pub(super) fn can_deliver_receipt(self) -> bool {
+        self.is_current()
+            && self.address.try_peek().is_ok_and(|address| {
+                address.refused_at.as_ref().is_none_or(|previous| {
+                    current_address().is_some_and(|current| &current == previous)
+                })
+            })
+    }
+
+    /// 页面恢复筛选后才发布已应用的位置版本。
+    pub(super) fn apply(mut self, revision: u64, query: SettlementQuery) {
+        self.address.set(SettlementAddress { query, refused_at: None });
+        self.applied_revision.set(revision);
+    }
+
+    /// 将已经应用到页面的筛选写回历史，并同步成功写入的地址基准。
+    pub(super) fn write(mut self, query: SettlementQuery, mode: QueryWriteMode) {
+        if write_query_pairs(SETTLEMENT_QUERY_KEYS, &settlement_query_pairs(&query), mode) {
+            self.address.set(SettlementAddress { query, refused_at: None });
+        } else {
+            // 拒写保留地址基准，匹配的目录响应仍可归并到本地筛选。
+            let mut address = self.address.write();
+            if address.query != query && address.refused_at.is_none() {
+                address.refused_at = current_address();
+            }
+        }
+    }
+}
+
+/// 记录首读采用的路径与筛选；有效链接视图卸载时销毁这一份基准。
+pub(super) fn use_settlement_location(
+    revision: Signal<u64>,
+    query: &SettlementQuery,
+) -> SettlementLocation {
+    SettlementLocation {
+        applied_revision: use_signal(|| *revision.peek()),
+        revision,
+        path: use_signal(current_path),
+        address: use_signal(|| SettlementAddress { query: query.clone(), refused_at: None }),
+    }
+}
+
+fn current_path() -> Option<String> {
+    current_address().map(|address| location_parts(&address).0.to_owned())
+}
+
+fn current_address() -> Option<String> {
+    let mut address = if let Some(location) = query_location() {
+        location.current()
+    } else {
+        cfg_select! {
+            target_arch = "wasm32" => {
+                if let Some(history) = try_consume_context::<Rc<dyn History>>() {
+                    history.current_route()
+                } else {
+                    let location = web_sys::window()?.location();
+                    location.pathname().ok()? + &location.search().ok()?
+                }
+            }
+            _ => try_consume_context::<Rc<dyn History>>()?.current_route(),
+        }
+    };
+    if let Some(fragment) = address.find('#') {
+        address.truncate(fragment);
+    }
+    Some(address)
 }
 
 /// 序列化规则与旧版一致：默认值键省略，auction 与 sequence 成对写入。
@@ -135,11 +210,17 @@ fn settlement_query_pairs(query: &SettlementQuery) -> Vec<(String, String)> {
     pairs
 }
 
-/// 监听同一路径的浏览器返回/前进，确保筛选状态不会与地址栏分离。
+/// 将共享层认可的同页地址变化记入本页的位置版本。
 pub(super) fn use_settlement_location_revision() -> Signal<u64> {
-    let revision = use_signal(|| 0_u64);
-    use_popstate_revision(revision);
-    revision
+    let next_revision = Cell::new(0_u64);
+    // 共享层按实际路径和查询去重，成功的筛选及分页写回也会更新其基准。
+    // 即使地址解析出的值相同，新的地址仍须覆盖拒写后保留的本地选择。
+    use_query_state(
+        &[],
+        move |_| next_revision.replace(next_revision.get().saturating_add(1)),
+        |_| Vec::new(),
+    )
+    .state
 }
 
 #[cfg(test)]

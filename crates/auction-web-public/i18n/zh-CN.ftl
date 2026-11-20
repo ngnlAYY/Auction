@@ -607,6 +607,7 @@ command-retry-unchanged = 结果仍未知。你可以离开此页，回来后原
 command-retry-price-changed = 价格已变化。再次操作前请查看拍品的当前价格。
 command-unknown-count = 结果未知的命令：{ $count } 条
 command-memory-only = 这些记录仅保留在当前标签页内存中。刷新或关闭页面会清除记录。
+command-reload-confirm = 刷新会清除当前标签页内未完成的出价和代理操作记录，以及尚未确认的回执。仍要刷新吗？
 command-create-proxy = 创建代理授权
 command-lot-unresolved = 此拍品有一条结果未知的命令。打开可查看处理选项。
 command-recovery-open = 查看拍品 { $code } 的命令
@@ -647,6 +648,7 @@ watch-save-error = 标记保存失败，请先刷新服务器标记再重试。
 watch-retry-command = 重试原保存命令
 
 boot-error = 页面运行出现异常，请刷新页面重试。
+page-load-failed = 此页面加载失败。
 stale-build-notice = 站点已更新。请刷新此页面以载入新版本；当前输入不会被自动提交。
 stale-build-refresh = 刷新页面
 

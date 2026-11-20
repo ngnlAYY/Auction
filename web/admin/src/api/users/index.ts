@@ -12,11 +12,12 @@ import { err, ok, type Result, unreachable } from "@auction/web-shared/result";
 
 import { parseRustUuid } from "../credentials/decode";
 import {
-  type AdminApiFailure,
-  adminApiFailureAtWriteEndpoint,
-  adminApiFailureClient,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   invalidResponseError,
   responseError,
+  writeNotSent,
+  writeOutcomeUnknown,
 } from "../failure";
 import { validate as validatePagination, validPageEcho } from "../pagination";
 import type { AdminSessionHost } from "../session";
@@ -26,7 +27,7 @@ import {
   sendGet,
   sendPreparedJsonWrite,
 } from "../transport";
-import { decodeUserList, decodeUserMutation } from "./decode";
+import { decodeUserList, decodeUserMutation, matchesUserMutationTarget } from "./decode";
 import type {
   AdminUser,
   AdminUserMutationResult,
@@ -125,10 +126,12 @@ export function prepareAdminUserCreate(
   };
 }
 
-/** 创建用户的已固定正文；`wantKey` 只在 `key_mode = generated` 时要求回执带 Key。 */
+/** 创建用户的已固定正文与可回显的字段。 */
 export interface PreparedAdminUserCreate {
   readonly prepared: PreparedJsonCommand;
   readonly wantKey: boolean;
+  readonly username: string;
+  readonly forumAccountId: string | null;
 }
 
 /** 冻结创建用户的输入；同一 `command_id` 的重试不会重新拼装命令。 */
@@ -137,14 +140,16 @@ export function prepareAdminUserCreateOnce(
   forumAccountId: string | null,
   keyMode: string,
   key: string | null,
-): (commandId: string) => Result<PreparedAdminUserCreate, AdminApiFailure> {
+): (commandId: string) => Result<PreparedAdminUserCreate, AdminWriteNotSent> {
   const prepareCommand = prepareJsonCommandOnce((commandId) =>
     prepareAdminUserCreate(commandId, username, forumAccountId, keyMode, key),
   );
   const wantKey = keyMode === "generated";
   return (commandId) => {
     const prepared = prepareCommand(commandId);
-    return prepared.ok ? ok({ prepared: prepared.value, wantKey }) : err(prepared.error);
+    return prepared.ok
+      ? ok({ prepared: prepared.value, wantKey, username, forumAccountId })
+      : err(prepared.error);
   };
 }
 
@@ -152,24 +157,38 @@ export function prepareAdminUserCreateOnce(
 export async function createAdminUser(
   host: AdminSessionHost,
   commandId: string,
-  prepare: (commandId: string) => Result<PreparedAdminUserCreate, AdminApiFailure>,
+  prepare: (commandId: string) => Result<PreparedAdminUserCreate, AdminWriteNotSent>,
   signal: AbortSignal,
-): Promise<Result<AdminUserMutationResult, string>> {
+): Promise<Result<AdminUserMutationResult, AdminWriteFailure>> {
   const prepared = prepare(commandId);
   if (!prepared.ok) {
-    return err(prepared.error.code);
+    return err(prepared.error);
   }
   const response = await sendPreparedJsonWrite(
     host,
-    "/api/v1/admin/users",
-    "POST",
+    { url: "/api/v1/admin/users", method: "POST", endpoint: "general" },
     prepared.value.prepared,
     signal,
   );
   if (!response.ok) {
-    return err(response.error.code);
+    return err(response.error);
   }
-  return decodeUserMutation(host, response.value, prepared.value.wantKey, signal);
+  const result = await decodeUserMutation(host, response.value, prepared.value.wantKey, signal);
+  if (!result.ok) {
+    return result;
+  }
+  // 创建没有预知的用户 ID；核对冻结表单和初始投影后才可交付 Key。
+  const user = result.value.user;
+  if (
+    user.username !== prepared.value.username ||
+    user.forum_account_id !== prepared.value.forumAccountId ||
+    user.status !== "active" ||
+    user.key_status !== "active" ||
+    user.state_version !== 1
+  ) {
+    return err(writeOutcomeUnknown(invalidResponseError("user_create_receipt")));
+  }
+  return result;
 }
 
 /** 冻结修改用户的字段并构造一次命令正文。 */
@@ -191,10 +210,14 @@ export function prepareAdminUserMutation(
   };
 }
 
-/** 修改用户的已固定正文；`wantKey` 只在重签 Key 时要求回执带 Key。 */
+/** 修改用户的已固定正文与回执核对字段。 */
 export interface PreparedAdminUserMutation {
   readonly prepared: PreparedJsonCommand;
-  readonly wantKey: boolean;
+  readonly userId: string;
+  readonly expectedStateVersion: number;
+  readonly action: string;
+  readonly username: string | null;
+  readonly forumAccountId: string | null;
 }
 
 /** 冻结用户、版本、动作与可选字段；无效用户 ID 在首次准备时失败。 */
@@ -203,12 +226,11 @@ export function prepareAdminUserMutationOnce(
   action: string,
   username: string | null,
   forumAccountId: string | null,
-): (commandId: string) => Result<PreparedAdminUserMutation, AdminApiFailure> {
+): (commandId: string) => Result<PreparedAdminUserMutation, AdminWriteNotSent> {
   const userId = parseRustUuid(user.id);
   const expectedStateVersion = user.state_version;
-  const wantKey = action === "reissue_key";
   if (userId === null) {
-    return () => err(adminApiFailureClient("invalid_request"));
+    return () => err(writeNotSent("invalid_request"));
   }
   const prepareCommand = prepareJsonCommandOnce((commandId) =>
     prepareAdminUserMutation(
@@ -222,7 +244,16 @@ export function prepareAdminUserMutationOnce(
   );
   return (commandId) => {
     const prepared = prepareCommand(commandId);
-    return prepared.ok ? ok({ prepared: prepared.value, wantKey }) : err(prepared.error);
+    return prepared.ok
+      ? ok({
+          prepared: prepared.value,
+          userId,
+          expectedStateVersion,
+          action,
+          username,
+          forumAccountId,
+        })
+      : err(prepared.error);
   };
 }
 
@@ -230,24 +261,50 @@ export function prepareAdminUserMutationOnce(
 export async function mutateAdminUser(
   host: AdminSessionHost,
   commandId: string,
-  prepare: (commandId: string) => Result<PreparedAdminUserMutation, AdminApiFailure>,
+  prepare: (commandId: string) => Result<PreparedAdminUserMutation, AdminWriteNotSent>,
   signal: AbortSignal,
-): Promise<Result<AdminUserMutationResult, string>> {
+): Promise<Result<AdminUserMutationResult, AdminWriteFailure>> {
   const prepared = prepare(commandId);
   if (!prepared.ok) {
-    return err(prepared.error.code);
+    return err(prepared.error);
   }
   const response = await sendPreparedJsonWrite(
     host,
-    "/api/v1/admin/users",
-    "PATCH",
+    { url: "/api/v1/admin/users", method: "PATCH", endpoint: "user-mutation" },
     prepared.value.prepared,
     signal,
   );
   if (!response.ok) {
-    return err(adminApiFailureAtWriteEndpoint(response.error, "user-mutation").code);
+    return err(response.error);
   }
-  return decodeUserMutation(host, response.value, prepared.value.wantKey, signal);
+  const { userId, expectedStateVersion, action } = prepared.value;
+  const result = await decodeUserMutation(host, response.value, action === "reissue_key", signal);
+  if (!result.ok) {
+    return result;
+  }
+  const user = result.value.user;
+  if (
+    !matchesUserMutationTarget(user, userId, expectedStateVersion) ||
+    !matchesUserMutationAction(user, prepared.value)
+  ) {
+    return err(writeOutcomeUnknown(invalidResponseError("user_mutation_receipt")));
+  }
+  return result;
+}
+
+function matchesUserMutationAction(user: AdminUser, command: PreparedAdminUserMutation): boolean {
+  switch (command.action) {
+    case "rename":
+      return user.username === command.username;
+    case "set_forum_account_id":
+      return command.forumAccountId !== null && user.forum_account_id === command.forumAccountId;
+    case "revoke_key":
+      return user.key_status === "revoked";
+    case "reissue_key":
+      return user.key_status === "active";
+    default:
+      return false;
+  }
 }
 
 /** 冻结拉黑命令的正文。 */
@@ -263,21 +320,23 @@ export function prepareAdminUserBlacklist(
   };
 }
 
-/** 拉黑用户所需的目标 URL 与已固定正文。 */
+/** 拉黑用户所需的目标 URL、已固定正文与回执核对字段。 */
 export interface PreparedAdminUserBlacklist {
   readonly url: string;
   readonly prepared: PreparedJsonCommand;
+  readonly userId: string;
+  readonly expectedStateVersion: number;
 }
 
 /** 冻结用户与公开理由；无效用户 ID 在首次准备时失败。 */
 export function prepareAdminUserBlacklistOnce(
   user: AdminUser,
   publicReason: string,
-): (commandId: string) => Result<PreparedAdminUserBlacklist, AdminApiFailure> {
+): (commandId: string) => Result<PreparedAdminUserBlacklist, AdminWriteNotSent> {
   const userId = parseRustUuid(user.id);
   const expectedStateVersion = user.state_version;
   if (userId === null) {
-    return () => err(adminApiFailureClient("invalid_request"));
+    return () => err(writeNotSent("invalid_request"));
   }
   const url = `/api/v1/admin/users/${userId}/blacklist`;
   const prepareCommand = prepareJsonCommandOnce((commandId) =>
@@ -285,7 +344,9 @@ export function prepareAdminUserBlacklistOnce(
   );
   return (commandId) => {
     const prepared = prepareCommand(commandId);
-    return prepared.ok ? ok({ url, prepared: prepared.value }) : err(prepared.error);
+    return prepared.ok
+      ? ok({ url, prepared: prepared.value, userId, expectedStateVersion })
+      : err(prepared.error);
   };
 }
 
@@ -293,25 +354,34 @@ export function prepareAdminUserBlacklistOnce(
 export async function blacklistAdminUser(
   host: AdminSessionHost,
   commandId: string,
-  prepare: (commandId: string) => Result<PreparedAdminUserBlacklist, AdminApiFailure>,
+  prepare: (commandId: string) => Result<PreparedAdminUserBlacklist, AdminWriteNotSent>,
   signal: AbortSignal,
-): Promise<Result<AdminUser, string>> {
+): Promise<Result<AdminUser, AdminWriteFailure>> {
   const prepared = prepare(commandId);
   if (!prepared.ok) {
-    return err(prepared.error.code);
+    return err(prepared.error);
   }
   const response = await sendPreparedJsonWrite(
     host,
-    prepared.value.url,
-    "PUT",
+    { url: prepared.value.url, method: "PUT", endpoint: "user-mutation" },
     prepared.value.prepared,
     signal,
   );
   if (!response.ok) {
-    return err(adminApiFailureAtWriteEndpoint(response.error, "user-mutation").code);
+    return err(response.error);
   }
   const result = await decodeUserMutation(host, response.value, false, signal);
-  return result.ok ? ok(result.value.user) : err(result.error);
+  if (!result.ok) {
+    return result;
+  }
+  const user = result.value.user;
+  if (
+    user.status !== "blacklisted" ||
+    !matchesUserMutationTarget(user, prepared.value.userId, prepared.value.expectedStateVersion)
+  ) {
+    return err(writeOutcomeUnknown(invalidResponseError("user_blacklist_receipt")));
+  }
+  return ok(user);
 }
 
 /** 冻结解除拉黑命令的正文。 */
@@ -325,20 +395,22 @@ export function prepareAdminUserUnblacklist(
   };
 }
 
-/** 解除拉黑所需的目标 URL 与已固定正文。 */
+/** 解除拉黑所需的目标 URL、已固定正文与回执核对字段。 */
 export interface PreparedAdminUserUnblacklist {
   readonly url: string;
   readonly prepared: PreparedJsonCommand;
+  readonly userId: string;
+  readonly expectedStateVersion: number;
 }
 
 /** 冻结用户与版本；无效用户 ID 在首次准备时失败。 */
 export function prepareAdminUserUnblacklistOnce(
   user: AdminUser,
-): (commandId: string) => Result<PreparedAdminUserUnblacklist, AdminApiFailure> {
+): (commandId: string) => Result<PreparedAdminUserUnblacklist, AdminWriteNotSent> {
   const userId = parseRustUuid(user.id);
   const expectedStateVersion = user.state_version;
   if (userId === null) {
-    return () => err(adminApiFailureClient("invalid_request"));
+    return () => err(writeNotSent("invalid_request"));
   }
   const url = `/api/v1/admin/users/${userId}/blacklist`;
   const prepareCommand = prepareJsonCommandOnce((commandId) =>
@@ -346,7 +418,9 @@ export function prepareAdminUserUnblacklistOnce(
   );
   return (commandId) => {
     const prepared = prepareCommand(commandId);
-    return prepared.ok ? ok({ url, prepared: prepared.value }) : err(prepared.error);
+    return prepared.ok
+      ? ok({ url, prepared: prepared.value, userId, expectedStateVersion })
+      : err(prepared.error);
   };
 }
 
@@ -354,25 +428,34 @@ export function prepareAdminUserUnblacklistOnce(
 export async function unblacklistAdminUser(
   host: AdminSessionHost,
   commandId: string,
-  prepare: (commandId: string) => Result<PreparedAdminUserUnblacklist, AdminApiFailure>,
+  prepare: (commandId: string) => Result<PreparedAdminUserUnblacklist, AdminWriteNotSent>,
   signal: AbortSignal,
-): Promise<Result<AdminUser, string>> {
+): Promise<Result<AdminUser, AdminWriteFailure>> {
   const prepared = prepare(commandId);
   if (!prepared.ok) {
-    return err(prepared.error.code);
+    return err(prepared.error);
   }
   const response = await sendPreparedJsonWrite(
     host,
-    prepared.value.url,
-    "DELETE",
+    { url: prepared.value.url, method: "DELETE", endpoint: "user-mutation" },
     prepared.value.prepared,
     signal,
   );
   if (!response.ok) {
-    return err(adminApiFailureAtWriteEndpoint(response.error, "user-mutation").code);
+    return err(response.error);
   }
   const result = await decodeUserMutation(host, response.value, false, signal);
-  return result.ok ? ok(result.value.user) : err(result.error);
+  if (!result.ok) {
+    return result;
+  }
+  const user = result.value.user;
+  if (
+    user.status !== "active" ||
+    !matchesUserMutationTarget(user, prepared.value.userId, prepared.value.expectedStateVersion)
+  ) {
+    return err(writeOutcomeUnknown(invalidResponseError("user_unblacklist_receipt")));
+  }
+  return ok(user);
 }
 
 /** 只接受 2xx 响应，与 gloo_net 的 `response.ok()` 一致。 */

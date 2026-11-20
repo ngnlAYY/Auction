@@ -26,15 +26,16 @@ pub(crate) use auction_contracts::{
     AdminSettlementReturnSummaryResponse as SettlementReturnSummary,
     AdminSettlementReturnTakeResponse as SettlementReturnTake,
 };
-use gloo_net::http::Request;
+use gloo_net::http::Method;
 use serde::Serialize;
 use uuid::Uuid;
 
+use super::AdminWriteFailure;
+use super::transport::WriteRequest;
 use super::{
-    AdminApiFailure, MAX_JSON_SAFE_INTEGER, fetch_csrf_token, invalid_request_error,
-    invalid_response_error, response_error, response_failure, send_get, send_request,
-    valid_admin_time, valid_count, valid_optional_time, valid_safe_text, valid_status,
-    valid_success_code, valid_uuid,
+    MAX_JSON_SAFE_INTEGER, invalid_response_error, response_error, send_get, valid_admin_time,
+    valid_count, valid_optional_time, valid_safe_text, valid_status, valid_success_code,
+    valid_uuid,
 };
 
 /// 列表筛选；状态、分类、种类与世界都取契约闭集中的值，空串表示不限。
@@ -99,13 +100,13 @@ pub(crate) async fn submit_settlement_return_action(
     return_id: String,
     expected_version: i64,
     action: String,
-) -> Result<SettlementReturnCommandResult, AdminApiFailure> {
+) -> Result<SettlementReturnCommandResult, AdminWriteFailure> {
     if command_id.is_nil()
         || !valid_uuid(&return_id)
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&expected_version)
         || !ADMIN_SETTLEMENT_RETURN_ACTIONS.contains(&action.as_str())
     {
-        return Err(AdminApiFailure::client("invalid_settlement_return_command"));
+        return Err(AdminWriteFailure::not_sent("invalid_settlement_return_command"));
     }
     let result = if action == "recheck" {
         post_command(
@@ -125,7 +126,7 @@ pub(crate) async fn submit_settlement_return_action(
         .await?
     };
     if !valid_command_result(&result, command_id, &return_id, &action, expected_version) {
-        return Err(AdminApiFailure::client(invalid_response_error("settlement return command")));
+        return Err(AdminWriteFailure::invalid_response("settlement return command"));
     }
     Ok(result)
 }
@@ -133,26 +134,12 @@ pub(crate) async fn submit_settlement_return_action(
 async fn post_command<T: Serialize>(
     url: &str,
     request: &T,
-) -> Result<SettlementReturnCommandResult, AdminApiFailure> {
-    let csrf_token = fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
-    let response = send_request(|abort_signal| {
-        Request::post(url)
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(request)
-            .map_err(invalid_request_error)
-    })
-    .await
-    .map_err(AdminApiFailure::client)?;
-    if !response.ok() {
-        return Err(response_failure(response).await);
-    }
-    let payload: ApiResponse<SettlementReturnCommandResult> = response
-        .json()
-        .await
-        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
+) -> Result<SettlementReturnCommandResult, AdminWriteFailure> {
+    let response = WriteRequest::general(url, Method::POST).send_json(request).await?;
+    let payload: ApiResponse<SettlementReturnCommandResult> =
+        response.json().await.map_err(AdminWriteFailure::invalid_response)?;
     if !valid_success_code(&payload.code) {
-        return Err(AdminApiFailure::client(invalid_response_error("settlement return command")));
+        return Err(AdminWriteFailure::invalid_response("settlement return command"));
     }
     Ok(payload.data)
 }
@@ -601,6 +588,24 @@ mod tests {
         assert!(!valid_command_result(&result, command_id, CASE, "reclaim_and_hold", 2));
         assert!(!valid_command_result(&result, command_id, CASE, "close_inbox", 3));
     }
+
+    #[test]
+    fn reclaim_and_resend_receipt_cannot_complete_a_different_return() {
+        let command_id = Uuid::from_u128(0x4000_8000_0000_0000_0007);
+        let reply = |return_id| {
+            serde_json::from_value::<SettlementReturnCommandResult>(json!({
+                "command_id": command_id.to_string(),
+                "return_id": return_id,
+                "action": "reclaim_and_resend",
+                "case_version": 3,
+                "status": "take_pending"
+            }))
+            .unwrap()
+        };
+        assert!(valid_command_result(&reply(CASE), command_id, CASE, "reclaim_and_resend", 2));
+        assert!(!valid_command_result(&reply(DELIVERY), command_id, CASE, "reclaim_and_resend", 2));
+    }
+
     #[test]
     fn settlement_return_read_and_command_contract_fixtures() {
         use super::{

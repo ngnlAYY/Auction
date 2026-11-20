@@ -6,7 +6,7 @@ import { err } from "@auction/web-shared/result";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { Match, onCleanup, Show, Switch } from "solid-js";
+import { createEffect, Match, onCleanup, Show, Switch } from "solid-js";
 
 import {
   type AdminCredential,
@@ -90,6 +90,30 @@ export function page(): JSX.Element {
   const errorView = createValueMemo(() => {
     const current = view();
     return current.kind === "error" ? current : null;
+  });
+  const pageSize = pagination.sizeSignal();
+  const pageCorrection = createValueMemo(() => {
+    const current = readyView();
+    if (current === null) {
+      return null;
+    }
+    const { generation, page } = current;
+    const lastPage = 1 + Math.floor((Math.max(page.total, 1) - 1) / page.page_size);
+    return page.page > lastPage
+      ? { generation, previousPage: BigInt(page.page), previousSize: page.page_size, lastPage }
+      : null;
+  });
+  // 只有当前快照能纠偏；替换失效页的历史项，避免后退再次进入同一个空页。
+  createEffect(pageCorrection, (correction) => {
+    const current = queryState.peek();
+    if (
+      correction !== null &&
+      correction.generation === Number(reloadGeneration.peek()) &&
+      correction.previousPage === current.page &&
+      correction.previousSize === pageSize.peek()
+    ) {
+      query.replace({ ...current, page: BigInt(correction.lastPage) });
+    }
   });
   const credentialEntity = (credential: AdminCredential): string => `credential:${credential.id}`;
   const deleteIsCurrent = (credential: AdminCredential): boolean => {
@@ -189,17 +213,19 @@ export function page(): JSX.Element {
                   }}
                   onDelete={openDelete}
                 />
-                <AdminPager
-                  pagination={pagination}
-                  page={ready().page.page}
-                  pageSize={ready().page.page_size}
-                  total={ready().page.total}
-                  label={t("page-credentials-title")}
-                  onPageChange={(nextPage) => {
-                    const next = { ...queryState(), page: BigInt(nextPage) };
-                    query.push(next);
-                  }}
-                />
+                <Show when={pageCorrection() === null}>
+                  <AdminPager
+                    pagination={pagination}
+                    page={ready().page.page}
+                    pageSize={ready().page.page_size}
+                    total={ready().page.total}
+                    label={t("page-credentials-title")}
+                    onPageChange={(nextPage) => {
+                      const next = { ...queryState(), page: BigInt(nextPage) };
+                      query.push(next);
+                    }}
+                  />
+                </Show>
               </>
             )}
           </Match>

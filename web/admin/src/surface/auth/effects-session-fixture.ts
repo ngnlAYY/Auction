@@ -1,4 +1,4 @@
-// 认证测试的受控传输：各端点独立排队，取消信号必须让 fetch 拒绝。
+// 认证测试的受控传输：各端点独立排队，可模拟取消后仍抵达的响应。
 
 import { preserveProperty } from "../../test-scope-fixture";
 
@@ -18,10 +18,18 @@ export type FetchReply =
 export class Stub {
   calls = 0;
   cancelled = 0;
+  private replyAfterAbort = false;
   private readonly pending: ((reply: FetchReply) => void)[] = [];
+
+  /** 让下一次 fetch 即使收到取消信号也能交付迟到响应。 */
+  allowNextReplyAfterAbort(): void {
+    this.replyAfterAbort = true;
+  }
 
   request(signal?: AbortSignal): Promise<FetchReply> {
     this.calls += 1;
+    const replyAfterAbort = this.replyAfterAbort;
+    this.replyAfterAbort = false;
     if (signal?.aborted === true) {
       this.cancelled += 1;
       return Promise.reject(aborted());
@@ -32,10 +40,11 @@ export class Stub {
         resolve(reply);
       };
       const abort = (): void => {
+        this.cancelled += 1;
+        if (replyAfterAbort) return;
         const index = this.pending.indexOf(finish);
         if (index >= 0) this.pending.splice(index, 1);
         cleanup();
-        this.cancelled += 1;
         reject(aborted());
       };
       const cleanup = (): void => signal?.removeEventListener("abort", abort);
@@ -44,8 +53,8 @@ export class Stub {
     });
   }
 
-  finish(reply: FetchReply): void {
-    const finish = this.pending.shift();
+  finish(reply: FetchReply, index = 0): void {
+    const finish = this.pending.splice(index, 1)[0];
     if (finish === undefined) {
       throw new Error("请求尚未派发");
     }
@@ -69,6 +78,11 @@ export interface Transport {
   readonly post: Stub;
   readonly activity: Stub;
   readonly logout: Stub;
+  readonly businessRead: Stub;
+  readonly businessWrite: Stub;
+  readonly createUser: Stub;
+  readonly userCreateBodies: (BodyInit | null)[];
+  readonly businessWrites: { method: string; path: string; body: BodyInit | null }[];
   pendingCountsCalls: number;
   readonly loginAuthorizations: string[];
   rejectLogoutRequest: boolean;
@@ -82,6 +96,11 @@ export function transport(): Transport {
     post: new Stub(),
     activity: new Stub(),
     logout: new Stub(),
+    businessRead: new Stub(),
+    businessWrite: new Stub(),
+    createUser: new Stub(),
+    userCreateBodies: [],
+    businessWrites: [],
     pendingCountsCalls: 0,
     loginAuthorizations: [],
     rejectLogoutRequest: false,
@@ -215,12 +234,37 @@ export function installFetch(stubs: Transport): () => void {
           case `POST ${session}/activity`:
             stub = stubs.activity;
             break;
+          case "POST /api/v1/admin/users":
+            stubs.userCreateBodies.push(init?.body ?? null);
+            stub = stubs.createUser;
+            break;
+          case "GET /api/v1/admin/worlds":
+            stub = stubs.businessRead;
+            break;
+          case "PATCH /api/v1/admin/worlds/main":
+            stubs.businessWrites.push({ method, path, body: init?.body ?? null });
+            stub = stubs.businessWrite;
+            break;
           case "GET /api/v1/admin/pending-counts?include=settlement_returns":
             stubs.pendingCountsCalls += 1;
             return pendingCountsResponse();
           case "GET /health/ready":
             return Response.json({ code: "ok", message: "", data: { ready: true } });
           default:
+            if (method === "GET" && url.pathname === "/api/v1/admin/users") {
+              return Response.json({
+                code: "ok",
+                message: "",
+                data: {
+                  users: [],
+                  pagination: {
+                    page: Number(url.searchParams.get("page")),
+                    page_size: Number(url.searchParams.get("page_size")),
+                    total: 0,
+                  },
+                },
+              });
+            }
             throw new Error(`意外的认证测试请求 ${method} ${path}`);
         }
         const reply = await stub.request(init?.signal ?? undefined);

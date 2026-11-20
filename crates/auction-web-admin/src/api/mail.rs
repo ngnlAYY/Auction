@@ -3,6 +3,8 @@
 //! 立即轮询（`POST /api/v1/admin/mail/polls:trigger`）使用单个 command ID 唤醒全部 Worker
 //! poller，浏览器不推导邮件处理状态。
 
+use std::future::Future;
+
 use auction_contracts::{
     AdminMailDisplayResponse, AdminMailEquipmentDiagnosticResponse,
     AdminMailIntakeMetadataResponse, AdminMailPollTriggerRequest, AdminMailPollTriggerResponse,
@@ -16,14 +18,15 @@ pub(crate) use auction_contracts::{
     AdminMailPollingResponse as AdminMailPolling,
 };
 
-use gloo_net::http::Request;
+use gloo_net::http::Method;
 use serde::Deserialize;
 use uuid::Uuid;
 
+use super::AdminWriteFailure;
+use super::transport::WriteRequest;
 use super::{
-    AdminApiFailure, MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error,
-    parse_admin_time, response_error, response_failure, send_get, valid_admin_time,
-    valid_safe_text, valid_trimmed_text, valid_uuid,
+    MAX_JSON_SAFE_INTEGER, invalid_response_error, parse_admin_time, response_error, send_get,
+    valid_admin_time, valid_safe_text, valid_trimmed_text, valid_uuid,
 };
 
 /// 轮询路径沿用允许扩展字段的旧边界，与 contracts 中闭集的 polling DTO 分开解码。
@@ -129,65 +132,54 @@ pub(crate) async fn set_mail_paused(
     command_id: Uuid,
     polling: AdminMailPolling,
     paused: bool,
-) -> Result<AdminMailPolling, AdminApiFailure> {
-    let csrf_token = super::fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
+) -> Result<AdminMailPolling, AdminWriteFailure> {
     let command = AdminMailPollingRequest {
         command_id,
         mailbox_key: polling.mailbox_key.clone(),
         paused,
         expected_state_version: polling.state_version,
     };
-    let response = super::send_request(|abort_signal| {
-        Request::put("/api/v1/admin/mail/polling")
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
-    .await
-    .map_err(AdminApiFailure::client)?;
-    if !response.ok() {
-        return Err(response_failure(response).await);
-    }
-    let payload: ApiResponse<StrictMailState> = response
-        .json()
-        .await
-        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
-    let updated = decode_mail_state(payload.data)
-        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
-    if updated.mailbox_key != polling.mailbox_key
-        || updated.paused != paused
-        || Some(updated.state_version) != polling.state_version.checked_add(1)
+    let response = WriteRequest::general("/api/v1/admin/mail/polling", Method::PUT)
+        .send_json(&command)
+        .await?;
+    let payload: ApiResponse<StrictMailState> =
+        response.json().await.map_err(AdminWriteFailure::invalid_response)?;
+    validate_mail_polling_receipt(payload, &command)
+}
+
+fn validate_mail_polling_receipt(
+    payload: ApiResponse<StrictMailState>,
+    command: &AdminMailPollingRequest,
+) -> Result<AdminMailPolling, AdminWriteFailure> {
+    let updated = decode_mail_state(payload.data).map_err(AdminWriteFailure::invalid_response)?;
+    if updated.mailbox_key != command.mailbox_key
+        || updated.paused != command.paused
+        || Some(updated.state_version) != command.expected_state_version.checked_add(1)
     {
-        return Err(AdminApiFailure::client("invalid_response"));
+        return Err(AdminWriteFailure::outcome_unknown("invalid_response"));
     }
     Ok(updated)
 }
 
-pub(crate) async fn trigger_mail_poll(command_id: Uuid) -> Result<i64, AdminApiFailure> {
-    let csrf_token = super::fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
+pub(crate) async fn trigger_mail_poll(command_id: Uuid) -> Result<i64, AdminWriteFailure> {
     let command = AdminMailPollTriggerRequest { command_id };
-    let response = super::send_request(|abort_signal| {
-        Request::post("/api/v1/admin/mail/polls:trigger")
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
-    .await
-    .map_err(AdminApiFailure::client)?;
-    if !response.ok() {
-        return Err(response_failure(response).await);
+    let response = WriteRequest::general("/api/v1/admin/mail/polls:trigger", Method::POST)
+        .send_json(&command)
+        .await?;
+    poll_trigger_write_result(response.status(), response.json(), command_id).await
+}
+
+async fn poll_trigger_write_result(
+    status: u16,
+    body: impl Future<Output = Result<ApiResponse<AdminMailPollTriggerResponse>, gloo_net::Error>>,
+    command_id: Uuid,
+) -> Result<i64, AdminWriteFailure> {
+    if status != 202 {
+        return Err(AdminWriteFailure::invalid_response("mail_poll_trigger_status"));
     }
-    if response.status() != 202 {
-        return Err(AdminApiFailure::client(invalid_response_error("mail_poll_trigger_status")));
-    }
-    let payload: ApiResponse<AdminMailPollTriggerResponse> = response
-        .json()
-        .await
-        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
+    let payload = body.await.map_err(AdminWriteFailure::invalid_response)?;
     accepted_pollers(payload, command_id)
-        .ok_or_else(|| AdminApiFailure::client(invalid_response_error("mail_poll_trigger_receipt")))
+        .ok_or_else(|| AdminWriteFailure::invalid_response("mail_poll_trigger_receipt"))
 }
 
 fn accepted_pollers(
@@ -505,11 +497,93 @@ fn valid_metadata_list(values: &[String]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use auction_contracts::{AdminMailPollTriggerResponse, ApiResponse};
-    use serde_json::json;
+    use std::future::{Future, ready};
+    use std::pin::pin;
+    use std::task::{Context, Poll, Waker};
+
+    use auction_contracts::{AdminMailPollTriggerResponse, AdminMailPollingRequest, ApiResponse};
+    use serde_json::{Value, json};
     use uuid::Uuid;
 
-    use super::{AdminMailIntake, accepted_pollers, valid_mail_intake};
+    use super::{
+        AdminMailIntake, accepted_pollers, poll_trigger_write_result, valid_mail_intake,
+        validate_mail_polling_receipt,
+    };
+    use crate::api::{AdminWriteFailure, Rejection};
+
+    #[test]
+    fn poll_trigger_requires_both_accepted_status_and_matching_command_id() {
+        let command_id = Uuid::parse_str("0f8fad5b-d9cb-469f-a165-70867728950e").unwrap();
+        let other_id = Uuid::parse_str("0f8fad5b-d9cb-469f-a165-70867728950f").unwrap();
+        let mut context = Context::from_waker(Waker::noop());
+        for (status, receipt_id, accepted) in
+            [(202, command_id, true), (200, command_id, false), (202, other_id, false)]
+        {
+            let body = format!(
+                r#"{{"code":"accepted","message":"邮件轮询已触发","data":{{"command_id":"{receipt_id}","pollers":3}}}}"#
+            );
+            let decoded = serde_json::from_str(&body).map_err(gloo_net::Error::from);
+            let mut reply = pin!(poll_trigger_write_result(status, ready(decoded), command_id));
+            let Poll::Ready(result) = reply.as_mut().poll(&mut context) else {
+                panic!("回执裁定应完成");
+            };
+            if accepted {
+                assert!(result.is_ok());
+            } else {
+                let failure = result.expect_err("状态或命令 ID 错配时应保留未决");
+                assert_eq!(failure.display_code(), "invalid_response");
+                assert!(matches!(failure.classify(), Rejection::Unknown));
+            }
+        }
+    }
+
+    #[test]
+    fn mail_polling_receipt_must_match_mailbox_next_version_and_target_state() {
+        let mut command = AdminMailPollingRequest {
+            command_id: Uuid::new_v4(),
+            mailbox_key: "mail-a".to_owned(),
+            paused: true,
+            expected_state_version: 1,
+        };
+        let mut wire: Value = serde_json::from_str(include_str!(
+            "../../../auction-contracts/tests/fixtures/admin/mail.json"
+        ))
+        .unwrap();
+        wire["data"]["polling"]["mailbox_key"] = json!("mail-a");
+        wire["data"]["polling"]["state_version"] = json!(2);
+        wire["data"]["polling"]["paused"] = json!(true);
+        let matching =
+            validate_mail_polling_receipt(serde_json::from_value(wire.clone()).unwrap(), &command)
+                .unwrap();
+        assert_eq!(matching.mailbox_key, "mail-a");
+        assert_eq!(matching.state_version, 2);
+        assert!(matching.paused);
+
+        for (field, wrong) in [
+            ("mailbox_key", json!("mail-b")),
+            ("state_version", json!(3)),
+            ("paused", json!(false)),
+        ] {
+            let mut mismatched = wire.clone();
+            mismatched["data"]["polling"][field] = wrong;
+            assert_eq!(
+                validate_mail_polling_receipt(
+                    serde_json::from_value(mismatched).unwrap(),
+                    &command
+                ),
+                Err(AdminWriteFailure::outcome_unknown("invalid_response")),
+                "{field}",
+            );
+        }
+
+        command.paused = false;
+        wire["data"]["polling"]["paused"] = json!(false);
+        assert!(
+            !validate_mail_polling_receipt(serde_json::from_value(wire).unwrap(), &command)
+                .unwrap()
+                .paused
+        );
+    }
 
     #[test]
     fn poll_trigger_uses_the_count_from_the_accepted_receipt() {

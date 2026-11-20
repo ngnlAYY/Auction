@@ -5,13 +5,12 @@ use auction_contracts::{
     RuntimeSwitchIntentDto, RuntimeSwitchListResponse,
 };
 use auction_time::Timestamp;
-use gloo_net::http::Request;
+use gloo_net::http::Method;
 use uuid::Uuid;
 
-use super::{
-    AdminApiFailure, fetch_csrf_token, invalid_request_error, invalid_response_error,
-    response_error, response_failure, send_get, send_request, valid_safe_text,
-};
+use super::AdminWriteFailure;
+use super::transport::WriteRequest;
+use super::{invalid_response_error, response_error, send_get, valid_safe_text};
 
 const KNOWN_SWITCHES: [&str; 7] = [
     "readiness_audit_failure_mode",
@@ -75,17 +74,12 @@ impl ExternalAccessPauseAttempt {
 }
 
 #[cfg(test)]
-type PauseSubmitStub = std::rc::Rc<
-    dyn Fn(&AdminExternalAccessPauseRequest) -> Result<RuntimeSwitchIntentDto, AdminApiFailure>,
->;
+type PauseSubmitStub = std::rc::Rc<dyn Fn(&AdminExternalAccessPauseRequest) -> (u16, String)>;
 
 #[cfg(test)]
 impl ExternalAccessPauseAttempt {
     pub(crate) fn stub_submit(
-        submit: impl Fn(
-            &AdminExternalAccessPauseRequest,
-        ) -> Result<RuntimeSwitchIntentDto, AdminApiFailure>
-        + 'static,
+        submit: impl Fn(&AdminExternalAccessPauseRequest) -> (u16, String) + 'static,
     ) {
         dioxus::prelude::provide_context(std::rc::Rc::new(submit) as PauseSubmitStub);
     }
@@ -94,14 +88,14 @@ impl ExternalAccessPauseAttempt {
 /// 提交外部访问暂停或恢复；只接受与命令一致的已接受事实。
 pub(crate) async fn submit_external_access_pause(
     attempt: &ExternalAccessPauseAttempt,
-) -> Result<RuntimeSwitchIntentDto, AdminApiFailure> {
+) -> Result<RuntimeSwitchIntentDto, AdminWriteFailure> {
     let reason = attempt.reason.trim();
     if attempt.command_id.is_nil()
         || attempt.expected_revision < 0
         || attempt.paused != attempt.expires_at.is_some()
         || !ExternalAccessPauseAttempt::valid_reason(reason)
     {
-        return Err(AdminApiFailure::client("invalid_request"));
+        return Err(AdminWriteFailure::not_sent("invalid_request"));
     }
     let command = AdminExternalAccessPauseRequest {
         command_id: attempt.command_id.to_string(),
@@ -110,43 +104,70 @@ pub(crate) async fn submit_external_access_pause(
         expires_at: attempt.expires_at,
         reason: reason.to_owned(),
     };
+    let request = WriteRequest::general(
+        "/api/v1/admin/runtime-switches/external-access-paused",
+        Method::POST,
+    );
+    let body = send_pause_command(request, &command).await?;
+    validate_pause_intent(decode_pause_receipt(&body, command.paused)?, &command)
+}
+
+async fn send_pause_command(
+    request: WriteRequest<'_>,
+    command: &AdminExternalAccessPauseRequest,
+) -> Result<String, AdminWriteFailure> {
     #[cfg(test)]
     if let Some(submit) = dioxus::prelude::try_consume_context::<PauseSubmitStub>() {
-        return submit(&command);
+        let (status, body) = submit(command);
+        if !(200..300).contains(&status) {
+            return Err(request.decode_stub_failure(status, &body));
+        }
+        return Ok(body);
     }
-    let csrf_token = fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
-    let response = send_request(|abort_signal| {
-        Request::post("/api/v1/admin/runtime-switches/external-access-paused")
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
-    .await
-    .map_err(AdminApiFailure::client)?;
-    if !response.ok() {
-        return Err(response_failure(response).await);
-    }
-    let body = response
-        .text()
-        .await
-        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
-    decode_pause_receipt(&body, attempt.paused)
+    let response = request.send_json(command).await?;
+    response.text().await.map_err(AdminWriteFailure::invalid_response)
 }
 
 fn decode_pause_receipt(
     body: &str,
     paused: bool,
-) -> Result<RuntimeSwitchIntentDto, AdminApiFailure> {
-    let payload: ApiResponse<AdminExternalAccessPauseResponse> = serde_json::from_str(body)
-        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
-    let accepted = payload.data.accepted;
+) -> Result<RuntimeSwitchIntentDto, AdminWriteFailure> {
+    let payload: ApiResponse<AdminExternalAccessPauseResponse> =
+        serde_json::from_str(body).map_err(AdminWriteFailure::invalid_response)?;
+    validate_pause_operation(payload.data.accepted, paused)
+}
+
+fn validate_pause_operation(
+    accepted: RuntimeSwitchIntentDto,
+    paused: bool,
+) -> Result<RuntimeSwitchIntentDto, AdminWriteFailure> {
     let expected_operation = if paused { "set" } else { "clear" };
     if accepted.name != "external_access_paused"
         || accepted.operation.as_deref() != Some(expected_operation)
         || accepted.revision < 1
     {
-        return Err(AdminApiFailure::client(invalid_response_error("external access pause")));
+        return Err(AdminWriteFailure::invalid_response("external access pause"));
+    }
+    Ok(accepted)
+}
+
+fn validate_pause_intent(
+    accepted: RuntimeSwitchIntentDto,
+    command: &AdminExternalAccessPauseRequest,
+) -> Result<RuntimeSwitchIntentDto, AdminWriteFailure> {
+    let value_matches = if command.paused {
+        accepted.value.as_ref().and_then(serde_json::Value::as_bool) == Some(true)
+    } else {
+        accepted.value.is_none()
+    };
+    // 账本返回本次命令接受时的事实，重放也沿用原修订与期限。错配保留未决命令供原样重试。
+    if Some(accepted.revision) != command.expected_revision.checked_add(1)
+        || accepted.expires_at != command.expires_at
+        || !value_matches
+        || accepted.reason.as_deref() != Some(command.reason.as_str())
+        || accepted.entrypoint.as_deref() != Some("admin")
+    {
+        return Err(AdminWriteFailure::invalid_response("external access pause"));
     }
     Ok(accepted)
 }
@@ -173,10 +194,90 @@ mod tests {
         }
     }
     #[test]
+    fn pause_receipt_matches_the_frozen_intent_field_by_field() {
+        use auction_contracts::AdminExternalAccessPauseRequest;
+        use serde_json::json;
+
+        use super::{decode_pause_receipt, validate_pause_intent};
+        use crate::api::AdminWriteFailure;
+
+        let command: AdminExternalAccessPauseRequest = serde_json::from_value(json!({
+            "command_id": "00000000-0000-4000-8000-000000000002",
+            "expected_revision": 7,
+            "paused": true,
+            "expires_at": "2026-11-20T06:00:00Z",
+            "reason": "演练"
+        }))
+        .unwrap();
+        let intent = json!({
+            "name": "external_access_paused", "operation": "set", "revision": 8,
+            "expires_at": "2026-11-20T01:00:00-05:00", "value": true, "reason": "演练",
+            "entrypoint": "admin", "actor_id": "operator"
+        });
+        let submit = |accepted| {
+            let body = json!({"code":"ok","message":"","data":{"accepted":accepted}});
+            validate_pause_intent(
+                decode_pause_receipt(&body.to_string(), command.paused)?,
+                &command,
+            )
+        };
+        let first = submit(intent.clone()).unwrap();
+        assert_eq!(first.revision, 8);
+        assert_eq!(first.expires_at, command.expires_at);
+        for (field, value) in [
+            ("name", json!("metrics_sli_snapshot_enabled")),
+            ("operation", json!("clear")),
+            ("revision", json!(9)),
+            ("expires_at", json!("2026-11-20T06:00:01Z")),
+            ("value", json!(false)),
+            ("reason", json!("另一原因")),
+            ("entrypoint", json!("cli")),
+        ] {
+            let mut invalid = intent.clone();
+            invalid[field] = value;
+            assert!(
+                matches!(
+                    submit(invalid),
+                    Err(AdminWriteFailure::OutcomeUnknown { code, response_status: None })
+                        if code == "invalid_response"
+                ),
+                "{field}"
+            );
+        }
+        assert_eq!(submit(intent).unwrap(), first);
+    }
+
+    #[test]
+    fn resume_receipt_rejects_the_wrong_revision() {
+        use auction_contracts::AdminExternalAccessPauseRequest;
+
+        use super::{decode_pause_receipt, validate_pause_intent};
+        use crate::api::AdminWriteFailure;
+        use crate::api::contract_fixtures::admin_fixture;
+
+        let command = AdminExternalAccessPauseRequest {
+            command_id: "00000000-0000-4000-8000-000000000002".to_owned(),
+            expected_revision: 1,
+            paused: false,
+            expires_at: None,
+            reason: "resume regular polling".to_owned(),
+        };
+        let mut accepted =
+            decode_pause_receipt(admin_fixture!("runtime-switch-command"), false).unwrap();
+        accepted.revision = 3;
+        assert!(matches!(
+            validate_pause_intent(accepted, &command),
+            Err(AdminWriteFailure::OutcomeUnknown { code, response_status: None })
+                if code == "invalid_response"
+        ));
+    }
+
+    #[test]
     fn runtime_switch_read_and_command_contract_fixtures() {
+        use auction_contracts::AdminExternalAccessPauseRequest;
         use serde_json::{Value, json};
 
-        use super::{decode_pause_receipt, decode_runtime_switches};
+        use super::{decode_pause_receipt, decode_runtime_switches, validate_pause_intent};
         use crate::api::contract_fixtures::{admin_fixture, checked};
 
         let body = admin_fixture!("runtime-switches");
@@ -205,6 +306,14 @@ mod tests {
         assert_eq!(accepted.name, "external_access_paused");
         assert_eq!(accepted.operation.as_deref(), Some("clear"));
         assert_eq!(accepted.revision, 2);
+        let resume = AdminExternalAccessPauseRequest {
+            command_id: "00000000-0000-4000-8000-000000000002".to_owned(),
+            expected_revision: 1,
+            paused: false,
+            expires_at: None,
+            reason: "resume regular polling".to_owned(),
+        };
+        assert!(validate_pause_intent(accepted, &resume).is_ok());
         assert!(decode_pause_receipt(body, true).is_err());
         let mut invalid: Value = serde_json::from_str(body).unwrap();
         invalid["data"]["accepted"]["name"] = json!("metrics_sli_snapshot_enabled");

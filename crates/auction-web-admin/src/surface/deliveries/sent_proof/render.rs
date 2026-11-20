@@ -3,12 +3,13 @@
 use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
+use super::super::labels::delivery_reason_error;
 use super::evidence::{latest_send_attempt, selectable_evidence};
 use super::preview::{preview_panel, run_preview, submit_proof};
 use super::state::{
     SentProofDraft, SentProofIssue, SentProofPreviewError, SentProofReview, SentProofSubmission,
 };
-use super::validation::{missing_observed_ids, valid_reason};
+use super::validation::missing_observed_ids;
 use crate::api::DeliveryDetail;
 use crate::surface::admin_world_label;
 
@@ -50,10 +51,12 @@ pub(crate) fn SentProofDialog(
         _ => None,
     };
     let fence = detail.delivery.fencing_version;
+    let reason_error = delivery_reason_error(&current.reason);
+    let reason_invalid = reason_error.is_some();
     let can_confirm = matches!(
         review_state.outcome.as_ref(),
         Some(Ok(proof)) if proof.can_confirm(&detail.delivery.id, fence)
-    ) && valid_reason(&current.reason);
+    ) && !reason_invalid;
 
     let disabled = busy || blocked;
     let confirm_label =
@@ -359,12 +362,17 @@ pub(crate) fn SentProofDialog(
                     rows: "3",
                     required: true,
                     disabled: disabled,
+                    aria_invalid: reason_invalid.to_string(),
+                    aria_describedby: reason_invalid.then_some("delivery-sent-reason-error"),
                     value: current.reason.clone(),
                     oninput: move |event| {
                         let mut next = reason_draft();
                         next.reason = event.value();
                         reason_draft.set(next);
                     },
+                }
+                if let Some(error) = reason_error {
+                    p { id: "delivery-sent-reason-error", class: "action-feedback action-feedback--error", "{error}" }
                 }
                 p { class: "admin-panel__note", {t!("delivery-sent-proof-note")} }
                 div { class: "admin-shell__dialog-actions",

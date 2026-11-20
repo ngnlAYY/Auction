@@ -52,6 +52,8 @@ Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编
 
 生产构建校验最终 HTML 恰有一个模块入口脚本，且 `data-cfasync="false"` 位于 `src` 之前。Public 与 Admin 的入口都必须以 `?url` 引入[共享 SVG](../crates/auction-web-shared/assets/favicon.svg)，产物因此各有一个唯一的 `assets/favicon-<指纹>.svg`；入口 HTML 的图标链接固定为 `/favicon.ico`，生产由后端映射到该文件，开发服务器则由仅对 `serve` 生效的插件提供同样的映射。发布校验要求入口恰好有一个该图标链接、`assets/` 恰好有一个带指纹的 `favicon-*.svg`，两者缺一即失败。
 
+Public 与 Admin 都按路由分块。Admin 的认证外壳、登录页、首次设置页、未决命令宿主、导航和仪表盘随入口交付，登录成功后可直接读取仪表盘数据。入口 HTML 的 `modulepreload` 只声明入口模块的静态依赖。页面分块及其按需依赖在进入对应路由时获取。
+
 ## 文件与命名
 
 - 文件与目录一律小写连字符（`browser-lock.ts`）。有子模块的模块以 `name/index.ts` 为入口，叶子模块是单个 `name.ts`，两者不并存。含 JSX 的文件用 `.tsx`。
@@ -218,6 +220,8 @@ export function Blacklist(): JSX.Element {
 
 需要按字段校验原始词法时，通过 `response.json` 显式传入规则。Public 错误信封的 `code`、`message` 和 `data` 各只能出现一次，标记读取与写回执的 `version` 使用整数词法。
 
+Admin 的 Solid 与 Rust 测试共用[写回执裁定样本](../crates/auction-contracts/tests/fixtures/admin/write-receipt-rejections.json)。修改拒绝码表时同步更新样本。
+
 ## 样式与译文
 
 - 样式文件与类名沿用现有定义：共享设计变量与控制台外壳在 `auction-web-shared` 的 `style/`，各应用的规则在各自的 `assets/`。装配顺序固定为 base → surface → desktop → mobile → console。
@@ -235,7 +239,6 @@ export function Blacklist(): JSX.Element {
   | `web/admin/src/surface/index.tsx`、`surface/auth/redirect.ts` | 直接打开带片段的后台地址（如 `/#dashboard-deliveries-title`），或未登录时打开后完成登录：Solid 版在目标挂载后滚到片段指向的位置，Rust 版保留片段但停在页首。登录回跳的 `return` 地址在 Solid 版会被规范化（去掉尾斜杠与裸 `?`） |
   | `web/admin/src/surface/realtime/filters.tsx` | 无效书签的错误提示里回显原始参数时，未分配码点是否转义取决于浏览器的 Unicode 版本（Rust 版取决于工具链的 Unicode 版本），同一条书签在两版的提示文字可能不同 |
   | Admin 的文本输入 | 输入里未配对的代理项（畸形 UTF-16，键盘输入与正常粘贴不会产生）：Rust 版读入时替换为 U+FFFD，Solid 版原样序列化，请求可能被服务端以 400 拒绝。首次设置表单例外，提交前同样替换 |
-  | `web/admin/src/surface/config/form/fields.tsx`、`surface/config/runtime-switches.tsx` | 运行配置的下拉框（监听方式、排期星期等）与暂停时长下拉框在 Solid 版始终显示当前值。Rust 版首次打开配置页、或取消暂停确认之后，下拉框可能显示第一项而草稿仍是原值——这是 Rust 版的显示缺陷（待修），不是有意差异 |
   | `web/public/src/styles/mobile-topbar.css` | 手机顶栏改为两行应用栏：第一行是当前场次与所在世界，第二行是状态标签与倒计时（放不下时截断）；不显示品牌名，语言与主题移到设置页，顶栏没有任何切换器；菜单与刷新是无边框图标 |
   | `web/public/src/styles/round-pages.css` | 出价记录与履约进度的场次区：场次下拉框就是场次标题；手机上去掉卡片，下拉框与搜索框共两行。历史成交价的主筛选行少了世界一列 |
   | `web/public/src/styles/mobile-catalog-filters.css` | 手机上看板筛选区排成带标签的三行（分组按钮、窄等级输入框与复选项、类型下拉框与列设置）；列设置面板改为整宽多列网格 |
@@ -243,7 +246,7 @@ export function Blacklist(): JSX.Element {
   | `web/public/src/surface/pages/history.tsx` | 往期拍卖没有状态筛选，只列已结算；地址栏里的 `status` 读到后即移除 |
   | `web/public/src/surface/reads/bid-log/`、`reads/fulfillment/` | 场次下拉框并入场次标题（全部世界时按世界分组），页面上方不再有单独的控件行；出价记录的选项只显示期数，状态由旁边的标签给出 |
   | `web/public/src/surface/query/category.ts`、`presentation/desktop.tsx`、`presentation/mobile.tsx` | 装备分类多选：地址栏 `type` 与接口 `category` 是逗号分隔的分类键列表；桌面是可多选的开关按钮，手机是多选下拉面板，面板里的勾选是草稿、关闭面板时一次生效（Rust 版单选） |
-  | `web/shared/src/router/outlet.tsx`、`ui/bootstrap/page-load-recovery.ts` | 目标页面的代码尚未加载时立即卸载上一个页面。页面分块加载失败时，用当前标签页在 `sessionStorage` 保留的最近 8 条路径与时间判断是否重载，路径不含查询与片段。30 秒内已重载过同一路径或存储不可用时显示错误横幅。Rust 版是单个 WASM 包，无需分块恢复 |
+  | `web/shared/src/router/outlet.tsx`、`ui/bootstrap/page-load-recovery.ts`、`web/admin/src/surface/router/page-load.tsx`、`web/public/src/surface/shell/index.tsx` | Public 与 Admin 的 Solid 版在目标页面的代码尚未加载时立即卸载上一个页面。分块加载失败时，用当前标签页在 `sessionStorage` 保留的最近 8 条路径与时间判断是否重载，路径不含查询与片段。30 秒内已重载过同一路径或存储不可用时显示错误横幅。Admin 有在途或结果未知的命令、未关闭的回执（含一次性 Key）、退出在途或退出未确认、运行配置或「规则」「关于」的未保存草稿时，跳过自动重载。会话内仍有运行配置的通用重启提醒时也跳过自动重载。Admin 的失败提示和手动刷新按钮位于页面区，认证外壳与导航继续可用。手动刷新时，有未保存草稿就沿用草稿的原生离开确认；没有草稿但仍有上述任一会话状态时，先弹出确认说明将清除哪些记录，取消则留在当前页。手动刷新不写入自动重载标记。Public 同样在页面区提供恢复入口，自动重载须先检查 [Public 竞价命令恢复](#public-竞价命令恢复) 所述的在途请求、未知结果与回执。Rust 版是单个 WASM 包，无需分块恢复 |
   | `web/public/src/surface/settings.tsx`、`styles/settings-page.css` | 设置页 `/settings`（语言与主题）：Rust 版没有这个页面；入口只在手机导航里，桌面顶栏仍保留两个切换器 |
 - 译文是各应用 `i18n/` 下的五个 `.ftl` 文件（en、zh-CN、zh-TW、ja、ko），键集合一致，键名用连字符。译文只使用 Fluent 的平铺子集：每条消息占一行，写成 `键 = 文本`，文本里的占位只有 `{ $变量 }` 与字符串字面量 `{"…"}` 两种；加载器遇到子集之外的写法会拒绝整份译文。该子集由 `i18n` 门禁的 [`i18n-flat-subset.pl`](../ci/checks/i18n-flat-subset.pl) 静态核对，扩展加载器语法时两边一起改。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang` 与 `hv.theme` 是固定契约。
 
@@ -252,6 +255,9 @@ export function Blacklist(): JSX.Element {
 直接出价、创建代理和降低代理上限沿用 [Rust Public 的竞价命令规则](../crates/auction-web-public/DESIGN.md#竞价代理与标记)。表单只持有未发送的确认草稿。外壳按权威会话确认的用户在内存中持有已发送的请求、冻结目标和回执，同一拍品同时最多有一条未结记录。切换路由或进入登录页不取消请求。同一账号复核期间暂停重试，确认退出或换号时销毁原记录与在途任务。
 
 外壳提示区和拍品弹窗只能原样重试未知命令，或由玩家二次确认后放弃本地记录。刷新或关闭标签页会清除记录。“查看拍品”按冻结的世界及场次定位。命令答复触发权威重读，价格、领先关系和代理状态均由读取投影更新。
+
+页面分块加载失败时，外壳先检查在途请求、未知结果和未确认回执，宿主没有这些记录时才允许写防循环标记并自动重载。保留竞价记录、同路径近期已重载或存储不可写时，错误横幅和手动刷新按钮留在页面区，导航与竞价提示区继续可用。点页内刷新时若仍有这些记录，须确认接受清除本标签页记录后才会重载。防循环标记仅用于自动重载。
+页面处于分块加载失败状态时，页头「立即刷新」也执行同样的确认。
 
 已读取的本人代理授权按场次和拍品保存在同一身份的外壳中。目录或场次暂时读不到时，同一账号回到原目录仍沿用已有的授权判定。确认匿名、退出或换号时销毁旧账号的快照。
 

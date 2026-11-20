@@ -141,6 +141,11 @@ function createStore(userId: string, sessionReady: () => boolean, refresh: Cell<
   return {
     canSubmit,
     command: (lotId: string) => state().pending.get(lotId) ?? null,
+    /** 同步检查重载会清除的未结请求，以及尚未交付或关闭的回执。 */
+    hasRecoveryRecords(): boolean {
+      const { pending, receipts, dialog } = state.peek();
+      return pending.size > 0 || receipts.length > 0 || dialog !== null;
+    },
     unknownCommands: () =>
       [...state().pending.values()]
         .filter(({ status }) => status.kind === "unknown")

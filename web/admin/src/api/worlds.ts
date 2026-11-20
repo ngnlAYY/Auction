@@ -12,11 +12,13 @@ import type { JsonFieldPolicy } from "@auction/web-shared/net/wire";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { parseRustUuid } from "./credentials/decode";
 import {
-  type AdminApiFailure,
-  adminApiFailureClient,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   decodeAdminReceipt,
   invalidResponseError,
   responseError,
+  writeNotSent,
+  writeOutcomeUnknown,
 } from "./failure";
 import type { AdminSessionHost } from "./session";
 import {
@@ -90,7 +92,7 @@ export function prepareAdminBusinessWorldSetEnabledOnce(
   worldId: string,
   enabled: boolean,
   expectedPolicyRevision: number,
-): (commandId: string) => Result<PreparedAdminBusinessWorldSetEnabled, AdminApiFailure> {
+): (commandId: string) => Result<PreparedAdminBusinessWorldSetEnabled, AdminWriteNotSent> {
   const prepare = prepareJsonCommandOnce((commandId) => {
     const command: AdminWorldSetEnabledRequest = {
       command_id: commandId,
@@ -109,7 +111,7 @@ export function prepareAdminBusinessWorldSetEnabledOnce(
       expectedPolicyRevision <= 0 ||
       expectedPolicyRevision > MAX_JSON_SAFE_INTEGER
     ) {
-      return err(adminApiFailureClient("invalid_request"));
+      return err(writeNotSent("invalid_request"));
     }
     const prepared = prepare(canonicalCommandId);
     if (!prepared.ok) {
@@ -131,12 +133,11 @@ export async function setAdminBusinessWorldEnabled(
   host: AdminSessionHost,
   prepared: PreparedAdminBusinessWorldSetEnabled,
   signal: AbortSignal,
-): Promise<Result<AdminBusinessWorld, AdminApiFailure>> {
+): Promise<Result<AdminBusinessWorld, AdminWriteFailure>> {
   const expected = prepared.expectedPolicyRevision;
   const response = await sendPreparedJsonWrite(
     host,
-    `/api/v1/admin/worlds/${prepared.worldId}`,
-    "PATCH",
+    { url: `/api/v1/admin/worlds/${prepared.worldId}`, method: "PATCH", endpoint: "general" },
     prepared.body,
     signal,
   );
@@ -149,11 +150,11 @@ export async function setAdminBusinessWorldEnabled(
     ADMIN_WORLD_SET_ENABLED_RESPONSE_FIELD_POLICY,
   );
   if (!payload.ok) {
-    return err(adminApiFailureClient(payload.error));
+    return err(writeOutcomeUnknown(payload.error));
   }
   const decoded = decodeWorld(payload.value.data.world);
   if (!decoded.ok) {
-    return err(adminApiFailureClient(invalidResponseError(decoded.error)));
+    return err(writeOutcomeUnknown(invalidResponseError(decoded.error)));
   }
   const world = decoded.value;
   // Rust 的 `i64::saturating_add(1)` 只可能多推进一版；期望值已是 JSON 安全上限时
@@ -165,7 +166,7 @@ export async function setAdminBusinessWorldEnabled(
     world.enabled !== prepared.enabled ||
     (world.policyRevision !== expected && world.policyRevision !== nextRevision)
   ) {
-    return err(adminApiFailureClient("invalid_response"));
+    return err(writeOutcomeUnknown("invalid_response"));
   }
   return ok(world);
 }

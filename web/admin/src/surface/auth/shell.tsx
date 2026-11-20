@@ -26,6 +26,7 @@ import { fetchAdminPendingCounts } from "../../api/alerts";
 import {
   type AdminSession,
   type AdminSessionHost,
+  type AdminSessionWriteReview,
   registerAdminSessionHost,
 } from "../../api/session";
 import type { AdminReadinessState } from "../../api/status";
@@ -35,6 +36,7 @@ import { PendingCommandHostContext, usePendingCommandHost } from "../pending";
 import { PendingCommandNotices } from "../pending/panel";
 import { adminApiErrorMessage } from "../presentation";
 import { ADMIN_PAGES, NotFoundPage } from "../router";
+import { AdminPageLoadFailure } from "../router/page-load";
 import { DocumentDraftsContext, useRulesDraft } from "../rules/model";
 import { LOGOUT_BUTTON_CLASS } from "./activity";
 import { AdminReadinessStatus } from "./login";
@@ -54,14 +56,37 @@ export function useAdminSessionHost(): AdminSessionHost {
   return host;
 }
 
+interface LogoutRecoveryProps {
+  readonly busy: boolean;
+  readonly onContinue: () => void;
+  readonly onStay: () => void;
+}
+
+/** 只读退出复核期间可用的两个明确选择。 */
+export function LogoutRecovery(props: LogoutRecoveryProps): JSX.Element {
+  return (
+    <div class="admin-shell__banner">
+      <p role="alert">{t("admin-logout-unconfirmed")}</p>
+      <button type="button" disabled={props.busy} onClick={() => props.onContinue()}>
+        {t("admin-logout-continue")}
+      </button>
+      <button type="button" disabled={props.busy} onClick={() => props.onStay()}>
+        {t("admin-logout-stay")}
+      </button>
+    </div>
+  );
+}
+
 /** 已认证的外壳；会话代际变化由父组件重挂载本组件，草稿随旧外壳一起销毁。 */
 export function AdminAuthenticatedShell(props: {
   readonly session: AdminSession;
+  readonly writeReview?: AdminSessionWriteReview;
   readonly readiness: AdminReadinessState;
   readonly readinessRefresh: Cell<number>;
   readonly sessionConfirmed: boolean;
   readonly redirecting: boolean;
   readonly loggingOut: boolean;
+  readonly logoutRecovery?: LogoutRecoveryProps | null;
   readonly logoutError: string | null;
   readonly onLogout: () => void;
   readonly onRecheck: () => void;
@@ -73,10 +98,12 @@ export function AdminAuthenticatedShell(props: {
   });
   // 写许可在渲染的跟踪上下文里读取 props，命令按钮才能随同代会话复核恢复；
   // 命令发出前仍由传输层或未决宿主同步再读一次。
+  const writeReview = untrack(() => props.writeReview);
   const registration = registerAdminSessionHost({
     check: () => props.onRecheck(),
     writesAllowed: () => alive && props.sessionConfirmed,
     confirmed: () => (alive ? props.session : null),
+    ...(writeReview === undefined ? {} : { writeReview }),
   });
   // 句柄随本次已认证外壳登记；未决命令宿主持有同一句柄并通过既有 Context 交给子树。
   // 旧代际的命令只能核对旧句柄，不能借用父组件后来登记的会话。
@@ -92,6 +119,22 @@ export function AdminAuthenticatedShell(props: {
   const sidebarCollapsed = createCell(loadSidebarCollapsed());
   const navigationToggle = createCell<HTMLButtonElement | null>(null);
   const router = useRouter();
+  const failedPage = createCell<RouteMatch | null>(null);
+  const currentPageLoadFailure = () => {
+    const failure = failedPage();
+    return !props.redirecting && failure === router.current() ? failure : null;
+  };
+  // 整页重载会释放本会话持有的请求、回执（包括一次性 Key）和草稿。
+  // 退出结果未确认时也保留当前文档，让原会话继续跟踪退出并保持写门禁关闭。
+  // 保存后即使草稿干净，重新读取配置也无法恢复本会话的通用重启提醒。
+  const hasReloadRisk = () =>
+    props.loggingOut ||
+    Boolean(props.logoutRecovery) ||
+    commandHost.entries.peek().length > 0 ||
+    commandHost.notices.peek().length > 0 ||
+    configDraft.restartRequired.peek();
+  const hasDirtyDraft = () =>
+    configDraft.dirty() || rulesDraft.rules.dirty() || rulesDraft.about.dirty();
   // 路由身份与 Rust `Route` 一样不含查询；仅查询变化不收起手机导航，也不刷新侧栏待办数。
   const currentRoute = createValueMemo(() => withoutRouteQuery(router.current()));
   const settlementRoute = (): boolean => {
@@ -151,14 +194,16 @@ export function AdminAuthenticatedShell(props: {
                         darkLabel={t("theme-dark")}
                         lightLabel={t("theme-light")}
                       />
-                      <button
-                        class={LOGOUT_BUTTON_CLASS}
-                        type="button"
-                        disabled={props.loggingOut}
-                        onClick={() => props.onLogout()}
-                      >
-                        {t("admin-logout")}
-                      </button>
+                      <Show when={!props.logoutRecovery}>
+                        <button
+                          class={LOGOUT_BUTTON_CLASS}
+                          type="button"
+                          disabled={props.loggingOut}
+                          onClick={() => props.onLogout()}
+                        >
+                          {t("admin-logout")}
+                        </button>
+                      </Show>
                     </div>
                   </header>
                   <Show when={props.logoutError !== null}>
@@ -166,7 +211,18 @@ export function AdminAuthenticatedShell(props: {
                       {adminApiErrorMessage(props.logoutError ?? "")}
                     </p>
                   </Show>
-                  <Show when={!props.loggingOut && !props.sessionConfirmed}>
+                  <Show when={props.logoutRecovery}>
+                    {(recovery) => (
+                      <LogoutRecovery
+                        busy={recovery().busy}
+                        onContinue={() => recovery().onContinue()}
+                        onStay={() => recovery().onStay()}
+                      />
+                    )}
+                  </Show>
+                  <Show
+                    when={!props.logoutRecovery && !props.loggingOut && !props.sessionConfirmed}
+                  >
                     <p class="admin-shell__banner" role="alert">
                       {t("admin-session-recheck-blocked")}
                       <button type="button" onClick={() => props.onRecheck()}>
@@ -215,9 +271,29 @@ export function AdminAuthenticatedShell(props: {
                       tabindex="-1"
                     >
                       <PendingCommandNotices host={commandHost} />
+                      <Show when={currentPageLoadFailure()} keyed>
+                        {(failure) => (
+                          <AdminPageLoadFailure
+                            isCurrent={() => alive && currentPageLoadFailure() === failure}
+                            canAutoReload={() => !hasReloadRisk() && !hasDirtyDraft()}
+                            confirmManualReload={() => hasReloadRisk() && !hasDirtyDraft()}
+                          />
+                        )}
+                      </Show>
                       <fieldset disabled={!props.sessionConfirmed} style="display: contents;">
                         <Show when={!props.redirecting}>
-                          <RouteOutlet pages={ADMIN_PAGES} notFound={<NotFoundPage />} />
+                          <RouteOutlet
+                            pages={ADMIN_PAGES}
+                            notFound={<NotFoundPage />}
+                            onLoadError={() => {
+                              const route = router.current();
+                              if (route.kind === "matched") {
+                                console.warn("管理后台页面分块加载失败", { route: route.name });
+                              }
+                              failedPage.set(route);
+                              router.restoreScrollAfterCommit();
+                            }}
+                          />
                         </Show>
                       </fieldset>
                     </main>

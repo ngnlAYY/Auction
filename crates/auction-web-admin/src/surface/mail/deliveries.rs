@@ -1,5 +1,7 @@
 //! 收件关联投递的安全展示与手动重排；原邮件处理结果和外部完成证明仍由后端拥有。
 
+use std::collections::BTreeMap;
+
 use auction_contracts::{AdminDeliveryActionBlocker, AdminDeliveryActionsResponse};
 use auction_web_shared::{TableColumns, TruncatedText, t};
 use dioxus::prelude::*;
@@ -15,17 +17,19 @@ use crate::api::{
 };
 use crate::surface::AdminActionFeedback;
 use crate::surface::pagination::{AdminPager as Pager, use_admin_pagination};
-use crate::surface::pending::{
-    CommandDelivery, CommandReceipt, PendingCommands, set_if_alive, try_set_if_alive,
-};
+use crate::surface::pending::{CommandDelivery, CommandReceipt, PendingCommands};
 
 const DIALOG_ID: &str = "mail-delivery-action-dialog";
 
+/// 投递 ID 对应的重排反馈及来源邮件 ID。
+pub(super) type MailDeliveryNotices = BTreeMap<String, (String, AdminActionFeedback)>;
+
+/// 当前收件的关联投递、重排入口与确认框。
 #[component]
 pub(super) fn MailDeliveriesPanel(
     intake_id: String,
     deliveries: Vec<AdminMailIntakeDelivery>,
-    mut notice: Signal<Option<(String, AdminActionFeedback)>>,
+    mut notices: Signal<MailDeliveryNotices>,
     refresh: Signal<u64>,
 ) -> Element {
     let mut page = use_signal(|| 1_i64);
@@ -50,13 +54,21 @@ pub(super) fn MailDeliveriesPanel(
             }
             let success_intake_id = confirm_intake_id.clone();
             let failure_intake_id = confirm_intake_id.clone();
-            notice.set(None);
+            let success_delivery_id = delivery.id.clone();
+            let failure_delivery_id = delivery.id.clone();
+            notices.write().remove(&delivery.id);
+            // 未决命令持有提交时的投递身份和版本，重试不读取当前详情。
             let submitted = commands.submit_with_receipt(
                 delivery_command_entity(&delivery.id),
                 retry_label(&operation),
                 move |command_id| {
                     let delivery_id = delivery.id.clone();
                     async move {
+                        #[cfg(test)]
+                        if let Some(replies) = try_consume_context::<tests::LinkedDeliveryReplies>()
+                        {
+                            return replies.fetch().await;
+                        }
                         execute_delivery(
                             command_id,
                             delivery_id,
@@ -66,16 +78,18 @@ pub(super) fn MailDeliveriesPanel(
                             None,
                         )
                         .await
-                        .map_err(|error| error.code)
                     }
                 },
                 move |_, source_alive| {
-                    let delivered = source_alive
-                        && pending.try_peek().is_ok()
-                        && try_set_if_alive(
-                            notice,
-                            Some((success_intake_id.clone(), AdminActionFeedback::Success)),
+                    // 邮件页仍存活时，成功回执覆盖同一投递的旧错误，即使原面板已卸载。
+                    let notice_updated = source_alive
+                        && set_delivery_notice(
+                            notices,
+                            &success_delivery_id,
+                            &success_intake_id,
+                            AdminActionFeedback::Success,
                         );
+                    let delivered = notice_updated && pending.try_peek().is_ok();
                     CommandDelivery::reported(delivered, || {
                         Some(CommandReceipt::Text(t!("admin-mail-delivery-requeued")))
                     })
@@ -90,9 +104,11 @@ pub(super) fn MailDeliveriesPanel(
                         let mut refresh = refresh;
                         refresh.set(refresh().saturating_add(1));
                     }
-                    set_if_alive(
-                        notice,
-                        Some((failure_intake_id.clone(), AdminActionFeedback::Error(code))),
+                    set_delivery_notice(
+                        notices,
+                        &failure_delivery_id,
+                        &failure_intake_id,
+                        AdminActionFeedback::Error(code),
                     );
                 },
             );
@@ -136,7 +152,7 @@ pub(super) fn MailDeliveriesPanel(
                                 delivery,
                                 on_retry: move |delivery: AdminMailIntakeDelivery| {
                                     if !busy() && !commands.contains(&delivery_command_entity(&delivery.id)) {
-                                        notice.set(None);
+                                        notices.write().remove(&delivery.id);
                                         pending.set(Some(delivery));
                                     }
                                 },
@@ -166,6 +182,20 @@ pub(super) fn MailDeliveriesPanel(
                 }
             }
         }
+    }
+}
+
+fn set_delivery_notice(
+    mut notices: Signal<MailDeliveryNotices>,
+    delivery_id: &str,
+    intake_id: &str,
+    feedback: AdminActionFeedback,
+) -> bool {
+    if let Ok(mut notices) = notices.try_write() {
+        notices.insert(delivery_id.to_owned(), (intake_id.to_owned(), feedback));
+        true
+    } else {
+        false
     }
 }
 
@@ -296,12 +326,33 @@ fn retry_label(operation: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+
     use auction_contracts::{
         AdminDeliveryActionAvailability, AdminDeliveryActionBlocker, AdminDeliveryActionsResponse,
+        AdminDeliveryDetailWithActionsResponse,
     };
+    use dioxus::prelude::*;
+    use gloo_net::http::Method;
+    use serde_json::{Value, json};
 
-    use super::retry_action;
-    use crate::api::DeliveryAction;
+    use super::{MailDeliveriesPanel, MailDeliveryNotices, retry_action};
+    use crate::api::{
+        AdminApiFailure, AdminMailIntakeDelivery, AdminWriteEndpoint, AdminWriteFailure, Delivery,
+        DeliveryAction, DeliveryDetailGetFixture,
+    };
+    use crate::surface::AdminActionFeedback;
+    use crate::surface::auctions::draft_page_tests::{
+        RecordRead, button, click_button, command_button, has_live_text, init_i18n, mount_writer,
+        settle_writer,
+    };
+    use crate::surface::deliveries::labels::action_feedback_message;
+    use crate::surface::pending::{
+        PendingCommandHost, PendingCommandNotices, PendingCommandPanel, use_pending_commands,
+    };
+    use crate::surface::realtime::text_attributes;
+
+    pub(super) type LinkedDeliveryReplies = Rc<RecordRead<Delivery, AdminWriteFailure>>;
 
     #[test]
     fn linked_mail_uses_the_fence_decision_for_retry() {
@@ -324,5 +375,206 @@ mod tests {
             retry_action(actions),
             Err(AdminDeliveryActionBlocker::SettlementReturnActionOwned)
         );
+    }
+
+    #[test]
+    fn linked_mail_retry_delivers_success_after_the_original_panel_unmounts() {
+        const A: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        const B: &str = "00000000-0000-4000-8000-000000000031";
+        const INTAKE_A: &str = "00000000-0000-4000-8000-000000000022";
+        const INTAKE_B: &str = "00000000-0000-4000-8000-000000000021";
+        const SUCCESS: &str = "已重新排队，等待后台执行；这不表示邮件已发送、退回或领取成功。";
+        const TIMEOUT: &str = "请求超时，服务端结果可能尚未返回。表单内容已保留，请在当前页面再次提交；相同命令不会重复录入。";
+        const STALE: &str =
+            "投递状态或证据已变化，请核对最新详情后重试。提交 Sent 证明时请重新选择证据。";
+        let [mut wire, _, _]: [Value; 3] = serde_json::from_str(include_str!(
+            "../../../../auction-contracts/tests/fixtures/admin/delivery-sent-proof-detail.json"
+        ))
+        .unwrap();
+        wire["data"]["actions"]["reconcile_retry"] = json!({"state":"eligible"});
+        let projection: AdminDeliveryDetailWithActionsResponse =
+            serde_json::from_value(wire["data"].take()).unwrap();
+        let success_a = Delivery {
+            id: A.to_owned(),
+            fencing_version: 5,
+            status: "queued".to_owned(),
+            ..projection.detail.delivery.clone()
+        };
+        let replies: LinkedDeliveryReplies = Rc::new(RecordRead::new());
+        let (mut dom, _) = mount_writer({
+            let replies = replies.clone();
+            move || {
+                init_i18n();
+                use_context_provider(|| replies.clone());
+                use_context_provider(|| {
+                    let projection = projection.clone();
+                    let get: DeliveryDetailGetFixture = Rc::new(move |url| {
+                        let mut detail = projection.clone();
+                        if url == format!("/api/v1/admin/deliveries/{B}?include=sent_proof") {
+                            detail.detail.delivery.id = B.to_owned();
+                        } else {
+                            assert_eq!(
+                                url,
+                                format!("/api/v1/admin/deliveries/{A}?include=sent_proof")
+                            );
+                        }
+                        detail
+                    });
+                    get
+                });
+                let notices = use_signal(MailDeliveryNotices::new);
+                let refresh = use_signal(|| 0);
+                use_pending_commands(refresh, |_| false);
+                let host = use_context::<PendingCommandHost>();
+                let mut active = use_signal(|| A);
+                let intake = if active() == A { INTAKE_A } else { INTAKE_B };
+                let delivery = AdminMailIntakeDelivery {
+                    id: active().to_owned(),
+                    operation: "send".to_owned(),
+                    recipient: "Sample".to_owned(),
+                    status: "manual_reconcile".to_owned(),
+                    fencing_version: 4,
+                    attempt_count: 1,
+                    failure_code: Some("write_unknown".to_owned()),
+                    reason_code: None,
+                    external_reference: None,
+                };
+                let notice = notices.read().get(active()).filter(|(owner, _)| owner == intake).map(
+                    |(_, feedback)| {
+                        let message = action_feedback_message(feedback, SUCCESS.to_owned());
+                        format!("{} · {message}", active())
+                    },
+                );
+                rsx! {
+                    PendingCommandNotices { host }
+                    button { onclick: move |_| active.set(if active() == A { B } else { A }), {"切换关联投递".to_owned()} }
+                    for id in [active()] {
+                        MailDeliveriesPanel { key: "{id}", intake_id: intake.to_owned(), deliveries: vec![delivery.clone()], notices, refresh }
+                    }
+                    if let Some(notice) = notice {
+                        p { "{notice}" }
+                    }
+                }
+            }
+        });
+        click_button(&mut dom, "查看处置");
+        settle_writer(&mut dom);
+        click_button(&mut dom, "确认");
+        assert_eq!(replies.started(), 1);
+        replies.respond(Err(AdminWriteFailure::outcome_unknown("request_timeout")));
+        let edits = settle_writer(&mut dom);
+        let command_id =
+            text_attributes(&edits, "data-command-id").next().unwrap().1.parse().unwrap();
+        assert!(has_live_text(&dom, &format!("{A} · {TIMEOUT}")));
+        assert!(button(&dom, "关闭回执").is_none());
+
+        click_button(&mut dom, "切换关联投递");
+        click_button(&mut dom, "查看处置");
+        settle_writer(&mut dom);
+        click_button(&mut dom, "确认");
+        replies.respond(Err(AdminWriteFailure::from_test_http(
+            AdminWriteEndpoint::General,
+            409,
+            r#"{"code":"stale_delivery_state","message":"投递状态已变化","data":null,"request_id":null}"#,
+        )));
+        settle_writer(&mut dom);
+        let notice_b = format!("{B} · {STALE}");
+        assert!(has_live_text(&dom, &notice_b));
+        assert!(button(&dom, "关闭回执").is_none());
+
+        let (retry, disabled) = command_button(&dom, command_id, "原样重试").unwrap();
+        assert!(!disabled);
+        dom.dispatch("click", retry, "");
+        assert_eq!(replies.started(), 3);
+        replies.respond(Ok(success_a));
+        settle_writer(&mut dom);
+        assert!(has_live_text(&dom, &notice_b), "A 重试成功后 B 的错误提示应保留");
+        assert!(has_live_text(&dom, SUCCESS));
+        assert!(button(&dom, "原样重试").is_none());
+        click_button(&mut dom, "关闭回执");
+        assert!(button(&dom, "关闭回执").is_none());
+        assert!(!has_live_text(&dom, SUCCESS));
+
+        click_button(&mut dom, "切换关联投递");
+        assert!(has_live_text(&dom, &format!("{A} · {SUCCESS}")));
+        assert!(!has_live_text(&dom, &format!("{A} · {TIMEOUT}")));
+    }
+
+    #[test]
+    fn linked_mail_failure_tracks_the_original_delivery_after_panel_unmount() {
+        const ID: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        const INTAKE_ID: &str = "00000000-0000-4000-8000-000000000022";
+        const PATH: &str =
+            "/api/v1/admin/deliveries/0f8fad5b-d9cb-469f-a165-70867728950e/reconcile";
+        let [mut wire, _, _]: [Value; 3] = serde_json::from_str(include_str!(
+            "../../../../auction-contracts/tests/fixtures/admin/delivery-sent-proof-detail.json"
+        ))
+        .unwrap();
+        wire["data"]["actions"]["reconcile_retry"] = json!({"state":"eligible"});
+        let read: AdminDeliveryDetailWithActionsResponse =
+            serde_json::from_value(wire["data"].take()).unwrap();
+        let delivery = AdminMailIntakeDelivery {
+            id: ID.to_owned(),
+            operation: "send".to_owned(),
+            recipient: "Sample".to_owned(),
+            status: "manual_reconcile".to_owned(),
+            fencing_version: 4,
+            attempt_count: 1,
+            failure_code: Some("write_unknown".to_owned()),
+            reason_code: None,
+            external_reference: None,
+        };
+        let (mut dom, _) = mount_writer(move || {
+            init_i18n();
+            use_context_provider(|| {
+                let read = read.clone();
+                let get: DeliveryDetailGetFixture = Rc::new(move |url| {
+                    assert_eq!(url, format!("/api/v1/admin/deliveries/{ID}?include=sent_proof"));
+                    read.clone()
+                });
+                get
+            });
+            let notices = use_signal(MailDeliveryNotices::new);
+            let refresh = use_signal(|| 0);
+            let owner = use_pending_commands(refresh, |_| false);
+            let mut showing = use_signal(|| true);
+            let (status, body) = if showing() {
+                (
+                    503,
+                    r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+                )
+            } else {
+                (502, "{")
+            };
+            AdminApiFailure::stub_write_response(PATH, Method::POST, status, body);
+            let notice = notices.read().get(ID).and_then(|(intake, feedback)| match feedback {
+                AdminActionFeedback::Error(code) => Some(format!("{intake} · {ID} · {code}")),
+                AdminActionFeedback::Success => None,
+            });
+            rsx! {
+                PendingCommandPanel { owner }
+                button { onclick: move |_| showing.set(!showing()), {"切换关联投递".to_owned()} }
+                if showing() {
+                    MailDeliveriesPanel { intake_id: INTAKE_ID.to_owned(), deliveries: vec![delivery.clone()], notices, refresh }
+                    if let Some(notice) = notice {
+                        p { "{notice}" }
+                    }
+                }
+            }
+        });
+        click_button(&mut dom, "查看处置");
+        settle_writer(&mut dom);
+        click_button(&mut dom, "确认");
+        settle_writer(&mut dom);
+        let notice = format!("{INTAKE_ID} · {ID} · storage_unavailable");
+        assert!(has_live_text(&dom, &notice));
+        click_button(&mut dom, "切换关联投递");
+        assert!(!has_live_text(&dom, &notice));
+        click_button(&mut dom, "原样重试");
+        settle_writer(&mut dom);
+        assert!(button(&dom, "原样重试").is_some());
+        click_button(&mut dom, "切换关联投递");
+        assert!(!has_live_text(&dom, &notice));
+        assert!(has_live_text(&dom, &format!("{INTAKE_ID} · {ID} · http_502")));
     }
 }

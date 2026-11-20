@@ -7,16 +7,17 @@ use auction_contracts::{
     AdminUserBlacklistRequest, AdminUserCreateRequest, AdminUserMutationRequest,
     AdminUserPaginationResponse, AdminUserResponse, AdminUserUnblacklistRequest, ApiResponse,
 };
-use gloo_net::http::{Method, Request};
+use gloo_net::http::Method;
 use serde::Deserialize;
 use uuid::Uuid;
 
+use super::AdminWriteFailure;
 use super::failure::AdminWriteEndpoint;
-use super::transport::send_json_write;
+use super::transport::AdminResponse;
+use super::transport::WriteRequest;
 use super::{
     MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error, parse_admin_time,
-    response_error, response_failure, send_get, send_request, valid_admin_time, valid_safe_text,
-    valid_uuid,
+    response_error, send_get, valid_admin_time, valid_safe_text, valid_uuid,
 };
 
 // 保留镜像的理由：contracts 的 `AdminUserResponse` 被 `AdminUserListItemResponse` 以
@@ -215,8 +216,7 @@ pub(crate) async fn create_admin_user(
     forum_account_id: Option<String>,
     key_mode: &'static str,
     key: Option<String>,
-) -> Result<AdminUserMutationResult, String> {
-    let csrf_token = super::fetch_csrf_token().await?;
+) -> Result<AdminUserMutationResult, AdminWriteFailure> {
     let command = AdminUserCreateRequest {
         command_id: command_id.to_string(),
         username,
@@ -224,18 +224,26 @@ pub(crate) async fn create_admin_user(
         key_mode: key_mode.to_owned(),
         key,
     };
-    let response = send_request(|abort_signal| {
-        Request::post("/api/v1/admin/users")
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
-    .await?;
-    if !response.ok() {
-        return Err(response_error(response).await);
+    let response =
+        WriteRequest::general("/api/v1/admin/users", Method::POST).send_json(&command).await?;
+    let result = decode_user_mutation(response, key_mode == "generated").await?;
+    validate_user_create_receipt(&command, result)
+}
+
+fn validate_user_create_receipt(
+    command: &AdminUserCreateRequest,
+    result: AdminUserMutationResult,
+) -> Result<AdminUserMutationResult, AdminWriteFailure> {
+    // 创建没有预知的用户 ID；核对冻结表单和初始投影后才可交付 Key。
+    if result.user.username != command.username
+        || result.user.forum_account_id != command.forum_account_id
+        || result.user.status != "active"
+        || result.user.key_status != "active"
+        || result.user.state_version != 1
+    {
+        return Err(AdminWriteFailure::invalid_response("user_create_receipt"));
     }
-    decode_user_mutation(response, key_mode == "generated").await
+    Ok(result)
 }
 
 /// 修改用户名、论坛账号 ID 或登录 key 状态。
@@ -245,8 +253,9 @@ pub(crate) async fn mutate_admin_user(
     action: &'static str,
     username: Option<String>,
     forum_account_id: Option<String>,
-) -> Result<AdminUserMutationResult, String> {
-    let user_id = Uuid::parse_str(&user.id).map_err(|_| "invalid_request".to_owned())?;
+) -> Result<AdminUserMutationResult, AdminWriteFailure> {
+    let user_id = Uuid::parse_str(&user.id)
+        .map_err(|error| AdminWriteFailure::not_sent(invalid_request_error(error)))?;
     let command = AdminUserMutationRequest {
         command_id: command_id.to_string(),
         user_id: user_id.to_string(),
@@ -255,10 +264,32 @@ pub(crate) async fn mutate_admin_user(
         username,
         forum_account_id,
     };
-    let response = send_json_write("/api/v1/admin/users", Method::PATCH, &command)
-        .await
-        .map_err(|failure| failure.at_write_endpoint(AdminWriteEndpoint::UserMutation).code)?;
-    decode_user_mutation(response, action == "reissue_key").await
+    #[cfg(test)]
+    if let Some(respond) = dioxus::prelude::try_consume_context::<tests::UserMutationResponseStub>()
+    {
+        return decode_user_mutation_body(respond(&command), action == "reissue_key");
+    }
+    let response =
+        WriteRequest::new("/api/v1/admin/users", Method::PATCH, AdminWriteEndpoint::UserMutation)
+            .send_json(&command)
+            .await?;
+    let result = decode_user_mutation(response, action == "reissue_key").await?;
+    let user = &result.user;
+    let matches_action = match action {
+        "rename" => command.username.as_deref() == Some(user.username.as_str()),
+        "set_forum_account_id" => {
+            command.forum_account_id.is_some() && user.forum_account_id == command.forum_account_id
+        }
+        "revoke_key" => user.key_status == "revoked",
+        "reissue_key" => user.key_status == "active",
+        _ => false,
+    };
+    if !matches_action
+        || !matches_user_mutation_target(user, &command.user_id, command.expected_state_version)
+    {
+        return Err(AdminWriteFailure::invalid_response("user_mutation_receipt"));
+    }
+    Ok(result)
 }
 
 /// 将用户加入黑名单。
@@ -266,59 +297,62 @@ pub(crate) async fn blacklist_admin_user(
     command_id: Uuid,
     user: &AdminUser,
     public_reason: String,
-) -> Result<AdminUser, String> {
-    let user_id = Uuid::parse_str(&user.id).map_err(|_| "invalid_request".to_owned())?;
-    let csrf_token = super::fetch_csrf_token().await?;
+) -> Result<AdminUser, AdminWriteFailure> {
+    let user_id = Uuid::parse_str(&user.id)
+        .map_err(|error| AdminWriteFailure::not_sent(invalid_request_error(error)))?
+        .to_string();
     let url = format!("/api/v1/admin/users/{user_id}/blacklist");
     let command = AdminUserBlacklistRequest {
         command_id: command_id.to_string(),
         expected_state_version: user.state_version,
         public_reason,
     };
-    let response = send_request(|abort_signal| {
-        Request::put(&url)
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
-    .await?;
-    if !response.ok() {
-        return Err(response_failure(response)
-            .await
-            .at_write_endpoint(AdminWriteEndpoint::UserMutation)
-            .code);
+    let response = WriteRequest::new(&url, Method::PUT, AdminWriteEndpoint::UserMutation)
+        .send_json(&command)
+        .await?;
+    let user = decode_user_mutation(response, false).await?.user;
+    if user.status != "blacklisted"
+        || !matches_user_mutation_target(&user, &user_id, command.expected_state_version)
+    {
+        return Err(AdminWriteFailure::invalid_response("user_blacklist_receipt"));
     }
-    decode_user_mutation(response, false).await.map(|result| result.user)
+    Ok(user)
 }
 
 /// 将用户移出黑名单。
 pub(crate) async fn unblacklist_admin_user(
     command_id: Uuid,
     user: &AdminUser,
-) -> Result<AdminUser, String> {
-    let user_id = Uuid::parse_str(&user.id).map_err(|_| "invalid_request".to_owned())?;
-    let csrf_token = super::fetch_csrf_token().await?;
+) -> Result<AdminUser, AdminWriteFailure> {
+    let user_id = Uuid::parse_str(&user.id)
+        .map_err(|error| AdminWriteFailure::not_sent(invalid_request_error(error)))?
+        .to_string();
     let url = format!("/api/v1/admin/users/{user_id}/blacklist");
     let command = AdminUserUnblacklistRequest {
         command_id: command_id.to_string(),
         expected_state_version: user.state_version,
     };
-    let response = send_request(|abort_signal| {
-        Request::delete(&url)
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
-    .await?;
-    if !response.ok() {
-        return Err(response_failure(response)
-            .await
-            .at_write_endpoint(AdminWriteEndpoint::UserMutation)
-            .code);
+    let response = WriteRequest::new(&url, Method::DELETE, AdminWriteEndpoint::UserMutation)
+        .send_json(&command)
+        .await?;
+    let user = decode_user_mutation(response, false).await?.user;
+    if user.status != "active"
+        || !matches_user_mutation_target(&user, &user_id, command.expected_state_version)
+    {
+        return Err(AdminWriteFailure::invalid_response("user_unblacklist_receipt"));
     }
-    decode_user_mutation(response, false).await.map(|result| result.user)
+    Ok(user)
+}
+
+/// 写回执只可确认提交时冻结的用户与紧邻版本；错配时保留命令供原样重试。
+pub(super) fn matches_user_mutation_target(
+    user: &AdminUser,
+    user_id: &str,
+    expected_state_version: i64,
+) -> bool {
+    user.id == user_id
+        && expected_state_version > 0
+        && expected_state_version.checked_add(1) == Some(user.state_version)
 }
 
 fn decode_user_list(data: StrictUserList) -> Result<AdminUserPage, &'static str> {
@@ -327,26 +361,35 @@ fn decode_user_list(data: StrictUserList) -> Result<AdminUserPage, &'static str>
     Ok(AdminUserPage { users, pagination })
 }
 
+/// 按命令类型解码含 Key 或无 Key 的闭集回执，调用方须再核对冻结字段。
 pub(super) async fn decode_user_mutation(
-    response: gloo_net::http::Response,
+    response: AdminResponse,
     want_key: bool,
-) -> Result<AdminUserMutationResult, String> {
-    let payload: ApiResponse<serde_json::Value> =
-        response.json().await.map_err(invalid_response_error)?;
+) -> Result<AdminUserMutationResult, AdminWriteFailure> {
+    let body = response.text().await.map_err(AdminWriteFailure::invalid_response)?;
+    decode_user_mutation_body(&body, want_key)
+}
+
+fn decode_user_mutation_body(
+    body: &str,
+    want_key: bool,
+) -> Result<AdminUserMutationResult, AdminWriteFailure> {
+    // 直接从响应正文解码，已定义字段重复时保持结果未知，不能交付有歧义的一次性 Key。
     let (user, generated_key) = if want_key {
-        let data: StrictUserDataWithKey =
-            serde_json::from_value(payload.data).map_err(invalid_response_error)?;
+        let payload: ApiResponse<StrictUserDataWithKey> =
+            serde_json::from_str(body).map_err(AdminWriteFailure::invalid_response)?;
+        let data = payload.data;
         if !valid_generated_key(&data.generated_key) {
-            return Err("invalid_response".to_owned());
+            return Err(AdminWriteFailure::outcome_unknown("invalid_response"));
         }
         (data.user, Some(data.generated_key))
     } else {
-        let data: StrictUserData =
-            serde_json::from_value(payload.data).map_err(invalid_response_error)?;
-        (data.user, None)
+        let payload: ApiResponse<StrictUserData> =
+            serde_json::from_str(body).map_err(AdminWriteFailure::invalid_response)?;
+        (payload.data.user, None)
     };
     Ok(AdminUserMutationResult {
-        user: decode_user(user).map_err(invalid_response_error)?.into(),
+        user: decode_user(user).map_err(AdminWriteFailure::invalid_response)?.into(),
         generated_key,
     })
 }
@@ -457,9 +500,205 @@ fn append_query(url: &mut String, name: &str, value: &str) {
 
 #[cfg(test)]
 mod tests {
-    use auction_contracts::ApiResponse;
+    use std::future::Future;
+    use std::pin::pin;
+    use std::rc::Rc;
+    use std::task::{Context, Poll, Waker};
 
-    use super::{StrictUserList, decode_user_list};
+    use auction_contracts::{AdminUserCreateRequest, AdminUserMutationRequest, ApiResponse};
+    use dioxus::prelude::{ScopeId, VNode, VirtualDom, provide_context};
+    use gloo_net::http::Method;
+    use uuid::Uuid;
+
+    use super::{
+        AdminUser, StrictUserList, blacklist_admin_user, create_admin_user, decode_user_list,
+        decode_user_mutation_body, matches_user_mutation_target, mutate_admin_user,
+        unblacklist_admin_user, validate_user_create_receipt,
+    };
+    use crate::api::contract_fixtures::admin_fixture;
+    use crate::api::{AdminApiFailure, AdminWriteFailure, Rejection};
+
+    pub(super) type UserMutationResponseStub =
+        Rc<dyn Fn(&AdminUserMutationRequest) -> &'static str>;
+
+    impl AdminApiFailure {
+        /// 为宿主用户行提供已经核对目标的成功正文，沿用正常的解码。
+        pub(crate) fn stub_user_mutation_success(
+            respond: impl Fn(&AdminUserMutationRequest) -> &'static str + 'static,
+        ) {
+            provide_context(Rc::new(respond) as UserMutationResponseStub);
+        }
+    }
+
+    const USER_ID: &str = "00000000-0000-4000-8000-000000000002";
+    const OTHER_ID: &str = "00000000-0000-4000-8000-000000000004";
+    const CONFLICT: &str = r#"{"code":"state_conflict","message":"用户版本已变化","data":{"current_state_version":4},"request_id":null}"#;
+
+    fn target() -> AdminUser {
+        AdminUser {
+            id: USER_ID.into(),
+            username: "before".into(),
+            forum_account_id: None,
+            status: "active".into(),
+            key_status: "active".into(),
+            state_version: 3,
+            created_at: "2026-11-14T00:00:00Z".into(),
+            updated_at: "2026-11-14T00:00:00Z".into(),
+            blacklist_count: 0,
+            blacklist_history: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn user_write_target_requires_the_frozen_id_and_next_version() {
+        let mut echoed = target();
+        echoed.state_version = 4;
+        assert!(matches_user_mutation_target(&echoed, USER_ID, 3));
+        assert!(!matches_user_mutation_target(&echoed, OTHER_ID, 3));
+        assert!(!matches_user_mutation_target(&echoed, USER_ID, 4));
+        assert!(!matches_user_mutation_target(&echoed, USER_ID, 2));
+    }
+
+    #[test]
+    fn generated_user_key_requires_exactly_one_id_version_and_key() {
+        let text = admin_fixture!("user-create-command");
+        let result = decode_user_mutation_body(text, true).unwrap();
+        assert_eq!(result.user.username, "ExamplePlayer");
+        assert_eq!(result.user.state_version, 1);
+        assert_eq!(result.generated_key, Some("A".repeat(43)));
+
+        for (field, extra) in [
+            ("id", format!("\"id\":\"{OTHER_ID}\",")),
+            ("state_version", String::from("\"state_version\":7,")),
+            ("generated_key", format!("\"generated_key\":\"{}\",", "B".repeat(43))),
+        ] {
+            let key = format!("\"{field}\"");
+            let duplicate = text.replacen(&key, &format!("{extra}{key}"), 1);
+            assert_ne!(duplicate, text);
+            assert_invalid_user_receipt(decode_user_mutation_body(&duplicate, true).unwrap_err());
+        }
+
+        let mut keyless: serde_json::Value = serde_json::from_str(text).unwrap();
+        keyless["data"].as_object_mut().unwrap().remove("generated_key");
+        let keyless = keyless.to_string();
+        assert_invalid_user_receipt(decode_user_mutation_body(&keyless, true).unwrap_err());
+        let manual = decode_user_mutation_body(&keyless, false).unwrap();
+        assert_eq!(manual.user.username, "ExamplePlayer");
+        assert_eq!(manual.generated_key, None);
+        assert_invalid_user_receipt(decode_user_mutation_body(text, false).unwrap_err());
+    }
+
+    fn assert_invalid_user_receipt(failure: AdminWriteFailure) {
+        assert!(matches!(failure.classify(), Rejection::Unknown), "{failure:?}");
+        assert_eq!(failure.display_code(), "invalid_response");
+    }
+
+    #[test]
+    fn user_create_receipt_delivers_key_only_for_the_frozen_username() {
+        let text = admin_fixture!("user-create-command");
+        let command = AdminUserCreateRequest {
+            command_id: "00000000-0000-4000-8000-000000000003".into(),
+            username: "ExamplePlayer".into(),
+            forum_account_id: None,
+            key_mode: "generated".into(),
+            key: None,
+        };
+        let checked = decode_user_mutation_body(text, true)
+            .and_then(|result| validate_user_create_receipt(&command, result))
+            .unwrap();
+        assert_eq!(checked.generated_key, Some("A".repeat(43)));
+
+        let other_user = text.replace("\"ExamplePlayer\"", "\"OtherPlayer\"");
+        let decoded = decode_user_mutation_body(&other_user, true).unwrap();
+        assert_eq!(decoded.user.username, "OtherPlayer");
+        assert_invalid_user_receipt(validate_user_create_receipt(&command, decoded).unwrap_err());
+    }
+
+    fn assert_write_rejection<T>(
+        method: Method,
+        path: &'static str,
+        body: &'static str,
+        status: u16,
+        expected: (Rejection, &str),
+        request: impl Future<Output = Result<T, AdminWriteFailure>>,
+    ) {
+        let mut dom = VirtualDom::new(VNode::empty);
+        dom.rebuild_in_place();
+        dom.in_scope(ScopeId::APP, || {
+            AdminApiFailure::stub_write_response(path, method, status, body);
+            let mut request = pin!(request);
+            let Poll::Ready(Err(failure)) =
+                request.as_mut().poll(&mut Context::from_waker(Waker::noop()))
+            else {
+                panic!("用户写入应经传输替身返回拒绝回执");
+            };
+            assert!(failure.classify() == expected.0, "{failure:?}");
+            assert_eq!(failure.display_code(), expected.1);
+        });
+    }
+
+    #[test]
+    fn user_patch_and_blacklist_replay_only_verified_409_state_conflict() {
+        let target = target();
+        let command_id = Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap();
+        let path = "/api/v1/admin/users/00000000-0000-4000-8000-000000000002/blacklist";
+        for (status, rejection, code) in [
+            (409, Rejection::ReplayChecked, "state_conflict"),
+            (422, Rejection::Unknown, "http_422"),
+        ] {
+            for method in [Method::PATCH, Method::PUT, Method::DELETE] {
+                match method {
+                    Method::PATCH => assert_write_rejection(
+                        method,
+                        "/api/v1/admin/users",
+                        CONFLICT,
+                        status,
+                        (rejection, code),
+                        mutate_admin_user(
+                            command_id,
+                            &target,
+                            "rename",
+                            Some("after".into()),
+                            None,
+                        ),
+                    ),
+                    Method::PUT => assert_write_rejection(
+                        method,
+                        path,
+                        CONFLICT,
+                        status,
+                        (rejection, code),
+                        blacklist_admin_user(command_id, &target, "reason".into()),
+                    ),
+                    Method::DELETE => assert_write_rejection(
+                        method,
+                        path,
+                        CONFLICT,
+                        status,
+                        (rejection, code),
+                        unblacklist_admin_user(command_id, &target),
+                    ),
+                    _ => unreachable!("只测试用户修改及黑名单"),
+                }
+            }
+        }
+        assert_write_rejection(
+            Method::POST,
+            "/api/v1/admin/users",
+            CONFLICT,
+            409,
+            (Rejection::Unknown, "state_conflict"),
+            create_admin_user(command_id, "before".into(), Some("42".into()), "generated", None),
+        );
+        assert_write_rejection(
+            Method::POST,
+            "/api/v1/admin/users",
+            r#"{"code":"user_conflict","message":"用户已存在","data":null,"request_id":null}"#,
+            409,
+            (Rejection::ThisAttempt, "user_conflict"),
+            create_admin_user(command_id, "before".into(), Some("42".into()), "generated", None),
+        );
+    }
 
     #[test]
     fn users_decode_backend_contract_fixtures() {

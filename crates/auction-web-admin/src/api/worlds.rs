@@ -6,13 +6,12 @@ use auction_contracts::{
     AdminWorldListResponse, AdminWorldResponse, AdminWorldSetEnabledRequest,
     AdminWorldSetEnabledResponse, ApiResponse,
 };
-use gloo_net::http::Request;
+use gloo_net::http::Method;
 use uuid::Uuid;
 
-use super::{
-    AdminApiFailure, MAX_JSON_SAFE_INTEGER, fetch_csrf_token, invalid_request_error,
-    invalid_response_error, response_error, response_failure, send_get, send_request,
-};
+use super::AdminWriteFailure;
+use super::transport::WriteRequest;
+use super::{MAX_JSON_SAFE_INTEGER, invalid_response_error, response_error, send_get};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AdminBusinessWorld {
@@ -43,43 +42,38 @@ pub(crate) async fn set_admin_business_world_enabled(
     world_id: String,
     enabled: bool,
     expected_policy_revision: i64,
-) -> Result<AdminBusinessWorld, AdminApiFailure> {
+) -> Result<AdminBusinessWorld, AdminWriteFailure> {
     if !matches!(world_id.as_str(), "main" | "isekai")
         || expected_policy_revision <= 0
         || expected_policy_revision > MAX_JSON_SAFE_INTEGER
     {
-        return Err(AdminApiFailure::client("invalid_request"));
+        return Err(AdminWriteFailure::not_sent("invalid_request"));
     }
-    let csrf_token = fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
     let request = AdminWorldSetEnabledRequest { command_id, enabled, expected_policy_revision };
     let url = format!("/api/v1/admin/worlds/{world_id}");
-    let response = send_request(|abort_signal| {
-        Request::patch(&url)
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&request)
-            .map_err(invalid_request_error)
-    })
-    .await
-    .map_err(AdminApiFailure::client)?;
-    if !response.ok() {
-        return Err(response_failure(response).await);
-    }
-    let payload: ApiResponse<AdminWorldSetEnabledResponse> = response
-        .json()
-        .await
-        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
-    let world = decode_world(payload.data.world)
-        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
+    let response = WriteRequest::general(&url, Method::PATCH).send_json(&request).await?;
+    let payload: ApiResponse<AdminWorldSetEnabledResponse> =
+        response.json().await.map_err(AdminWriteFailure::invalid_response)?;
+    validate_world_receipt(payload.data.world, &world_id, &request)
+}
+
+fn validate_world_receipt(
+    accepted: AdminWorldResponse,
+    world_id: &str,
+    request: &AdminWorldSetEnabledRequest,
+) -> Result<AdminBusinessWorld, AdminWriteFailure> {
+    let world = decode_world(accepted).map_err(AdminWriteFailure::invalid_response)?;
+    let expected_policy_revision = request.expected_policy_revision;
+    // 回执必须描述冻结的目标；同版表示状态已相同，下一版表示本次修改。
     if world.id != world_id
-        || world.enabled != enabled
+        || world.enabled != request.enabled
         || !matches!(
             world.policy_revision,
             revision if revision == expected_policy_revision
                 || revision == expected_policy_revision.saturating_add(1)
         )
     {
-        return Err(AdminApiFailure::client("invalid_response"));
+        return Err(AdminWriteFailure::outcome_unknown("invalid_response"));
     }
     Ok(world)
 }
@@ -120,6 +114,50 @@ fn decode_world(value: AdminWorldResponse) -> Result<AdminBusinessWorld, &'stati
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn world_receipt_matches_the_frozen_world_state_and_revision() {
+        use auction_contracts::{
+            AdminWorldResponse, AdminWorldSetEnabledRequest, AdminWorldSetEnabledResponse,
+            ApiResponse,
+        };
+        use serde_json::json;
+        use uuid::Uuid;
+
+        use super::validate_world_receipt;
+        use crate::api::AdminWriteFailure;
+        use crate::api::contract_fixtures::admin_fixture;
+
+        let request = AdminWorldSetEnabledRequest {
+            command_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
+            enabled: false,
+            expected_policy_revision: 2,
+        };
+        let payload: ApiResponse<AdminWorldSetEnabledResponse> =
+            serde_json::from_str(admin_fixture!("world-command")).unwrap();
+        let mut receipt = serde_json::to_value(payload.data.world).unwrap();
+        let validate = |value| {
+            let world: AdminWorldResponse = serde_json::from_value(value).unwrap();
+            validate_world_receipt(world, "isekai", &request)
+        };
+        assert_eq!(validate(receipt.clone()).unwrap().policy_revision, 2);
+        for (field, wrong) in
+            [("id", json!("main")), ("policy_revision", json!(4)), ("enabled", json!(true))]
+        {
+            let mut invalid = receipt.clone();
+            invalid[field] = wrong;
+            assert!(
+                matches!(
+                    validate(invalid),
+                    Err(AdminWriteFailure::OutcomeUnknown { code, response_status: None })
+                        if code == "invalid_response"
+                ),
+                "{field}"
+            );
+        }
+        receipt["policy_revision"] = json!(3);
+        assert_eq!(validate(receipt).unwrap().policy_revision, 3);
+    }
 
     #[test]
     fn world_contract_fixtures() {

@@ -2,14 +2,19 @@
 // 外壳负责启动首次读取、可见性与人工输入监听、跨标签页通知，以及请求与定时器的派发和取消。
 
 import { sleep } from "@auction/web-shared/platform/timer";
-import { createPageVisibility } from "@auction/web-shared/platform/visibility";
+import { createPageVisibility, documentIsVisible } from "@auction/web-shared/platform/visibility";
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { createTaskScope, type TaskHandle } from "@auction/web-shared/reactive/tasks";
 import { unreachable } from "@auction/web-shared/result";
 import { onCleanup, onSettled } from "solid-js";
-import { type AdminApiFailure, adminApiFailureOutcomeUnknown } from "../../api/failure";
+import {
+  type AdminApiFailure,
+  adminApiFailureDefiniteRejection,
+  adminApiFailureOutcomeUnknown,
+} from "../../api/failure";
 import {
   type AdminSessionHost,
+  type AdminSessionWriteReview,
   fetchAdminSession,
   loginAdmin,
   logoutAdmin,
@@ -25,6 +30,7 @@ import {
   initialState,
   initialView,
   type LogoutOutcome,
+  phaseVerified,
   type ReadOutcome,
   type RenewalOutcome,
   type Event as SessionEvent,
@@ -43,6 +49,7 @@ export interface AdminSessionHandle {
   readonly dispatch: (event: SessionEvent) => void;
   readonly submitLogin: (submission: LoginSubmission) => void;
   readonly host: AdminSessionHost;
+  readonly writeReview: (epoch: number) => AdminSessionWriteReview;
 }
 
 /**
@@ -62,7 +69,7 @@ export function useSession(): AdminSessionHandle {
   const registration = registerAdminSessionHost({
     check: () => accept({ kind: "check_requested" }),
     writesAllowed: () => view.peek().canWrite,
-    confirmed: () => view.peek().session,
+    confirmed: () => phaseVerified(state.phase)?.session ?? null,
   });
   const host = registration.host;
   onCleanup(registration.release);
@@ -94,9 +101,10 @@ export function useSession(): AdminSessionHandle {
     cancel(handle);
   }
 
-  function accept(event: SessionEvent): void {
-    // 人工输入不读取 Cookie：输入既可能来自可读 Cookie，也可能来自 HttpOnly 会话。
-    const cookie = event.kind === "input" ? ({ kind: "unavailable" } as const) : cookieGeneration();
+  function accept(
+    event: SessionEvent,
+    cookie: Cookie = event.kind === "input" ? { kind: "unavailable" } : cookieGeneration(),
+  ): void {
     const [nextState, effects] = step(state, event, cookie, monotonicMillis());
     state = nextState;
     publish();
@@ -142,8 +150,21 @@ export function useSession(): AdminSessionHandle {
   }
 
   function startRead(ticket: Ticket): void {
+    const pending = state.check;
+    if (pending?.request.ticket !== ticket) {
+      return;
+    }
+    if (pending.reason === "discover" && (!documentIsVisible() || state.login !== null)) {
+      state = { ...state, check: null };
+      return;
+    }
     read = tasks.spawn(async (context) => {
       const sent = cookieGeneration();
+      // 复核等待网络前立即发布这次 Cookie 观测，撤回旧身份的写许可和 Key 展示。
+      accept({ kind: "read_sending", ticket }, sent);
+      if (!context.alive() || state.check?.request.ticket !== ticket) {
+        return;
+      }
       const result = await fetchAdminSession(host, context.signal);
       if (!context.alive()) {
         return;
@@ -161,15 +182,32 @@ export function useSession(): AdminSessionHandle {
   function startLogout(ticket: Ticket): void {
     tasks.spawn(async (context) => {
       const sent = cookieGeneration();
-      // 注销只使用本宿主已确认的会话；等待期间不会被其他宿主或代际接管。
+      accept({ kind: "logout_sending", ticket }, sent);
+      if (
+        !context.alive() ||
+        state.phase.kind !== "logging_out" ||
+        state.phase.logout.request.ticket !== ticket
+      ) {
+        return;
+      }
+      // 派发围栏核对了退出票与本宿主保留的原身份，读取该身份与发出 DELETE 之间没有等待。
       const result = await logoutAdmin(host, context.signal);
       if (!context.alive()) {
         return;
       }
+      const dispatched =
+        result.ok ||
+        result.error.status !== null ||
+        !adminApiFailureDefiniteRejection(result.error.code);
       const outcome: LogoutOutcome = result.ok
         ? { kind: "succeeded" }
         : logoutFailure(result.error);
-      accept({ kind: "logout_finished", ticket, cookie: sent, outcome });
+      accept({
+        kind: dispatched ? "logout_finished" : "logout_not_sent",
+        ticket,
+        cookie: sent,
+        outcome,
+      });
     });
   }
 
@@ -177,6 +215,10 @@ export function useSession(): AdminSessionHandle {
     // `spawn` 在任务体内先同步执行到首个 await，等同源码在同一轮启动 fetch。
     tasks.spawn(async (context) => {
       const sent = cookieGeneration();
+      accept({ kind: "renewal_sending", ticket }, sent);
+      if (!context.alive() || state.renewal?.request.ticket !== ticket) {
+        return;
+      }
       // 续期同样只读取本宿主已确认的会话与 CSRF，不接受旧 effect 携带的快照。
       const result = await renewAdminSession(host, context.signal);
       if (!context.alive()) {
@@ -269,7 +311,21 @@ export function useSession(): AdminSessionHandle {
     dispatch({ kind: "start" });
   });
 
-  return { view, dispatch, submitLogin, host };
+  return {
+    view,
+    dispatch,
+    submitLogin,
+    host,
+    writeReview: (epoch) => ({
+      isCurrent: () => state.viewEpoch === epoch,
+      observe: (session) => accept({ kind: "write_review_identity", epoch, session }),
+      cookieGeneration: () => {
+        const cookie = cookieGeneration();
+        return cookie.kind === "present" ? cookie.value : null;
+      },
+      invalidate: (session) => accept({ kind: "external_unauthenticated", epoch, session }),
+    }),
+  };
 }
 
 interface BroadcastNotice {

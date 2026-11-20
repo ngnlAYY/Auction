@@ -15,30 +15,50 @@ use crate::api::{
 use crate::surface::AdminActionFeedback;
 use crate::surface::pagination::{AdminPager as Pager, AdminPagination, use_admin_pagination};
 
+/// 同一场次内保留恢复面板，两个报告分别呈现读取结果。
 #[component]
 pub(super) fn AdminSettlementReportView(
-    report: AdminSettlementReport,
+    report: Option<AdminSettlementReport>,
     recovery: Option<AdminRecoveryReport>,
-    mut lot_page: Signal<i64>,
+    lot_page: Signal<i64>,
     mut recovery_page: Signal<i64>,
     action_busy: ReadSignal<bool>,
     recovery_read: RecoveryRead,
     confirmation: Signal<Option<RecoveryConfirmationDraft>>,
     reason: Signal<String>,
     action_feedback: Signal<Option<AdminActionFeedback>>,
+    recovery_status: Element,
 ) -> Element {
+    let settlement_ready = report.is_some();
+    rsx! {
+        if let Some(report) = report {
+            AdminSettlementLots { report, lot_page }
+        }
+        section { class: "admin-auction-report admin-auction-recovery", aria_labelledby: "settlement-recovery-title",
+            h2 { id: "settlement-recovery-title", tabindex: "-1", {t!("admin-recovery-title")} }
+            {recovery_status}
+            if settlement_ready {
+                AdminRecoveryTable {
+                    report: recovery,
+                    page: recovery_page,
+                    action_busy,
+                    recovery_read,
+                    confirmation,
+                    reason,
+                    action_feedback,
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn AdminSettlementLots(report: AdminSettlementReport, lot_page: Signal<i64>) -> Element {
     let lot_pagination =
         use_admin_pagination("settlement-lots", &["lot_page_size"], None, i64::MAX);
-    let recovery_pagination =
-        use_admin_pagination("settlement-recovery", &["recovery_page_size"], None, i64::MAX);
     let lot_total_pages = page_count(report.lots.len(), lot_pagination.size());
     let current_lot_page = lot_page().clamp(1, lot_total_pages);
     let lot_rows = page_slice(&report.lots, current_lot_page, lot_pagination.size());
-    let recovery_total_pages = recovery
-        .as_ref()
-        .map_or(1, |value| page_count(value.recoveries.len(), recovery_pagination.size()));
-    let current_recovery_page = recovery_page().clamp(1, recovery_total_pages);
-
     rsx! {
         div { class: "admin-settlement__table-wrap",
             table { class: "admin-shell__table admin-auction-table",
@@ -103,17 +123,6 @@ pub(super) fn AdminSettlementReportView(
             label: t!("admin-settlement-lots-pagination"),
         }
         AdminSettlementSummaryCard { summary: report.settlement }
-        AdminRecoveryTable {
-            report: recovery,
-            current_page: current_recovery_page,
-            pagination: recovery_pagination,
-            page: recovery_page,
-            action_busy,
-            recovery_read,
-            confirmation,
-            reason,
-            action_feedback,
-        }
     }
 }
 

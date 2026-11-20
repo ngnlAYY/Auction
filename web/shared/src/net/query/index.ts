@@ -3,11 +3,12 @@
 // hook 声明的键，其余键（其他 hook 或路由持有）原样保留。状态形状与解析/序列化规则由
 // 调用方注入，本模块不含业务键名。
 
-import { getOwner, onSettled, runWithOwner } from "solid-js";
+import { getOwner, onCleanup, onSettled, runWithOwner } from "solid-js";
 
 import { type Cell, createCell } from "../../reactive/cell";
 import { structuralEquals } from "../../reactive/equality";
 import { type LocationWriteOptions, writeLocationPreservingScroll } from "../../router/history";
+import { watchLocationWritten } from "../../router/location-notice";
 
 /** 写回地址栏时创建还是替换浏览器历史项。 */
 export type QueryWriteMode = "push" | "replace";
@@ -28,8 +29,14 @@ export function readQueryPairs(): readonly QueryPair[] {
   return [...parseQuerySearch(window.location.search)];
 }
 
-/** 查询状态写回地址栏的选项；`sameAddress` 缺省 `"skip"`，与共享历史层一致。 */
-export type QueryStateOptions = LocationWriteOptions;
+/** 查询状态的历史写入与地址恢复选项。 */
+export interface QueryStateOptions extends LocationWriteOptions {
+  /** 调用方已有同页地址订阅时传入 `false`，只保留共享的原生历史恢复。 */
+  readonly watchRouteWrites?: boolean;
+}
+
+// 历史层同步广播成功写入。查询写回照常更新路由快照，但不需要按站内导航重新解析。
+let queryWriteDepth = 0;
 
 /** 把 `pairs` 合并写回当前地址的 query 段；`keys` 声明的旧值整体替换，其余键原样保留。
  * 返回地址栏写入是否成功；没有浏览器环境时返回 `false`。 */
@@ -37,7 +44,7 @@ export function writeQueryPairs(
   keys: readonly string[],
   pairs: readonly QueryPair[],
   mode: QueryWriteMode,
-  options?: QueryStateOptions,
+  options?: LocationWriteOptions,
 ): boolean {
   if (typeof window === "undefined") {
     return false;
@@ -66,18 +73,23 @@ export function writeQueryPairs(
     hash = "";
   }
   const url = encoded.length === 0 ? `${pathname}${hash}` : `${pathname}?${encoded}${hash}`;
-  return writeLocationPreservingScroll(url, mode, options);
+  queryWriteDepth += 1;
+  try {
+    return writeLocationPreservingScroll(url, mode, options);
+  } finally {
+    queryWriteDepth -= 1;
+  }
 }
 
 /** 状态 → 写回键值对的序列化器（省略等于默认值的键）。 */
 export type QuerySerializer<T> = (value: T) => readonly QueryPair[];
 
-/** 全部 query 键值对 → 状态的解析器（挂载初值与 popstate 恢复共用）。 */
+/** 全部 query 键值对 → 状态的解析器（挂载初值与导航恢复共用）。 */
 export type QueryParser<T> = (pairs: readonly QueryPair[]) => T;
 
 /** 随地址栏双向同步的状态句柄。 */
 export interface QueryState<T> {
-  /** 当前状态；挂载时取自地址栏初值，浏览器前进/后退时自动恢复。 */
+  /** 当前状态；挂载、同页导航与浏览器前进/后退时取自地址栏。 */
   readonly state: Cell<T>;
   /** 更新状态并按 `mode` 写回地址栏（只替换本 hook 声明管理的键）。 */
   set(value: T, mode: QueryWriteMode): void;
@@ -101,7 +113,41 @@ function usePopstateListener(onPopstate: () => void): void {
   });
 }
 
-/** 挂载与 URL query 双向同步的状态；组件卸载时移除 popstate 监听。 */
+function currentQueryAddress(): { readonly pathname: string; readonly search: string } | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const { pathname, search } = window.location;
+  return { pathname, search };
+}
+
+function useQueryNavigation(restore: (pairs: readonly QueryPair[]) => void): void {
+  const owner = getOwner();
+  let observed = currentQueryAddress();
+  const pathname = observed?.pathname;
+  const restoreFromLocation = (): void => {
+    const next = currentQueryAddress();
+    const previous = observed;
+    observed = next;
+    // 站内导航与前进后退共用路径门禁，离页实例不能解析目标页的参数。
+    if (
+      next === null ||
+      next.pathname !== pathname ||
+      queryWriteDepth !== 0 ||
+      (previous?.pathname === next.pathname && previous.search === next.search)
+    ) {
+      return;
+    }
+    restore([...parseQuerySearch(next.search)]);
+  };
+  if (typeof window !== "undefined") {
+    // 初始化分页也会写回地址，订阅须在首次 effect 前就能记录成功写入。
+    onCleanup(watchLocationWritten(() => runWithOwner(owner, restoreFromLocation)));
+  }
+  usePopstateListener(restoreFromLocation);
+}
+
+/** 挂载与 URL query 双向同步的状态；组件卸载时注销位置监听。 */
 export function useQueryState<T>(
   keys: readonly string[],
   parse: QueryParser<T>,
@@ -109,27 +155,27 @@ export function useQueryState<T>(
   options?: QueryStateOptions,
 ): QueryState<T> {
   const state = createCell(parse(readQueryPairs()));
-  usePopstateListener(() => {
-    const value = parse(readQueryPairs());
+  const restore = (pairs: readonly QueryPair[]): void => {
+    const value = parse(pairs);
     if (!structuralEquals(value, state.peek())) {
       state.set(value);
     }
-  });
+  };
+  if (options?.watchRouteWrites === false) {
+    usePopstateListener(() => restore(readQueryPairs()));
+  } else {
+    useQueryNavigation(restore);
+  }
 
+  const set = (value: T, mode: QueryWriteMode): void => {
+    writeQueryPairs(keys, serialize(value), mode, options);
+    state.set(value);
+  };
   return {
     state,
-    set(value, mode) {
-      writeQueryPairs(keys, serialize(value), mode, options);
-      state.set(value);
-    },
-    push(value) {
-      writeQueryPairs(keys, serialize(value), "push", options);
-      state.set(value);
-    },
-    replace(value) {
-      writeQueryPairs(keys, serialize(value), "replace", options);
-      state.set(value);
-    },
+    set,
+    push: (value) => set(value, "push"),
+    replace: (value) => set(value, "replace"),
   };
 }
 

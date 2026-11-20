@@ -2,7 +2,8 @@
 
 use auction_web_shared::{QueryState, use_query_state};
 
-use super::primitives::{parse_text, parse_uuid_text, push_text};
+use super::primitives::{pair_value, parse_uuid_text, push_text};
+use crate::api::{player_support_user_too_long, valid_uuid};
 
 const SUPPORT_KEYS: &[&str] = &["user", "reference"];
 
@@ -13,20 +14,25 @@ pub(crate) struct SupportQuery {
 }
 
 impl SupportQuery {
-    /// 语义校验：恰好一个非空入口；参考编号必须是规范 UUID。
+    /// 语义校验：恰好一个非空入口，用户检索词须符合字节上限，参考编号须为规范 UUID。
     pub(crate) fn valid(&self) -> bool {
         match (self.user.is_empty(), self.reference.is_empty()) {
-            (false, true) => true,
-            (true, false) => crate::api::valid_uuid(&self.reference),
+            (false, true) => !player_support_user_too_long(&self.user),
+            (true, false) => valid_uuid(&self.reference),
             _ => false,
         }
     }
 }
 
-/// 地址栏只恢复格式合法的入口；是否恰好一个入口由 [`SupportQuery::valid`] 在请求前判定。
+/// 保留超长检索词以显示字段错误；请求前由 [`SupportQuery::valid`] 拒绝该入口。
 fn parse_support_query(pairs: &[(String, String)]) -> SupportQuery {
+    let user = pair_value(pairs, "user").unwrap_or_default().trim();
     SupportQuery {
-        user: parse_text(pairs, "user", 256),
+        user: if !player_support_user_too_long(user) && user.chars().any(char::is_control) {
+            String::new()
+        } else {
+            user.to_owned()
+        },
         reference: parse_uuid_text(pairs, "reference"),
     }
 }

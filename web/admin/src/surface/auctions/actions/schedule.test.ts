@@ -5,6 +5,7 @@ import { AdminAuctionResponseSchema } from "@auction/contracts/dto/admin/settlem
 import { decode } from "@auction/contracts/wire";
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { err } from "@auction/web-shared/result";
+import { writeFailureFromReply } from "../../../api/api-request-fixture";
 import { success } from "../../../api/auction-contract-fixture.test";
 import { loadRenderModule } from "../../../solid-render-fixture.test";
 import { createComponent } from "../../solid-dom-fixture";
@@ -54,7 +55,12 @@ async function withSchedule(
       // Rust 的纯草稿测试没有 HTTP UUID 验证。用同一个 ID 驱动表单，并在该边界观察实际解析结果。
       update.mockImplementation(async (_host, _command, id, preview, open, end, version) => {
         submitted.push([id, preview, open, end, version]);
-        return err("invalid_auction_state");
+        return err(
+          await writeFailureFromReply(
+            409,
+            '{"code":"invalid_auction_state","message":"场次状态不允许排期","data":null,"request_id":null}',
+          ),
+        );
       });
       await withUtc(async () => {
         let mounted: Cell<ScheduleDraft | null> | undefined;

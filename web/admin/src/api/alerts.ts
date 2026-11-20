@@ -25,10 +25,14 @@ import { err, ok, type Result } from "@auction/web-shared/result";
 
 import {
   type AdminApiFailure,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   adminApiFailureClient,
   decodeAdminReceipt,
   invalidResponseError,
   responseFailure,
+  writeNotSent,
+  writeOutcomeUnknown,
 } from "./failure";
 import { validate as validatePagination, validPageEcho } from "./pagination";
 import type { AdminSessionHost } from "./session";
@@ -67,7 +71,7 @@ export type AdminAlertCommandAction = "acknowledge" | "silence";
 /** 准备一条告警命令；返回的函数在第一次运行时生成并缓存固定正文。 */
 export type AdminAlertCommandPreparation = (
   commandId: string,
-) => Result<PreparedJsonCommand, AdminApiFailure>;
+) => Result<PreparedJsonCommand, AdminWriteNotSent>;
 
 const ALERT_STATUSES: readonly AdminAlertStatus[] = ["active", "resolved", "all"];
 
@@ -126,7 +130,7 @@ export async function fetchAdminAlerts(
   if (!url.ok) {
     return err(url.error);
   }
-  const response = await sendAlertRequest(host, url.value, null, signal);
+  const response = await sendAlertRequest(host, url.value, signal);
   if (!response.ok) {
     return err(response.error.code);
   }
@@ -221,7 +225,7 @@ export async function fetchAdminWebhooks(
     return err("invalid_request");
   }
   const url = `/api/v1/admin/alerts/webhooks?limit=${limit}`;
-  const response = await sendAlertRequest(host, url, null, signal);
+  const response = await sendAlertRequest(host, url, signal);
   if (!response.ok) {
     return err(response.error.code);
   }
@@ -327,7 +331,7 @@ export function prepareAdminAlertSilence(
     silenceSeconds < MIN_SILENCE_SECONDS ||
     silenceSeconds > MAX_SILENCE_SECONDS
   ) {
-    return () => err(adminApiFailureClient("invalid_request"));
+    return () => err(writeNotSent("invalid_request"));
   }
   return prepareJsonCommandOnce(
     (commandId): AdminAlertSilenceRequest => ({
@@ -346,7 +350,7 @@ export async function acknowledgeAdminAlert(
   commandId: string,
   prepare: AdminAlertCommandPreparation,
   signal: AbortSignal,
-): Promise<Result<AdminAlertCommandResult, AdminApiFailure>> {
+): Promise<Result<AdminAlertCommandResult, AdminWriteFailure>> {
   return submitAlertCommand(host, commandId, alertId, "acknowledge", prepare, signal);
 }
 
@@ -357,7 +361,7 @@ export async function silenceAdminAlert(
   commandId: string,
   prepare: AdminAlertCommandPreparation,
   signal: AbortSignal,
-): Promise<Result<AdminAlertCommandResult, AdminApiFailure>> {
+): Promise<Result<AdminAlertCommandResult, AdminWriteFailure>> {
   return submitAlertCommand(host, commandId, alertId, "silence", prepare, signal);
 }
 
@@ -368,16 +372,21 @@ async function submitAlertCommand(
   action: AdminAlertCommandAction,
   prepare: AdminAlertCommandPreparation,
   signal: AbortSignal,
-): Promise<Result<AdminAlertCommandResult, AdminApiFailure>> {
+): Promise<Result<AdminAlertCommandResult, AdminWriteFailure>> {
   if (!validAlertId(alertId)) {
-    return err(adminApiFailureClient("invalid_request"));
+    return err(writeNotSent("invalid_request"));
   }
   const prepared = prepare(commandId);
   if (!prepared.ok) {
     return err(prepared.error);
   }
   const url = `/api/v1/admin/alerts/${alertId}/${action}`;
-  const response = await sendAlertRequest(host, url, prepared.value, signal);
+  const response = await sendPreparedJsonWrite(
+    host,
+    { url, method: "POST", endpoint: "general" },
+    prepared.value,
+    signal,
+  );
   if (!response.ok) {
     return err(response.error);
   }
@@ -389,14 +398,14 @@ function decodeAlertReceipt(
   commandId: string,
   alertId: string,
   action: AdminAlertCommandAction,
-): Result<AdminAlertCommandResult, AdminApiFailure> {
+): Result<AdminAlertCommandResult, AdminWriteFailure> {
   const decoded = decodeAdminReceipt(
     response,
     apiResponseSchema(AdminAlertCommandResponseSchema),
     ADMIN_ALERT_COMMAND_RESPONSE_FIELD_POLICY,
   );
   if (!decoded.ok) {
-    return err(adminApiFailureClient(decoded.error));
+    return err(writeOutcomeUnknown(decoded.error));
   }
   const result = decoded.value.data.alert;
   if (
@@ -407,7 +416,7 @@ function decodeAlertReceipt(
     result.id === "" ||
     commandId === NIL_UUID
   ) {
-    return err(adminApiFailureClient(invalidResponseError("alert command")));
+    return err(writeOutcomeUnknown(invalidResponseError("alert command")));
   }
   return ok(result);
 }
@@ -415,12 +424,8 @@ function decodeAlertReceipt(
 async function sendAlertRequest(
   host: AdminSessionHost,
   url: string,
-  body: PreparedJsonCommand | null,
   signal: AbortSignal,
 ): Promise<Result<TransportResponse, AdminApiFailure>> {
-  if (body !== null) {
-    return sendPreparedJsonWrite(host, url, "POST", body, signal);
-  }
   const response = await sendGet(host, url, signal);
   if (!response.ok) {
     return err(adminApiFailureClient(response.error));

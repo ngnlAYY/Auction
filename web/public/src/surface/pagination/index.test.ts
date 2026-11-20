@@ -1,6 +1,6 @@
 // Public 分页数量的接受范围：预设与默认值停在契约上限。
 
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { MAX_PUBLIC_PAGE_SIZE } from "@auction/contracts/dto/public/pagination";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { installFakeWindow } from "@auction/web-shared/router/test-window";
@@ -8,6 +8,7 @@ import { Pager } from "@auction/web-shared/ui/components/pager";
 import { PageSizePicker } from "@auction/web-shared/ui/components/pager/size";
 import { flush } from "solid-js";
 
+import { mountPublicPagerForDiagnostics } from "../shell/navigation-fixture.test";
 import { mountReadPage } from "./browser-fixture";
 
 const {
@@ -266,5 +267,50 @@ test.each([2, 120])("总数已缩减或随后缩减时，拒绝纠偏保留第 3
     expect(nativeInput.value).toBe("1");
   } finally {
     mounted.dispose();
+  }
+});
+
+test("开发模式下 Public 分页输入随页码和页长更新且不报非跟踪读取", async () => {
+  const page = createCell(2);
+  const size = createCell(20);
+  const warnings = spyOn(console, "warn");
+  let dispose = () => {};
+  try {
+    const mounted = await mountPublicPagerForDiagnostics({
+      get page() {
+        return page();
+      },
+      get pageSize() {
+        return size();
+      },
+      total: 200,
+      label: "分页",
+      onPageChange: (target) => page.set(target),
+      onPageSizeChange: (target) => size.set(target),
+    });
+    dispose = mounted.dispose;
+    const value = (name: string) =>
+      mounted.find((node) => node.getAttribute("name") === name)?.attributes.value;
+    expect([value("page"), value("page_size"), value("custom_page_size")]).toEqual([
+      "2",
+      "20",
+      "20",
+    ]);
+    page.set(3);
+    size.set(50);
+    flush();
+    expect([value("page"), value("page_size"), value("custom_page_size")]).toEqual([
+      "3",
+      "50",
+      "50",
+    ]);
+    expect(
+      warnings.mock.calls.filter(
+        ([message]) => typeof message === "string" && message.startsWith("[STRICT_READ_UNTRACKED]"),
+      ),
+    ).toEqual([]);
+  } finally {
+    warnings.mockRestore();
+    dispose();
   }
 });

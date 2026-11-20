@@ -15,26 +15,55 @@ import {
   cookiesEqual,
   type Effect,
   type Event,
-  initialActivity,
-  type LogoutOutcome,
+  logoutUnconfirmed,
   phaseVerified,
-  type ReadOutcome,
   type RenewalOutcome,
-  type Request,
   requestIsStale,
   type State,
   type Ticket,
   type Timer,
   type Verified,
-  verifiedNew,
 } from "./index";
-import { takeVerified, verifiedMut, withVerified } from "./phase";
-
-const CHECK_RETRY_MILLIS = 30_000;
+import {
+  canDecideLogout,
+  finishLogout,
+  prepareLogout,
+  revokeLogoutReadNotice,
+  startLogout,
+} from "./logout";
+import {
+  clearPendingEndNotices,
+  deferExpiration,
+  noticeOrigin,
+  rememberPeerEnd,
+  retainSettledEndNotice,
+  settleEndNotice,
+} from "./notices";
+import {
+  endSession,
+  hideSession,
+  markIdentityUnconfirmed,
+  observeIdentity,
+  observeSessionBody,
+  takeVerified,
+  verifiedMut,
+  withVerified,
+} from "./phase";
+import { finishRead } from "./read-results";
+import {
+  armTimer,
+  cancelRead,
+  cancelTimer,
+  cookieSnapshot,
+  request,
+  setTimer,
+  ticket,
+  timerValue,
+} from "./requests";
 
 /**
  * 用单次事件与当前观测推进会话，浏览器适配负责执行返回的动作。
- * Cookie 代际与单调时钟由调用方在事件发生时采集，回执不得重新读取当前值。
+ * 当前 Cookie 先经过身份观测；回执携带的实发代际只用于核对自己的归属。
  */
 export function step(
   state: State,
@@ -42,22 +71,27 @@ export function step(
   cookie: Cookie,
   now: number,
 ): readonly [State, readonly Effect[]] {
+  if (event.kind === "write_review_identity" && event.epoch !== state.viewEpoch) {
+    // 旧宿主的回调连当前 Cookie 观测也不能送入新宿主。
+    return [state, []];
+  }
+  if (event.kind === "external_unauthenticated") {
+    const current = phaseVerified(state.phase);
+    if (
+      event.epoch !== state.viewEpoch ||
+      current === null ||
+      !adminSessionSameIdentity(current.session, event.session)
+    ) {
+      return [state, []];
+    }
+  }
   const draft = stateDraft(state);
   const actions: Actions = { cookie, now, effects: [] };
-  // 浏览器已经切到新代际时，旧代际的续期投影不能跨会话暂存或借用已派发的 POST。
-  if (
-    draft.bufferedRenewal !== null &&
-    cookieConflictsWith(draft.bufferedRenewal.cookie, actions.cookie)
-  ) {
-    draft.bufferedRenewal = null;
-  }
-  if (
-    draft.renewal !== null &&
-    draft.renewal.source !== null &&
-    cookieConflictsWith(draft.renewal.source.cookie, actions.cookie)
-  ) {
-    draft.renewal.source = null;
-  }
+  const keysWereHidden = keysHidden(draft);
+  const revision = draft.keyVisibilityRevision;
+  const completingRead =
+    event.kind === "read_finished" && draft.check?.request.ticket === event.ticket;
+  const cookieChanged = observeIdentity(draft, actions);
   switch (event.kind) {
     case "start":
       if (draft.phase.kind === "starting") {
@@ -69,6 +103,7 @@ export function step(
       if (draft.login === event.ticket) {
         draft.login = null;
         if (event.outcome.ok) {
+          observeSessionBody(draft, noticeOrigin(draft), event.outcome.value, actions);
           if (cookieAgreesWith(cookieFromSession(event.outcome.value), actions.cookie)) {
             draft.activity.timing = renewalTimingFromSession(event.outcome.value);
           }
@@ -89,19 +124,43 @@ export function step(
         beginRead(draft, "explicit", actions);
       }
       break;
+    case "write_review_identity":
+      if (
+        observeSessionBody(
+          draft,
+          phaseVerified(draft.phase)?.session ?? null,
+          event.session,
+          actions,
+        )
+      ) {
+        beginRead(draft, "explicit", actions);
+      }
+      break;
+    case "external_unauthenticated": {
+      const pending = draft.check;
+      const stay =
+        pending?.reason === "stay_after_logout" &&
+        cookiesEqual(pending.request.cookie, actions.cookie);
+      // 401 之前发出的 GET 与续期不能恢复授权。新票保留同代「留在后台」的人工决定。
+      markIdentityUnconfirmed(draft, false, actions);
+      deferExpiration(draft, event.session);
+      cancelRead(draft, actions);
+      beginRead(draft, stay ? "stay_after_logout" : "explicit", actions);
+      break;
+    }
     case "broadcast":
-      hideSession(draft, actions);
-      beginRead(draft, "broadcast", actions);
+      rememberPeerEnd(draft);
+      if (draft.check?.reason === "login") {
+        beginRead(draft, "login", actions);
+      } else if (draft.phase.kind === "logged_out" && draft.login === null) {
+        beginRead(draft, "discover", actions);
+      } else {
+        hideSession(draft, actions);
+        beginRead(draft, "broadcast", actions);
+      }
       break;
     case "visible":
-      // 已有复核在途时不得叠加；退出期间也不允许 GET 快照恢复授权。
-      if (
-        draft.check === null &&
-        draft.phase.kind !== "logged_out" &&
-        draft.phase.kind !== "logging_out"
-      ) {
-        beginRead(draft, "routine", actions);
-      }
+      beginRead(draft, draft.phase.kind === "logged_out" ? "discover" : "routine", actions);
       break;
     case "input":
       if (!event.onLogout && draft.phase.kind === "authenticated") {
@@ -110,16 +169,45 @@ export function step(
       }
       break;
     case "logout_clicked":
-      startLogout(draft, actions);
+      if (!logoutUnconfirmed(draft.phase)) {
+        startLogout(draft, false, actions);
+      }
+      break;
+    case "continue_logout":
+      if (canDecideLogout(draft)) {
+        startLogout(draft, true, actions);
+      }
+      break;
+    case "stay_after_logout":
+      if (canDecideLogout(draft)) {
+        beginRead(draft, "stay_after_logout", actions);
+      }
       break;
     case "timer_elapsed":
       timerElapsed(draft, event.timer, event.ticket, actions);
       break;
+    case "read_sending":
+      prepareRead(draft, event.ticket, actions);
+      break;
     case "read_finished":
       finishRead(draft, event.ticket, event.cookie, event.outcome, actions);
       break;
+    case "logout_sending":
+      prepareLogout(draft, event.ticket, actions);
+      break;
     case "logout_finished":
-      finishLogout(draft, event.ticket, event.cookie, event.outcome, actions);
+    case "logout_not_sent":
+      finishLogout(
+        draft,
+        event.ticket,
+        event.cookie,
+        event.outcome,
+        event.kind === "logout_finished",
+        actions,
+      );
+      break;
+    case "renewal_sending":
+      prepareRenewal(draft, event.ticket, actions);
       break;
     case "renewal_finished":
       finishRenewal(draft, event.ticket, event.cookie, event.outcome, actions);
@@ -127,16 +215,15 @@ export function step(
     default:
       unreachable(event);
   }
+  // 当前读取自行处理权威结论、重读或退避。其他事件即使已过时，观测到换代也要复核。
+  if (cookieChanged && draft.identityUnconfirmed && !completingRead) {
+    beginRead(draft, "routine", actions);
+  }
+  if (!keysWereHidden && keysHidden(draft) && draft.keyVisibilityRevision === revision) {
+    // 即使界面合并了两次渲染，旧的打开动作也不能在复核成功后重新显示明文。
+    draft.keyVisibilityRevision += 1;
+  }
   return [commitDraft(state, draft), actions.effects];
-}
-/** 标识只在当前外壳内递增；回执必须与派发时的票号一致才被接受。 */
-function ticket(draft: Draft): Ticket {
-  draft.nextTicket += 1;
-  return draft.nextTicket;
-}
-
-function request(draft: Draft, actions: Actions): Request {
-  return { ticket: ticket(draft), cookie: cookieSnapshot(actions.cookie) };
 }
 
 /** 登记一次登录 POST；已有在途登录时不再派发。 */
@@ -153,69 +240,12 @@ export function startLogin(
   return { state: commitDraft(state, draft), ticket: loginTicket };
 }
 
-/** 派发时冻结的 Cookie 副本；调用方随后改写原对象不能改变回执使用的代际。 */
-type FrozenCookie =
-  | { readonly kind: "unavailable" }
-  | { readonly kind: "missing" }
-  | { readonly kind: "present"; readonly value: string };
-
-function cookieSnapshot(cookie: Cookie): FrozenCookie {
-  switch (cookie.kind) {
-    case "unavailable":
-      return Object.freeze({ kind: "unavailable" });
-    case "missing":
-      return Object.freeze({ kind: "missing" });
-    case "present":
-      return Object.freeze({ kind: "present", value: cookie.value });
-    default:
-      return unreachable(cookie);
-  }
+function keysHidden(draft: Draft): boolean {
+  return draft.identityUnconfirmed || logoutUnconfirmed(draft.phase);
 }
 
-function timerValue(draft: Draft, timer: Timer): Ticket | null {
-  return timer === "check" ? draft.checkTimer : draft.renewalTimer;
-}
-
-function setTimer(draft: Draft, timer: Timer, value: Ticket | null): void {
-  if (timer === "check") {
-    draft.checkTimer = value;
-  } else {
-    draft.renewalTimer = value;
-  }
-}
-
-function cancelTimer(draft: Draft, timer: Timer, actions: Actions): void {
-  if (timerValue(draft, timer) !== null) {
-    setTimer(draft, timer, null);
-    actions.effects.push({ kind: "cancel_timer", timer });
-  }
-}
-
-function armTimer(draft: Draft, timer: Timer, delay: number, actions: Actions): void {
-  cancelTimer(draft, timer, actions);
-  const armed = ticket(draft);
-  setTimer(draft, timer, armed);
-  actions.effects.push({ kind: "arm_timer", timer, ticket: armed, delay });
-}
-
-function cancelRead(draft: Draft, actions: Actions): void {
-  if (draft.check !== null) {
-    draft.check = null;
-    actions.effects.push({ kind: "cancel_read" });
-  }
-}
-
-/** 撤下敏感页面；旧宿主的草稿、未决命令和弹窗随宿主失效，旧回执不能重挂同一棵树。 */
-function hideSession(draft: Draft, actions: Actions): void {
-  if (takeVerified(draft) !== null) {
-    draft.viewEpoch += 1;
-  }
-  draft.activity = initialActivity();
-  draft.logoutError = null;
-  cancelTimer(draft, "renewal", actions);
-}
-
-function beginRead(draft: Draft, reason: CheckReason, actions: Actions): void {
+/** 按本轮已处理的 Cookie 代际合并在途读取，保留本地登录的优先级。 */
+export function beginRead(draft: Draft, reason: CheckReason, actions: Actions): void {
   if (draft.login !== null) {
     // 登录 POST 尚未结清时不发复核；广播只能收起表单，回执后仍归这次 POST。
     if (reason === "broadcast") {
@@ -228,17 +258,37 @@ function beginRead(draft: Draft, reason: CheckReason, actions: Actions): void {
     draft.phase = {
       kind: "logging_out",
       verified: draft.phase.verified,
-      logout: { ...draft.phase.logout, reviewAfter: true },
+      logout: {
+        ...draft.phase.logout,
+        reviewAfter:
+          draft.phase.logout.reviewAfter || reason !== "routine" || draft.identityUnconfirmed,
+      },
     };
     return;
   }
-  if (
-    reason !== "after_renewal" &&
-    draft.check !== null &&
-    draft.check.reason === reason &&
-    cookiesEqual(draft.check.request.cookie, actions.cookie)
-  ) {
-    return;
+  if (draft.check !== null) {
+    const pending = draft.check;
+    if (pending.reason === "login") {
+      if (
+        actions.cookie.kind === "unavailable" ||
+        cookiesEqual(pending.request.cookie, actions.cookie)
+      ) {
+        return;
+      }
+      reason = "login";
+    }
+    if (reason === "routine" && actions.cookie.kind === "unavailable") {
+      return;
+    }
+    if (
+      cookiesEqual(pending.request.cookie, actions.cookie) &&
+      (reason === "routine" ||
+        reason === "discover" ||
+        (reason === "explicit" && pending.reason === "stay_after_logout") ||
+        (pending.reason === reason && reason !== "after_renewal"))
+    ) {
+      return;
+    }
   }
   const keepsPermission =
     reason === "routine" &&
@@ -246,76 +296,46 @@ function beginRead(draft: Draft, reason: CheckReason, actions: Actions): void {
     !cookieConflictsWith(draft.phase.verified.cookie, actions.cookie);
   cancelRead(draft, actions);
   cancelTimer(draft, "check", actions);
-  if (!keepsPermission) {
+  if (!keepsPermission && !logoutUnconfirmed(draft.phase) && reason !== "discover") {
     cancelTimer(draft, "renewal", actions);
     draft.phase =
-      reason === "login" && draft.phase.kind === "logged_out"
+      reason === "login" &&
+      (draft.phase.kind === "logged_out" || draft.phase.kind === "checking_login")
         ? { kind: "checking_login" }
         : { kind: "checking", verified: takeVerified(draft) };
   }
   const sent = request(draft, actions);
   actions.effects.push({ kind: "read", ticket: sent.ticket });
-  draft.check = { reason, request: sent };
+  draft.check = {
+    reason,
+    request: sent,
+    origin: noticeOrigin(draft),
+    logoutTicket: draft.logoutIntent?.lastSent ?? null,
+  };
 }
 
-function rereadCurrentCookie(draft: Draft, actions: Actions): void {
-  const verified = phaseVerified(draft.phase);
-  if (verified === null || !cookieAgreesWith(verified.cookie, actions.cookie)) {
-    hideSession(draft, actions);
-  }
-  beginRead(draft, "cookie_changed", actions);
-}
-
-function finishRead(
-  draft: Draft,
-  finished: Ticket,
-  sent: Cookie,
-  outcome: ReadOutcome,
-  actions: Actions,
-): void {
+function prepareRead(draft: Draft, ticket: Ticket, actions: Actions): void {
   const pending = draft.check;
-  if (pending === null || pending.request.ticket !== finished) {
+  if (pending === null || pending.request.ticket !== ticket) {
     return;
   }
-  draft.check = null;
-  if (requestIsStale(pending.request, sent, actions.cookie, false)) {
-    rereadCurrentCookie(draft, actions);
-    return;
-  }
-  switch (outcome.kind) {
-    case "authenticated": {
-      const verified = verifiedNew(outcome.session);
-      if (
-        cookieConflictsWith(verified.cookie, actions.cookie) ||
-        cookieConflictsWith(verified.cookie, sent)
-      ) {
-        rereadCurrentCookie(draft, actions);
-      } else {
-        const previous = phaseVerified(draft.phase);
-        if (previous !== null && !adminSessionSameIdentity(previous.session, verified.session)) {
-          endSession(draft, false, actions);
-        } else {
-          mergeBufferedRenewal(draft, verified, sent, actions);
-          confirm(draft, verified, actions);
-        }
-      }
-      break;
-    }
-    case "unauthenticated":
-      endSession(draft, shouldNotifyExpiration(draft, sent, actions), actions);
-      break;
-    case "failed":
-      // 临时故障关闭写门禁，但仍保留已确认宿主的草稿和待对账命令。
-      draft.phase = { kind: "unavailable", verified: takeVerified(draft), error: outcome.error };
-      cancelTimer(draft, "renewal", actions);
-      armTimer(draft, "check", CHECK_RETRY_MILLIS, actions);
-      break;
-    default:
-      unreachable(outcome);
+  if (
+    actions.cookie.kind !== "unavailable" &&
+    !cookiesEqual(pending.request.cookie, actions.cookie)
+  ) {
+    // 旧票尚未发出，按实际代际合并后续读取。登记时的证据不能用于补播或解开退出锁。
+    revokeLogoutReadNotice(draft);
+    draft.check = {
+      ...pending,
+      reason: pending.reason === "stay_after_logout" ? "after_logout" : pending.reason,
+      request: { ticket, cookie: cookieSnapshot(actions.cookie) },
+      logoutTicket: null,
+    };
   }
 }
 
-function confirm(draft: Draft, verified: Verified, actions: Actions): void {
+/** 采用同身份的已确认投影并恢复日常复核与续期。 */
+export function confirm(draft: Draft, verified: Verified, actions: Actions): void {
   const current = phaseVerified(draft.phase);
   let next = verified;
   if (
@@ -334,142 +354,14 @@ function confirm(draft: Draft, verified: Verified, actions: Actions): void {
   }
   // 当前代际已由服务端确认；重新挂载的表单不再显示上一次登录失败。
   draft.loginError = null;
+  draft.logoutIntent = null;
+  clearPendingEndNotices(draft);
+  retainSettledEndNotice(draft, next.session);
+  draft.identityUnconfirmed = false;
+  draft.sawOtherGeneration = false;
   draft.phase = { kind: "authenticated", verified: next };
   scheduleCheck(draft, actions);
   scheduleRenewal(draft, actions);
-}
-
-/** 广播复核确认同代同身份后并入暂存的续期投影；否则丢弃。 */
-function mergeBufferedRenewal(
-  draft: Draft,
-  verified: Verified,
-  sent: Cookie,
-  actions: Actions,
-): void {
-  const pending = draft.bufferedRenewal;
-  draft.bufferedRenewal = null;
-  if (
-    pending === null ||
-    !cookieAgreesWith(pending.cookie, sent) ||
-    !cookieAgreesWith(pending.cookie, actions.cookie) ||
-    !adminSessionSameIdentity(pending.session, verified.session)
-  ) {
-    return;
-  }
-  draft.activity.timing = renewalTimingFromSession(pending.session);
-  draft.activity.retryNotBefore = 0;
-  if (isNewerProjection(pending.session, verified.session)) {
-    verified.session = pending.session;
-  }
-}
-
-function endSession(draft: Draft, notify: boolean, actions: Actions): void {
-  hideSession(draft, actions);
-  retireRenewal(draft);
-  cancelRead(draft, actions);
-  cancelTimer(draft, "check", actions);
-  draft.phase = { kind: "logged_out" };
-  if (notify) {
-    actions.effects.push({ kind: "broadcast_ended" });
-  }
-}
-
-/** 会话已经结束：丢弃暂存投影，并让仍持票的续期回执失去宿主归属。 */
-function retireRenewal(draft: Draft): void {
-  draft.bufferedRenewal = null;
-  if (draft.renewal !== null) {
-    draft.renewal.source = null;
-  }
-}
-
-/** 到达绝对截止时浏览器也会清空 Cookie；持续缺失与读取失败有不同的代际证据。 */
-function shouldNotifyExpiration(draft: Draft, sent: Cookie, actions: Actions): boolean {
-  return (
-    phaseVerified(draft.phase) !== null &&
-    sent.kind !== "unavailable" &&
-    cookiesEqual(sent, actions.cookie)
-  );
-}
-
-function startLogout(draft: Draft, actions: Actions): void {
-  if (draft.phase.kind === "logging_out") {
-    return;
-  }
-  const wasWritable = draft.phase.kind === "authenticated";
-  const verified = takeVerified(draft);
-  if (verified === null) {
-    return;
-  }
-  if (cookieConflictsWith(verified.cookie, actions.cookie)) {
-    draft.phase = { kind: "checking", verified };
-    beginRead(draft, "explicit", actions);
-    return;
-  }
-  cancelRead(draft, actions);
-  cancelTimer(draft, "check", actions);
-  cancelTimer(draft, "renewal", actions);
-  draft.bufferedRenewal = null;
-  draft.activity.latestInput = null;
-  draft.logoutError = null;
-  const sent = request(draft, actions);
-  actions.effects.push({ kind: "logout", ticket: sent.ticket, session: verified.session });
-  draft.phase = {
-    kind: "logging_out",
-    verified,
-    logout: { request: sent, reviewAfter: false, wasWritable },
-  };
-}
-
-function finishLogout(
-  draft: Draft,
-  finished: Ticket,
-  sent: Cookie,
-  outcome: LogoutOutcome,
-  actions: Actions,
-): void {
-  const phase = draft.phase;
-  if (phase.kind !== "logging_out" || phase.logout.request.ticket !== finished) {
-    return;
-  }
-  const success = outcome.kind === "succeeded";
-  // 成功 DELETE 的 Set-Cookie 会清空代际；仍须排除派发期间换了实际请求 Cookie。
-  const clearedByLogout = success && actions.cookie.kind === "missing";
-  const stale = requestIsStale(phase.logout.request, sent, actions.cookie, clearedByLogout);
-  const reviewAfter = phase.logout.reviewAfter;
-  const wasWritable = phase.logout.wasWritable;
-  retireRenewal(draft);
-  draft.phase = { kind: "checking", verified: takeVerified(draft) };
-  if (stale) {
-    rereadCurrentCookie(draft, actions);
-    return;
-  }
-  switch (outcome.kind) {
-    case "succeeded":
-      endSession(draft, true, actions);
-      if (reviewAfter) {
-        beginRead(draft, "after_logout", actions);
-      }
-      break;
-    case "rejected":
-      if (wasWritable && !reviewAfter && cookieAgreesWith(sent, actions.cookie)) {
-        draft.logoutError = outcome.error;
-        const verified = takeVerified(draft);
-        if (verified !== null) {
-          confirm(draft, verified, actions);
-        }
-      } else {
-        draft.logoutError = outcome.error;
-        beginRead(draft, "after_logout", actions);
-      }
-      break;
-    case "unknown":
-    case "rate_limited":
-      draft.logoutError = outcome.error;
-      beginRead(draft, "after_logout", actions);
-      break;
-    default:
-      unreachable(outcome);
-  }
 }
 
 function scheduleCheck(draft: Draft, actions: Actions): void {
@@ -531,10 +423,6 @@ function startRenewal(draft: Draft, actions: Actions): void {
     return;
   }
   const verified = draft.phase.verified;
-  if (cookieConflictsWith(verified.cookie, actions.cookie)) {
-    beginRead(draft, "explicit", actions);
-    return;
-  }
   if (renewalDelay(draft, actions.now) !== 0) {
     scheduleRenewal(draft, actions);
     return;
@@ -544,7 +432,29 @@ function startRenewal(draft: Draft, actions: Actions): void {
   draft.activity.latestInput = null;
   const sent = request(draft, actions);
   actions.effects.push({ kind: "renew", ticket: sent.ticket, session });
-  draft.renewal = { request: sent, source: { session, cookie: verified.cookie } };
+  draft.renewal = {
+    request: sent,
+    origin: session,
+    source: { session, cookie: verified.cookie },
+    epoch: draft.viewEpoch,
+  };
+}
+
+function prepareRenewal(draft: Draft, ticket: Ticket, actions: Actions): void {
+  const renewal = draft.renewal;
+  if (renewal === null || renewal.request.ticket !== ticket) {
+    return;
+  }
+  const current = draft.phase;
+  if (
+    current.kind !== "authenticated" ||
+    renewal.source === null ||
+    !adminSessionSameIdentity(renewal.source.session, current.verified.session) ||
+    cookieConflictsWith(renewal.request.cookie, actions.cookie)
+  ) {
+    draft.renewal = null;
+    scheduleRenewal(draft, actions);
+  }
 }
 
 function finishRenewal(
@@ -559,39 +469,62 @@ function finishRenewal(
     return;
   }
   draft.renewal = null;
-  const source =
-    renewal.source !== null &&
-    !cookieConflictsWith(renewal.source.cookie, sent) &&
-    !requestIsStale(renewal.request, sent, actions.cookie, false)
-      ? renewal.source
-      : null;
-  if (source === null) {
-    if (
-      draft.phase.kind === "authenticated" &&
-      cookieConflictsWith(draft.phase.verified.cookie, actions.cookie)
-    ) {
-      rereadCurrentCookie(draft, actions);
-    } else {
-      scheduleRenewal(draft, actions);
-    }
+  const current = phaseVerified(draft.phase);
+  if (current !== null && renewal.epoch !== draft.viewEpoch) {
+    scheduleRenewal(draft, actions);
+    return;
+  }
+  // Cookie 冲突可以撤销投影资格。当前票和原宿主仍匹配时，正文依然是身份证据。
+  const owner = noticeOrigin(draft);
+  const origin = owner !== null && adminSessionSameIdentity(renewal.origin, owner) ? owner : null;
+  if (outcome.kind === "succeeded" && observeSessionBody(draft, origin, outcome.session, actions)) {
+    draft.activity.latestInput = null;
+    beginRead(draft, "after_renewal", actions);
+    return;
+  }
+  const requestMatches = !requestIsStale(renewal.request, sent, actions.cookie, false);
+  const projectionAllowed =
+    requestMatches && renewal.source !== null && !cookieConflictsWith(renewal.source.cookie, sent);
+  // 退出限流等迁移会撤销续期投影。原票的可信 401 仍能结束同一 epoch 的会话。
+  const ownedExpiration =
+    outcome.kind === "unauthenticated" &&
+    requestMatches &&
+    cookiesEqual(sent, actions.cookie) &&
+    sent.kind === "present" &&
+    sent.value === renewal.origin.csrfToken &&
+    (projectionAllowed ||
+      (renewal.epoch === draft.viewEpoch &&
+        current !== null &&
+        adminSessionSameIdentity(current.session, renewal.origin)));
+  if (!projectionAllowed && !ownedExpiration) {
+    scheduleRenewal(draft, actions);
     return;
   }
   switch (outcome.kind) {
     case "succeeded":
-      if (adminSessionSameIdentity(source.session, outcome.session)) {
+      if (adminSessionSameIdentity(renewal.origin, outcome.session)) {
         applyRenewal(draft, outcome.session, sent, actions);
-      } else {
-        scheduleRenewal(draft, actions);
       }
       break;
-    case "unauthenticated":
+    case "unauthenticated": {
       if (draft.phase.kind === "logging_out") {
+        if (ownedExpiration) {
+          deferExpiration(draft, renewal.origin);
+        }
         hideSession(draft, actions);
         beginRead(draft, "after_renewal", actions);
       } else {
-        endSession(draft, shouldNotifyExpiration(draft, sent, actions), actions);
+        if (ownedExpiration) {
+          settleEndNotice(draft, renewal.origin, actions);
+        }
+        // 使 401 之前的 GET 票失效，只有新读取可以重新确认写权限。
+        endSession(draft, actions);
+        if (!projectionAllowed) {
+          beginRead(draft, "discover", actions);
+        }
       }
       break;
+    }
     case "rate_limited": {
       const delay = outcome.retryAfterMillis ?? draft.activity.timing?.intervalMillis ?? 5_000;
       draft.activity.retryNotBefore = f64Max(draft.activity.retryNotBefore, actions.now + delay);
@@ -630,7 +563,7 @@ function applyRenewal(draft: Draft, session: AdminSession, sent: Cookie, actions
     cookieConflictsWith(projectionCookie, actions.cookie) ||
     cookieConflictsWith(projectionCookie, sent)
   ) {
-    rereadCurrentCookie(draft, actions);
+    beginRead(draft, "cookie_changed", actions);
     return;
   }
   if (

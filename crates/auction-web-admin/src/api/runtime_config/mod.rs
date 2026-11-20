@@ -17,12 +17,14 @@ use auction_contracts::{
     AdminRuntimeConfigUpdateRequest, AdminRuntimeConfigValidateRequest, AdminWorkerRestartStateDto,
     ApiResponse,
 };
-use gloo_net::http::Request;
+use gloo_net::http::{Method, Request};
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
-use self::document::valid_runtime_document;
+use self::document::{project_update_document, valid_runtime_document};
 use self::fields::{invalid_runtime_response, valid_fingerprint};
+use super::AdminWriteFailure;
+use super::transport::WriteRequest;
 use super::{
     AdminApiFailure, invalid_request_error, invalid_response_error, response_failure, send_get,
     send_request,
@@ -156,35 +158,38 @@ pub(crate) async fn validate_admin_runtime_config(
     decode_runtime_config(payload.data, false).map_err(invalid_runtime_response)
 }
 
+/// 提交冻结的配置候选，并核对本次保存回执的完整文档。
 pub(crate) async fn update_admin_runtime_config(
     command_id: uuid::Uuid,
     expected_fingerprint: String,
     document: Value,
-) -> Result<AdminRuntimeConfig, AdminRuntimeConfigApiError> {
+) -> Result<AdminRuntimeConfig, AdminWriteFailure> {
     let command = AdminRuntimeConfigUpdateRequest { command_id, expected_fingerprint, document };
     #[cfg(test)]
     if let Some(stub) = dioxus::prelude::try_consume_context::<RuntimeConfigStub>() {
-        return decode_runtime_config((stub.save)(command), true).map_err(invalid_runtime_response);
+        return decode_runtime_config_update((stub.save)(command.clone()), command.document);
     }
-    let csrf_token =
-        super::fetch_csrf_token().await.map_err(|code| AdminApiFailure { status: None, code })?;
-    let response = send_request(|abort_signal| {
-        Request::put(&format!("/api/v1/admin/config?{RUNTIME_CONFIG_QUERY}"))
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
-    .await
-    .map_err(AdminApiFailure::client)?;
-    if !response.ok() {
-        return Err(response_failure(response).await);
+    let response =
+        WriteRequest::general(&format!("/api/v1/admin/config?{RUNTIME_CONFIG_QUERY}"), Method::PUT)
+            .send_json(&command)
+            .await?;
+    let payload: ApiResponse<AdminRuntimeConfig> =
+        response.json().await.map_err(AdminWriteFailure::invalid_response)?;
+    decode_runtime_config_update(payload.data, command.document)
+}
+
+fn decode_runtime_config_update(
+    value: AdminRuntimeConfig,
+    mut candidate: Value,
+) -> Result<AdminRuntimeConfig, AdminWriteFailure> {
+    let value = decode_runtime_config(value, true)
+        .map_err(|_error| AdminWriteFailure::outcome_unknown("invalid_response"))?;
+    // 只有与冻结候选对应的回执才能推进编辑基线。投影只作用于比较用的候选，重试复用原请求。
+    project_update_document(&mut candidate);
+    if value.document != candidate {
+        return Err(AdminWriteFailure::outcome_unknown("invalid_response"));
     }
-    let payload: ApiResponse<AdminRuntimeConfig> = response
-        .json()
-        .await
-        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
-    decode_runtime_config(payload.data, true).map_err(invalid_runtime_response)
+    Ok(value)
 }
 
 fn decode_runtime_config(
@@ -240,6 +245,46 @@ mod tests {
 
     pub(super) fn default_response() -> AdminRuntimeConfig {
         response(DEFAULT_PROJECTION)
+    }
+
+    #[test]
+    fn config_update_receipt_matches_the_frozen_candidate_projection() {
+        use super::decode_runtime_config_update;
+        use crate::api::AdminWriteFailure;
+
+        let mut receipt = default_response();
+        receipt.restart_required = true;
+        let early_bird = json!({
+            "enabled": false, "timezone": "UTC", "worlds": ["isekai"], "season_starts": ["05-01", "11-01"],
+            "season_start_time": "09:00", "window_days": 7, "session_days": [1, 3, 5, 7],
+            "open_time": "18:00", "preview_lead_minutes": 120, "live_minutes": 1440,
+            "qualities": [], "pause_intake_before_season": true
+        });
+        receipt.document["operations"]["schedule"]["early_bird"] = early_bird;
+        let mut candidate = receipt.document.clone();
+        candidate["bot_players"] = json!([]);
+        candidate["equipment_filter"]["qualities"] = json!([]);
+        let schedule = &mut candidate["operations"]["schedule"]["early_bird"];
+        schedule["pre_season_session"] = json!(true);
+        schedule["pre_season_days_before"] = json!(3);
+
+        let accepted = decode_runtime_config_update(receipt.clone(), candidate.clone()).unwrap();
+        assert_eq!(accepted.document, receipt.document);
+        for (path, value) in [
+            ("/metrics/enabled", json!(true)),
+            ("/operations/schedule/early_bird/season_starts", json!(["11-01", "05-01"])),
+        ] {
+            let mut invalid = receipt.clone();
+            *invalid.document.pointer_mut(path).unwrap() = value;
+            assert!(
+                matches!(
+                    decode_runtime_config_update(invalid, candidate.clone()),
+                    Err(AdminWriteFailure::OutcomeUnknown { code, response_status: None })
+                        if code == "invalid_response"
+                ),
+                "{path}"
+            );
+        }
     }
 
     /// 读取、校验与保存都带两个扩展参数：装备分类词典与长期未领取阈值。

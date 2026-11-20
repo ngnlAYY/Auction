@@ -1,7 +1,7 @@
-//! 运行配置文档的业务段校验：世界、装备颜色与筛选、模板、装备来源与看板邮箱。
+//! 运行配置候选的保存回执投影，以及配置文档的业务段校验。
 
 use auction_web_shared::wire::json_exact_object;
-use serde_json::Value;
+use serde_json::{Map, Value, json};
 
 use super::fields::{
     bool_field, optional_keys_object, safe_i64, string_field, valid_scalars, valid_string_array,
@@ -11,6 +11,44 @@ use super::infrastructure::{
     valid_worker_control,
 };
 use super::operations;
+
+/// 将完整的页面候选转成 HTTP 保存回执的文档投影，供结构相等比较。
+pub(super) fn project_update_document(value: &mut Value) {
+    let Some(document) = value.as_object_mut() else { return };
+    // HTTP 已补齐邮件默认值、可交易开关和告警阈值，候选中含这些字段时会按原值回显。
+    omit_empty_arrays(document, &["bot_players"]);
+    let colors = document.entry("equipment_colors").or_insert_with(|| json!({ "rules": [] }));
+    if let Some(rules) = colors.get_mut("rules").and_then(Value::as_array_mut) {
+        for rule in rules.iter_mut().filter_map(Value::as_object_mut) {
+            omit_empty_arrays(rule, &["categories", "equipment_types", "qualities"]);
+        }
+    }
+    if let Some(qualities) =
+        value.pointer_mut("/equipment_filter/qualities").and_then(Value::as_array_mut)
+        && qualities.is_empty()
+    {
+        // HTTP 以实际生效的品质门槛投影空配置（materialize_business_defaults）。
+        qualities.extend([Value::from("Legendary"), Value::from("Peerless")]);
+    }
+    if let Some(early_bird) =
+        value.pointer_mut("/operations/schedule/early_bird").and_then(Value::as_object_mut)
+    {
+        if early_bird.get("pre_season_session").and_then(Value::as_bool) == Some(true) {
+            early_bird.remove("pre_season_session");
+        }
+        if early_bird.get("pre_season_days_before").and_then(Value::as_u64) == Some(3) {
+            early_bird.remove("pre_season_days_before");
+        }
+    }
+}
+
+fn omit_empty_arrays(object: &mut Map<String, Value>, keys: &[&str]) {
+    for &key in keys {
+        if object.get(key).and_then(Value::as_array).is_some_and(Vec::is_empty) {
+            object.remove(key);
+        }
+    }
+}
 
 pub(super) fn valid_runtime_document(value: &Value) -> bool {
     let Some(document) = optional_keys_object(

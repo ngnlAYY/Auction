@@ -3,7 +3,8 @@
 import { expect, jest, spyOn, test } from "bun:test";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { createComponent, createRoot, flush } from "solid-js";
-import { adminApiFailureFromHttpBody } from "../../api/failure";
+import { writeFailureFromReply } from "../../api/api-request-fixture";
+import type { AdminWriteFailure } from "../../api/failure";
 import { loadRenderModule } from "../../solid-render-fixture.test";
 import { cleanupScope } from "../../test-scope-fixture";
 import { installAdminTranslation } from "../admin-locale-fixture.test";
@@ -93,6 +94,13 @@ test("显式移除先把焦点移到下一条记录再回主区", async () => {
   ]) {
     const scope = cleanupScope();
     try {
+      const replies: [string, Result<void, AdminWriteFailure>][] = [];
+      for (const entity of ["world:one", "world:two"]) {
+        const result = unknown
+          ? err(await writeFailureFromReply(503, UNAVAILABLE_BODY))
+          : ok(undefined);
+        replies.push([entity, result]);
+      }
       scope.defer(installAdminTranslation());
       scope.defer(flush);
       jest.useFakeTimers();
@@ -113,15 +121,12 @@ test("显式移除先把焦点移到下一条记录再回主区", async () => {
               const send = createElement("button", {
                 type: "button",
                 onClick() {
-                  for (const entity of ["world:one", "world:two"]) {
+                  for (const [entity, result] of replies) {
                     submissions.push(
                       owner.submitWithReceipt(
                         entity,
                         "测试操作",
-                        async (): Promise<Result<void, string>> =>
-                          unknown
-                            ? err(adminApiFailureFromHttpBody(503, UNAVAILABLE_BODY).code)
-                            : ok(undefined),
+                        async () => result,
                         () => ({ kind: "receipt", receipt: null }),
                         () => {},
                       ),

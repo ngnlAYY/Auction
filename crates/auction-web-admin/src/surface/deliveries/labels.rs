@@ -3,7 +3,7 @@
 use auction_contracts::AdminDeliveryActionBlocker;
 use auction_web_shared::t;
 
-use crate::api::Delivery;
+use crate::api::{Delivery, SentProofCommand};
 use crate::surface::AdminActionFeedback;
 
 pub(crate) fn action_blocker_label(reason: AdminDeliveryActionBlocker) -> String {
@@ -43,6 +43,22 @@ pub(crate) fn action_feedback_message(feedback: &AdminActionFeedback, success: S
         }
         _ => feedback.message(success),
     }
+}
+
+/// 把接口校验拒绝的理由草稿映射为字段提示。
+pub(super) fn delivery_reason_error(reason: &str) -> Option<String> {
+    let reason = reason.trim();
+    if SentProofCommand::valid_reason(reason) {
+        return None;
+    }
+    let max = SentProofCommand::MAX_REASON_BYTES;
+    Some(if reason.is_empty() {
+        t!("admin-field-required")
+    } else if reason.len() > max {
+        t!("admin-field-max-utf8-bytes", max: max)
+    } else {
+        t!("admin-field-no-control-characters")
+    })
 }
 
 pub(crate) const DELIVERY_STATUS_VALUES: [&str; 7] =

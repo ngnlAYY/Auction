@@ -54,7 +54,7 @@ pub(super) fn MailTriggerButton() -> Element {
                     "mail-poll-trigger".to_owned(),
                     t!("admin-mail-trigger"),
                     |command_id| async move {
-                        trigger_mail_poll(command_id).await.map_err(|error| error.code)
+                        trigger_mail_poll(command_id).await
                     },
                     move |pollers, source_alive| CommandDelivery::reported(
                         source_alive && try_set_if_alive(notice, Some(Ok(pollers))),
@@ -139,11 +139,10 @@ pub(super) fn MailPollingCard(
                             async move {
                                 #[cfg(test)]
                                 if let Some(reply) = try_consume_context::<PollingReply>() {
-                                    return reply.0.fetch().await;
+                                    return reply.0.fetch().await.map_err(crate::api::AdminWriteFailure::outcome_unknown);
                                 }
                                 set_mail_paused(command_id, polling, desired_paused)
                                     .await
-                                    .map_err(|error| error.code)
                             }
                         },
                         move |_, source_alive| {
@@ -173,10 +172,12 @@ pub(super) fn MailPollingCard(
 mod tests {
     use std::rc::Rc;
 
+    use dioxus::core::{AttributeValue, Mutation};
     use dioxus::prelude::*;
+    use gloo_net::http::Method;
 
-    use super::{MailPollingCard, MailPollingCommands, PollingReply};
-    use crate::api::AdminMailPolling;
+    use super::{MailPollingCard, MailPollingCommands, MailTriggerButton, PollingReply};
+    use crate::api::{AdminApiFailure, AdminMailPolling};
     use crate::surface::auctions::draft_page_tests::{
         RecordRead, button, click_button, has_live_text, init_i18n, mount_writer, settle_writer,
     };
@@ -197,7 +198,9 @@ mod tests {
 
     #[test]
     fn mailbox_switch_keeps_the_first_mailbox_receipt_and_does_not_reload_the_other_mailbox() {
-        for switch in [false, true] {
+        for (switch, initially_paused, valid) in
+            [(false, false, true), (true, false, true), (true, true, true), (true, false, false)]
+        {
             let reply = Rc::new(RecordRead::new());
             let (mut page, _) = mount_writer({
                 let reply = reply.clone();
@@ -213,26 +216,39 @@ mod tests {
                         p { "轮询世代 {reload()}" }
                         MailPollingCommands { refresh: reload, active_mailbox: mailbox,
                             for key in [mailbox()] {
-                                MailPollingCard { key: "{key}", polling: polling(key), refresh: reload, loaded_generation: 0 }
+                                MailPollingCard {
+                                    key: "{key}",
+                                    polling: AdminMailPolling { paused: initially_paused, ..polling(key) },
+                                    refresh: reload,
+                                    loaded_generation: 0,
+                                }
                             }
                         }
                     }
                 }
             });
-            click_button(&mut page, "暂停轮询");
+            let label = if initially_paused { "恢复轮询" } else { "暂停轮询" };
+            click_button(&mut page, label);
             if switch {
                 click_button(&mut page, "切换邮箱");
             }
             let mut accepted = polling("mail-a".to_owned());
-            accepted.paused = true;
+            accepted.paused = !initially_paused;
             accepted.state_version = 2;
-            reply.respond(Ok(accepted));
+            reply.respond(if valid { Ok(accepted) } else { Err("invalid_response".to_owned()) });
             settle_writer(&mut page);
+            if !valid {
+                assert!(button(&page, "关闭回执").is_none());
+                assert!(!has_live_text(&page, "邮件轮询状态已更新。"));
+                assert!(has_live_text(&page, "轮询世代 0"));
+                assert!(!button(&page, "原样重试").unwrap().1);
+                continue;
+            }
             assert!(button(&page, "关闭回执").is_some());
             assert!(has_live_text(&page, "邮件轮询状态已更新。"));
             if switch {
                 assert!(has_live_text(&page, "轮询世代 0"));
-                assert!(!button(&page, "暂停轮询").unwrap().1);
+                assert!(!button(&page, label).unwrap().1);
             } else {
                 assert!(has_live_text(&page, "轮询世代 1"));
                 let (pause, disabled) = button(&page, "暂停轮询").unwrap();
@@ -242,5 +258,42 @@ mod tests {
                 assert!(has_live_text(&page, "邮件轮询状态已更新。"));
             }
         }
+    }
+
+    #[test]
+    fn mail_trigger_with_unreadable_http_reply_keeps_the_original_intent_pending() {
+        let (mut page, initial) = mount_writer(|| {
+            init_i18n();
+            AdminApiFailure::stub_write_response(
+                "/api/v1/admin/mail/polls:trigger",
+                Method::POST,
+                503,
+                "{",
+            );
+            let refresh = use_signal(|| 0);
+            let active_mailbox = use_signal(String::new);
+            rsx! {
+                MailPollingCommands { refresh, active_mailbox,
+                    MailTriggerButton {}
+                }
+            }
+        });
+        assert!(has_live_text(&page, "唤醒全部邮件轮询器"));
+        // 按钮的两种文案经条件片段渲染；从挂载时的真实监听定位触发按钮。
+        let trigger = initial
+            .iter()
+            .find_map(|mutation| match mutation {
+                Mutation::NewEventListener { name, id } if name == "click" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let mut edits = page.dispatch("click", trigger, "");
+        edits.extend(settle_writer(&mut page));
+        assert!(edits.iter().any(|mutation| matches!(
+            mutation,
+            Mutation::SetAttribute { id, name: "disabled", value: AttributeValue::Bool(true), .. } if *id == trigger
+        )));
+        assert!(!button(&page, "原样重试").unwrap().1);
+        assert!(!has_live_text(&page, "请求已接受，将唤醒 3 个轮询器。"));
     }
 }

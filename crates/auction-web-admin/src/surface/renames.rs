@@ -2,7 +2,7 @@
 //! 页面沿用旧版的名称即时筛选、列表和页级确认对话框；回滚仍通过新版命令 API、当前用户
 //! 版本和 CSRF 边界完成，浏览器不自行推导身份状态迁移。
 
-use std::{cell::RefCell, cmp::Ordering, rc::Rc};
+use std::{cell::RefCell, cmp::Ordering, future::Future, rc::Rc};
 
 use auction_web_shared::{AsyncState, AsyncStateKind, Dialog, Time, TruncatedText, t};
 use dioxus::prelude::*;
@@ -12,7 +12,7 @@ use super::query::use_renames_query_state;
 use super::users::user_command_entity;
 use super::{AdminActionFeedback, admin_api_error_message};
 use crate::api::{
-    AdminRename, AdminRenamePage, AdminRenameRevertCommand, fetch_admin_renames,
+    AdminRename, AdminRenamePage, AdminRenameRevertCommand, AdminWriteFailure, fetch_admin_renames,
     prepare_admin_rename_revert, revert_admin_rename,
 };
 use crate::surface::pending::{
@@ -67,15 +67,11 @@ pub(super) fn page() -> Element {
                 let rename = rename.clone();
                 let frozen = Rc::clone(&frozen);
                 async move {
-                    let existing = frozen.borrow().clone();
-                    let command = match existing {
-                        Some(command) => command,
-                        None => {
-                            let command = prepare_admin_rename_revert(command_id, &rename).await?;
-                            *frozen.borrow_mut() = Some(command.clone());
-                            command
-                        }
-                    };
+                    let command = frozen_rename_command(
+                        &frozen,
+                        prepare_admin_rename_revert(command_id, &rename),
+                    )
+                    .await?;
                     revert_admin_rename(&command).await
                 }
             },
@@ -139,15 +135,11 @@ pub(super) fn page() -> Element {
                     detail: "",
                 }
             }
-            if let Some(feedback) = notice() {
+            if let Some(AdminActionFeedback::Error(code)) = notice() {
                 p {
-                    class: if feedback.is_success() {
-                        "action-feedback action-feedback--success"
-                    } else {
-                        "action-feedback action-feedback--error"
-                    },
-                    role: if feedback.is_success() { "status" } else { "alert" },
-                    {feedback.message(t!("admin-renames-revert-success"))}
+                    class: "action-feedback action-feedback--error",
+                    role: "alert",
+                    {admin_api_error_message(&code)}
                 }
             }
             Pager {
@@ -193,6 +185,14 @@ pub(super) fn page() -> Element {
                     }
                 }
             }
+            // 已确认的回滚在来源页交付，列表读取状态不影响回执展示。
+            if matches!(notice(), Some(AdminActionFeedback::Success)) {
+                p {
+                    class: "action-feedback action-feedback--success",
+                    role: "status",
+                    {t!("admin-renames-revert-success")}
+                }
+            }
             {content}
             if let Some(rename) = selected() {
                 Dialog {
@@ -224,6 +224,22 @@ pub(super) fn page() -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+// 首次准备成功后保留整条命令。重试不轮询准备 future，避免重新读取版本。
+async fn frozen_rename_command<T: Clone>(
+    frozen: &RefCell<Option<T>>,
+    prepare: impl Future<Output = Result<T, AdminWriteFailure>>,
+) -> Result<T, AdminWriteFailure> {
+    let existing = frozen.borrow().clone();
+    match existing {
+        Some(command) => Ok(command),
+        None => {
+            let command = prepare.await?;
+            *frozen.borrow_mut() = Some(command.clone());
+            Ok(command)
         }
     }
 }
@@ -338,4 +354,52 @@ fn sort_renames(renames: &mut [AdminRename], column: &str, direction: SortDirect
         "actor" => left.actor.cmp(&right.actor),
         _ => Ordering::Equal,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::{Cell, RefCell};
+    use std::future::Future;
+    use std::pin::pin;
+    use std::task::{Context, Poll, Waker};
+
+    use auction_contracts::AdminRenameRevertRequest;
+
+    use super::frozen_rename_command;
+
+    #[test]
+    fn rename_retry_reuses_the_frozen_body_without_reading_history_again() {
+        const COMMAND_ID: &str = "00000000-0000-4000-8000-000000000003";
+        let reads = Cell::new(0);
+        let history_version = Cell::new(3);
+        let frozen = RefCell::new(None);
+        let prepare_from_history = || async {
+            reads.set(reads.get() + 1);
+            Ok(AdminRenameRevertRequest {
+                command_id: COMMAND_ID.to_owned(),
+                expected_state_version: history_version.get(),
+            })
+        };
+        let attempt = || {
+            let mut future = pin!(frozen_rename_command(&frozen, prepare_from_history()));
+            let Poll::Ready(Ok(command)) =
+                future.as_mut().poll(&mut Context::from_waker(Waker::noop()))
+            else {
+                panic!("准备回滚应返回完整命令");
+            };
+            let body = serde_json::to_string(&command).unwrap();
+            (command.expected_state_version, body)
+        };
+        let (version, body) = attempt();
+        assert_eq!(reads.get(), 1);
+        assert_eq!(version, 3);
+        assert_eq!(
+            body,
+            r#"{"command_id":"00000000-0000-4000-8000-000000000003","expected_state_version":3}"#
+        );
+
+        history_version.set(9);
+        assert_eq!(attempt(), (3, body));
+        assert_eq!(reads.get(), 1, "原样重试不得再读取历史");
+    }
 }

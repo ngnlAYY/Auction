@@ -140,11 +140,6 @@ pub(super) fn lifecycle_action_confirm_note(action: AdminAuctionLifecycleAction)
     }
 }
 
-/// 写入准备阶段的同名错误不能作为已拒绝的版本冲突回执。
-pub(super) fn stale_auction_failure(code: &str) -> bool {
-    code == "stale_auction_state"
-}
-
 // 镜像 Admin 生命周期 HTTP 入口的原因约束，长度按 UTF-8 字节计算。
 const MAX_LIFECYCLE_REASON_BYTES: usize = 1_024;
 
@@ -200,11 +195,23 @@ pub(crate) fn auction_notice_label(notice: AdminAuctionNotice) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::future::ready;
+    use std::rc::Rc;
+
+    use dioxus::prelude::{VNode, spawn, use_hook, use_signal};
+    use gloo_net::http::Method;
+    use uuid::Uuid;
+
     use super::{
-        LifecycleReasonIssue, lifecycle_actions, pending_open_millis, stale_auction_failure,
-        validate_lifecycle_reason,
+        LifecycleReasonIssue, lifecycle_actions, pending_open_millis, validate_lifecycle_reason,
     };
-    use crate::api::{AdminAuctionCapabilities, AdminAuctionLifecycleAction};
+    use crate::api::{
+        AdminAuctionCapabilities, AdminAuctionLifecycleAction, AdminWriteFailure,
+        execute_admin_auction_lifecycle,
+    };
+    use crate::surface::auctions::editor::observe_draft_write;
+    use crate::surface::auctions::editor::tests::{WriteScript, mount_writer};
 
     const OPEN_AT: &str = "2026-11-14T12:00:00Z";
 
@@ -284,11 +291,75 @@ mod tests {
     }
 
     #[test]
-    fn only_version_rejections_enter_the_auction_stale_path() {
-        assert!(stale_auction_failure("stale_auction_state"));
-        assert!(!stale_auction_failure("stale_state_version"));
-        assert!(!stale_auction_failure("not_sent:stale_auction_state"));
-        assert!(!stale_auction_failure("command_conflict"));
-        assert!(!stale_auction_failure("outcome_unknown"));
+    fn only_verified_version_rejections_lock_the_auction_draft() {
+        const AUCTION_ID: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+        let script = WriteScript::default();
+        let feedbacks = Rc::new(RefCell::new(Vec::new()));
+        let cases = [
+            (Some(409), "stale_auction_state", "stale_auction_state", true),
+            (Some(422), "stale_auction_state", "http_422", false),
+            (None, "stale_auction_state", "stale_auction_state", false),
+            (Some(409), "stale_state_version", "stale_state_version", false),
+            (Some(409), "command_conflict", "command_conflict", false),
+            (Some(409), "outcome_unknown", "outcome_unknown", false),
+        ];
+        for (status, code, _, _) in cases {
+            if let Some(status) = status {
+                script.reply_http(status, serde_json::json!({"code": code, "message": "拒绝", "data": null, "request_id": null}).to_string());
+            }
+        }
+        let observed = feedbacks.clone();
+        let writes = script.clone();
+        let command_id = Uuid::from_u128(0x00000000_0000_4000_8000_000000000002);
+        let (mut page, _) = mount_writer(move || {
+            let feedback = use_signal(|| None);
+            writes.install();
+            let observed = observed.clone();
+            use_hook(move || {
+                spawn(async move {
+                    for (status, code, _, _) in cases {
+                        let result = if status.is_some() {
+                            observe_draft_write(
+                                execute_admin_auction_lifecycle(
+                                    command_id,
+                                    AUCTION_ID.to_owned(),
+                                    AdminAuctionLifecycleAction::Cancel,
+                                    7,
+                                    Some("核对".to_owned()),
+                                ),
+                                feedback,
+                                "stale_auction_state",
+                            )
+                            .await
+                        } else {
+                            observe_draft_write(
+                                ready(Err(AdminWriteFailure::not_sent(code))),
+                                feedback,
+                                "stale_auction_state",
+                            )
+                            .await
+                        };
+                        assert!(result.is_err());
+                        let outcome = feedback().expect("草稿失败反馈");
+                        observed.borrow_mut().push((outcome.display_code, outcome.stale_write));
+                    }
+                });
+            });
+            VNode::empty()
+        });
+        page.rerender();
+        assert_eq!(*feedbacks.borrow(), cases.map(|(_, _, code, stale)| (code.to_owned(), stale)));
+        let captured = script.take_writes();
+        assert_eq!(captured.len(), 5);
+        for write in captured {
+            assert_eq!(write.method, Method::POST);
+            assert_eq!(write.url, format!("/api/v1/admin/auctions/{AUCTION_ID}/cancel"));
+            assert_eq!(
+                String::from_utf8(write.body).unwrap(),
+                format!(
+                    r#"{{"command_id":"{command_id}","expected_state_version":7,"reason":"核对"}}"#
+                )
+            );
+        }
     }
 }

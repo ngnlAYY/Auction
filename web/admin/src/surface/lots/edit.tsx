@@ -21,9 +21,11 @@ import {
   DraftFeedback,
   type DraftRead,
   DraftRefreshButton,
+  type DraftWriteFeedback,
   draftReadIsReady,
   draftReadRetryAfterClose,
   draftReadVersionChanged,
+  observeDraftWrite,
 } from "../auctions/editor";
 import { type PendingCommands, requirePendingCommands, setIfAlive } from "../pending";
 import { PendingCommandPanel } from "../pending/panel";
@@ -95,7 +97,7 @@ export interface AdminLotEditDialogProps {
 /** 页面拥有的改价或撤回对话框；提交后由未决命令宿主保留同一命令与完整负载。 */
 export function AdminLotEditDialog(props: AdminLotEditDialogProps): JSX.Element {
   const owner = requirePendingCommands();
-  const failureCode = createCell<string | null>(null);
+  const writeFeedback = createCell<DraftWriteFeedback | null>(null);
   const invalidPrice = createCell(false);
   const focusField = useFocusField();
   let alive = true;
@@ -113,7 +115,7 @@ export function AdminLotEditDialog(props: AdminLotEditDialogProps): JSX.Element 
         const conflict = createValueMemo(
           () =>
             !frozen() &&
-            (failureCode() === "stale_lot_state" ||
+            (writeFeedback()?.staleWrite === true ||
               draftReadVersionChanged(props.read, edit().base.stateVersion, props.latestVersion)),
         );
         const canSubmit = createValueMemo(
@@ -157,14 +159,14 @@ export function AdminLotEditDialog(props: AdminLotEditDialogProps): JSX.Element 
               current,
               price,
               props.draft,
-              failureCode,
+              writeFeedback,
               props.notice,
               props.host,
               failureAlive,
               props.pageAlive,
             )
           ) {
-            failureCode.set(null);
+            writeFeedback.set(null);
           }
         };
         const onInput = (event: InputEvent & { readonly currentTarget: HTMLInputElement }) => {
@@ -218,7 +220,11 @@ export function AdminLotEditDialog(props: AdminLotEditDialogProps): JSX.Element 
                 />
               </Show>
               <Show when={!frozen()}>
-                <DraftFeedback conflict={conflict()} read={props.read} failure={failureCode()} />
+                <DraftFeedback
+                  conflict={conflict()}
+                  read={props.read}
+                  failure={writeFeedback()?.displayCode ?? null}
+                />
               </Show>
               <div class="admin-shell__dialog-actions">
                 <Show when={!conflict()}>
@@ -268,7 +274,7 @@ function submitLotUpdate(
   edit: LotEdit,
   price: number | null,
   draft: Cell<LotEdit | null>,
-  failure: Cell<string | null>,
+  failure: Cell<DraftWriteFeedback | null>,
   notice: Cell<LotUpdateNotice | null>,
   host: AdminSessionHost,
   failureAlive: () => boolean,
@@ -294,14 +300,13 @@ function submitLotUpdate(
   const submitted = owner.submit(
     `lot:${lotId}`,
     label,
-    async (commandId, signal) => {
-      const result = await updateAdminLot(host, lotId, commandId, prepare, signal);
-      // 任务取消后观察逻辑随 future 一起丢弃，不能把旧结果写回仍挂载的弹窗。
-      if (!signal.aborted) {
-        setIfAlive(failure, result.ok ? null : result.error, failureAlive);
-      }
-      return result;
-    },
+    (commandId, signal) =>
+      observeDraftWrite(
+        updateAdminLot(host, lotId, commandId, prepare, signal),
+        "stale_lot_state",
+        failure,
+        () => failureAlive() && !signal.aborted,
+      ),
     () => {
       closeMatchingDraft(
         draft,

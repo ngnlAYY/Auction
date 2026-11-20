@@ -8,8 +8,9 @@ pub(crate) use auction_contracts::{
 };
 use gloo_net::http::{Method, Request};
 
+use super::AdminWriteFailure;
 use super::failure::AdminWriteEndpoint;
-use super::transport::send_json_write;
+use super::transport::WriteRequest;
 use super::{
     AdminApiFailure, MAX_JSON_SAFE_INTEGER, fetch_csrf_token, invalid_request_error,
     invalid_response_error, response_failure, send_get, send_request, valid_admin_time,
@@ -141,7 +142,7 @@ pub(crate) async fn publish_admin_rules(
     locale: String,
     title: String,
     markdown: String,
-) -> Result<AdminRules, AdminRulesApiError> {
+) -> Result<AdminRules, AdminWriteFailure> {
     let request =
         AdminRulesPublishRequest { command_id, expected_revision, locale, title, markdown };
     #[cfg(test)]
@@ -153,27 +154,25 @@ pub(crate) async fn publish_admin_rules(
         AdminDocumentKind::Rules => AdminWriteEndpoint::RulesPublish,
         AdminDocumentKind::About => AdminWriteEndpoint::AboutPublish,
     };
-    let response = send_json_write(kind.api_path(), Method::PUT, &request)
-        .await
-        .map_err(|failure| failure.at_write_endpoint(endpoint))?;
-    let payload: ApiResponse<AdminRules> = response
-        .json()
-        .await
-        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
+    let response =
+        WriteRequest::new(kind.api_path(), Method::PUT, endpoint).send_json(&request).await?;
+    let payload: ApiResponse<AdminRules> =
+        response.json().await.map_err(AdminWriteFailure::invalid_response)?;
     decode_publish_receipt(payload.data, &request)
 }
 
 fn decode_publish_receipt(
     value: AdminRules,
     request: &AdminRulesPublishRequest,
-) -> Result<AdminRules, AdminRulesApiError> {
-    let rules = decode_rules(value).map_err(invalid_rules_response)?;
+) -> Result<AdminRules, AdminWriteFailure> {
+    let rules = decode_rules(value)
+        .map_err(|error| AdminWriteFailure::outcome_unknown(invalid_rules_response(error).code))?;
     if rules.locale != request.locale
         || rules.title != request.title
         || rules.markdown != request.markdown
         || Some(rules.revision) != request.expected_revision.checked_add(1)
     {
-        return Err(AdminApiFailure::client("invalid_response"));
+        return Err(AdminWriteFailure::outcome_unknown("invalid_response"));
     }
     Ok(rules)
 }

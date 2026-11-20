@@ -5,8 +5,8 @@ import { unreachable } from "@auction/web-shared/result";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 
-import { adminApiFailureDisplayCode } from "../../api/failure";
 import type { AdminUserStatusFilter } from "../../api/users";
+import type { KeyVisibility } from "../auth/session";
 import { type CommandOperation, type PendingCommands, setIfAlive, trySetIfAlive } from "../pending";
 import { advanceCommandReload } from "../pending/sources";
 import type { AdminActionFeedback } from "../presentation";
@@ -66,20 +66,26 @@ export function runUserAction(
   feedback: Cell<AdminActionFeedback | null>,
   reloadGeneration: Cell<bigint>,
   operation: CommandOperation<string | null>,
-  feedbackAlive: () => boolean = () => true,
+  options: {
+    readonly feedbackAlive?: () => boolean;
+    readonly keyVisibility?: () => KeyVisibility;
+  } = {},
 ): boolean {
+  const feedbackAlive = options.feedbackAlive ?? (() => true);
   return owner.submitWithReceipt(
     entity,
     action,
     operation,
-    (key, sourceAlive) =>
-      adminUserGeneratedKeyDelivery(
+    (key, sourceAlive) => {
+      const visibility = sourceAlive && key !== null ? (options.keyVisibility?.() ?? null) : null;
+      return adminUserGeneratedKeyDelivery(
         key,
         sourceAlive && trySetIfAlive(feedback, { kind: "success" }, feedbackAlive),
-      ),
+        visibility,
+      );
+    },
     (code) => {
-      const displayCode = adminApiFailureDisplayCode(code);
-      setIfAlive(feedback, { kind: "error", code: displayCode }, feedbackAlive);
+      setIfAlive(feedback, { kind: "error", code }, feedbackAlive);
       // 成功由 owner 刷新；拒绝或未知也保留原用户页的重读行为。
       advanceCommandReload(reloadGeneration);
     },

@@ -28,6 +28,14 @@ export type AdminSessionCheckTrigger = () => void;
 /** 认证内状态不等于继续授权；连接丢失或复核未完成时写门禁必须失败关闭。 */
 export type AdminSessionWritePermission = () => boolean;
 
+/** 请求发出时记录代际，异代正文与可信 401 都交回原宿主。 */
+export interface AdminSessionWriteReview {
+  readonly isCurrent: () => boolean;
+  readonly observe: (session: AdminSession) => void;
+  readonly cookieGeneration: () => string | null;
+  readonly invalidate: (session: AdminSession) => void;
+}
+
 /**
  * Admin 会话的进程内快照；服务端时刻保留完整纳秒，接收时间用单调时钟。
  * 内部字段用小驼峰；`csrf_token` 是照搬回执字段名的兼容别名，两处取值相同。
@@ -54,6 +62,7 @@ export interface AdminSessionHostCapabilities {
   readonly check: AdminSessionCheckTrigger;
   readonly writesAllowed: AdminSessionWritePermission;
   readonly confirmed: () => AdminSession | null;
+  readonly writeReview?: AdminSessionWriteReview;
 }
 
 // 句柄品牌只在模块内可见；外部无法构造出满足 `AdminSessionHost` 的对象。
@@ -126,9 +135,51 @@ export function confirmedAdminSession(host: AdminSessionHost): AdminSession | nu
   return entry === null ? null : entry.capabilities.confirmed();
 }
 
+/** 读取此宿主登记的身份观测与请求失效回调，旧句柄不能接管新宿主。 */
+export function adminSessionWriteReview(host: AdminSessionHost): AdminSessionWriteReview | null {
+  return registeredSessionHost(host)?.capabilities.writeReview ?? null;
+}
+
 /** 两个会话属于同一身份与同一 CSRF 代际；宿主归属由调用方持有的句柄保证。 */
 export function adminSessionSameIdentity(left: AdminSession, right: AdminSession): boolean {
   return left.actor === right.actor && left.csrfToken === right.csrfToken;
+}
+
+// 只有实际发出时可核对的代际才能报告失效。回执到达时不重新认领宿主或代际。
+const responseInvalidations = new WeakMap<TransportResponse, () => void>();
+
+/** 在发出请求前固定归属。回执中的代际不能从收包时的宿主反推。 */
+export function captureAdminSessionInvalidation(host: AdminSessionHost): (() => void) | null {
+  const review = adminSessionWriteReview(host);
+  if (review === null || !review.isCurrent()) {
+    return null;
+  }
+  const session = confirmedAdminSession(host);
+  if (session === null || review.cookieGeneration() !== session.csrfToken) {
+    return null;
+  }
+  return () => {
+    if (adminSessionHostLive(host)) {
+      review.invalidate(session);
+    }
+  };
+}
+
+/** 将请求发出时的失效归属附到本次 HTTP 401 回执。 */
+export function bindAdminSessionInvalidation(
+  response: TransportResponse,
+  invalidate: (() => void) | null,
+): void {
+  if (response.status === 401 && invalidate !== null) {
+    responseInvalidations.set(response, invalidate);
+  }
+}
+
+/** 完整解码可信的 401 后向原宿主交付一次失效证据。 */
+export function reportAdminSessionInvalidation(response: TransportResponse): void {
+  const invalidate = responseInvalidations.get(response);
+  responseInvalidations.delete(response);
+  invalidate?.();
 }
 
 /** 请求返回后仍须由发起时的宿主收尾；宿主注销或任务取消后不能再报告结果。 */
@@ -154,7 +205,8 @@ export async function fetchAdminSession(
   }
   const received = response.value;
   if (!responseOk(received)) {
-    const failure = await sessionFailure(received, signal, host);
+    // 外壳自己的读票没有业务宿主归属。写前 GET 的可信 401 则携带实发归属。
+    const failure = await responseFailure(received, signal, host);
     if (failure.status === 401 && failure.code === "unauthenticated") {
       return ok(null);
     }
@@ -197,7 +249,7 @@ export async function loginAdmin(
   }
   const received = response.value;
   if (!responseOk(received)) {
-    // 同一取消信号与发起宿主穿过错误适配；已取消时不再触发外壳重查。
+    // Basic Auth 的拒绝随登录回执交付，登录专属 GET 决定当前 Cookie 的状态。
     const failure = await responseFailure(received, signal, host);
     return err(failure.code);
   }

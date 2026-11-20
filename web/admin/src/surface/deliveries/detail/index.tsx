@@ -10,7 +10,7 @@ import {
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
-import { err, ok, type Result } from "@auction/web-shared/result";
+import { ok, type Result } from "@auction/web-shared/result";
 import { Link } from "@auction/web-shared/router";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
@@ -25,6 +25,7 @@ import {
   prepareAcknowledgeDelivery,
   prepareSentProofCommand,
   type SentProofCommand,
+  validDeliveryReason,
 } from "../../../api/delivery";
 import { trimRustWhitespace } from "../../../api/session-time";
 import { useAdminSessionHost } from "../../auth/shell";
@@ -37,7 +38,7 @@ import {
 } from "../../pending/sources";
 import { adminApiErrorMessage } from "../../presentation";
 import { deliveryCommandEntity } from "..";
-import { actionBlockerLabel } from "../labels";
+import { actionBlockerLabel, deliveryReasonError } from "../labels";
 import { selectableEvidence } from "../sent-proof/evidence";
 import { SentProofDialog } from "../sent-proof/render";
 import type { SentProofSubmission } from "../sent-proof/state";
@@ -49,6 +50,8 @@ import {
   EvidenceSection,
   ObligationSection,
 } from "./sections";
+
+const ACKNOWLEDGE_REASON_ERROR_ID = "delivery-acknowledge-reason-error";
 
 interface DetailRead {
   readonly deliveryId: string;
@@ -86,6 +89,14 @@ function DeliveryDetailPage(props: DeliveryDetailPageProps): JSX.Element {
   const sentOpen = createCell(false);
   const sentSubmitted = createCell(false);
   const acknowledgeReason = createCell("");
+  const reasonError = createValueMemo(() => deliveryReasonError(acknowledgeReason()));
+  const reasonDescription = (): string | undefined => {
+    const note = blockedNote();
+    if (reasonError() === null) {
+      return note ?? undefined;
+    }
+    return note === null ? ACKNOWLEDGE_REASON_ERROR_ID : `${ACKNOWLEDGE_REASON_ERROR_ID} ${note}`;
+  };
   const acknowledged = createCell(false);
   let alive = true;
   onCleanup(() => {
@@ -150,10 +161,10 @@ function DeliveryDetailPage(props: DeliveryDetailPageProps): JSX.Element {
       async (commandId, signal) => {
         const prepared = prepare(commandId);
         if (!prepared.ok) {
-          return err(prepared.error.code);
+          return prepared;
         }
         const result = await confirmDeliverySentProof(host, prepared.value, signal);
-        return result.ok ? ok(result.value) : err(result.error.code);
+        return result;
       },
       () => {
         setIfAlive(sentOpen, false, () => alive);
@@ -187,11 +198,12 @@ function DeliveryDetailPage(props: DeliveryDetailPageProps): JSX.Element {
     if (fencingVersion === null) {
       return;
     }
-    const reason = trimRustWhitespace(acknowledgeReason());
-    if (reason === "" || busy() || occupied()) {
+    const reason = trimRustWhitespace(acknowledgeReason.peek());
+    if (!validDeliveryReason(reason) || busy() || occupied()) {
       return;
     }
     actionError.set(null);
+    // 理由与投递版本随命令冻结，结果未知时由宿主沿用原命令 ID 和正文重试。
     const prepare = prepareAcknowledgeDelivery(deliveryId, fencingVersion, reason);
     commands.submit(
       entity,
@@ -199,10 +211,10 @@ function DeliveryDetailPage(props: DeliveryDetailPageProps): JSX.Element {
       async (commandId, signal) => {
         const prepared = prepare(commandId);
         if (!prepared.ok) {
-          return err(prepared.error.code);
+          return prepared;
         }
         const result = await acknowledgeDelivery(host, prepared.value, signal);
-        return result.ok ? ok(null) : err(result.error.code);
+        return result.ok ? ok(null) : result;
       },
       () => {
         setIfAlive(acknowledged, true, () => alive);
@@ -321,20 +333,28 @@ function DeliveryDetailPage(props: DeliveryDetailPageProps): JSX.Element {
                         <span>{t("delivery-detail-acknowledge-reason")}</span>
                         <textarea
                           rows="3"
-                          maxlength="2048"
                           disabled={occupied() || busy()}
-                          aria-describedby={blockedNote() ?? undefined}
+                          aria-invalid={reasonError() === null ? "false" : "true"}
+                          aria-describedby={reasonDescription()}
                           value={acknowledgeReason()}
                           onInput={(event) => acknowledgeReason.set(event.currentTarget.value)}
                         />
                       </label>
+                      <Show when={reasonError()}>
+                        {(error) => (
+                          <p
+                            id={ACKNOWLEDGE_REASON_ERROR_ID}
+                            class="action-feedback action-feedback--error"
+                          >
+                            {error()}
+                          </p>
+                        )}
+                      </Show>
                       <button
                         type="button"
                         class="admin-btn-primary"
-                        disabled={
-                          occupied() || busy() || trimRustWhitespace(acknowledgeReason()) === ""
-                        }
-                        aria-describedby={blockedNote() ?? undefined}
+                        disabled={occupied() || busy() || reasonError() !== null}
+                        aria-describedby={reasonDescription()}
                         onClick={acknowledge}
                       >
                         {t("delivery-detail-acknowledge-submit")}

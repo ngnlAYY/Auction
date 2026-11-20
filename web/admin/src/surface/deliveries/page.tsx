@@ -2,7 +2,7 @@
 
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
-import { err, ok, unreachable } from "@auction/web-shared/result";
+import { err, unreachable } from "@auction/web-shared/result";
 import { useRouter } from "@auction/web-shared/router";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
@@ -154,7 +154,7 @@ export function page(): JSX.Element {
       deliveryActionLabel(action),
       async (commandId, signal) => {
         const result = await executeDelivery(host, preparation, commandId, signal);
-        return result.ok ? ok(result.value) : err(result.error.code);
+        return result;
       },
       () => {
         setIfAlive(notice, { kind: "success" }, () => alive);

@@ -25,6 +25,8 @@ const READ_PATH = "/api/v1/admin/runtime-switches";
 const WRITE_PATH = "/api/v1/admin/runtime-switches/external-access-paused";
 const UNRESOLVED = "曾有请求结果未知，请保留原命令，勿为同一实体新建操作。";
 const CONFLICT = "数据已变化，或本次命令与已有请求冲突。请重新加载后再试。";
+const INVALID_RESPONSE = "服务器返回了无效响应。请重新加载后再试。";
+const DONE = "数据库已接受；各角色约 5 秒内生效。";
 const INVALID_REASON = "请输入 1 至 1024 个 UTF-8 字节的单行原因，且不含控制字符。";
 const TOO_LONG = "界".repeat(342);
 const DB_TIME = "2026-11-19T00:00:00Z";
@@ -71,7 +73,9 @@ function replyForAttempt(attempt: number, body: string, acceptReplay: boolean): 
       return Response.json({
         code: "ok",
         message: "",
-        data: { accepted: intent(true, 8, expiry) },
+        data: {
+          accepted: { ...intent(true, 8, expiry), entrypoint: "admin", reason: request.reason },
+        },
       });
     }
     default:
@@ -79,7 +83,11 @@ function replyForAttempt(attempt: number, body: string, acceptReplay: boolean): 
   }
 }
 
-function pauseCard(initialReads = 1, acceptReplay = false) {
+function pauseCard(
+  initialReads = 1,
+  acceptReplay = false,
+  beforeSettlement: readonly Response[] = [],
+) {
   const refresh = deferredReply();
   let reads = 0;
   const sent: string[] = [];
@@ -103,7 +111,17 @@ function pauseCard(initialReads = 1, acceptReplay = false) {
     expect(request.method).toBe("POST");
     expect(request.path).toBe(WRITE_PATH);
     sent.push(request.body);
-    return replyForAttempt(sent.length, request.body, acceptReplay);
+    const before = beforeSettlement[sent.length - 2];
+    return (
+      before ??
+      replyForAttempt(
+        sent.length >= beforeSettlement.length + 2
+          ? sent.length - beforeSettlement.length
+          : sent.length,
+        request.body,
+        acceptReplay,
+      )
+    );
   });
   return {
     ...page,
@@ -310,6 +328,92 @@ test("pause_retries_verbatim_until_a_ledger_checked_conflict_then_rereads", asyn
     assertNewResume(card.sent);
   } finally {
     card.dispose();
+  }
+});
+
+test("pause_keeps_unknown_until_a_valid_ledger_conflict", async () => {
+  const card = pauseCard(1, false, [
+    apiFailure(409, "state_conflict", "版本已变化"),
+    new Response('{"code":"runtime_switch_conflict","message":"版本已变化","data":null}', {
+      status: 409,
+    }),
+  ]);
+  try {
+    card.mountCard();
+    await settle();
+    openConfirmation(card, "演练");
+    await click(card.root, "确认");
+    for (let attempt = 2; attempt <= 4; attempt += 1) {
+      await click(card.root, "原样重试");
+      expect(card.sent).toHaveLength(attempt);
+      expect(card.sent[attempt - 1]).toBe(card.sent[0]);
+      expect(card.readCount()).toBe(1);
+      expect(maybeButton(card.root, "原样重试")).not.toBeNull();
+    }
+    await click(card.root, "原样重试");
+    expect(card.sent).toHaveLength(5);
+    expect(new Set(card.sent).size).toBe(1);
+    expect(maybeButton(card.root, "原样重试")).toBeNull();
+    expect(card.readCount()).toBe(2);
+    card.finishRefresh();
+    await settle();
+    expect(button(card.root, "恢复外部访问…").hasAttribute("disabled")).toBe(false);
+  } finally {
+    card.dispose();
+  }
+});
+
+test("resume_keeps_the_original_command_when_the_success_receipt_has_the_wrong_revision", async () => {
+  let reads = 0;
+  let writes = 0;
+  const page = configPage((request) => {
+    if (request.method === "GET") {
+      expect(request.path).toBe(READ_PATH);
+      reads += 1;
+      return reads === 1 ? snapshot(true, 1) : snapshot(false, 2);
+    }
+    expect([request.method, request.path]).toEqual(["POST", WRITE_PATH]);
+    writes += 1;
+    return Response.json({
+      code: "ok",
+      message: "",
+      data: {
+        accepted: {
+          ...intent(false, writes === 1 ? 3 : 2, null),
+          entrypoint: "admin",
+          reason: "resume regular polling",
+        },
+      },
+    });
+  });
+  try {
+    page.mount(() => fixture.createComponent(fixture.runtimeSwitches.RuntimeSwitchCard, {}));
+    await settle();
+    const reason = required(page.document.getElementById("admin-pause-reason"), "恢复原因");
+    const form = required(page.root.querySelector("form"), "恢复表单");
+    reason.input("resume regular polling");
+    flush();
+    expect(form.submit()).toBe(true);
+    await click(page.root, "确认");
+    expect(page.root.textContent).toContain(INVALID_RESPONSE);
+    expect(page.root.textContent).not.toContain(DONE);
+    expect(reads).toBe(1);
+
+    await click(page.root, "原样重试");
+    expect(page.requests.map(({ method }) => method)).toEqual(["GET", "POST", "POST", "GET"]);
+    const first = required(page.requests[1], "原恢复命令").body;
+    expect(page.requests[2]?.body).toBe(first);
+    expect(JSON.parse(first)).toEqual({
+      command_id: expect.stringMatching(/^[\da-f-]{36}$/u),
+      expected_revision: 1,
+      paused: false,
+      expires_at: null,
+      reason: "resume regular polling",
+    });
+    expect(maybeButton(page.root, "原样重试")).toBeNull();
+    expect(page.root.textContent).toContain(DONE);
+  } finally {
+    page.dispose();
   }
 });
 

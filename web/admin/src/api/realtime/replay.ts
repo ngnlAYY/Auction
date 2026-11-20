@@ -1,12 +1,21 @@
 // Admin realtime 失败重放的正文冻结与发送。
 // 公开 JSON 在提交时解析、校验并深冻结；同一 command_id 的重试只复用第一次生成的正文。
 
-import type { AdminRealtimeReplayRequest } from "@auction/contracts/dto/admin/realtime";
+import type {
+  AdminRealtimeFailureResponse,
+  AdminRealtimeReplayRequest,
+} from "@auction/contracts/dto/admin/realtime";
 import type { AdminJsonValue } from "@auction/contracts/dto/admin/rules";
 import { parseJson } from "@auction/web-shared/net/wire";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { parseRustUuid, rustUuidIsNil } from "../credentials/decode";
-import { type AdminApiFailure, adminApiFailureClient, invalidRequestError } from "../failure";
+import {
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
+  invalidRequestError,
+  writeNotSent,
+  writeOutcomeUnknown,
+} from "../failure";
 import type { AdminSessionHost } from "../session";
 import {
   type PreparedJsonCommand,
@@ -33,14 +42,14 @@ export interface PreparedRealtimeReplay {
 export function prepareRealtimeReplay(
   schemaVersion: number,
   publicPayloadText: string,
-): (commandId: string) => Result<PreparedRealtimeReplay, AdminApiFailure> {
+): (commandId: string) => Result<PreparedRealtimeReplay, AdminWriteNotSent> {
   if (!Number.isInteger(schemaVersion) || schemaVersion < I32_MIN || schemaVersion > I32_MAX) {
-    const failure = adminApiFailureClient("invalid_request");
+    const failure = writeNotSent("invalid_request");
     return () => err(failure);
   }
   const parsed = parseJson(publicPayloadText, { uniqueKeys: "all" });
   if (!parsed.ok || !isJsonObject(parsed.value) || !replayNumbersLossless(publicPayloadText)) {
-    const failure = adminApiFailureClient(invalidRequestError(parsed));
+    const failure = writeNotSent(invalidRequestError(parsed));
     return () => err(failure);
   }
   let payload: AdminJsonValue;
@@ -48,7 +57,7 @@ export function prepareRealtimeReplay(
     // parseJson 已证明值是合法 JSON，且上方已确认根是普通对象；与 serde_json::Value 同形。
     payload = deepFreeze(structuredClone(parsed.value)) as AdminJsonValue;
   } catch (error) {
-    const failure = adminApiFailureClient(invalidRequestError(error));
+    const failure = writeNotSent(invalidRequestError(error));
     return () => err(failure);
   }
   const prepare = prepareJsonCommandOnce((commandId) => {
@@ -63,24 +72,24 @@ export function prepareRealtimeReplay(
     // Rust 的请求字段是 `Uuid`：解析后写回规范形式，保证 v7 等版本与大小写拼写都能发送。
     const canonicalCommandId = parseRustUuid(commandId);
     if (canonicalCommandId === null || rustUuidIsNil(canonicalCommandId)) {
-      return err(adminApiFailureClient("invalid_request"));
+      return err(writeNotSent("invalid_request"));
     }
     const prepared = prepare(canonicalCommandId);
     return prepared.ok ? ok({ command: prepared.value, schemaVersion }) : prepared;
   };
 }
 
-/** 发送一次重放命令。结果未知的传输错误原样交给未决命令宿主。 */
+/** 发送一次已冻结的重放命令，回执须与确认时的原事件、流和 schema 版本一致。 */
 export async function replayRealtimeFailure(
   host: AdminSessionHost,
-  failureId: string,
+  failure: Readonly<Pick<AdminRealtimeFailureResponse, "id" | "event_id" | "stream_key">>,
   commandId: string,
-  prepare: (commandId: string) => Result<PreparedRealtimeReplay, AdminApiFailure>,
+  prepare: (commandId: string) => Result<PreparedRealtimeReplay, AdminWriteNotSent>,
   signal: AbortSignal,
-): Promise<Result<void, AdminApiFailure>> {
+): Promise<Result<void, AdminWriteFailure>> {
   const canonicalCommandId = parseRustUuid(commandId);
   if (canonicalCommandId === null || rustUuidIsNil(canonicalCommandId)) {
-    return err(adminApiFailureClient("invalid_request"));
+    return err(writeNotSent("invalid_request"));
   }
   const prepared = prepare(canonicalCommandId);
   if (!prepared.ok) {
@@ -88,16 +97,23 @@ export async function replayRealtimeFailure(
   }
   const response = await sendPreparedJsonWrite(
     host,
-    `/api/v1/admin/realtime/failures/${failureId}/replay`,
-    "POST",
+    {
+      url: `/api/v1/admin/realtime/failures/${failure.id}/replay`,
+      method: "POST",
+      endpoint: "general",
+    },
     prepared.value.command,
     signal,
   );
   if (!response.ok) {
     return err(response.error);
   }
-  const decoded = decodeRealtimeReplayReceipt(response.value, prepared.value.schemaVersion);
-  return decoded.ok ? ok(undefined) : err(adminApiFailureClient(decoded.error));
+  const decoded = decodeRealtimeReplayReceipt(
+    response.value,
+    failure,
+    prepared.value.schemaVersion,
+  );
+  return decoded.ok ? ok(undefined) : err(writeOutcomeUnknown(decoded.error));
 }
 
 function isJsonObject(value: unknown): value is Readonly<Record<string, unknown>> {

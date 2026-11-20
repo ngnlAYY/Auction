@@ -259,9 +259,9 @@ test("通知模板的读取与命令契约样本", async () => {
   expect(removeAt(missingRevision, "/data/template/revision")).toBe(2);
   expect(decode(UPDATE_RESPONSE_SCHEMA, missingRevision).ok).toBe(false);
   const missingReceipt = await submitWithResponse(prepared.value, JSON.stringify(missingRevision));
-  expect(missingReceipt.result).toEqual({
+  expect(missingReceipt.result).toEqual<unknown>({
     ok: false,
-    error: { status: null, code: "invalid_response" },
+    error: { kind: "outcome-unknown", code: "invalid_response", responseStatus: null },
   });
   expect(requestLines(missingReceipt.requests)).toEqual([
     ["GET", SESSION_URL],

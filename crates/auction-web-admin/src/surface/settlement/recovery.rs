@@ -1,18 +1,22 @@
 //! Admin recovery 表格、命令确认对话框和幂等提交交互。
 
+#[cfg(target_arch = "wasm32")]
+use auction_web_shared::a11y::{focus_element_by_id, top_modal};
+#[cfg(target_arch = "wasm32")]
+use auction_web_shared::timer::TimeoutFuture;
 use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
 use super::presentation::{
-    recovery_action_summary, recovery_command_label, recovery_stage_label,
+    page_count, recovery_action_summary, recovery_command_label, recovery_stage_label,
     send_attribution_blocker_label,
 };
-use super::query::read_settlement_query;
+use super::query::{SettlementLocation, read_settlement_query};
 use super::report::AdminSettlementPager;
 use crate::api::{AdminRecovery, AdminRecoveryReport, confirm_admin_recovery};
 use crate::surface::AdminActionFeedback;
-use crate::surface::pagination::AdminPagination;
+use crate::surface::pagination::use_admin_pagination;
 use crate::surface::pending::{PendingCommands, set_if_alive};
 use crate::surface::validation::{FieldError, focus_field};
 
@@ -39,69 +43,98 @@ impl RecoveryRead {
     }
 }
 
+/// 恢复确认关闭后，在报告页仍挂载且还焦落空时聚焦报告标题。
+pub(super) fn use_recovery_focus_fallback(_dialog_open: bool) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut was_open = use_signal(|| false);
+        use_effect(use_reactive((&_dialog_open,), move |(open,)| {
+            let closed = *was_open.peek() && !open;
+            was_open.set(open);
+            if closed {
+                spawn(async move {
+                    // 先等移除弹窗与焦点陷阱还焦；保留浏览器或用户已放置的焦点。
+                    TimeoutFuture::new(0).await;
+                    let Some(document) = web_sys::window().and_then(|window| window.document())
+                    else {
+                        return;
+                    };
+                    if document
+                        .active_element()
+                        .is_none_or(|focus| matches!(focus.local_name().as_str(), "body" | "html"))
+                        && top_modal(&document).is_none()
+                    {
+                        focus_element_by_id("settlement-report-panel-title");
+                    }
+                });
+            }
+        }));
+    }
+}
+
+/// 恢复报告的表格与分页；只在当前结算报告通过校验后挂载。
 #[component]
 pub(super) fn AdminRecoveryTable(
     report: Option<AdminRecoveryReport>,
-    current_page: i64,
-    pagination: AdminPagination,
-    mut page: Signal<i64>,
+    page: Signal<i64>,
     action_busy: ReadSignal<bool>,
     recovery_read: RecoveryRead,
-    mut confirmation: Signal<Option<RecoveryConfirmationDraft>>,
-    mut reason: Signal<String>,
-    mut action_feedback: Signal<Option<AdminActionFeedback>>,
+    confirmation: Signal<Option<RecoveryConfirmationDraft>>,
+    reason: Signal<String>,
+    action_feedback: Signal<Option<AdminActionFeedback>>,
 ) -> Element {
+    let pagination =
+        use_admin_pagination("settlement-recovery", &["recovery_page_size"], None, i64::MAX);
     let rows = report.as_ref().map_or_default(|report| {
-        super::presentation::page_slice(&report.recoveries, current_page, pagination.size())
+        let size = pagination.size();
+        let current_page = page().clamp(1, page_count(report.recoveries.len(), size));
+        super::presentation::page_slice(&report.recoveries, current_page, size)
     });
     rsx! {
-        section { class: "admin-auction-report admin-auction-recovery", aria_labelledby: "settlement-recovery-title",
-            h2 { id: "settlement-recovery-title", {t!("admin-recovery-title")} }
-            if let Some(report) = report {
-                if report.recoveries.is_empty() {
-                    AsyncState {
-                        kind: AsyncStateKind::Empty,
-                        title: t!("admin-recovery-empty"),
-                        detail: "",
-                    }
-                } else {
-                    div { class: "admin-settlement__table-wrap",
-                        table { class: "admin-shell__table admin-auction-table",
-                            aria_label: t!("admin-recovery-title"),
-                            auction_web_shared::TableColumns { layout: "admin-recovery", widths: vec![6, 27, 10, 18, 14, 12, 13] }
-                            thead {
-                                tr {
-                                    th { scope: "col", {t!("admin-recovery-lot")} }
-                                    th { scope: "col", {t!("admin-recovery-equipment")} }
-                                    th { scope: "col", {t!("admin-recovery-stage")} }
-                                    th { scope: "col", {t!("admin-recovery-deadline")} }
-                                    th { scope: "col", {t!("admin-recovery-evidence")} }
-                                    th { scope: "col", {t!("admin-recovery-actions")} }
-                                    th { scope: "col", {t!("admin-recovery-commands")} }
-                                }
+        if let Some(report) = report {
+            if report.recoveries.is_empty() {
+                AsyncState {
+                    kind: AsyncStateKind::Empty,
+                    title: t!("admin-recovery-empty"),
+                    detail: "",
+                }
+            } else {
+                div { class: "admin-settlement__table-wrap",
+                    table { class: "admin-shell__table admin-auction-table",
+                        aria_label: t!("admin-recovery-title"),
+                        auction_web_shared::TableColumns { layout: "admin-recovery", widths: vec![6, 27, 10, 18, 14, 12, 13] }
+                        thead {
+                            tr {
+                                th { scope: "col", {t!("admin-recovery-lot")} }
+                                th { scope: "col", {t!("admin-recovery-equipment")} }
+                                th { scope: "col", {t!("admin-recovery-stage")} }
+                                th { scope: "col", {t!("admin-recovery-deadline")} }
+                                th { scope: "col", {t!("admin-recovery-evidence")} }
+                                th { scope: "col", {t!("admin-recovery-actions")} }
+                                th { scope: "col", {t!("admin-recovery-commands")} }
                             }
-                            tbody {
-                                for recovery in rows {
-                                    AdminRecoveryRow {
-                                        recovery,
-                                        action_busy,
-                                        recovery_read,
-                                        confirmation,
-                                        reason,
-                                        action_feedback,
-                                    }
+                        }
+                        tbody {
+                            for recovery in rows {
+                                AdminRecoveryRow {
+                                    recovery,
+                                    action_busy,
+                                    recovery_read,
+                                    confirmation,
+                                    reason,
+                                    action_feedback,
                                 }
                             }
                         }
                     }
                 }
-                AdminSettlementPager {
-                    current_page: page(),
-                    total_rows: report.recoveries.len(),
-                    pagination,
-                    page,
-                    label: t!("admin-recovery-pagination"),
-                }
+            }
+            AdminSettlementPager {
+                current_page: page(),
+                total_rows: report.recoveries.len(),
+                pagination,
+                page,
+                label: t!("admin-recovery-pagination"),
             }
         }
     }
@@ -188,6 +221,7 @@ fn AdminRecoveryRow(
 #[component]
 pub(super) fn AdminRecoveryDialog(
     draft: RecoveryConfirmationDraft,
+    location: SettlementLocation,
     mut confirmation: Signal<Option<RecoveryConfirmationDraft>>,
     mut reason: Signal<String>,
     busy: ReadSignal<bool>,
@@ -227,7 +261,7 @@ pub(super) fn AdminRecoveryDialog(
                     onsubmit: move |event| {
                         event.prevent_default();
                         // 首次提交只作用于打开确认时选中的场次，重试继续使用冻结的意图。
-                        if !recovery_read.is_current() || read_settlement_query().is_err()
+                        if !recovery_read.is_current() || !location.is_current()
                             || pending.any_busy() || pending.contains(&format!("settlement-recovery:{}", draft.recovery_id))
                             || selected_auction_id() != draft.auction_id
                             || selection_generation() != generation
@@ -260,28 +294,29 @@ pub(super) fn AdminRecoveryDialog(
                                         draft.action,
                                         reason_value,
                                     ).await;
-                                    if result.as_ref().is_err_and(crate::api::AdminApiFailure::is_conflict)
+                                    if result.as_ref().is_err_and(|failure| failure.observed_response_status() == Some(409))
                                         && same_recovery_selection(
-                                            selected_auction_id, selection_generation,
+                                            location, selected_auction_id, selection_generation,
                                             &draft.auction_id, submitted_selection_generation,
                                         )
                                         && let Ok(mut reload) = recovery_reload_generation.try_write()
                                     {
                                         *reload = reload.saturating_add(1);
                                     }
-                                    result.map_err(|error| error.code)
+                                    result
                                 }
                             },
                             move |_, source_alive| {
+                                // 地址已切换时由外壳接收回执，旧详情的反馈会随筛选恢复清除。
                                 let delivered = source_alive && same_recovery_selection(
-                                    selected_auction_id, selection_generation,
+                                    location, selected_auction_id, selection_generation,
                                     &success_auction_id, submitted_selection_generation,
                                 ) && crate::surface::pending::try_set_if_alive(feedback, Some(AdminActionFeedback::Success));
                                 crate::surface::pending::CommandDelivery::reported(delivered, || None)
                             },
                             move |code| {
                                 if same_recovery_selection(
-                                    selected_auction_id, selection_generation,
+                                    location, selected_auction_id, selection_generation,
                                     &failure_auction_id, submitted_selection_generation,
                                 ) {
                                     set_if_alive(feedback, Some(AdminActionFeedback::Error(code)));
@@ -344,8 +379,9 @@ pub(super) fn AdminRecoveryDialog(
     }
 }
 
-/// 无效链接会卸载选择视图。已提交命令的回执不得再读取销毁的视图状态。
+/// 回执只在仍存活的同一选择展示，筛选恢复前也须核对当前地址。
 fn same_recovery_selection(
+    location: SettlementLocation,
     auction: Signal<String>,
     generation: Signal<u64>,
     expected_auction: &str,
@@ -353,6 +389,7 @@ fn same_recovery_selection(
 ) -> bool {
     auction.try_peek().is_ok_and(|value| value.as_str() == expected_auction)
         && generation.try_peek().is_ok_and(|value| *value == expected_generation)
+        && location.can_deliver_receipt()
 }
 
 // 恢复确认应用端口检查 trim 后将要提交的理由，内部换行是合法输入。
@@ -396,18 +433,27 @@ fn activates_buyer_refund(action: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::collections::BTreeSet;
+    use std::rc::Rc;
 
     use dioxus::dioxus_core::{AttributeValue, Mutation};
     use dioxus::prelude::*;
+    use gloo_net::http::Method;
 
-    use super::{AdminRecoveryRow, RecoveryRead};
+    use super::{AdminRecoveryDialog, AdminRecoveryRow, RecoveryConfirmationDraft, RecoveryRead};
     use super::{RecoveryReasonIssue, activates_buyer_refund, validate_recovery_reason};
-    use crate::api::AdminRecovery;
+    use crate::api::{AdminApiFailure, AdminRecovery};
     use crate::surface::auctions::draft_page_tests::{
-        button, click_button, has_live_text, init_i18n, mount_writer,
+        button, click_button, has_live_text, init_i18n, mount_writer, settle_writer, writer_form,
     };
-    use crate::surface::pending::{use_pending_command_host, use_pending_commands};
+    use crate::surface::pending::{
+        PendingCommandPanel, use_pending_command_host, use_pending_commands,
+    };
+    use crate::surface::settlement::query::{
+        read_settlement_query, use_settlement_location, use_settlement_location_revision,
+    };
+    use crate::surface::test_events::dispatch_form_event;
 
     fn recovery_row() -> Element {
         init_i18n();
@@ -504,5 +550,81 @@ mod tests {
         assert!(activates_buyer_refund("equipment_recovered"));
         assert!(!activates_buyer_refund("reclaimed"));
         assert!(!activates_buyer_refund("cancelled"));
+    }
+
+    #[test]
+    fn recovery_confirmation_observes_the_actual_write_status_and_selection_generation() {
+        const AUCTION: &str = "00000000-0000-4000-8000-000000000002";
+        const RECOVERY: &str = "00000000-0000-4000-8000-000000000001";
+        const PATH: &str = "/api/v1/admin/recoveries/00000000-0000-4000-8000-000000000001/confirm";
+        for (status, stale, requires_reason) in [
+            (Some(409), false, false),
+            (Some(422), false, false),
+            (None, false, false),
+            (Some(409), true, false),
+            (Some(409), false, true),
+        ] {
+            let load = Rc::new(Cell::<Option<Signal<u64>>>::new(None));
+            let generation = Rc::new(Cell::<Option<Signal<u64>>>::new(None));
+            let (mut page, edits) = mount_writer({
+                let load = load.clone();
+                let generation = generation.clone();
+                move || {
+                    let owner = use_pending_commands(use_signal(|| 0), |_| false);
+                    if let Some(status) = status {
+                        AdminApiFailure::stub_write_response(PATH, Method::POST, status, "{");
+                    }
+                    let revision = use_settlement_location_revision();
+                    let location =
+                        use_settlement_location(revision, &read_settlement_query().unwrap());
+                    let draft = RecoveryConfirmationDraft {
+                        auction_id: AUCTION.to_owned(),
+                        recovery_id: RECOVERY.to_owned(),
+                        state_version: 2,
+                        action: if requires_reason { "equipment_recovered" } else { "reclaimed" }
+                            .to_owned(),
+                        equipment_name: "Phase Robe".to_owned(),
+                        lot_code: "C1".to_owned(),
+                    };
+                    let confirmation = use_signal(|| Some(draft));
+                    let reason = use_signal(String::new);
+                    let busy = use_signal(|| false);
+                    let feedback = use_signal(|| None);
+                    let selected = use_signal(|| AUCTION.to_owned());
+                    let selection = use_signal(|| 0);
+                    let reload = use_signal(|| 0);
+                    let recovery_reload = use_signal(|| 0);
+                    load.set(Some(recovery_reload));
+                    generation.set(Some(selection));
+                    rsx! {
+                        PendingCommandPanel { owner }
+                        if let Some(draft) = confirmation() {
+                            AdminRecoveryDialog {
+                                draft, location, confirmation, reason, busy, feedback,
+                                selected_auction_id: selected, selection_generation: selection,
+                                recovery_read: RecoveryRead { reload, recovery_reload, generation: (0, 0) },
+                                recovery_reload_generation: recovery_reload,
+                            }
+                        }
+                    }
+                }
+            });
+            let form = writer_form(&edits);
+            if stale {
+                generation.get().unwrap().set(2);
+            }
+            let event = dispatch_form_event(page.dom(), form, "submit", "");
+            assert!(!event.default_action_enabled());
+            settle_writer(&mut page);
+            let expected = u64::from(status == Some(409) && !stale && !requires_reason);
+            assert_eq!(*load.get().unwrap().peek(), expected);
+            assert_eq!(
+                button(&page, "原样重试").is_some(),
+                status.is_some() && !stale && !requires_reason
+            );
+            if requires_reason {
+                assert!(has_live_text(&page, "请填写此字段。"));
+            }
+        }
     }
 }

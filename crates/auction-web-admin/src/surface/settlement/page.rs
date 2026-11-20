@@ -1,49 +1,37 @@
 //! 结算与恢复页面：目录、详情加载与恢复确认。
 
-use auction_web_shared::{AsyncState, AsyncStateKind, t};
+use auction_web_shared::{AsyncState, AsyncStateKind, QueryWriteMode, t};
 use dioxus::prelude::*;
 
 use super::picker::{AdminSettlementCatalogPager, AdminSettlementPicker};
 use super::query::{
-    SETTLEMENT_PAGE_SIZE, SettlementQuery, read_settlement_query, replace_settlement_query,
-    use_settlement_location_revision,
+    SETTLEMENT_PAGE_SIZE, SettlementLocation, SettlementQuery, read_settlement_query,
+    use_settlement_location, use_settlement_location_revision,
 };
-use super::recovery::{AdminRecoveryDialog, RecoveryConfirmationDraft, RecoveryRead};
+use super::read_retry::SettlementRead;
+use super::reads::{SettlementReadQuery, matching_lookup, use_settlement_reads};
+use super::recovery::{
+    AdminRecoveryDialog, RecoveryConfirmationDraft, RecoveryRead, use_recovery_focus_fallback,
+};
 use super::report::AdminSettlementReportView;
-use crate::api::{
-    AdminSettlementCatalogEntry, AdminSettlementCatalogPage, AdminSettlementReport,
-    fetch_admin_recovery, fetch_admin_settlement, fetch_admin_settlement_catalog,
-};
+use super::selection::{CatalogSelection, report_for_selection, resolve_catalog_selection};
+use crate::api::{AdminSettlementCatalogEntry, AdminSettlementCatalogPage};
 use crate::surface::pagination::use_admin_pagination;
 use crate::surface::pending::{
     PendingCommandPanel, use_pending_command_gate, use_pending_commands_with_gate,
 };
 use crate::surface::{AdminActionFeedback, admin_api_error_message, admin_world_label};
 
-pub(super) struct CatalogLoad {
-    pub(super) world_id: String,
-    pub(super) page: i64,
-    pub(super) page_size: i64,
-    pub(super) result: Result<AdminSettlementCatalogPage, String>,
-}
-
-pub(super) struct CatalogLookupLoad {
-    pub(super) world_id: String,
-    pub(super) sequence: Option<i64>,
-    pub(super) result: Result<Option<AdminSettlementCatalogPage>, String>,
-}
-
-pub(super) struct DetailLoad<T> {
-    pub(super) auction_id: String,
-    pub(super) result: Result<Option<T>, String>,
-}
-
 /// 加载并展示已结算拍卖的多条件报表页面。
 pub(crate) fn page() -> Element {
     let location_revision = use_settlement_location_revision();
-    let _ = location_revision();
     let reload_generation = use_signal(|| 0_u64);
-    match read_settlement_query() {
+    // 同址通知也可能重绘页面，地址解析随共享位置版本更新。
+    let query = use_memo(move || {
+        let _ = location_revision();
+        read_settlement_query()
+    });
+    match query() {
         Ok(initial_query) => rsx! {
             AdminSettlementPage { initial_query, location_revision, reload_generation }
         },
@@ -68,6 +56,8 @@ fn AdminSettlementPage(
     location_revision: Signal<u64>,
     reload_generation: Signal<u64>,
 ) -> Element {
+    let location = use_settlement_location(location_revision, &initial_query);
+    let applied_location_revision = location.applied_revision;
     let initial_world = initial_query.world_id;
     let initial_auction = initial_query.auction_id;
     let initial_sequence = initial_query.sequence;
@@ -87,9 +77,12 @@ fn AdminSettlementPage(
     let action_feedback = use_signal(|| None::<AdminActionFeedback>);
     let selection_generation = use_signal(|| 0_u64);
 
-    // 浏览器返回/前进可能只改变 query；按地址恢复筛选并关闭旧报告上的操作上下文。
+    // 同页导航及前进后退按地址恢复筛选，选择变化时关闭旧报告上的操作上下文。
     use_effect(move || {
-        let _ = location_revision();
+        let revision = location_revision();
+        if revision == *applied_location_revision.peek() {
+            return;
+        }
         let Ok(query) = read_settlement_query() else {
             return;
         };
@@ -97,91 +90,37 @@ fn AdminSettlementPage(
             && selected_auction_id.read_unchecked().as_str() == query.auction_id
             && *requested_sequence.read_unchecked() == query.sequence
             && *catalog_page.read_unchecked() == query.page;
-        if unchanged {
-            return;
+        if !unchanged {
+            world_filter.set(query.world_id.clone());
+            selected_auction_id.set(query.auction_id.clone());
+            requested_sequence.set(query.sequence);
+            catalog_page.set(query.page);
+            reset_detail_state(
+                lot_page,
+                recovery_page,
+                confirmation,
+                reason,
+                action_feedback,
+                selection_generation,
+            );
         }
-        world_filter.set(query.world_id);
-        selected_auction_id.set(query.auction_id);
-        requested_sequence.set(query.sequence);
-        catalog_page.set(query.page);
-        reset_detail_state(
-            lot_page,
-            recovery_page,
-            confirmation,
-            reason,
-            action_feedback,
-            selection_generation,
-        );
+        location.apply(revision, query);
     });
 
-    let catalog = use_resource(move || {
-        let _ = reload_generation();
-        let world_id = world_filter();
-        let page = catalog_page();
-        let page_size = catalog_page_size();
-        async move {
-            let result =
-                fetch_admin_settlement_catalog(world_id.clone(), None, page, page_size).await;
-            CatalogLoad { world_id, page, page_size, result }
-        }
-    });
-    // URL 中的期号可能不在当前目录页；单独使用服务端筛选解析它，同时保留完整分页目录供切换。
-    // 只有当前目录页已加载且页内找不到请求的期号时才查找：默认选中与下拉选择的期号都在页内，
-    // 不再多发一次结果用不到的请求；深链接目标不在当前页时，查找在目录页返回后发出。
-    let lookup_sequence = use_memo(move || {
-        let sequence = requested_sequence()?;
-        let catalog_state = catalog.read();
-        let load = catalog_state.as_ref()?;
-        let current_page = load.world_id == *world_filter.read()
-            && load.page == catalog_page()
-            && load.page_size == catalog_page_size();
-        let page = load.result.as_ref().ok().filter(|_| current_page)?;
-        let selected = selected_auction_id.read();
-        matches!(
-            resolve_catalog_selection(Some(page), None, &selected, Some(sequence)),
-            CatalogSelection::Resolving
-        )
-        .then_some(sequence)
-    });
-    let catalog_lookup = use_resource(move || {
-        let world_id = world_filter();
-        let sequence = lookup_sequence();
-        async move {
-            let result = match sequence {
-                Some(sequence) => {
-                    fetch_admin_settlement_catalog(world_id.clone(), Some(sequence), 1, 10)
-                        .await
-                        .map(Some)
-                }
-                None => Ok(None),
-            };
-            CatalogLookupLoad { world_id, sequence, result }
-        }
-    });
-    let settlement = use_resource(move || {
-        let _ = reload_generation();
-        let auction_id = selected_auction_id();
-        async move {
-            let result = if auction_id.is_empty() {
-                Ok(None)
-            } else {
-                fetch_admin_settlement(auction_id.clone()).await.map(Some)
-            };
-            DetailLoad { auction_id, result }
-        }
-    });
-    let recovery = use_resource(move || {
-        let generation = (reload_generation(), recovery_reload_generation());
-        let auction_id = selected_auction_id();
-        async move {
-            let result = if auction_id.is_empty() {
-                Ok(None)
-            } else {
-                fetch_admin_recovery(auction_id.clone()).await.map(Some)
-            };
-            (generation, DetailLoad { auction_id, result })
-        }
-    });
+    let reads = use_settlement_reads(
+        SettlementReadQuery {
+            world: world_filter,
+            page: catalog_page,
+            page_size: catalog_page_size,
+            auction_id: selected_auction_id,
+            sequence: requested_sequence,
+        },
+        reload_generation,
+        recovery_reload_generation,
+    );
+    let catalog = reads.catalog;
+    let catalog_lookup = reads.lookup;
+    let recovery = reads.recovery;
     let command_gate = use_pending_command_gate();
     let pending =
         use_pending_commands_with_gate(reload_generation, Some(command_gate), move |entity| {
@@ -206,6 +145,10 @@ fn AdminSettlementPage(
 
     // 每个筛选页都以服务端稳定排序的第一项为默认值；第一页因此始终选择最后结算的一期。
     use_effect(move || {
+        // 先恢复新位置，再允许匹配本地筛选的目录响应更新场次和地址。
+        if location_revision() != applied_location_revision() {
+            return;
+        }
         let catalog_state = catalog.read();
         let Some(load) = catalog_state.as_ref() else {
             return;
@@ -215,6 +158,7 @@ fn AdminSettlementPage(
         if load.world_id != current_world
             || load.page != current_page
             || load.page_size != catalog_page_size()
+            || !location.matches_address()
         {
             return;
         }
@@ -223,17 +167,14 @@ fn AdminSettlementPage(
         };
         let current_id = selected_auction_id();
         let desired_sequence = requested_sequence();
-        if page.auctions.is_empty() && page.total > 0 && current_page > 1 {
-            let last_page =
-                ((page.total - 1) / page.page_size + 1).max(1).min(100_000 / page.page_size + 1);
-            catalog_page.set(last_page);
-            // 钳制空页只改页码；仍须解析原深链接的 UUID 与期号。
-            replace_settlement_query(&SettlementQuery {
-                world_id: current_world,
-                auction_id: current_id,
-                sequence: desired_sequence,
-                page: last_page,
-            });
+        if reconcile_empty_catalog_tail(
+            page,
+            location,
+            catalog_page,
+            &current_world,
+            &current_id,
+            desired_sequence,
+        ) {
             return;
         }
 
@@ -262,22 +203,26 @@ fn AdminSettlementPage(
         if desired_sequence != Some(selected.sequence) {
             requested_sequence.set(Some(selected.sequence));
         }
-        replace_settlement_query(&SettlementQuery {
-            world_id: current_world,
-            auction_id: selected.auction_id,
-            sequence: Some(selected.sequence),
-            page: current_page,
-        });
+        location.write(
+            SettlementQuery {
+                world_id: current_world,
+                auction_id: selected.auction_id,
+                sequence: Some(selected.sequence),
+                page: current_page,
+            },
+            QueryWriteMode::Replace,
+        );
     });
 
     let current_world = world_filter();
     let current_catalog_page = catalog_page();
+    let catalog_location_revision = applied_location_revision();
     let selected = selected_auction_id();
     let desired_sequence = requested_sequence();
     // 先借用完整快照核对身份，只在交给子组件时复制所需结果，避免重绘时复制两遍报告。
     let catalog_state = catalog.read_unchecked();
     let catalog_lookup_state = catalog_lookup.read_unchecked();
-    let settlement_state = settlement.read_unchecked();
+    let settlement_state = reads.settlement.read_unchecked();
     let recovery_state = recovery.read_unchecked();
     let current_catalog = catalog_state.as_ref().filter(|load| {
         load.world_id == current_world
@@ -301,28 +246,16 @@ fn AdminSettlementPage(
         CatalogSelection::Matched(entry) => Some(entry),
         CatalogSelection::Resolving | CatalogSelection::Contradictory => None,
     };
-    let mut picker_catalog = catalog_data.cloned();
-    if let (Some(page), Some(entry)) = (&mut picker_catalog, selected_entry)
-        && !page.auctions.iter().any(|candidate| candidate.auction_id == entry.auction_id)
-    {
-        // 深链接目标不在当前分页时仍把它放入选择器；翻页后恢复该页的普通目录。
-        page.auctions.push(entry.to_owned());
-    }
-    let catalog_loading =
-        current_catalog.is_none() || lookup_needed && current_catalog_lookup.is_none();
-    let catalog_error = current_catalog
-        .and_then(|load| load.result.as_ref().err())
-        .or_else(|| {
-            lookup_needed
-                .then_some(current_catalog_lookup)
-                .flatten()
-                .and_then(|load| load.result.as_ref().err())
-        })
-        .map(|error| admin_api_error_message(error))
-        .or_else(|| {
-            matches!(selection, CatalogSelection::Contradictory)
-                .then(|| admin_api_error_message("invalid_response"))
-        });
+    let picker_catalog = catalog_for_picker(catalog_data, selected_entry);
+    // 重读期间保留同查询的错误，按钮仍对应原读取。
+    let catalog_error = current_catalog.and_then(|load| load.result.as_ref().err());
+    let lookup_error = current_catalog_lookup
+        .filter(|_| lookup_needed)
+        .and_then(|load| load.result.as_ref().err());
+    let catalog_loading = current_catalog.is_none()
+        || catalog_error.is_some() && reads.pending(SettlementRead::Catalog)
+        || lookup_needed && current_catalog_lookup.is_none()
+        || lookup_error.is_some() && reads.pending(SettlementRead::CatalogLookup);
 
     let current_settlement = settlement_state.as_ref().filter(|load| load.auction_id == selected);
     // 恢复表单依赖恢复报告的版本；会话宿主收到回执后，旧报告不能授权新命令。
@@ -336,21 +269,15 @@ fn AdminSettlementPage(
         .as_ref()
         .filter(|(loaded, load)| *loaded == recovery_generation && load.auction_id == selected)
         .map(|(_, load)| load);
-    let mut detail_error = selected_entry.and_then(|_| {
-        current_settlement
-            .and_then(|load| load.result.as_ref().err())
-            .or_else(|| current_recovery.and_then(|load| load.result.as_ref().err()))
-            .map(|error| admin_api_error_message(error))
-    });
     let candidate_report =
         current_settlement.and_then(|load| load.result.as_ref().ok()).and_then(Option::as_ref);
-    let report = match report_for_selection(selection, candidate_report) {
-        Ok(report) => report.cloned(),
-        Err(code) => {
-            detail_error = Some(admin_api_error_message(code));
-            None
-        }
-    };
+    let checked_report = report_for_selection(selection, candidate_report);
+    let settlement_error = current_settlement
+        .and_then(|load| load.result.as_ref().err())
+        .map(String::as_str)
+        .or_else(|| checked_report.as_ref().err().copied());
+    let report = checked_report.ok().flatten().cloned();
+    let recovery_error = current_recovery.and_then(|load| load.result.as_ref().err());
     let recovery_report = report
         .as_ref()
         .and(current_recovery)
@@ -365,9 +292,11 @@ fn AdminSettlementPage(
             })
         })
     });
-    let detail_loading = selected_entry.is_some()
-        && !selected.is_empty()
-        && (current_settlement.is_none() || current_recovery.is_none());
+    use_recovery_focus_fallback(recovery_draft.is_some());
+    let settlement_loading = current_settlement.is_none()
+        || settlement_error.is_some() && reads.pending(SettlementRead::Settlement);
+    let recovery_loading = current_recovery.is_none()
+        || recovery_error.is_some() && reads.pending(SettlementRead::Recovery);
     let report_title = selected_entry.map_or_else(
         || t!("admin-settlement-report-panel-title"),
         |entry| {
@@ -389,10 +318,11 @@ fn AdminSettlementPage(
                 section {
                     class: "admin-settlement-layout__selector",
                     aria_labelledby: "settlement-selector-title",
-                    h2 { id: "settlement-selector-title", {t!("admin-settlement-selector-title")} }
+                    h2 { id: "settlement-selector-title", tabindex: "-1", {t!("admin-settlement-selector-title")} }
                     p { class: "admin-auction-intro", {t!("admin-settlement-selector-note")} }
                     AdminSettlementPicker {
                         catalog: picker_catalog,
+                        location,
                         world_filter,
                         requested_sequence,
                         selected_auction_id,
@@ -411,18 +341,28 @@ fn AdminSettlementPage(
                             detail: "",
                         }
                     }
-                    if let Some(error) = catalog_error {
+                    if let Some(code) = catalog_error {
+                        {reads.error(SettlementRead::Catalog, code)}
+                    }
+                    if let Some(code) = lookup_error {
+                        {reads.error(SettlementRead::CatalogLookup, code)}
+                    }
+                    if matches!(selection, CatalogSelection::Contradictory) {
                         AsyncState {
                             kind: AsyncStateKind::Error,
-                            title: error,
+                            title: admin_api_error_message("invalid_response"),
                             detail: "",
                         }
                     }
-                    if let Some(page) = catalog_data {
+                    // 空尾页只由核对了位置与响应身份的目录归并纠偏，保留原场次链接。
+                    if let Some(page) = catalog_data.filter(|page| !is_empty_catalog_tail(page)) {
                         AdminSettlementCatalogPager {
                             page: page.page,
                             page_size: page.page_size,
                             total: page.total,
+                            world_id: current_world,
+                            location,
+                            catalog_revision: catalog_location_revision,
                             pagination: catalog_pagination,
                             world_filter,
                             requested_sequence,
@@ -440,39 +380,45 @@ fn AdminSettlementPage(
                 section {
                     class: "admin-settlement-layout__report",
                     aria_labelledby: "settlement-report-panel-title",
-                    h2 { id: "settlement-report-panel-title", "{report_title}" }
+                    h2 { id: "settlement-report-panel-title", tabindex: "-1", "{report_title}" }
                     if selected.is_empty() {
                         p { class: "admin-auction-intro", {t!("admin-settlement-pick-prompt")} }
-                    } else {
-                        if detail_loading {
+                    } else if selected_entry.is_some() {
+                        if settlement_loading {
                             AsyncState {
                                 kind: AsyncStateKind::Loading,
                                 title: t!("admin-settlement-loading"),
                                 detail: "",
                             }
                         }
-                        if let Some(error) = detail_error {
-                            AsyncState {
-                                kind: AsyncStateKind::Error,
-                                title: error,
-                                detail: "",
-                            }
+                        if let Some(code) = settlement_error {
+                            {reads.error(SettlementRead::Settlement, code)}
                         }
-                        if let Some(report) = report {
-                            // key 必须位于迭代片段，才能随场次销毁报告内的分页草稿。
-                            for (report, recovery) in [(report, recovery_report)] {
-                                AdminSettlementReportView {
-                                    key: "{report.auction.id}",
-                                    report,
-                                    recovery,
-                                    lot_page,
-                                    recovery_page,
-                                    action_busy,
-                                    recovery_read,
-                                    confirmation,
-                                    reason,
-                                    action_feedback,
-                                }
+                        // 随场次重建报告，但同场次的恢复标题不随结算报告的读取结果卸载。
+                        for (auction_id, report, recovery) in [(selected, report, recovery_report)] {
+                            AdminSettlementReportView {
+                                key: "{auction_id}",
+                                report,
+                                recovery,
+                                lot_page,
+                                recovery_page,
+                                action_busy,
+                                recovery_read,
+                                confirmation,
+                                reason,
+                                action_feedback,
+                                recovery_status: rsx! {
+                                    if recovery_loading {
+                                        AsyncState {
+                                            kind: AsyncStateKind::Loading,
+                                            title: t!("admin-settlement-loading"),
+                                            detail: "",
+                                        }
+                                    }
+                                    if let Some(code) = recovery_error {
+                                        {reads.error(SettlementRead::Recovery, code)}
+                                    }
+                                },
                             }
                         }
                     }
@@ -492,6 +438,7 @@ fn AdminSettlementPage(
             if let Some(draft) = recovery_draft {
                 AdminRecoveryDialog {
                     draft,
+                    location,
                     confirmation,
                     reason,
                     busy: action_busy,
@@ -506,64 +453,52 @@ fn AdminSettlementPage(
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CatalogSelection<'a> {
-    Resolving,
-    Matched(&'a AdminSettlementCatalogEntry),
-    Contradictory,
+fn is_empty_catalog_tail(page: &AdminSettlementCatalogPage) -> bool {
+    page.auctions.is_empty() && page.total > 0 && page.page > 1
 }
 
-fn matching_lookup<'a>(
-    load: Option<&'a CatalogLookupLoad>,
+/// 空尾页归并只改页码，保留待解析的场次与期号。
+fn reconcile_empty_catalog_tail(
+    page: &AdminSettlementCatalogPage,
+    location: SettlementLocation,
+    mut catalog_page: Signal<i64>,
     world: &str,
+    auction: &str,
     sequence: Option<i64>,
-) -> Option<&'a CatalogLookupLoad> {
-    load.filter(|load| load.world_id == world && load.sequence == sequence)
-}
-
-fn resolve_catalog_selection<'a>(
-    page: Option<&'a AdminSettlementCatalogPage>,
-    lookup: Option<&'a AdminSettlementCatalogPage>,
-    auction_id: &str,
-    sequence: Option<i64>,
-) -> CatalogSelection<'a> {
-    let Some(page) = page else {
-        return CatalogSelection::Resolving;
-    };
-    let Some(sequence) = sequence else {
-        return if auction_id.is_empty() {
-            page.auctions.first().map_or(CatalogSelection::Resolving, CatalogSelection::Matched)
-        } else {
-            CatalogSelection::Resolving
-        };
-    };
-
-    // 有 UUID 时只能解析到该记录。不同世界可以复用同一个期号，不能取查询的第一项代替。
-    if let Some(entry) = page.auctions.iter().find(|entry| {
-        if auction_id.is_empty() {
-            entry.sequence == sequence
-        } else {
-            entry.auction_id == auction_id
-        }
-    }) {
-        return if entry.sequence == sequence {
-            CatalogSelection::Matched(entry)
-        } else {
-            CatalogSelection::Contradictory
-        };
+) -> bool {
+    if !is_empty_catalog_tail(page) {
+        return false;
     }
-    lookup.map_or(CatalogSelection::Resolving, |lookup| {
-        lookup
-            .auctions
-            .iter()
-            .find(|entry| {
-                entry.sequence == sequence
-                    && (auction_id.is_empty() || entry.auction_id == auction_id)
-            })
-            .map_or(CatalogSelection::Contradictory, CatalogSelection::Matched)
-    })
+    let last_page =
+        ((page.total - 1) / page.page_size + 1).max(1).min(100_000 / page.page_size + 1);
+    catalog_page.set(last_page);
+    location.write(
+        SettlementQuery {
+            world_id: world.to_owned(),
+            auction_id: auction.to_owned(),
+            sequence,
+            page: last_page,
+        },
+        QueryWriteMode::Replace,
+    );
+    true
 }
 
+/// 深链接目标不在当前分页时，将补查出的场次放入选择器。
+fn catalog_for_picker(
+    page: Option<&AdminSettlementCatalogPage>,
+    selected: Option<&AdminSettlementCatalogEntry>,
+) -> Option<AdminSettlementCatalogPage> {
+    let mut catalog = page.cloned();
+    if let (Some(page), Some(entry)) = (&mut catalog, selected)
+        && !page.auctions.iter().any(|candidate| candidate.auction_id == entry.auction_id)
+    {
+        page.auctions.push(entry.to_owned());
+    }
+    catalog
+}
+
+/// 切换场次时复位分页与确认草稿，推进世代以隔离旧场次的回执。
 pub(super) fn reset_detail_state(
     mut lot_page: Signal<i64>,
     mut recovery_page: Signal<i64>,
@@ -580,25 +515,9 @@ pub(super) fn reset_detail_state(
     selection_generation.set(selection_generation().saturating_add(1));
 }
 
-fn report_for_selection<'a>(
-    selection: CatalogSelection<'_>,
-    report: Option<&'a AdminSettlementReport>,
-) -> Result<Option<&'a AdminSettlementReport>, &'static str> {
-    let (CatalogSelection::Matched(entry), Some(report)) = (selection, report) else {
-        return Ok(None);
-    };
-    if report.auction.id != entry.auction_id
-        || report.auction.world_id != entry.world_id
-        || report.auction.sequence != entry.sequence
-        || report.auction.status != "settled"
-    {
-        return Err("invalid_response");
-    }
-    Ok(Some(report))
-}
-
 #[cfg(test)]
 mod tests {
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     use auction_web_shared::i18n::{DEFAULT_ADMIN_LOCALE, build_bundle};
@@ -606,14 +525,25 @@ mod tests {
     use dioxus::prelude::*;
     use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 
+    use super::super::picker::AdminSettlementPicker;
     use super::super::query::TestSettlementSearch;
-    use super::{CatalogSelection, page, report_for_selection, resolve_catalog_selection};
+    use super::super::tests::{CatalogReads, TestLocation, use_test_location};
+    use super::{
+        CatalogSelection, QueryWriteMode, catalog_for_picker, page, read_settlement_query,
+        reconcile_empty_catalog_tail, report_for_selection, resolve_catalog_selection,
+        use_settlement_location, use_settlement_location_revision,
+    };
     use crate::api::{
         AdminSettlementCatalogEntry, AdminSettlementCatalogPage, AdminSettlementReport,
     };
     use crate::surface::ADMIN_LOCALE_CATALOG;
+    use crate::surface::auctions::draft_page_tests::{
+        RecordRead, init_i18n, mount_writer, settle_writer,
+    };
+    use crate::surface::realtime::{get_parameter, selected_options, text_attributes};
 
     const AUCTION_ID: &str = "00000000-0000-0000-0000-000000000001";
+    const LINK_AUCTION: &str = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
 
     #[test]
     fn duplicate_page_size_mounts_only_the_invalid_link_view() {
@@ -653,6 +583,171 @@ mod tests {
             page_size: 10,
             total: 1,
         }
+    }
+
+    #[test]
+    fn empty_catalog_tail_replaces_page_once_and_preserves_deep_link() {
+        let address = Rc::new(TestLocation::at(&format!(
+            "/settlement?world=main&page=2&page_size=10&auction={LINK_AUCTION}&sequence=7"
+        )));
+        let reply = Rc::new(RecordRead::<AdminSettlementCatalogPage>::new());
+        let current_page = Rc::new(Cell::new(None));
+        let requested_pages = Rc::new(RefCell::new(Vec::new()));
+        let (mut page, _) = mount_writer({
+            let address = address.clone();
+            let reply = reply.clone();
+            let current_page = current_page.clone();
+            let requested_pages = requested_pages.clone();
+            move || {
+                use_test_location(address.clone());
+                let query = read_settlement_query().unwrap();
+                let location = use_settlement_location(use_settlement_location_revision(), &query);
+                let catalog_page = use_signal(|| query.page);
+                current_page.set(Some(catalog_page));
+                let reply = reply.clone();
+                let requested_pages = requested_pages.clone();
+                let catalog = use_resource(move || {
+                    let page = catalog_page();
+                    let reply = reply.clone();
+                    let requested_pages = requested_pages.clone();
+                    async move {
+                        requested_pages.borrow_mut().push(page);
+                        reply.fetch().await
+                    }
+                });
+                use_effect(move || {
+                    if let Some(Ok(page)) = catalog.read().as_ref()
+                        && page.page == catalog_page()
+                    {
+                        reconcile_empty_catalog_tail(
+                            page,
+                            location,
+                            catalog_page,
+                            &query.world_id,
+                            &query.auction_id,
+                            query.sequence,
+                        );
+                    }
+                });
+                VNode::empty()
+            }
+        });
+        assert!(address.attempts.borrow().is_empty());
+        assert_eq!(requested_pages.borrow().as_slice(), [2]);
+        reply.respond(Ok(AdminSettlementCatalogPage { page: 2, auctions: vec![], ..catalog() }));
+        settle_writer(&mut page);
+        assert_eq!(*current_page.get().unwrap().peek(), 1, "目录页码应归并到末页");
+        assert_eq!(requested_pages.borrow().as_slice(), [2, 1]);
+        reply.respond(Ok(catalog()));
+        settle_writer(&mut page);
+        assert_eq!(requested_pages.borrow().as_slice(), [2, 1]);
+        let attempts = address.attempts.borrow();
+        let [(mode, url)] = attempts.as_slice() else {
+            panic!("空尾页应恰好写入一次历史：{attempts:?}");
+        };
+        assert_eq!(*mode, QueryWriteMode::Replace);
+        assert_eq!(get_parameter(url, "page"), None);
+        assert_eq!(get_parameter(url, "page_size").as_deref(), Some("10"));
+        assert_eq!(get_parameter(url, "world").as_deref(), Some("main"));
+        assert_eq!(get_parameter(url, "auction").as_deref(), Some(LINK_AUCTION));
+        assert_eq!(get_parameter(url, "sequence").as_deref(), Some("7"));
+    }
+
+    #[test]
+    fn settlement_page_reads_corrected_catalog_page_after_empty_tail() {
+        let address =
+            Rc::new(TestLocation::at("/settlement?world=main&page=2&page_size=10&sequence=7"));
+        let catalog_reads = Rc::new(CatalogReads::new());
+        let (mut mounted, _) = mount_writer({
+            let address = address.clone();
+            let catalog_reads = catalog_reads.clone();
+            move || {
+                use_test_location(address.clone());
+                use_context_provider(|| catalog_reads.clone());
+                page()
+            }
+        });
+        assert_eq!(catalog_reads.pages.borrow().as_slice(), [2]);
+        // 分页器在挂载时会写入每页数量，只记录回包后的历史修改。
+        address.attempts.borrow_mut().clear();
+        catalog_reads.reply.respond(Ok(AdminSettlementCatalogPage {
+            page: 2,
+            auctions: vec![],
+            ..catalog()
+        }));
+        settle_writer(&mut mounted);
+
+        let attempts = address.attempts.borrow();
+        let [(mode, url)] = attempts.as_slice() else {
+            panic!("空尾页应恰好写入一次历史：{attempts:?}");
+        };
+        assert_eq!(*mode, QueryWriteMode::Replace);
+        assert_eq!(get_parameter(url, "page"), None);
+        assert_eq!(get_parameter(url, "page_size").as_deref(), Some("10"));
+        assert_eq!(get_parameter(url, "world").as_deref(), Some("main"));
+        assert_eq!(get_parameter(url, "sequence").as_deref(), Some("7"));
+        assert_eq!(catalog_reads.pages.borrow().as_slice(), [2, 1]);
+    }
+
+    #[test]
+    fn late_catalog_lookup_inserts_and_selects_the_deep_link_option() {
+        const OTHER: &str = "00000000-0000-4000-8000-000000000002";
+        let address = Rc::new(TestLocation::at(&format!(
+            "/settlement?world=main&auction={LINK_AUCTION}&sequence=7"
+        )));
+        let reply = Rc::new(RecordRead::<AdminSettlementCatalogPage>::new());
+        let (mut page, edits) = mount_writer({
+            let reply = reply.clone();
+            move || {
+                init_i18n();
+                use_test_location(address.clone());
+                let query = read_settlement_query().unwrap();
+                let location = use_settlement_location(use_settlement_location_revision(), &query);
+                let world_filter = use_signal(|| query.world_id);
+                let requested_sequence = use_signal(|| query.sequence);
+                let selected_auction_id = use_signal(|| query.auction_id);
+                let catalog_page = use_signal(|| query.page);
+                let lot_page = use_signal(|| 1);
+                let recovery_page = use_signal(|| 1);
+                let confirmation = use_signal(|| None);
+                let reason = use_signal(String::new);
+                let action_feedback = use_signal(|| None);
+                let selection_generation = use_signal(|| 0);
+                let reply = reply.clone();
+                let lookup = use_resource(move || {
+                    let reply = reply.clone();
+                    async move { reply.fetch().await }
+                });
+                let mut page = catalog();
+                page.auctions[0].auction_id = OTHER.to_owned();
+                page.auctions[0].sequence = 8;
+                let lookup = lookup.read();
+                let selected = match resolve_catalog_selection(
+                    Some(&page),
+                    lookup.as_ref().and_then(|reply| reply.as_ref().ok()),
+                    &selected_auction_id.read(),
+                    requested_sequence(),
+                ) {
+                    CatalogSelection::Matched(entry) => Some(entry),
+                    CatalogSelection::Resolving | CatalogSelection::Contradictory => None,
+                };
+                let catalog = catalog_for_picker(Some(&page), selected);
+                rsx! {
+                    AdminSettlementPicker {
+                        catalog, location, world_filter, requested_sequence, selected_auction_id,
+                        catalog_page, lot_page, recovery_page, confirmation, reason,
+                        action_feedback, selection_generation,
+                    }
+                }
+            }
+        });
+        assert!(text_attributes(&edits, "value").any(|(_, value)| value == OTHER));
+        assert!(selected_options(&edits).is_empty());
+        let mut lookup = catalog();
+        lookup.auctions[0].auction_id = LINK_AUCTION.to_owned();
+        reply.respond(Ok(lookup));
+        let edits = settle_writer(&mut page);
+        assert_eq!(selected_options(&edits), [LINK_AUCTION]);
     }
 
     #[test]

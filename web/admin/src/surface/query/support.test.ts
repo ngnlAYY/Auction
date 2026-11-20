@@ -1,6 +1,7 @@
 // 玩家支持 query：恰好一个检索入口且参考编号必须是规范 UUID。
 
 import { expect, test } from "bun:test";
+import { writeLocationPreservingScroll } from "@auction/web-shared/router";
 import { mountQueryState } from "./query-fixture";
 import { type SupportQuery, supportQueryValid, useSupportQueryState } from "./support";
 
@@ -64,4 +65,24 @@ test("两个入口同时设置或同时为空时在请求前拒绝", () => {
   expect(supportQueryValid({ user: "alice", reference: REFERENCE })).toBe(false);
   expect(supportQueryValid(DEFAULT_QUERY)).toBe(false);
   expect(supportQueryValid({ user: "", reference: "not-a-uuid" })).toBe(false);
+});
+
+test("拒写后的玩家检索保留到地址实际改写为止", () => {
+  const mounted = mountQueryState("/player-support", useSupportQueryState);
+  try {
+    const applied = { user: "alice", reference: "" };
+    mounted.fake.rejectWrites(true);
+    mounted.state.push(applied);
+    expect(mounted.fake.location.search).toBe("");
+    expect(mounted.state.state.peek()).toEqual(applied);
+    mounted.fake.rejectWrites(false);
+    expect(writeLocationPreservingScroll("/player-support", "push", { sameAddress: "write" })).toBe(
+      true,
+    );
+    expect(mounted.state.state.peek()).toEqual(applied);
+    expect(writeLocationPreservingScroll("/player-support?user=bob", "replace")).toBe(true);
+    expect(mounted.state.state.peek()).toEqual({ user: "bob", reference: "" });
+  } finally {
+    mounted.dispose();
+  }
 });

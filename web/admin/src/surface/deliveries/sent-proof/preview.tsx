@@ -13,7 +13,7 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { For, Match, Show, Switch, untrack } from "solid-js";
 
-import { previewDeliverySentProof } from "../../../api/delivery";
+import { previewDeliverySentProof, validDeliveryReason } from "../../../api/delivery";
 import { type AdminApiFailure, adminApiFailureClient } from "../../../api/failure";
 import type { AdminSessionHost } from "../../../api/session";
 import { trimRustWhitespace } from "../../../api/session-time";
@@ -35,7 +35,7 @@ import {
   sentProofReviewComplete,
   sentProofReviewRevision,
 } from "./state";
-import { buildEvidence, validReason } from "./validation";
+import { buildEvidence } from "./validation";
 
 /** 组装并发送无副作用预览；本地形状不合格时只记录问题码，不发请求。 */
 export function runPreview(
@@ -124,7 +124,7 @@ export function submitProof(
   const current = draft.peek();
   if (
     !reviewedSentProofCanConfirm(proof, deliveryId, fencingVersion) ||
-    !validReason(current.reason)
+    !validDeliveryReason(trimRustWhitespace(current.reason))
   ) {
     return;
   }

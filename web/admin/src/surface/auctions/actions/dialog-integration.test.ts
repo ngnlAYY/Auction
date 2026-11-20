@@ -6,6 +6,7 @@ import { decode } from "@auction/contracts/wire";
 import { SecondTickerContext, useSecondTicker } from "@auction/web-shared/platform/clock";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { err } from "@auction/web-shared/result";
+import { writeOutcomeUnknown } from "../../../api/failure";
 import { loadRenderModule } from "../../../solid-render-fixture.test";
 import type { PendingCommands } from "../../pending";
 import { createComponent } from "../../solid-dom-fixture";
@@ -110,7 +111,7 @@ test.each([
           pending.submit(
             pendingEntity,
             "场次命令",
-            async () => err("network_error"),
+            async () => err(writeOutcomeUnknown("network_error")),
             () => {},
             () => {},
           ),

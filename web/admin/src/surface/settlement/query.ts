@@ -1,20 +1,14 @@
 // Admin 结算报表筛选的 URL 状态与浏览器历史同步。
-// 不迁到统一的 `useQueryState`：本页 URL 状态拆成四个独立状态
-// （world/auction/sequence/page），popstate 经 `useSettlementLocationRevision` 的 revision
-// 驱动页面 effect 一次性恢复，并同时复位详情上下文（`selectionGeneration` 防止 recovery
-// 确认的异步回写落到已切换的选择上，见 recovery 提交回调里的同代比较）；目录加载后还要
-// 按服务端事实 canonical 化地址（auction 与 sequence 必须成对、空目录页钳制到末页、解析失败
-// 保留地址显式报错）。这些语义超出通用 hook 的单一状态模型，因此保留本模块的
-// read + push/replace + location revision 三件套，底层地址栏读写与 popstate 监听复用
-// `@auction/web-shared/net/query` 的 `readQueryPairs` / `writeQueryPairs` / `usePopstateRevision`。
+// 共享查询订阅推进位置版本，页面按版本恢复世界、场次、期号与页码，并复位相关的详情上下文。
+// 目录加载后按服务端事实规范化地址，无效链接保留原文供核对。
 
 import {
   type QueryPair,
   readQueryPairs,
-  usePopstateRevision,
+  useQueryState,
   writeQueryPairs,
 } from "@auction/web-shared/net/query";
-import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
+import type { Cell } from "@auction/web-shared/reactive/cell";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { compareText } from "@auction/web-shared/text";
 import { validUuid } from "@auction/web-shared/ui/validation";
@@ -172,9 +166,18 @@ function settlementQueryPairs(query: SettlementQuery): readonly QueryPair[] {
   return pairs;
 }
 
-/** 监听同一路径的浏览器返回/前进，确保筛选状态不会与地址栏分离。 */
+/** 将共享层认可的同页地址变化记入本页的位置版本。 */
 export function useSettlementLocationRevision(): Cell<number> {
-  const revision = createCell(0);
-  usePopstateRevision(revision);
-  return revision;
+  let nextRevision = 0;
+  // 共享层按实际路径和查询去重，成功的筛选及分页写回也会更新其基准。
+  // 即使地址解析出的值相同，新的地址仍须覆盖拒写后保留的本地选择。
+  return useQueryState(
+    [],
+    () => {
+      const revision = nextRevision;
+      nextRevision = Math.min(revision + 1, Number.MAX_SAFE_INTEGER);
+      return revision;
+    },
+    () => [],
+  ).state;
 }

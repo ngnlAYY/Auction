@@ -8,11 +8,11 @@ import type {
 import { buildAdminCredentialCreateRequest } from "@auction/contracts/dto/admin/credentials";
 import { err, ok, type Result } from "@auction/web-shared/result";
 
-import { type AdminApiFailure, adminApiFailureClient, invalidRequestError } from "../failure";
+import { type AdminWriteNotSent, invalidRequestError, writeNotSent } from "../failure";
 import { type PreparedJsonCommand, prepareJsonCommand } from "../transport";
 import { type AdminCredential, parseRustUuid } from "./decode";
 
-/** 导入命令的冻结正文与回执核对字段；表单在首次提交时生成并跨手动重试复用。 */
+/** 导入命令的冻结正文与安全回执核对字段。 */
 export interface PreparedAdminCredentialCreate {
   readonly command_id: string;
   readonly kind: string;
@@ -57,10 +57,10 @@ export function copyCredential(value: AdminCredential): AdminCredential {
   };
 }
 
-/** 在首次提交时冻结导入输入并生成正文；密码、CK 与登录口令只留在该正文内。 */
+/** 生成导入正文与安全回执核对字段；Cookie 和论坛密码只留在正文内。 */
 export function prepareAdminCredentialCreate(
   command: AdminCredentialCreateRequest,
-): Result<PreparedAdminCredentialCreate, AdminApiFailure> {
+): Result<PreparedAdminCredentialCreate, AdminWriteNotSent> {
   let commandId: string;
   let kind: string;
   let world: string;
@@ -81,11 +81,11 @@ export function prepareAdminCredentialCreate(
         ? undefined
         : { username: rawLogin.username, password: rawLogin.password };
   } catch (error) {
-    return err(adminApiFailureClient(invalidRequestError(error)));
+    return err(writeNotSent(invalidRequestError(error)));
   }
   const canonicalCommandId = parseRustUuid(commandId);
   if (canonicalCommandId === null) {
-    return err(adminApiFailureClient("invalid_request"));
+    return err(writeNotSent("invalid_request"));
   }
   const request = buildAdminCredentialCreateRequest({
     command_id: canonicalCommandId,
@@ -112,6 +112,27 @@ export function prepareAdminCredentialCreate(
   );
 }
 
+/** 冻结导入输入，首次执行时生成正文，之后的手动重试复用同一份正文。 */
+export function prepareAdminCredentialCreateOnce(
+  input: Omit<AdminCredentialCreateRequest, "command_id">,
+): (commandId: string) => Result<PreparedAdminCredentialCreate, AdminWriteNotSent> {
+  const login = input.login;
+  let state:
+    | { kind: "input"; request: typeof input }
+    | { kind: "prepared"; result: Result<PreparedAdminCredentialCreate, AdminWriteNotSent> } = {
+    kind: "input",
+    request: { ...input, ...(login === undefined ? {} : { login: { ...login } }) },
+  };
+  return (commandId) => {
+    if (state.kind === "input") {
+      const result = prepareAdminCredentialCreate({ ...state.request, command_id: commandId });
+      // 序列化后释放冻结输入，宿主只保留一份可重试的正文。
+      state = { kind: "prepared", result };
+    }
+    return state.result;
+  };
+}
+
 /** 在首次提交时冻结被修改凭据与操作参数；正文只生成一次。 */
 export function prepareAdminCredentialMutation(
   commandId: string,
@@ -119,20 +140,20 @@ export function prepareAdminCredentialMutation(
   action: string,
   label: string | null,
   status: string | null,
-): Result<PreparedAdminCredentialMutation, AdminApiFailure> {
+): Result<PreparedAdminCredentialMutation, AdminWriteNotSent> {
   const canonicalCommandId = parseRustUuid(commandId);
   if (canonicalCommandId === null) {
-    return err(adminApiFailureClient("invalid_request"));
+    return err(writeNotSent("invalid_request"));
   }
   let previous: AdminCredential;
   try {
     previous = copyCredential(credential);
   } catch (error) {
-    return err(adminApiFailureClient(invalidRequestError(error)));
+    return err(writeNotSent(invalidRequestError(error)));
   }
   const credentialId = parseRustUuid(previous.id);
   if (credentialId === null || !Number.isSafeInteger(previous.state_version)) {
-    return err(adminApiFailureClient("invalid_request"));
+    return err(writeNotSent("invalid_request"));
   }
   const request: AdminCredentialMutationRequest = {
     command_id: canonicalCommandId,
@@ -163,20 +184,20 @@ export function prepareAdminCredentialMutation(
 export function prepareAdminCredentialDelete(
   commandId: string,
   credential: AdminCredential,
-): Result<PreparedAdminCredentialDelete, AdminApiFailure> {
+): Result<PreparedAdminCredentialDelete, AdminWriteNotSent> {
   const canonicalCommandId = parseRustUuid(commandId);
   if (canonicalCommandId === null) {
-    return err(adminApiFailureClient("invalid_request"));
+    return err(writeNotSent("invalid_request"));
   }
   let previous: AdminCredential;
   try {
     previous = copyCredential(credential);
   } catch (error) {
-    return err(adminApiFailureClient(invalidRequestError(error)));
+    return err(writeNotSent(invalidRequestError(error)));
   }
   const credentialId = parseRustUuid(previous.id);
   if (credentialId === null || !Number.isSafeInteger(previous.state_version)) {
-    return err(adminApiFailureClient("invalid_request"));
+    return err(writeNotSent("invalid_request"));
   }
   const request: AdminCredentialDeleteRequest = {
     command_id: canonicalCommandId,

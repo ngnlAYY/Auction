@@ -1095,3 +1095,29 @@ fn delivery_release_reconcile_and_sent_proof_contract_fixtures() {
     assert_eq!(confirmation.external_reference, "mooglemail:main:send:7000001");
     assert!(!confirmation.replayed);
 }
+
+#[test]
+fn queue_reconcile_checks_target_and_new_fence() {
+    use super::decode::decode_delivery_command;
+    use super::queue::DeliveryAction;
+    use crate::api::contract_fixtures::admin_fixture;
+
+    let body = admin_fixture!("delivery-release-command");
+    let id = "00000000-0000-4000-8000-000000000031";
+    let decode = |body: &str, delivery_id, fence| {
+        decode_delivery_command(
+            serde_json::from_str(body).map_err(drop)?,
+            delivery_id,
+            DeliveryAction::ReconcileRetry,
+            fence,
+        )
+    };
+    let queued = decode(body, id, 4).unwrap();
+    assert_eq!(
+        (queued.id.as_str(), queued.status.as_str(), queued.fencing_version),
+        (id, "pending", 5)
+    );
+    assert!(decode(body, OTHER_ID, 4).is_err());
+    assert!(decode(body, id, 5).is_err());
+    assert!(decode("{", id, 4).is_err());
+}

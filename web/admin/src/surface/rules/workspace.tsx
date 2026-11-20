@@ -219,7 +219,7 @@ export function AdminRulesWorkspace(props: AdminRulesWorkspaceProps): JSX.Elemen
       t("admin-rules-publish"),
       async (commandId, signal) => {
         const result = await publishAdminRules(host, props.kind, commandId, prepare, signal);
-        return result.ok ? ok(null) : err(result.error.code);
+        return result.ok ? ok(null) : result;
       },
       (_value, sourceAlive) => {
         const alive = (): boolean => props.pending.host.alive();

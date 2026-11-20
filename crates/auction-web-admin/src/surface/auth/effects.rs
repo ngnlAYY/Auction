@@ -5,11 +5,11 @@ use std::rc::Rc;
 
 use auction_web_shared::PageVisibility;
 use auction_web_shared::clock::monotonic_millis;
-use auction_web_shared::storage::read_cookie;
 use auction_web_shared::timer::TimeoutFuture;
 #[cfg(target_arch = "wasm32")]
 use auction_web_shared::visibility::activity::InputActivityListener;
 use auction_web_shared::visibility::broadcast::BroadcastNotice;
+use auction_web_shared::visibility::document_is_visible;
 use dioxus::core::Task;
 use dioxus::prelude::*;
 
@@ -20,7 +20,10 @@ use super::session::{
     Cookie, Effect, Event, LogoutOutcome, ReadOutcome, RenewalOutcome, State, Ticket, Timer, View,
     step,
 };
-use crate::api::{AdminApiFailure, AdminSession, fetch_admin_session, login_admin, logout_admin};
+use crate::api::{
+    AdminApiFailure, AdminSession, admin_session_cookie, fetch_admin_session, login_admin,
+    logout_admin,
+};
 
 /// 宿主测试注入会话投影和事件，继续通过真实 Router 与认证外壳挂载业务页面。
 #[cfg(test)]
@@ -48,7 +51,7 @@ pub(super) fn use_session() -> (Signal<View>, EventHandler<Event>, EventHandler<
     });
     use_hook(|| {
         let visibility = PageVisibility::new();
-        visibility.install(move || dispatch.call(Event::Visible));
+        visibility.install(move || on_visible(dispatch));
         visibility
     });
     let on_input = move |on_logout| dispatch.call(Event::Input { on_logout });
@@ -70,6 +73,10 @@ pub(super) fn use_session() -> (Signal<View>, EventHandler<Event>, EventHandler<
         return (view, dispatch, submit_login);
     }
     (view, dispatch, submit_login)
+}
+
+fn on_visible(dispatch: EventHandler<Event>) {
+    dispatch.call(Event::Visible);
 }
 
 struct SessionRuntime {
@@ -99,6 +106,10 @@ impl SessionRuntime {
         } else {
             cookie_generation()
         };
+        self.accept_with_cookie(event, cookie);
+    }
+
+    fn accept_with_cookie(self: &Rc<Self>, event: Event, cookie: Cookie) {
         let (state, effects) = step(self.state.take(), event, cookie, monotonic_millis());
         self.state.replace(state);
         self.publish();
@@ -146,7 +157,23 @@ impl SessionRuntime {
     fn read(self: &Rc<Self>, ticket: Ticket) {
         let runtime = Rc::clone(self);
         self.read.set(Some(spawn(async move {
+            if !runtime.state.borrow().has_read(ticket) {
+                return;
+            }
+            if runtime
+                .state
+                .borrow_mut()
+                .cancel_discovery_before_send(ticket, document_is_visible())
+            {
+                runtime.read.set(None);
+                return;
+            }
             let sent = cookie_generation();
+            // 复核等待网络前立即发布这次 Cookie 观测，撤回旧身份的写许可和 Key 展示。
+            runtime.accept_with_cookie(Event::ReadSending(ticket), sent.clone());
+            if !runtime.state.borrow().has_read(ticket) {
+                return;
+            }
             let outcome = match request_session().await {
                 Ok(Some(session)) => ReadOutcome::Authenticated(Rc::new(session)),
                 Ok(None) => ReadOutcome::Unauthenticated,
@@ -161,11 +188,12 @@ impl SessionRuntime {
         let runtime = Rc::clone(self);
         spawn(async move {
             let sent = cookie_generation();
-            let outcome = match logout_admin(session.csrf_token.clone()).await {
-                Ok(()) => LogoutOutcome::Succeeded,
-                Err(error) => logout_failure(error),
-            };
-            runtime.accept(Event::LogoutFinished(ticket, sent, outcome));
+            runtime.accept_with_cookie(Event::LogoutSending(ticket), sent.clone());
+            if !runtime.state.borrow().has_logout(ticket) {
+                return;
+            }
+            let result = logout_admin(session.csrf_token.clone()).await;
+            runtime.accept(logout_completion(ticket, sent, result));
         });
     }
 
@@ -173,6 +201,9 @@ impl SessionRuntime {
         let runtime = Rc::clone(self);
         let task = spawn(async move {
             let sent = cookie_generation();
+            if !runtime.prepare_renewal_send(ticket, &sent) {
+                return;
+            }
             let outcome = match session.renew().await {
                 Ok(session) => RenewalOutcome::Succeeded(Rc::new(session)),
                 Err(error) => renewal_failure(&error.failure, error.retry_after_millis),
@@ -181,6 +212,11 @@ impl SessionRuntime {
         });
         // 在定时器事件同一轮启动 fetch。退出点击可以取消定时器，已派发 POST 的回执则仍归外壳。
         let _ = task.poll_now();
+    }
+
+    fn prepare_renewal_send(self: &Rc<Self>, ticket: Ticket, sent: &Cookie) -> bool {
+        self.accept_with_cookie(Event::RenewalSending(ticket), sent.clone());
+        self.state.borrow().has_renewal(ticket)
     }
 
     fn timer(&self, timer: Timer) -> &Cell<Option<Task>> {
@@ -230,10 +266,26 @@ fn cancel(task: &Cell<Option<Task>>) {
 }
 
 fn cookie_generation() -> Cookie {
-    match read_cookie("auction_admin_csrf") {
+    match admin_session_cookie() {
         Some(Some(value)) => Cookie::Present(Rc::from(value)),
         Some(None) => Cookie::Missing,
         None => Cookie::Unavailable,
+    }
+}
+
+fn logout_completion(ticket: Ticket, sent: Cookie, result: Result<(), AdminApiFailure>) -> Event {
+    // 明确在构造请求或传输准备时失败的重试，仍由先前实际发送的票持有通知证据。
+    let dispatched = result.as_ref().err().is_none_or(|error| {
+        error.status.is_some() || !AdminApiFailure::definite_rejection(&error.code)
+    });
+    let outcome = match result {
+        Ok(()) => LogoutOutcome::Succeeded,
+        Err(error) => logout_failure(error),
+    };
+    if dispatched {
+        Event::LogoutFinished(ticket, sent, outcome)
+    } else {
+        Event::LogoutNotSent(ticket, sent, outcome)
     }
 }
 
@@ -273,15 +325,23 @@ mod tests {
 
     use auction_time::{Duration, Timestamp};
     use dioxus::core::Mutation;
+    use dioxus::history::MemoryHistory;
     use dioxus::prelude::*;
+    use dioxus::router::RouterConfig;
 
-    use super::{logout_failure, renewal_failure, use_session};
+    use super::{
+        SessionRuntime, TestSession, logout_completion, logout_failure, on_visible,
+        renewal_failure, use_session,
+    };
     use crate::api::{AdminApiFailure, AdminSession};
     use crate::surface::auctions::draft_page_tests::{
-        click_button, has_live_text, init_i18n, mount_writer, settle_writer, writer_form,
+        button, click_button, has_live_text, init_i18n, mount_writer, settle_writer, writer_form,
     };
     use crate::surface::auth::login::{AdminLogin, LoginSubmission};
-    use crate::surface::auth::session::{Event, LogoutOutcome, RenewalOutcome, View};
+    use crate::surface::auth::session::{
+        Cookie, Effect, Event, LogoutOutcome, ReadOutcome, RenewalOutcome, State, Timer, View, step,
+    };
+    use crate::surface::router::Route;
 
     pub(super) struct ResponseStub<T> {
         calls: Cell<usize>,
@@ -331,6 +391,137 @@ mod tests {
             assert_eq!(submission.secret, "fixture-password");
             self.post.request().await
         }
+    }
+
+    fn fixture_session() -> AdminSession {
+        let now = Timestamp::parse_from_rfc3339("2026-11-18T00:00:00Z").unwrap();
+        AdminSession {
+            actor: "fixture-operator".to_owned(),
+            csrf_token: "fixture-cookie".to_owned(),
+            expires_at: now.checked_add_signed(Duration::minutes(15)).unwrap(),
+            absolute_expires_at: now.checked_add_signed(Duration::hours(8)).unwrap(),
+            server_time: now,
+            received_at_millis: 0.0,
+        }
+    }
+
+    #[test]
+    fn activity_send_gate_observes_cookie_and_hides_key_before_recheck() {
+        let session = Rc::new(fixture_session());
+        let current = Cookie::Present(Rc::from(session.csrf_token.as_str()));
+        let (state, effects) = step(State::default(), Event::Start, current.clone(), 0.0);
+        let [Effect::Read(read)] = effects.as_slice() else { panic!("应读取初始会话") };
+        let (state, _) = step(
+            state,
+            Event::ReadFinished(*read, current.clone(), ReadOutcome::Authenticated(session)),
+            current.clone(),
+            0.0,
+        );
+        let (state, effects) = step(state, Event::Input { on_logout: false }, current.clone(), 0.0);
+        let [Effect::ArmTimer(Timer::Renewal, timer, delay)] = effects.as_slice() else {
+            panic!("应安排一次续期");
+        };
+        let (state, effects) = step(
+            state,
+            Event::TimerElapsed(Timer::Renewal, *timer),
+            current.clone(),
+            f64::from(*delay),
+        );
+        let [Effect::Renew(ticket, _)] = effects.as_slice() else {
+            panic!("应登记一次续期")
+        };
+        let ticket = *ticket;
+
+        for (observed, may_send) in [
+            (current, true),
+            (Cookie::Present(Rc::from("replacement-cookie")), false),
+            (Cookie::Missing, false),
+        ] {
+            let transport = Rc::new(SessionTransport::default());
+            let sent = Rc::new(Cell::new(None));
+            let (mut page, _) = mount_writer({
+                let transport = transport.clone();
+                let sent = sent.clone();
+                let state = state.clone();
+                move || {
+                    use_context_provider(|| transport.clone());
+                    let view = use_signal(|| state.view());
+                    let runtime = use_hook(|| {
+                        let runtime = Rc::new(SessionRuntime::new(view));
+                        runtime.state.replace(state.clone());
+                        runtime
+                    });
+                    let observed = observed.clone();
+                    let sent = sent.clone();
+                    rsx! {
+                        button { onclick: move |_| {
+                            let previous = view();
+                            assert!(previous.can_write && !previous.key_visibility.hidden);
+                            sent.set(Some(runtime.prepare_renewal_send(ticket, &observed)));
+                            let current = view();
+                            assert_eq!(current.can_write, may_send);
+                            assert_eq!(current.key_visibility.hidden, !may_send);
+                            assert_eq!(current.session, previous.session);
+                        }, {"尝试实发活动续期".to_owned()} }
+                    }
+                }
+            });
+            click_button(&mut page, "尝试实发活动续期");
+            assert_eq!(sent.get(), Some(may_send));
+            assert_eq!(transport.get.calls.get(), usize::from(!may_send));
+        }
+    }
+
+    #[component]
+    fn DiscoveryShell(view: Signal<View>, dispatch: EventHandler<Event>) -> Element {
+        use_context_provider(|| TestSession(view, dispatch));
+        rsx! {
+            Router::<Route> { config: move |_| RouterConfig::<Route>::default().on_update(|router| {
+                matches!(router.current(), Route::Dashboard {}).then(|| Route::Status {}.into())
+            }) }
+        }
+    }
+
+    #[test]
+    fn visible_logged_out_shell_reads_once_then_enters_admin() {
+        let transport = Rc::new(SessionTransport::default());
+        let history = Rc::new(MemoryHistory::with_initial_path(Route::Login {}));
+        let snapshot = Rc::new(Cell::new(None::<Signal<View>>));
+        let (mut page, _) = mount_writer({
+            let transport = transport.clone();
+            let history = history.clone();
+            let snapshot = snapshot.clone();
+            move || {
+                init_i18n();
+                use_context_provider(|| transport.clone());
+                use_context_provider(|| history.clone() as Rc<dyn History>);
+                let (view, dispatch, _) = use_session();
+                snapshot.set(Some(view));
+                rsx! {
+                    button { onclick: move |_| on_visible(dispatch), {"恢复可见".to_owned()} }
+                    DiscoveryShell { view, dispatch }
+                }
+            }
+        });
+        assert_eq!(transport.get.calls.get(), 1);
+        transport.get.finish(Ok(None));
+        settle_writer(&mut page);
+        assert_eq!(history.current_route(), "/login");
+        assert!(has_live_text(&page, "后台登录"));
+
+        click_button(&mut page, "恢复可见");
+        click_button(&mut page, "恢复可见");
+        assert_eq!(transport.get.calls.get(), 2);
+        assert_eq!(transport.post.calls.get(), 0);
+        assert!(has_live_text(&page, "后台登录"));
+        transport.get.finish(Ok(Some(fixture_session())));
+        settle_writer(&mut page);
+        settle_writer(&mut page);
+        assert_eq!(transport.get.calls.get(), 2);
+        assert!(snapshot.get().unwrap().peek().can_write);
+        assert!(button(&page, "退出登录").is_some());
+        assert!(!has_live_text(&page, "后台登录"));
+        assert_eq!(history.current_route(), "/status");
     }
 
     fn verify_broadcast_login(failure: Option<(&str, &str)>) {
@@ -436,7 +627,35 @@ mod tests {
     }
 
     fn http(status: u16, code: &str) -> AdminApiFailure {
-        AdminApiFailure { status: Some(status), code: code.to_owned() }
+        let body = serde_json::json!({
+            "code": code, "message": "测试回执", "data": null, "request_id": null
+        });
+        AdminApiFailure::from_http_bytes(status, body.to_string().as_bytes())
+    }
+
+    #[test]
+    fn logout_completion_distinguishes_unsent_from_sent_delete() {
+        let ticket = 1;
+        let cookie = Cookie::Present(Rc::from("fixture-cookie"));
+        for (failure, was_sent, expected_code) in [
+            (AdminApiFailure::client("invalid_request"), false, "invalid_request"),
+            (http(403, "origin_forbidden"), true, "origin_forbidden"),
+        ] {
+            let (dispatched, observed_ticket, sent, code) =
+                match logout_completion(ticket, cookie.clone(), Err(failure)) {
+                    Event::LogoutNotSent(ticket, sent, LogoutOutcome::Rejected(code)) => {
+                        (false, ticket, sent, code)
+                    }
+                    Event::LogoutFinished(ticket, sent, LogoutOutcome::Rejected(code)) => {
+                        (true, ticket, sent, code)
+                    }
+                    _ => panic!("应收到明确拒绝的退出回执"),
+                };
+            assert_eq!(dispatched, was_sent);
+            assert_eq!(observed_ticket, ticket);
+            assert!(sent == cookie);
+            assert_eq!(code, expected_code);
+        }
     }
 
     #[test]
@@ -480,6 +699,23 @@ mod tests {
         }
         for failure in [http(403, "origin_forbidden"), AdminApiFailure::client("invalid_request")] {
             assert!(matches!(renewal_failure(&failure, None), RenewalOutcome::Rejected));
+        }
+    }
+
+    #[test]
+    fn raw_renewal_receipt_requires_both_trusted_body_and_401_status() {
+        let valid =
+            br#"{"code":"unauthenticated","message":"expired","data":null,"request_id":null}"#;
+        let truncated = br#"{"code":"unauthenticated","message":"expired","data":null}"#;
+        assert!(matches!(
+            renewal_failure(&AdminApiFailure::from_http_bytes(401, valid), None),
+            RenewalOutcome::Unauthenticated
+        ));
+        for (status, body) in [(401, truncated.as_slice()), (503, valid.as_slice())] {
+            assert!(matches!(
+                renewal_failure(&AdminApiFailure::from_http_bytes(status, body), None),
+                RenewalOutcome::Unknown
+            ));
         }
     }
 }

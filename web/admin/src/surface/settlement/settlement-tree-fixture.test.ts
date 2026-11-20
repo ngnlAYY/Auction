@@ -26,6 +26,7 @@ import {
 
 interface TreeFixture {
   readonly fake: ReturnType<typeof openRouter>["fake"];
+  readonly router: ReturnType<typeof openRouter>["router"];
   readonly requests: AdminRequestHarness;
   mount(render: () => JSX.Element): void;
   find(predicate: (node: TestElement) => boolean): TestElement | null;
@@ -53,6 +54,7 @@ export async function withAdminTree(
     const { host } = requests.registerHost();
     await run({
       fake,
+      router,
       requests,
       mount(render) {
         createRoot((dispose) => {

@@ -8,6 +8,7 @@ use auction_web_shared::t;
 use auction_web_shared::{AsyncState, AsyncStateKind, use_popstate_revision};
 use dioxus::prelude::*;
 
+use super::auth::generated_key_visibility;
 use super::pagination::{use_admin_pagination, use_versioned_admin_page};
 use super::pending::{
     PendingCommandPanel, use_pending_command_gate, use_pending_commands_with_gate,
@@ -27,6 +28,19 @@ use table::{AdminUserFilters, AdminUserTable};
 
 pub(super) use create::{AdminUserGeneratedKey, AdminUserGeneratedKeyDialog};
 
+#[derive(Clone, Copy)]
+struct SourceKeyDelivery(Signal<Option<u64>>);
+
+impl SourceKeyDelivery {
+    fn record(mut self) {
+        // 来源页的串行门禁保留唯一待确认 Key。先记录交付时的围栏，再把回执交给会话宿主。
+        let visibility = generated_key_visibility();
+        if let Ok(mut revision) = self.0.try_write() {
+            *revision = (!visibility.hidden).then_some(visibility.revision);
+        }
+    }
+}
+
 /// 改名回滚和用户页的动作共用用户的实体围栏。
 pub(super) fn user_command_entity(user_id: &str) -> String {
     format!("user:{user_id}")
@@ -36,6 +50,27 @@ pub(super) fn user_command_entity(user_id: &str) -> String {
 pub(super) struct UsersPageFixture {
     pub fetch: Box<dyn Fn(String, i64, i64) -> crate::api::AdminUserPage>,
     pub retry_correction: Cell<Option<EventHandler<()>>>,
+}
+
+#[cfg(test)]
+impl UsersPageFixture {
+    /// 从挂载的用户页提交已裁定的重签结果，保留真实的成功交付回调。
+    pub(in crate::surface) fn submit_generated_key<F>(
+        operation: impl Fn(uuid::Uuid) -> F + 'static,
+    ) -> bool
+    where
+        F: std::future::Future<Output = Result<Option<String>, crate::api::AdminWriteFailure>>
+            + 'static,
+    {
+        dialogs::run_user_action(
+            consume_context::<crate::surface::pending::PendingCommands>(),
+            user_command_entity("00000000-0000-4000-8000-000000000002"),
+            "重新签发 Key".to_owned(),
+            Signal::new(None),
+            Signal::new(0),
+            operation,
+        )
+    }
 }
 
 /// 加载并展示 Admin 用户管理页面。
@@ -58,6 +93,8 @@ pub(super) fn page() -> Element {
     let mut create_open = use_signal(|| false);
     let mut action_busy = use_signal(|| false);
     let command_gate = use_pending_command_gate();
+    let delivered_key_revision = use_signal(|| None::<u64>);
+    use_context_provider(|| SourceKeyDelivery(delivered_key_revision));
     let pending = use_pending_commands_with_gate(reload_generation, Some(command_gate), |entity| {
         entity == "create-user" || entity.starts_with("user:")
     });
@@ -176,6 +213,16 @@ pub(super) fn page() -> Element {
             if command_gate.blocked() {
                 p { role: "status", {t!("admin-users-key-gate-help")} }
             }
+            if let Some((command_id, key)) = pending.generated_key() {
+                for (command_id, key) in [(command_id, key)] {
+                    SourceGeneratedKey {
+                        key: "{command_id}",
+                        generated: key,
+                        delivered_revision: delivered_key_revision(),
+                        on_acknowledge: move |_| pending.acknowledge_key(command_id),
+                    }
+                }
+            }
             if create_open() {
                 AdminUserCreateForm {
                     gate: command_gate,
@@ -220,10 +267,45 @@ pub(super) fn page() -> Element {
             }
             {content}
         }
-        if let Some((command_id, key)) = pending.generated_key() {
-            AdminUserGeneratedKeyDialog {
-                generated: key,
-                on_close: move |_| pending.acknowledge_key(command_id),
+    }
+}
+
+#[component]
+fn SourceGeneratedKey(
+    generated: AdminUserGeneratedKey,
+    delivered_revision: Option<u64>,
+    on_acknowledge: EventHandler<()>,
+) -> Element {
+    let visibility = generated_key_visibility();
+    let mut open_revision = use_signal(|| delivered_revision);
+    rsx! {
+        if !visibility.hidden && open_revision() == Some(visibility.revision) {
+            for (revision, generated) in [(visibility.revision, generated)] {
+                AdminUserGeneratedKeyDialog {
+                    key: "{revision}",
+                    generated,
+                    on_close: move |_| {
+                        if generated_key_visibility() == visibility
+                            && open_revision.try_peek().is_ok_and(|opened| *opened == Some(revision))
+                        {
+                            on_acknowledge.call(());
+                        }
+                    },
+                }
+            }
+        } else {
+            button {
+                r#type: "button", disabled: visibility.hidden,
+                onclick: move |_| {
+                    let current = generated_key_visibility();
+                    if !current.hidden && current == visibility {
+                        open_revision.set(Some(current.revision));
+                    }
+                },
+                {t!("admin-pending-view-key")}
+            }
+            if visibility.hidden {
+                p { class: "admin-panel__note", {t!("admin-session-key-hidden")} }
             }
         }
     }

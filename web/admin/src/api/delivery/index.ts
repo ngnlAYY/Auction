@@ -29,10 +29,14 @@ import { validUuid } from "@auction/web-shared/ui/validation";
 
 import {
   type AdminApiFailure,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   adminApiFailureClient,
   decodeAdminReceipt,
   invalidResponseError,
   responseError,
+  writeNotSent,
+  writeOutcomeUnknown,
 } from "../failure";
 import type { AdminSessionHost } from "../session";
 import { trimRustWhitespace } from "../session-time";
@@ -40,7 +44,7 @@ import {
   type PreparedJsonCommand,
   prepareJsonCommandOnce,
   sendGet,
-  sendJsonWrite,
+  sendJsonPreview,
   sendPreparedJsonWrite,
 } from "../transport";
 import { MAX_JSON_SAFE_INTEGER, validSafeText, validSuccessCode } from "../validation";
@@ -50,6 +54,17 @@ import { decodeConfirmation, decodeDetailWithActions, decodePreview } from "./re
 
 /** 与服务端 `MAX_PLAYER_SUPPORT_ROWS` 对齐；超过即视为损坏响应。 */
 export const MAX_PLAYER_SUPPORT_ROWS = 50;
+
+/** 玩家支持用户检索词的 UTF-8 字节上限，与服务端 `MAX_PLAYER_SUPPORT_USER_LEN` 对齐。 */
+export const MAX_PLAYER_SUPPORT_USER_BYTES = 256;
+
+/** 解除告警和人工 Sent 证明共用的理由上限，按 UTF-8 字节计算。 */
+export const MAX_DELIVERY_REASON_BYTES = 2_048;
+
+/** 校验将写入处置事实的单行理由，表单在调用前去除首尾空白。 */
+export function validDeliveryReason(reason: string): boolean {
+  return validSafeText(reason, MAX_DELIVERY_REASON_BYTES);
+}
 
 /** 列表与玩家支持请求的扩展投影（`include` 取值）。本页面的闭集认识结算退件 Take 来源
  * （`settlement_return_action`）与装备收回处置（`recovery_equipment_recovered`），必须显式请求；
@@ -95,19 +110,19 @@ export interface PreparedAcknowledgeDeliveryCommand {
 /** 人工 Sent 证明确认的准备函数；同一个 `command_id` 的重试返回同一份命令与正文。 */
 export type SentProofCommandPreparation = (
   commandId: string,
-) => Result<PreparedSentProofCommand, AdminApiFailure>;
+) => Result<PreparedSentProofCommand, AdminWriteNotSent>;
 
 /** 解除告警的准备函数；同一个 `command_id` 的重试返回同一份命令与正文。 */
 export type AcknowledgeDeliveryPreparation = (
   commandId: string,
-) => Result<PreparedAcknowledgeDeliveryCommand, AdminApiFailure>;
+) => Result<PreparedAcknowledgeDeliveryCommand, AdminWriteNotSent>;
 
 /** 在提交时冻结确认输入；执行体第一次调用返回的函数时才构造正文，后续重试复用同一文本。 */
 export function prepareSentProofCommand(command: SentProofCommand): SentProofCommandPreparation {
   // 证据对象也是提交输入的一部分：复制可变清单，避免队列等待期间被草稿改写。
   const snapshot = safeSnapshotSentEvidence(command.evidence);
   if (!snapshot.ok) {
-    const failure = snapshot.error;
+    const failure = writeNotSent(snapshot.error.code);
     return () => err(failure);
   }
   const frozen: SentProofCommand = Object.freeze({
@@ -133,7 +148,7 @@ export function prepareSentProofCommand(command: SentProofCommand): SentProofCom
   });
   return (commandId) => {
     if (!validSentProofCommand(commandId, frozen)) {
-      return err(adminApiFailureClient("invalid_delivery_command"));
+      return err(writeNotSent("invalid_delivery_command"));
     }
     const prepared = prepare(commandId);
     if (!prepared.ok) {
@@ -164,7 +179,7 @@ export function prepareAcknowledgeDelivery(
   });
   return (commandId) => {
     if (!validAcknowledgeCommand(commandId, frozen)) {
-      return err(adminApiFailureClient("invalid_delivery_command"));
+      return err(writeNotSent("invalid_delivery_command"));
     }
     const prepared = prepare(commandId);
     if (!prepared.ok) {
@@ -230,7 +245,7 @@ export async function previewDeliverySentProof(
     evidence_reference: evidenceReference,
     evidence: snapshot.value,
   };
-  const response = await sendJsonWrite(host, url, "POST", request, signal);
+  const response = await sendJsonPreview(host, url, request, signal);
   if (!response.ok) {
     return err(response.error);
   }
@@ -254,10 +269,15 @@ export async function acknowledgeDelivery(
   host: AdminSessionHost,
   prepared: PreparedAcknowledgeDeliveryCommand,
   signal: AbortSignal,
-): Promise<Result<AdminDeliveryAcknowledgeResponse, AdminApiFailure>> {
+): Promise<Result<AdminDeliveryAcknowledgeResponse, AdminWriteFailure>> {
   const { deliveryId, expectedFencingVersion } = prepared.command;
   const url = `/api/v1/admin/deliveries/${deliveryId}/acknowledge`;
-  const response = await sendPreparedJsonWrite(host, url, "POST", prepared.body, signal);
+  const response = await sendPreparedJsonWrite(
+    host,
+    { url, method: "POST", endpoint: "general" },
+    prepared.body,
+    signal,
+  );
   if (!response.ok) {
     return err(response.error);
   }
@@ -267,7 +287,7 @@ export async function acknowledgeDelivery(
     ADMIN_DELIVERY_DECISION_FIELD_POLICY,
   );
   if (!payload.ok) {
-    return err(adminApiFailureClient(payload.error));
+    return err(writeOutcomeUnknown(payload.error));
   }
   return decodeAcknowledgement(payload.value, deliveryId, expectedFencingVersion);
 }
@@ -280,7 +300,7 @@ function decodeAcknowledgement(
   },
   deliveryId: string,
   expectedFencingVersion: number,
-): Result<AdminDeliveryAcknowledgeResponse, AdminApiFailure> {
+): Result<AdminDeliveryAcknowledgeResponse, AdminWriteFailure> {
   if (
     !validSuccessCode(payload.code) ||
     payload.message.length === 0 ||
@@ -288,7 +308,7 @@ function decodeAcknowledgement(
     payload.data.fencing_version !== expectedFencingVersion ||
     payload.data.kind !== "operator_acknowledged"
   ) {
-    return err(adminApiFailureClient(invalidResponseError("delivery_acknowledge")));
+    return err(writeOutcomeUnknown(invalidResponseError("delivery_acknowledge")));
   }
   return ok(payload.data);
 }
@@ -298,11 +318,16 @@ export async function confirmDeliverySentProof(
   host: AdminSessionHost,
   prepared: PreparedSentProofCommand,
   signal: AbortSignal,
-): Promise<Result<AdminDeliverySentProofResponse, AdminApiFailure>> {
+): Promise<Result<AdminDeliverySentProofResponse, AdminWriteFailure>> {
   const { deliveryId } = prepared.command;
   const { commandId } = prepared;
   const url = `/api/v1/admin/deliveries/${deliveryId}/sent-proof/confirm`;
-  const response = await sendPreparedJsonWrite(host, url, "POST", prepared.body, signal);
+  const response = await sendPreparedJsonWrite(
+    host,
+    { url, method: "POST", endpoint: "general" },
+    prepared.body,
+    signal,
+  );
   if (!response.ok) {
     return err(response.error);
   }
@@ -312,13 +337,18 @@ export async function confirmDeliverySentProof(
     ADMIN_DELIVERY_DECISION_FIELD_POLICY,
   );
   if (!payload.ok) {
-    return err(adminApiFailureClient(payload.error));
+    return err(writeOutcomeUnknown(payload.error));
   }
   const confirmation = decodeConfirmation(payload.value, commandId, deliveryId);
   if (!confirmation.ok) {
-    return err(adminApiFailureClient(invalidResponseError("delivery_sent_confirmation")));
+    return err(writeOutcomeUnknown(invalidResponseError("delivery_sent_confirmation")));
   }
   return ok(confirmation.value);
+}
+
+/** 判断去除首尾空白后的用户检索词是否超过字节上限。 */
+export function playerSupportUserTooLong(user: string): boolean {
+  return utf8ByteLength(user) > MAX_PLAYER_SUPPORT_USER_BYTES;
 }
 
 /** 玩家支持只读汇总；`user` 与 `reference` 必须恰好提供一个。 */
@@ -332,7 +362,7 @@ export async function fetchPlayerSupport(
   const trimmedReference = trimRustWhitespace(reference);
   let key: "user" | "reference";
   let value: string;
-  if (trimmedReference === "" && trimmedUser.length > 0 && utf8ByteLength(trimmedUser) <= 256) {
+  if (trimmedReference === "" && trimmedUser !== "" && !playerSupportUserTooLong(trimmedUser)) {
     key = "user";
     value = trimmedUser;
   } else if (trimmedUser === "" && validUuid(trimmedReference)) {
@@ -379,7 +409,7 @@ function validAcknowledgeCommand(commandId: string, command: AcknowledgeDelivery
     Number.isSafeInteger(command.expectedFencingVersion) &&
     command.expectedFencingVersion >= 1 &&
     command.expectedFencingVersion <= MAX_JSON_SAFE_INTEGER &&
-    validSafeText(command.reason, 2048)
+    validDeliveryReason(command.reason)
   );
 }
 
@@ -392,7 +422,7 @@ function validSentProofCommand(commandId: string, command: SentProofCommand): bo
     command.expectedFencingVersion >= 1 &&
     command.expectedFencingVersion <= MAX_JSON_SAFE_INTEGER &&
     validSafeText(command.evidenceReference, 128) &&
-    validSafeText(command.reason, 2048)
+    validDeliveryReason(command.reason)
   );
 }
 

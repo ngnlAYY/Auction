@@ -608,6 +608,7 @@ command-retry-unchanged = The result is still unknown. You can leave this page a
 command-retry-price-changed = The price has changed. Check the lot’s current price before trying again.
 command-unknown-count = Unknown command results: { $count }
 command-memory-only = These records are kept in memory in this tab. Reloading or closing the page clears them.
+command-reload-confirm = Reloading will clear unfinished bid and proxy records and unacknowledged results in this tab. Reload anyway?
 command-create-proxy = Create proxy authorization
 command-lot-unresolved = This lot has a command with an unknown result. Open it to review your options.
 command-recovery-open = Review the command for lot { $code }
@@ -648,6 +649,7 @@ watch-save-error = Mark could not be saved. Refresh server marks before trying a
 watch-retry-command = Retry original save
 
 boot-error = The application encountered an error. Refresh the page to try again.
+page-load-failed = This page could not be loaded.
 stale-build-notice = A new version has been deployed. Refresh this page to load it; your current input is not submitted automatically.
 stale-build-refresh = Refresh page
 

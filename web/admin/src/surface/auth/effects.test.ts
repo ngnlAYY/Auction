@@ -27,15 +27,22 @@ test("unknown_login_outcome_after_broadcast_reads_once_and_never_reposts：广�
 async function captureFinishedOutcomes() {
   const transition = await import("./session/transition");
   const outcomes: (LogoutOutcome | RenewalOutcome)[] = [];
+  const unsentLogout: LogoutOutcome[] = [];
   const realStep = transition.step;
   const spy = spyOn(transition, "step").mockImplementation((state, event, cookie, now) => {
-    if (event.kind === "logout_finished" || event.kind === "renewal_finished") {
+    if (
+      event.kind === "logout_finished" ||
+      event.kind === "logout_not_sent" ||
+      event.kind === "renewal_finished"
+    ) {
       outcomes.push(event.outcome);
     }
+    if (event.kind === "logout_not_sent") unsentLogout.push(event.outcome);
     return realStep(state, event, cookie, now);
   });
   return {
     outcomes,
+    unsentLogout,
     restore: () => spy.mockRestore(),
   };
 }
@@ -87,6 +94,7 @@ test("logout_failure_requires_a_read_when_session_or_outcome_is_uncertain：注�
         await settle();
       }
       expect(captured.outcomes).toEqual([entry.outcome]);
+      expect(captured.unsentLogout).toEqual(entry.beforeSend === true ? [entry.outcome] : []);
       if (entry.outcome.kind === "rejected") {
         expect(stubs.get.calls).toBe(readsBeforeLogout);
         expect(mounted.session.view.peek().canWrite).toBe(true);

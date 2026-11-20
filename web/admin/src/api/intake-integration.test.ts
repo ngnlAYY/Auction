@@ -29,11 +29,14 @@ async function expectRejectedBeforeFetch(text: string): Promise<void> {
       command,
       new AbortController().signal,
     );
-    expect(command(COMMAND_ID)).toEqual({
+    expect(command(COMMAND_ID)).toEqual<unknown>({
       ok: false,
-      error: { code: "invalid_request", status: null },
+      error: { kind: "not-sent", code: "invalid_request" },
     });
-    expect(result).toEqual({ ok: false, error: "invalid_request" });
+    expect(result).toEqual<unknown>({
+      ok: false,
+      error: { kind: "not-sent", code: "invalid_request" },
+    });
     expect(requests).toEqual([]);
   } finally {
     harness.cleanup();
@@ -86,7 +89,10 @@ test.each([
     const command = prepare(equipmentJsonWithBase("-0"));
     const send = () =>
       addAdminIntake(host, COMMAND_ID, "main", 1000, "Player", command, controller.signal);
-    expect(await send()).toEqual({ ok: false, error: "http_503" });
+    expect(await send()).toEqual<unknown>({
+      ok: false,
+      error: { kind: "outcome-unknown", code: "http_503", responseStatus: 503 },
+    });
     const frozen = success(command(COMMAND_ID));
     expect(frozen.body).toContain(`"stats":{"Defense":{"value":"2","base":${base}}}`);
     expect(frozen.body).toContain(`"command_id":"${COMMAND_ID}"`);

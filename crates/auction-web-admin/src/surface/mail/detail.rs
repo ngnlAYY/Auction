@@ -5,6 +5,7 @@ use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 
 use super::super::{admin_world_label, format_admin_time};
+use super::deliveries::MailDeliveryNotices;
 use super::labels::{mail_kind_label, mail_status_class, mail_status_label};
 use super::messages::{
     equipment_category_message, equipment_detail_message, equipment_guidance,
@@ -13,6 +14,7 @@ use super::messages::{
 use crate::api::AdminMailIntakeDetail;
 use crate::surface::admin_api_error_message;
 
+/// 显示当前收件的详情或读取状态。
 #[component]
 pub(super) fn MailIntakeDetailPanel(
     visible: bool,
@@ -20,7 +22,7 @@ pub(super) fn MailIntakeDetailPanel(
     loading: bool,
     error: Option<String>,
     mut refresh: Signal<u64>,
-    delivery_notice: Signal<Option<(String, super::super::AdminActionFeedback)>>,
+    delivery_notices: Signal<MailDeliveryNotices>,
     on_close: EventHandler<()>,
 ) -> Element {
     if !visible {
@@ -194,7 +196,7 @@ pub(super) fn MailIntakeDetailPanel(
                     key: "{intake_id}",
                     intake_id,
                     deliveries,
-                    notice: delivery_notice,
+                    notices: delivery_notices,
                     refresh,
                 }
             }

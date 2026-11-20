@@ -53,7 +53,7 @@ test("duplicate_page_size_mounts_only_the_invalid_link_view", async () => {
         expect(read).toHaveBeenCalledTimes(1);
         tree.fake.dispatchEvent(new Event("popstate"));
         await settle();
-        expect(read).toHaveBeenCalledTimes(2);
+        expect(read).toHaveBeenCalledTimes(1);
         assertInvalidView();
         expect(
           tree.elements((node) => Object.keys(node.attributes).some((key) => key.startsWith("on"))),

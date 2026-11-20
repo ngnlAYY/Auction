@@ -7,6 +7,7 @@ use auction_contracts::{AdminAuctionLifecycleRequest, ApiResponse};
 use gloo_net::http::Method;
 use uuid::Uuid;
 
+use super::AdminWriteFailure;
 use super::auctions::{decode_auction_command_response, send_auction_edit};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +37,7 @@ pub(crate) async fn execute_admin_auction_lifecycle(
     action: AdminAuctionLifecycleAction,
     expected_state_version: i64,
     reason: Option<String>,
-) -> Result<AdminAuctionLifecycleResult, String> {
+) -> Result<AdminAuctionLifecycleResult, AdminWriteFailure> {
     let url = format!("/api/v1/admin/auctions/{auction_id}/{}", action.path());
     let command = AdminAuctionLifecycleRequest {
         command_id: command_id.to_string(),
@@ -47,7 +48,7 @@ pub(crate) async fn execute_admin_auction_lifecycle(
         send_auction_edit(Method::POST, &url, &command).await?;
     let auction = decode_auction_command_response(payload)?;
     if auction.id != auction_id {
-        return Err("invalid_response".to_owned());
+        return Err(AdminWriteFailure::outcome_unknown("invalid_response"));
     }
     Ok(AdminAuctionLifecycleResult { auction })
 }

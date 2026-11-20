@@ -10,9 +10,10 @@ use super::state::{
     ReviewedSentProof, SentProofDraft, SentProofPreviewError, SentProofRequest, SentProofReview,
     SentProofSubmission,
 };
-use super::validation::{build_evidence, valid_reason};
+use super::validation::build_evidence;
 use crate::api::{
-    AdminApiFailure, DeliveryDetail, DeliverySentProofPreview, preview_delivery_sent_proof,
+    AdminApiFailure, DeliveryDetail, DeliverySentProofPreview, SentProofCommand,
+    preview_delivery_sent_proof,
 };
 use crate::surface::admin_api_error_message;
 
@@ -84,7 +85,9 @@ pub(super) fn submit_proof(
         return;
     };
     let draft = draft.peek();
-    if !proof.can_confirm(delivery_id, fencing_version) || !valid_reason(&draft.reason) {
+    if !proof.can_confirm(delivery_id, fencing_version)
+        || !SentProofCommand::valid_reason(draft.reason.trim())
+    {
         return;
     }
     let submission = proof.submission(&draft.reason);

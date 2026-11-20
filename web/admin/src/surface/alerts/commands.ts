@@ -1,7 +1,7 @@
 // 告警确认/静默命令：点击时冻结事件代数和表单参数，首次提交与未决重试共用同一份负载。
 
 import type { Cell } from "@auction/web-shared/reactive/cell";
-import { err, ok } from "@auction/web-shared/result";
+import { ok } from "@auction/web-shared/result";
 import { t } from "@auction/web-shared/ui/i18n";
 
 import {
@@ -130,7 +130,7 @@ export function submitAlertCommand(
         frozenCommand.kind === "acknowledge"
           ? await acknowledgeAdminAlert(host, frozenCommand.alertId, commandId, prepare, signal)
           : await silenceAdminAlert(host, frozenCommand.alertId, commandId, prepare, signal);
-      return result.ok ? ok(null) : err(result.error.code);
+      return result.ok ? ok(null) : result;
     },
     () => setIfAlive(notice, { kind: "success" }, pageAlive),
     (code) => {

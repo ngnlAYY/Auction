@@ -201,6 +201,7 @@ function cleanupAll(cleanups: (() => void)[]): void {
 export async function withEditor(
   render: (scope: EditorScope) => JSX.Element,
   run: (page: EditorTest) => void | Promise<void>,
+  read?: (path: string, signal: AbortSignal | null) => Promise<Response>,
 ): Promise<void> {
   const timers = await import("@auction/web-shared/platform/timer");
   const base = import.meta.dir;
@@ -262,6 +263,9 @@ export async function withEditor(
           method === "POST"
         ) {
           return new Response(null, { status: 204 });
+        }
+        if (read !== undefined && method === "GET") {
+          return read(path, init?.signal ?? null);
         }
         writes.push({ method, path, body });
         const reply = replies.shift();

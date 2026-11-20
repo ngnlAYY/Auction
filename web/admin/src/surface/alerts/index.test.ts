@@ -1,7 +1,7 @@
 // 告警页用户事件：冻结命令、切页重试与备注播报。
 
 import { expect, test } from "bun:test";
-import { parseJsonObject } from "../../api/api-request-fixture";
+import { parseJsonObject, TEST_SESSION_BODY } from "../../api/api-request-fixture";
 import { t11Buttons } from "../dashboard/t11-page-fixture.test";
 import {
   fireT11Event,
@@ -151,6 +151,51 @@ test("acknowledge_retries_original_incident_and_allows_new_command_after_stale",
 test("silence_retries_original_incident_and_allows_new_command_after_stale", async () => {
   await retryAfterStale("silence");
 });
+
+for (const [index, action] of (["acknowledge", "silence"] as const).entries()) {
+  test(`${action}_preflight_stale_retains_the_unknown_command`, async () => {
+    let reviews = 0;
+    await withAlertsPage(
+      async (page) => {
+        fireT11Event(page.reason(), "onInput", "原始备注");
+        const [acknowledge, silence] = page.rowActions(false);
+        fireT11Event(index === 0 ? acknowledge : silence, "onClick");
+        await settleT11View();
+        expectWrites(page, action, 1);
+
+        fireT11Event(pageRetry(page.tree), "onClick");
+        await settleT11View();
+        expect(reviews).toBe(2);
+        expect(page.writes).toHaveLength(1);
+        // 告警提示仍会重读列表；较早的未知命令继续锁住同一告警。
+        expect(page.reads).toEqual(["active", "active"]);
+        expect(t11Buttons(page.tree, "关闭已拒绝操作")).toHaveLength(0);
+        expect(textStartingWith(page.tree, "操作已记录")).toBe(0);
+        page.rowActions(true);
+
+        fireT11Event(pageRetry(page.tree), "onClick");
+        await settleT11View();
+        expect(reviews).toBe(3);
+        expect(page.writes).toHaveLength(2);
+        expect(page.writes[1]).toEqual(page.writes[0]);
+        expect(page.reads).toEqual(["active", "active", "active"]);
+        expect(t11Buttons(page.tree, "关闭已拒绝操作")).toHaveLength(1);
+        page.rowActions(false);
+      },
+      undefined,
+      () => {
+        reviews += 1;
+        if (reviews === 2) {
+          return {
+            status: 409,
+            body: '{"code":"alert_stale","message":"告警状态已变化","data":null,"request_id":null}',
+          };
+        }
+        return { body: JSON.stringify(TEST_SESSION_BODY) };
+      },
+    );
+  });
+}
 
 test("silence_cannot_replace_unknown_after_leaving_and_returning", async () => {
   await withAlertsPage(async (page) => {

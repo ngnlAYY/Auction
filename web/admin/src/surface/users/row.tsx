@@ -8,7 +8,7 @@ import { Time } from "@auction/web-shared/ui/components/time";
 import { TruncatedText } from "@auction/web-shared/ui/components/truncated-text";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { For, Match, Show, Switch, untrack } from "solid-js";
+import { For, Match, Show, Switch, untrack, useContext } from "solid-js";
 
 import {
   type AdminUser,
@@ -19,6 +19,7 @@ import {
   prepareAdminUserUnblacklistOnce,
   unblacklistAdminUser,
 } from "../../api/users";
+import { KeyVisibilityContext } from "../auth/key-visibility";
 import { useAdminSessionHost } from "../auth/shell";
 import { requirePendingCommands } from "../pending";
 import type { AdminActionFeedback } from "../presentation";
@@ -60,6 +61,7 @@ export interface AdminUserRowProps {
 /** 列表中的一行用户；行内还携带该行的操作对话框行。 */
 export function AdminUserRow(props: AdminUserRowProps): JSX.Element {
   const host = useAdminSessionHost();
+  const keyVisibility = useContext(KeyVisibilityContext);
   const owner = requirePendingCommands();
   const focusField = useFocusField();
 
@@ -379,6 +381,7 @@ export function AdminUserRow(props: AdminUserRowProps): JSX.Element {
                             const result = await mutateAdminUser(host, commandId, prepare, signal);
                             return result.ok ? ok(result.value.generated_key) : err(result.error);
                           },
+                          { keyVisibility },
                         );
                         if (submitted) dialog.set(null);
                       }}

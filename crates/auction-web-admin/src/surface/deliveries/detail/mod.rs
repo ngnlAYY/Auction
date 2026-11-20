@@ -9,7 +9,7 @@ use dioxus::prelude::*;
 
 use super::super::router::Route;
 use super::delivery_command_entity;
-use super::labels::action_blocker_label;
+use super::labels::{action_blocker_label, delivery_reason_error};
 use super::sent_proof::{SentProofDialog, SentProofSubmission, selectable_evidence};
 use crate::api::{
     DeliverySentProofResult, SentProofCommand, acknowledge_delivery, confirm_delivery_sent_proof,
@@ -92,7 +92,10 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                 async move {
                     #[cfg(test)]
                     if let Some(requests) = try_consume_context::<tests::SentConfirmRequests>() {
-                        return requests.fetch().await;
+                        return requests
+                            .fetch()
+                            .await
+                            .map_err(crate::api::AdminWriteFailure::outcome_unknown);
                     }
                     confirm_delivery_sent_proof(SentProofCommand {
                         command_id,
@@ -105,7 +108,6 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                         accept_attempt_history: submission.accept_attempt_history,
                     })
                     .await
-                    .map_err(|failure| failure.code)
                 }
             },
             move |_: DeliverySentProofResult| {
@@ -137,13 +139,14 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
         };
         let entity = acknowledge_delivery_id.clone();
         let reason = acknowledge_reason().trim().to_owned();
-        if reason.is_empty()
+        if !SentProofCommand::valid_reason(&reason)
             || commands.any_busy()
             || commands.contains(&delivery_command_entity(&entity))
         {
             return;
         }
         action_error.set(None);
+        // 理由与投递版本随命令冻结，结果未知时由宿主沿用原命令 ID 和正文重试。
         commands.submit(
             delivery_command_entity(&entity),
             t!("delivery-detail-acknowledge-submit"),
@@ -151,15 +154,21 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                 let delivery_id = entity.clone();
                 let reason = reason.clone();
                 async move {
-                    acknowledge_delivery(
+                    let send = acknowledge_delivery(
                         command_id,
                         delivery_id,
                         acknowledge_fencing_version,
                         reason,
-                    )
-                    .await
-                    .map(|_| ())
-                    .map_err(|failure| failure.code)
+                    );
+                    #[cfg(test)]
+                    let send = async {
+                        if let Some(replies) = try_consume_context::<tests::AcknowledgeReplies>() {
+                            replies.fetch().await
+                        } else {
+                            send.await
+                        }
+                    };
+                    send.await.map(|_| ())
                 }
             },
             move |_: ()| {
@@ -187,6 +196,14 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
             return rsx! {};
         }
         let mut reason = acknowledge_reason;
+        let reason_value = reason();
+        let reason_error = delivery_reason_error(&reason_value);
+        let reason_invalid = reason_error.is_some();
+        let reason_describedby = match (reason_invalid, blocked_note) {
+            (true, Some(_)) => Some("delivery-acknowledge-reason-error admin-delivery-command-occupied"),
+            (true, None) => Some("delivery-acknowledge-reason-error"),
+            (false, _) => blocked_note,
+        };
         let mut submit = acknowledge.clone();
         rsx! {
             section { class: "admin-panel admin-delivery-acknowledge",
@@ -197,18 +214,21 @@ fn DeliveryDetailPage(delivery_id: String) -> Element {
                     span { {t!("delivery-detail-acknowledge-reason")} }
                     textarea {
                         rows: "3",
-                        maxlength: "2048",
                         disabled: occupied || busy,
-                        aria_describedby: blocked_note,
-                        value: "{reason}",
+                        aria_invalid: reason_invalid.to_string(),
+                        aria_describedby: reason_describedby,
+                        value: reason_value,
                         oninput: move |event| reason.set(event.value()),
                     }
+                }
+                if let Some(error) = reason_error {
+                    p { id: "delivery-acknowledge-reason-error", class: "action-feedback action-feedback--error", "{error}" }
                 }
                 button {
                     r#type: "button",
                     class: "admin-btn-primary",
-                    disabled: occupied || busy || reason().trim().is_empty(),
-                    aria_describedby: blocked_note,
+                    disabled: occupied || busy || reason_invalid,
+                    aria_describedby: reason_describedby,
                     onclick: move |_| submit(()),
                     {t!("delivery-detail-acknowledge-submit")}
                 }
@@ -345,22 +365,29 @@ mod tests {
     use std::future::ready;
     use std::rc::Rc;
 
-    use auction_contracts::AdminDeliveryDetailWithActionsResponse;
-    use dioxus::core::{ElementId, Mutation};
+    use auction_contracts::{
+        AdminDeliveryAcknowledgeResponse, AdminDeliveryDetailWithActionsResponse,
+    };
+    use dioxus::core::{AttributeValue, ElementId, Mutation};
+    use dioxus::history::MemoryHistory;
     use dioxus::prelude::*;
     use gloo_net::http::Method;
     use serde_json::{Value, json};
+    use uuid::Uuid;
 
-    use super::DeliveryDetailPage;
-    use crate::api::{AdminApiFailure, DeliveryDetailGetFixture, DeliverySentProofResult};
+    use super::{DeliveryDetailPage, detail_page};
+    use crate::api::{
+        AdminApiFailure, AdminWriteEndpoint, AdminWriteFailure, DeliveryDetailGetFixture,
+        DeliverySentProofResult,
+    };
     use crate::surface::auctions::draft_page_tests::{
-        RecordRead, button, click_button, has_live_text, init_i18n, mount_writer, settle_writer,
-        submit_button_disabled, writer_form,
+        RecordRead, button, click_button, command_button, has_live_text, init_i18n, mount_writer,
+        settle_writer, submit_button_disabled, writer_form,
     };
     use crate::surface::deliveries::delivery_command_entity;
     use crate::surface::deliveries::sent_proof::use_preview_stub;
     use crate::surface::pending::use_pending_commands;
-    use crate::surface::realtime::TestPage;
+    use crate::surface::realtime::{TestPage, text_attributes};
 
     #[derive(Clone)]
     struct DetailFixture {
@@ -410,11 +437,30 @@ mod tests {
     }
 
     pub(super) type SentConfirmRequests = Rc<RecordRead<DeliverySentProofResult>>;
+    pub(super) type AcknowledgeReplies =
+        Rc<RecordRead<AdminDeliveryAcknowledgeResponse, AdminWriteFailure>>;
 
     #[derive(Clone, Debug, PartialEq, Routable)]
     enum TestRoute {
         #[route("/")]
         Fixture {},
+        #[route("/deliveries/:delivery_id")]
+        RoutedDetail { delivery_id: Uuid },
+    }
+
+    const OTHER_DELIVERY: &str = "00000000-0000-4000-8000-000000000031";
+
+    #[component]
+    fn RoutedDetail(delivery_id: Uuid) -> Element {
+        let navigation = navigator();
+        rsx! {
+            button {
+                onclick: move |_| { navigation.push(TestRoute::RoutedDetail { delivery_id: OTHER_DELIVERY.parse().unwrap() }); },
+                {"打开另一条投递".to_owned()}
+            }
+            button { onclick: move |_| navigation.go_back(), {"返回原投递".to_owned()} }
+            {detail_page(delivery_id.to_string())}
+        }
     }
 
     #[component]
@@ -437,6 +483,10 @@ mod tests {
     }
 
     fn open_reviewed_proof(page: &mut TestPage) -> ElementId {
+        open_reviewed_proof_with_reason(page).1
+    }
+
+    fn open_reviewed_proof_with_reason(page: &mut TestPage) -> (ElementId, ElementId) {
         let opened = click_button(page, "打开人工 Sent 证明");
         let mut inputs = opened.iter().filter_map(|edit| match edit {
             Mutation::NewEventListener { name, id } if name == "input" => Some(*id),
@@ -445,11 +495,12 @@ mod tests {
         page.dispatch("input", inputs.next().unwrap(), "Sample");
         page.dispatch("input", inputs.next().unwrap(), "12345");
         page.dispatch("input", inputs.next().unwrap(), "2026-11-02T01:14");
-        page.dispatch("input", inputs.next_back().unwrap(), "已核对 Sent 实见");
+        let reason = inputs.next_back().unwrap();
+        page.dispatch("input", reason, "已核对 Sent 实见");
         click_button(page, "预览准入");
         assert!(has_live_text(page, "准入通过。确认时仍会重新核验快照。"));
         assert_eq!(submit_button_disabled(page, "确认证明"), Some(false));
-        writer_form(&opened)
+        (reason, writer_form(&opened))
     }
 
     #[test]
@@ -468,10 +519,12 @@ mod tests {
                 let entity = delivery_command_entity(&fixture.initial.detail.delivery.id);
                 rsx! {
                     button { onclick: move |_| {
-                        let failure = AdminApiFailure::from_http_body(
-                            503, r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+                        let failure = AdminWriteFailure::from_test_http(
+                            AdminWriteEndpoint::General,
+                            503,
+                            r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
                         );
-                        assert!(other_source.submit(entity.clone(), "列表处置".to_owned(), move |_| ready(Err::<(), _>(failure.code.clone())), |()| {}, |_| {}));
+                        assert!(other_source.submit(entity.clone(), "列表处置".to_owned(), move |_| ready(Err::<(), _>(failure.clone())), |()| {}, |_| {}));
                     }, {"列表提交同一投递".to_owned()} }
                     Router::<TestRoute> {}
                 }
@@ -507,7 +560,7 @@ mod tests {
         let requests = fixture.requests.clone();
         let delivery_id = fixture.initial.detail.delivery.id.clone();
         let detail_url = format!("/api/v1/admin/deliveries/{delivery_id}?include=sent_proof");
-        let confirms = Rc::new(RecordRead::new());
+        let confirms = Rc::new(RecordRead::<DeliverySentProofResult>::new());
         let (mut page, _) = mount_writer({
             let confirms = confirms.clone();
             move || {
@@ -607,5 +660,211 @@ mod tests {
             &page,
             "投递状态或证据已变化，请核对最新详情后重试。提交 Sent 证明时请重新选择证据。"
         ));
+    }
+
+    #[test]
+    fn delivery_reason_fields_reject_invalid_input_and_clear_the_field_error() {
+        let fixture = fixture();
+        let confirms = Rc::new(RecordRead::<DeliverySentProofResult>::new());
+        let (mut page, edits) = mount_writer({
+            let confirms = confirms.clone();
+            move || {
+                init_i18n();
+                use_preview_stub();
+                use_detail_fixture(&fixture);
+                use_context_provider(|| confirms.clone());
+                rsx! { Router::<TestRoute> {} }
+            }
+        });
+        let acknowledge = text_attributes(&edits, "aria-describedby")
+            .find(|(_, id)| *id == "delivery-acknowledge-reason-error")
+            .unwrap()
+            .0;
+        let (input, form) = open_reviewed_proof_with_reason(&mut page);
+        let boundary = format!("{}ab", "界".repeat(682));
+        let inputs = [
+            ("\u{85}\u{3000}".to_owned(), "请填写此字段。"),
+            ("界".repeat(683), "请输入不超过 2048 个 UTF-8 字节的内容。"),
+            ("核\n对".to_owned(), "请删除换行、制表符等控制字符。"),
+            ("核\t对".to_owned(), "请删除换行、制表符等控制字符。"),
+            ("核\u{7f}对".to_owned(), "请删除换行、制表符等控制字符。"),
+        ];
+        for (field, error_id, is_sent) in [
+            (input, "delivery-sent-reason-error", true),
+            (acknowledge, "delivery-acknowledge-reason-error", false),
+        ] {
+            for (index, (value, message)) in inputs.iter().enumerate() {
+                let edits = page.dispatch("input", field, value);
+                if index == 0 && is_sent {
+                    assert!(
+                        text_attributes(&edits, "aria-invalid")
+                            .any(|entry| entry == (field, "true"))
+                    );
+                    assert!(
+                        text_attributes(&edits, "aria-describedby")
+                            .any(|entry| entry == (field, error_id))
+                    );
+                }
+                assert!(has_live_text(&page, message));
+                if is_sent {
+                    assert_eq!(submit_button_disabled(&page, "确认证明"), Some(true));
+                    page.dispatch("submit", form, "");
+                    assert_eq!(confirms.started(), 0);
+                } else {
+                    let (submit, disabled) = button(&page, "确认已处置").unwrap();
+                    assert!(disabled);
+                    page.dispatch("click", submit, "");
+                    assert!(button(&page, "原样重试").is_none());
+                }
+            }
+            let edits = page.dispatch("input", field, &format!("\u{85}{boundary}\u{3000}"));
+            assert!(text_attributes(&edits, "aria-invalid").any(|entry| entry == (field, "false")));
+            assert!(edits.iter().any(|edit| matches!(edit,
+                Mutation::SetAttribute { id, name: "aria-describedby", value: AttributeValue::None, .. } if *id == field
+            )));
+            assert!(!has_live_text(&page, "请删除换行、制表符等控制字符。"));
+            if is_sent {
+                assert_eq!(submit_button_disabled(&page, "确认证明"), Some(false));
+            } else {
+                assert!(!button(&page, "确认已处置").unwrap().1);
+            }
+        }
+    }
+
+    #[test]
+    fn acknowledge_with_invalid_receipt_stays_pending_until_retry_succeeds() {
+        const SUCCESS: &str = "已确认该投递失败为已处置。";
+        const INVALID: &str = "服务器返回了无效响应。请重新加载后再试。";
+        let fixture = fixture();
+        let success = AdminDeliveryAcknowledgeResponse {
+            delivery_id: fixture.initial.detail.delivery.id.clone(),
+            fencing_version: fixture.initial.detail.delivery.fencing_version,
+            kind: "operator_acknowledged".to_owned(),
+        };
+        let reads = fixture.requests.clone();
+        let replies: AcknowledgeReplies = Rc::new(RecordRead::new());
+        let (mut page, edits) = mount_writer({
+            let replies = replies.clone();
+            move || {
+                init_i18n();
+                use_detail_fixture(&fixture);
+                use_context_provider(|| replies.clone());
+                rsx! { Router::<TestRoute> {} }
+            }
+        });
+        let reason = text_attributes(&edits, "aria-describedby")
+            .find(|(_, id)| *id == "delivery-acknowledge-reason-error")
+            .unwrap()
+            .0;
+        page.dispatch("input", reason, "已核对告警处置记录");
+        let (submit, _) = button(&page, "确认已处置").unwrap();
+        let edits = click_button(&mut page, "确认已处置");
+        let command_id =
+            text_attributes(&edits, "data-command-id").next().unwrap().1.parse().unwrap();
+        assert_eq!(replies.started(), 1);
+        assert_eq!(reads.borrow().len(), 1);
+        replies.respond(Err(AdminWriteFailure::outcome_unknown("invalid_response")));
+        settle_writer(&mut page);
+        assert!(!has_live_text(&page, SUCCESS));
+        assert!(has_live_text(&page, INVALID));
+        assert!(has_live_text(&page, "这条投递还有未了结的操作，请先在未决区核对。"));
+        page.dispatch("click", submit, "");
+        assert_eq!(replies.started(), 1);
+        assert_eq!(reads.borrow().len(), 1);
+        let (retry, disabled) = command_button(&page, command_id, "原样重试").unwrap();
+        assert!(!disabled);
+        page.dispatch("click", retry, "");
+        assert_eq!(replies.started(), 2);
+        assert!(!has_live_text(&page, SUCCESS));
+        replies.respond(Ok(success));
+        settle_writer(&mut page);
+        assert!(has_live_text(&page, SUCCESS));
+        assert!(command_button(&page, command_id, "原样重试").is_none());
+        assert!(button(&page, "原样重试").is_none());
+        assert!(button(&page, "确认已处置").unwrap().1);
+        assert_eq!(reads.borrow().len(), 2);
+    }
+
+    #[test]
+    fn sent_proof_unknown_confirmation_can_be_retried_after_dialog_closes() {
+        let fixture = fixture();
+        let delivery_id = fixture.initial.detail.delivery.id.clone();
+        let reads = fixture.requests.clone();
+        let confirms = Rc::new(RecordRead::<DeliverySentProofResult>::new());
+        let (mut page, _) = mount_writer({
+            let confirms = confirms.clone();
+            move || {
+                init_i18n();
+                use_preview_stub();
+                use_detail_fixture(&fixture);
+                use_context_provider(|| confirms.clone());
+                rsx! { Router::<TestRoute> {} }
+            }
+        });
+        let form = open_reviewed_proof(&mut page);
+        page.dispatch("submit", form, "");
+        assert_eq!(confirms.started(), 1);
+        confirms.respond(Err("invalid_response".to_owned()));
+        settle_writer(&mut page);
+        assert!(!has_live_text(&page, "人工 Sent 证明已提交。"));
+        assert!(submit_button_disabled(&page, "确认证明").is_none());
+        assert_eq!(reads.borrow().len(), 1);
+        click_button(&mut page, "原样重试");
+        assert_eq!(confirms.started(), 2);
+        confirms.respond(Ok(DeliverySentProofResult {
+            command_id: "01010101-0101-0101-0101-010101010101".to_owned(),
+            delivery_id,
+            external_reference: "mooglemail:main:send:7000001".to_owned(),
+            replayed: true,
+        }));
+        settle_writer(&mut page);
+        assert!(has_live_text(&page, "人工 Sent 证明已提交。"));
+        assert!(button(&page, "原样重试").is_none());
+        assert_eq!(reads.borrow().len(), 2);
+    }
+
+    #[test]
+    fn delivery_detail_history_loads_the_explicit_id() {
+        let fixture = fixture();
+        let original = fixture.initial.detail.delivery.id.clone();
+        let reads = fixture.requests.clone();
+        let (mut page, _) = mount_writer({
+            let original = original.clone();
+            let reads = reads.clone();
+            move || {
+                init_i18n();
+                use_context_provider(|| {
+                    Rc::new(MemoryHistory::with_initial_path(TestRoute::RoutedDetail {
+                        delivery_id: original.parse().unwrap(),
+                    })) as Rc<dyn History>
+                });
+                use_context_provider(|| {
+                    let first = fixture.initial.clone();
+                    let mut other = first.clone();
+                    other.detail.delivery.id = OTHER_DELIVERY.to_owned();
+                    let reads = reads.clone();
+                    let get: DeliveryDetailGetFixture = Rc::new(move |url| {
+                        reads.borrow_mut().push(url.to_owned());
+                        if url.contains(OTHER_DELIVERY) { other.clone() } else { first.clone() }
+                    });
+                    get
+                });
+                rsx! { Router::<TestRoute> {} }
+            }
+        });
+        assert!(has_live_text(&page, &original));
+        click_button(&mut page, "打开另一条投递");
+        settle_writer(&mut page);
+        assert!(has_live_text(&page, OTHER_DELIVERY));
+        assert!(!has_live_text(&page, &original));
+        click_button(&mut page, "返回原投递");
+        settle_writer(&mut page);
+        assert!(has_live_text(&page, &original));
+        assert!(!has_live_text(&page, OTHER_DELIVERY));
+        assert_eq!(
+            *reads.borrow(),
+            [original.as_str(), OTHER_DELIVERY, original.as_str()]
+                .map(|id| format!("/api/v1/admin/deliveries/{id}?include=sent_proof")),
+        );
     }
 }

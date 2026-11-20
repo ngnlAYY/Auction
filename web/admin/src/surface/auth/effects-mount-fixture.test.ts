@@ -27,7 +27,8 @@ export interface MountedSession {
   dispose(): void;
 }
 
-function mountSession(
+/** 安装会话传输和文档，按需在同一根作用域里挂载视图。 */
+export function mountSession(
   stubs: Transport,
   render?: (session: AdminSessionHandle, document: AuthTestDocument) => void,
 ): MountedSession {

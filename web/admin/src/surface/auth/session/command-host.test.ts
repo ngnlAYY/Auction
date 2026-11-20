@@ -17,6 +17,7 @@ import {
   installAuthDocument,
   installManualTimers,
   settleAuth,
+  waitForPageTitle,
 } from "../auth-environment-fixture";
 import { installAuthLocale } from "../auth-locale-fixture.test";
 import {
@@ -324,10 +325,10 @@ test("authenticated_outlet_navigation_keeps_the_same_command_host：站内切页
     expect(requests.cancelled).toBe(0);
 
     click(document, "离开命令页");
-    await settleAuth();
+    const title = await waitForPageTitle(document, "admin-status-title");
     expect(requests.sourceUnmounted).toBe(true);
     expect(router.currentLocationString()).toBe("/status");
-    expect(document.getElementById("admin-status-title")?.textContent).toBe("服务状态");
+    expect(title.textContent).toBe("服务状态");
     expect(button(document, "发送会话命令")).toBeNull();
     expect(button(document, "原样重试")).not.toBeNull();
     expect(adminSessionHostLive(initialHosts.session)).toBe(true);

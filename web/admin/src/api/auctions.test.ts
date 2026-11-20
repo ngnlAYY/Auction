@@ -6,6 +6,8 @@ import {
   AdminUpdateAuctionScheduleResponseSchema,
 } from "@auction/contracts/dto/admin/auction";
 import { AdminAuctionListResponseSchema } from "@auction/contracts/dto/admin/settlement";
+import { createCell } from "@auction/web-shared/reactive/cell";
+import { type DraftWriteFeedback, observeDraftWrite } from "../surface/auctions/editor";
 import {
   AUCTION_ID,
   COMMAND_ID,
@@ -23,6 +25,55 @@ import {
   prepareAdminAuctionScheduleOnce,
   updateAdminAuctionSchedule,
 } from "./auctions";
+
+test("create_delivers_the_matching_draft_and_keeps_a_mismatched_auction_unknown", async () => {
+  const payload = checkedFixture(
+    fixtureText("auction-create-command"),
+    AdminAuctionLifecycleResponseSchema,
+    "/data/auction/state_version",
+  );
+  const { auction } = payload.data;
+  const end = "2025-11-15T13:46:40.110000Z";
+  const prepare = prepareAdminAuctionCreateOnce(
+    auction.id,
+    auction.world_id,
+    auction.sequence,
+    auction.preview_scheduled_at,
+    auction.scheduled_open_at,
+    end,
+  );
+  const request = {
+    command_id: COMMAND_ID,
+    auction_id: auction.id,
+    world_id: "main",
+    sequence: 5,
+    preview_scheduled_at: "2025-11-15T10:46:40.110000Z",
+    scheduled_open_at: "2025-11-15T11:46:40.110000Z",
+    scheduled_end_at: end,
+    expected_state_version: 0,
+  };
+  for (const change of [null, { id: AUCTION_ID }, { status: "preview" }]) {
+    const result = await requestFixture(
+      [
+        SESSION_REPLY,
+        {
+          status: 201,
+          body: JSON.stringify({ ...payload, data: { auction: { ...auction, ...change } } }),
+        },
+      ],
+      [SESSION_REQUEST, ["POST", "/api/v1/admin/auctions", JSON.stringify(request)]],
+      (host, signal) => createAdminAuction(host, COMMAND_ID, auction.id, prepare, signal),
+    );
+    expect(result).toEqual(
+      change === null
+        ? { ok: true, value: auction }
+        : {
+            ok: false,
+            error: { kind: "outcome-unknown", code: "invalid_response", responseStatus: null },
+          },
+    );
+  }
+});
 
 test("auction_contract_fixtures", async () => {
   for (const [name, page, size, count] of [
@@ -109,4 +160,53 @@ test("schedule_command_contract_fixture", async () => {
   );
   expect(result.state_version).toBe(2);
   expect(result.scheduled_ends_at).toBe("2025-11-15T13:46:40.110000Z");
+});
+
+test("schedule_locks_after_a_write_conflict_but_not_after_the_same_session_error", async () => {
+  const preview = "2025-11-15T10:46:40.110000Z";
+  const open = "2025-11-15T11:46:40.110000Z";
+  const end = "2025-11-15T13:46:40.110000Z";
+  const code = "stale_auction_state";
+  const failure = {
+    status: 409,
+    body: JSON.stringify({ code, message: "版本已变化", data: null, request_id: null }),
+  };
+  const body = JSON.stringify({
+    command_id: COMMAND_ID,
+    preview_scheduled_at: preview,
+    scheduled_open_at: open,
+    scheduled_end_at: end,
+    expected_state_version: 7,
+  });
+  for (const stage of ["review", "write"] as const) {
+    const feedback = createCell<DraftWriteFeedback | null>(null);
+    const result = await requestFixture(
+      stage === "write" ? [SESSION_REPLY, failure] : [failure],
+      stage === "write"
+        ? [SESSION_REQUEST, ["PATCH", `/api/v1/admin/auctions/${AUCTION_ID}/schedule`, body]]
+        : [SESSION_REQUEST],
+      (host, signal) =>
+        observeDraftWrite(
+          updateAdminAuctionSchedule(
+            host,
+            COMMAND_ID,
+            AUCTION_ID,
+            preview,
+            open,
+            end,
+            7,
+            prepareAdminAuctionScheduleOnce(preview, open, end, 7),
+            signal,
+          ),
+          code,
+          feedback,
+          () => true,
+        ),
+    );
+    expect(result.ok).toBe(false);
+    if (stage === "review") {
+      expect(result).toEqual({ ok: false, error: { kind: "not-sent", code } });
+    }
+    expect(feedback()).toEqual({ displayCode: code, staleWrite: stage === "write" });
+  }
 });

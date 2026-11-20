@@ -129,16 +129,22 @@ mod tests {
     use std::rc::Rc;
 
     use auction_web_shared::t;
-    use dioxus::core::ScopeId;
-    use dioxus::prelude::*;
+    use dioxus::core::{AttributeValue, Mutation, ScopeId};
+    use dioxus::prelude::{
+        Callback, Element, ReadableExt, Routable, Router, Signal, VNode, VirtualDom, WritableExt,
+        component, consume_context, dioxus_core, dioxus_router, dioxus_signals, rsx, use_context,
+        use_context_provider, use_hook, use_resource, use_signal,
+    };
+    use gloo_net::http::Method;
 
     use super::{page, use_manual_refresh};
-    use crate::api::{AdminDashboardSnapshot, AdminMailPolling};
+    use crate::api::{AdminApiFailure, AdminDashboardSnapshot, AdminMailPolling};
     use crate::surface::AdminReadinessResource;
     use crate::surface::auctions::draft_page_tests::{
         RecordRead, button, click_button, has_live_text, init_i18n, mount_writer_at, settle_writer,
     };
     use crate::surface::pending::{PendingCommandHost, PendingCommandNotices};
+    use crate::surface::realtime::TestPage;
 
     pub(super) type DashboardReads = Rc<RecordRead<AdminDashboardSnapshot>>;
 
@@ -195,9 +201,121 @@ mod tests {
         assert_eq!(readiness.peek().as_ref(), Some(&Ok(false)));
     }
 
+    fn polling_fixture(paused: bool) -> AdminMailPolling {
+        AdminMailPolling {
+            mailbox_key: "main".to_owned(),
+            paused,
+            state_version: 1,
+            consecutive_failures: 0,
+            last_poll_at: "2026-11-18T00:00:00Z".to_owned(),
+            next_poll_at: "2026-11-18T00:01:00Z".to_owned(),
+            updated_at: "2026-11-18T00:00:00Z".to_owned(),
+            diagnostics: None,
+        }
+    }
+
+    fn dashboard(polling: &AdminMailPolling) -> AdminDashboardSnapshot {
+        AdminDashboardSnapshot::test_fixture(|snapshot| {
+            snapshot["mail"] = serde_json::json!({
+                "status": "ok",
+                "observed_at": polling.updated_at,
+                "data": { "observed_at": polling.updated_at, "pollers": [polling] },
+            });
+        })
+    }
+
+    fn click_and_check_disabled(dom: &mut TestPage, label: &str) {
+        // 登记后未决面板的同名工具提示也带点击处理器；沿用点击前控件的节点 ID。
+        let (id, _) = button(dom, label).expect("操作控件存在");
+        let mut edits = click_button(dom, label);
+        edits.extend(settle_writer(dom));
+        let observed = edits.iter().rev().find_map(|edit| match edit {
+            Mutation::SetAttribute {
+                id: target,
+                name: "disabled",
+                value: AttributeValue::Bool(disabled),
+                ..
+            } if *target == id => Some(*disabled),
+            _ => None,
+        });
+        assert_eq!(observed, Some(true), "按钮 {label} 应禁用");
+    }
+
+    #[test]
+    fn dashboard_pause_resume_refresh_only_for_a_complete_write_409() {
+        for (status, paused, reads_after_write) in [(409, false, 2), (503, true, 1)] {
+            let reads: DashboardReads = Rc::new(RecordRead::new());
+            let (mut dom, _) = mount_writer_at("poll=0", {
+                let reads = reads.clone();
+                move || {
+                    init_i18n();
+                    use_context_provider(|| reads.clone());
+                    use_hook(move || {
+                        AdminApiFailure::stub_write_response(
+                            "/api/v1/admin/mail/polling",
+                            Method::PUT,
+                            status,
+                            r#"{"code":"#,
+                        );
+                    });
+                    let readiness: AdminReadinessResource = use_resource(|| async { Ok(true) });
+                    use_context_provider(|| readiness);
+                    let host = use_context::<PendingCommandHost>();
+                    rsx! {
+                        PendingCommandNotices { host }
+                        Router::<TestRoute> {}
+                    }
+                }
+            });
+            reads.respond(Ok(dashboard(&polling_fixture(paused))));
+            settle_writer(&mut dom);
+            let action =
+                if paused { "恢复定时轮询 (main)" } else { "暂停定时轮询 (main)" };
+            click_and_check_disabled(&mut dom, action);
+            assert_eq!(reads.started(), reads_after_write);
+            assert!(button(&dom, "原样重试").is_some());
+            assert!(button(&dom, "关闭回执").is_none());
+            assert!(!has_live_text(&dom, "轮询状态已更新。"));
+        }
+    }
+
+    #[test]
+    fn dashboard_poll_trigger_keeps_unknown_on_unavailable_write() {
+        let reads: DashboardReads = Rc::new(RecordRead::new());
+        let (mut dom, _) = mount_writer_at("poll=0", {
+            let reads = reads.clone();
+            move || {
+                init_i18n();
+                use_context_provider(|| reads.clone());
+                use_hook(|| {
+                    AdminApiFailure::stub_write_response(
+                        "/api/v1/admin/mail/polls:trigger",
+                        Method::POST,
+                        503,
+                        r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+                    );
+                });
+                let readiness: AdminReadinessResource = use_resource(|| async { Ok(true) });
+                use_context_provider(|| readiness);
+                let host = use_context::<PendingCommandHost>();
+                rsx! {
+                    PendingCommandNotices { host }
+                    Router::<TestRoute> {}
+                }
+            }
+        });
+        reads.respond(Ok(dashboard(&polling_fixture(false))));
+        settle_writer(&mut dom);
+        let action = "手动触发收件轮询";
+        click_and_check_disabled(&mut dom, action);
+        assert_eq!(reads.started(), 1);
+        assert!(button(&dom, "原样重试").is_some());
+        assert!(button(&dom, "关闭回执").is_none());
+    }
+
     #[test]
     fn dashboard_poll_receipt_survives_the_failed_aggregate_read() {
-        let reads = Rc::new(RecordRead::new());
+        let reads: DashboardReads = Rc::new(RecordRead::new());
         let write = Rc::new(RecordRead::<AdminMailPolling>::new());
         let (mut dom, _) = mount_writer_at("poll=0", {
             let reads = reads.clone();
@@ -215,25 +333,7 @@ mod tests {
                 }
             }
         });
-        let mut polling = AdminMailPolling {
-            mailbox_key: "main".to_owned(),
-            paused: false,
-            state_version: 1,
-            consecutive_failures: 0,
-            last_poll_at: "2026-11-18T00:00:00Z".to_owned(),
-            next_poll_at: "2026-11-18T00:01:00Z".to_owned(),
-            updated_at: "2026-11-18T00:00:00Z".to_owned(),
-            diagnostics: None,
-        };
-        let dashboard = |polling: &AdminMailPolling| {
-            AdminDashboardSnapshot::test_fixture(|snapshot| {
-                snapshot["mail"] = serde_json::json!({
-                    "status": "ok",
-                    "observed_at": polling.updated_at,
-                    "data": { "observed_at": polling.updated_at, "pollers": [polling] },
-                });
-            })
-        };
+        let mut polling = polling_fixture(false);
         reads.respond(Ok(dashboard(&polling)));
         settle_writer(&mut dom);
         let label = |action_key| {

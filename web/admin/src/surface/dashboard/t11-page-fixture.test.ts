@@ -26,16 +26,21 @@ export function t11Reply(data: unknown): Reply {
 }
 
 /** 装入局部内存传输；路由、方法、原始正文均可观测。 */
-export function installT11Fetch(reply: (request: RecordedRequest) => Reply | Promise<Reply>) {
+export function installT11Fetch(
+  reply: (request: RecordedRequest) => Reply | Response | Promise<Reply | Response>,
+  sessionReply: () => Reply | Response = () => ({ body: JSON.stringify(TEST_SESSION_BODY) }),
+) {
   const requests: RecordedRequest[] = [];
   const restore = installFixtureFetch(async (input, init) => {
     const request = recordRequest(input, init);
     requests.push(request);
     const response =
       request.method === "GET" && request.url === "/api/v1/admin/session?include=server_time"
-        ? { body: JSON.stringify(TEST_SESSION_BODY) }
+        ? sessionReply()
         : await reply(request);
-    return new Response(response.body, { status: response.status ?? 200 });
+    return response instanceof Response
+      ? response
+      : new Response(response.body, { status: response.status ?? 200 });
   });
   return { requests, restore };
 }

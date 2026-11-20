@@ -68,15 +68,6 @@ function validSenderUid(value: string): string | null {
   return trimmed;
 }
 
-/**
- * 校验人工确认理由：去掉首尾空白后非空、不超过 2048 个 UTF-8 字节且不含控制字符。
- * 确认按钮的可用性与提交入口共用这条判定，理由原样提交给服务端复核。
- */
-export function validReason(value: string): boolean {
-  const trimmed = trimRustWhitespace(value);
-  return trimmed !== "" && utf8ByteLength(trimmed) <= 2048 && !/\p{Cc}/u.test(trimmed);
-}
-
 function parseAmount(value: string): number | null {
   const trimmed = trimRustWhitespace(value);
   // Rust 的 i64 解析只接受可选的符号与十进制数字；最终边界仍是 JSON 安全整数。

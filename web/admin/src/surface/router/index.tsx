@@ -1,8 +1,9 @@
 // 管理端路由、页面入口组件和旧版别名跳转；路由表见子模块 `route`。
 // 路由路径与页面组件在同一 owner 内维护，避免 surface 装配文件再次聚合所有页面入口。
 
-import type { RoutePage, RoutePageProps } from "@auction/web-shared/router";
+import type { RoutePage, RoutePageComponent } from "@auction/web-shared/router";
 import {
+  lazyPage,
   pageComponent,
   useRouter,
   writeLocationPreservingScroll,
@@ -11,26 +12,8 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { createContext, createEffect, For, untrack, useContext } from "solid-js";
 
-import { page as alertsPage } from "../alerts";
-import { page as auctionsPage } from "../auctions";
-import { page as auditPage } from "../audit";
-import { page as configPage } from "../config/page";
-import { page as credentialsPage } from "../credentials/page";
 import { page as dashboardPage } from "../dashboard";
-import { detailPage as deliveryDetailPage } from "../deliveries/detail";
-import { page as deliveriesPage } from "../deliveries/page";
-import { page as lotsPage } from "../lots/page";
-import { page as mailPage } from "../mail/page";
-import { outboxPage } from "../realtime/page";
-import { page as renamesPage } from "../renames";
-import { detailPage as returnDetailPage } from "../returns/detail";
-import { page as returnsPage } from "../returns/list";
-import { page as rulesPage } from "../rules/page";
-import { page as settlementPage } from "../settlement/page";
 import { page as setupPage } from "../setup";
-import { page as statusPage } from "../status";
-import { page as supportPage } from "../support/page";
-import { page as usersPage } from "../users";
 
 /** 冷启动地址的路径、查询与片段；查询和片段只保存在当前页面内存。 */
 export interface AdminLocationSuffix {
@@ -155,19 +138,14 @@ function Login(): JSX.Element {
   return dashboardPage();
 }
 
-function Alerts(): JSX.Element {
-  return alertsPage();
-}
-
-function Auctions(): JSX.Element {
-  return auctionsPage();
-}
-
-function AuctionLots(props: RoutePageProps): JSX.Element {
-  // 路由组件在相同路由间复用：按场次标识重挂载页面，历史跳转不能沿用旧场次的资源与交互状态。
-  return (
-    <For each={[props.params.auction_id ?? ""]} keyed={(auctionId) => auctionId}>
-      {(auctionId) => lotsPage(untrack(() => auctionId()))}
+function pageForParam(
+  param: string,
+  renderPage: (value: string) => JSX.Element,
+): RoutePageComponent {
+  // 同一路由内换标识也要重挂载页面，避免把上一个对象的资源、草稿和对话框带到新地址。
+  return (props) => (
+    <For each={[props.params[param] ?? ""]} keyed={(value) => value}>
+      {(value) => renderPage(untrack(value))}
     </For>
   );
 }
@@ -176,95 +154,20 @@ function AuctionOverview(): JSX.Element {
   return redirectAdminAlias("/auctions");
 }
 
-function Mails(): JSX.Element {
-  return mailPage();
-}
-
 function MailOverview(): JSX.Element {
   return redirectAdminAlias("/mails");
-}
-
-function Cookies(): JSX.Element {
-  // /cookies 是凭据管理的正式入口；/credentials 只作为兼容旧书签的别名重定向到这里。
-  return credentialsPage();
 }
 
 function Credentials(): JSX.Element {
   return redirectAdminAlias("/cookies");
 }
 
-function Users(): JSX.Element {
-  return usersPage();
-}
-
-function Renames(): JSX.Element {
-  return renamesPage();
-}
-
-function Deliveries(): JSX.Element {
-  return deliveriesPage();
-}
-
-function DeliveryDetail(props: RoutePageProps): JSX.Element {
-  // 详情页同样按投递标识重挂载，避免在两条投递之间沿用旧的证据与对话框状态。
-  return (
-    <For each={[props.params.delivery_id ?? ""]} keyed={(deliveryId) => deliveryId}>
-      {(deliveryId) => deliveryDetailPage(untrack(() => deliveryId()))}
-    </For>
-  );
-}
-
 function DeliveryOverview(): JSX.Element {
   return redirectAdminAlias("/deliveries");
 }
 
-function PlayerSupport(): JSX.Element {
-  return supportPage();
-}
-
-function Outbox(): JSX.Element {
-  return outboxPage();
-}
-
-function Settlement(): JSX.Element {
-  return settlementPage();
-}
-
-function SettlementReturns(): JSX.Element {
-  return returnsPage();
-}
-
-function SettlementReturnDetail(props: RoutePageProps): JSX.Element {
-  // 退件案件详情按案件标识重挂载，资产位置与派发链不能跨案件复用。
-  return (
-    <For each={[props.params.return_id ?? ""]} keyed={(returnId) => returnId}>
-      {(returnId) => returnDetailPage(untrack(() => returnId()))}
-    </For>
-  );
-}
-
-function Config(): JSX.Element {
-  return configPage();
-}
-
-function RulesContent(): JSX.Element {
-  return rulesPage("rules");
-}
-
-function AboutContent(): JSX.Element {
-  return rulesPage("about");
-}
-
 function Rules(): JSX.Element {
   return redirectAdminAlias("/rules-content");
-}
-
-function Audit(): JSX.Element {
-  return auditPage();
-}
-
-function Status(): JSX.Element {
-  return statusPage();
 }
 
 /** 把旧版管理端别名无历史记录地收敛到 canonical URL，并保留查询字符串和片段。
@@ -324,35 +227,48 @@ export function NotFoundPage(): JSX.Element {
   );
 }
 
-/** 路由名到页面组件的映射；认证外壳与 `/setup` 各自取用同一份表。
- * 页面表按源码逐条登记，不按需拆分代码：Rust 版所有页面都在同一份 wasm 产物里。 */
+/** 认证外壳与 `/setup` 共用的页面表。仪表盘随入口交付，登录后可以立即开始读取首屏数据。 */
 export const ADMIN_PAGES: Readonly<Record<string, RoutePage>> = {
   Setup: pageComponent(Setup),
   Dashboard: pageComponent(Dashboard),
   DashboardAlias: pageComponent(DashboardAlias),
   Login: pageComponent(Login),
-  Auctions: pageComponent(Auctions),
-  AuctionLots: pageComponent(AuctionLots),
+  Auctions: lazyPage(() => import("../auctions").then(({ page }) => page)),
+  AuctionLots: lazyPage(() =>
+    import("../lots/page").then(({ page }) => pageForParam("auction_id", page)),
+  ),
   AuctionOverview: pageComponent(AuctionOverview),
-  Mails: pageComponent(Mails),
+  Mails: lazyPage(() => import("../mail/page").then(({ page }) => page)),
   MailOverview: pageComponent(MailOverview),
-  Cookies: pageComponent(Cookies),
+  Cookies: lazyPage(() => import("../credentials/page").then(({ page }) => page)),
   Credentials: pageComponent(Credentials),
-  Users: pageComponent(Users),
-  Renames: pageComponent(Renames),
-  Deliveries: pageComponent(Deliveries),
-  DeliveryDetail: pageComponent(DeliveryDetail),
+  Users: lazyPage(() => import("../users").then(({ page }) => page)),
+  Renames: lazyPage(() => import("../renames").then(({ page }) => page)),
+  Deliveries: lazyPage(() => import("../deliveries/page").then(({ page }) => page)),
+  DeliveryDetail: lazyPage(() =>
+    import("../deliveries/detail").then(({ detailPage }) =>
+      pageForParam("delivery_id", detailPage),
+    ),
+  ),
   DeliveryOverview: pageComponent(DeliveryOverview),
-  PlayerSupport: pageComponent(PlayerSupport),
-  Outbox: pageComponent(Outbox),
-  Settlement: pageComponent(Settlement),
-  SettlementReturns: pageComponent(SettlementReturns),
-  SettlementReturnDetail: pageComponent(SettlementReturnDetail),
-  Config: pageComponent(Config),
-  RulesContent: pageComponent(RulesContent),
+  PlayerSupport: lazyPage(() => import("../support/page").then(({ page }) => page)),
+  Outbox: lazyPage(() => import("../realtime/page").then(({ outboxPage }) => outboxPage)),
+  Settlement: lazyPage(() => import("../settlement/page").then(({ page }) => page)),
+  SettlementReturns: lazyPage(() => import("../returns/list").then(({ page }) => page)),
+  SettlementReturnDetail: lazyPage(() =>
+    import("../returns/detail").then(({ detailPage }) => pageForParam("return_id", detailPage)),
+  ),
+  Config: lazyPage(() => import("../config/page").then(({ page }) => page)),
+  RulesContent: lazyPage(async () => {
+    const { page } = await import("../rules/page");
+    return () => page("rules");
+  }),
   Rules: pageComponent(Rules),
-  AboutContent: pageComponent(AboutContent),
-  Alerts: pageComponent(Alerts),
-  Audit: pageComponent(Audit),
-  Status: pageComponent(Status),
+  AboutContent: lazyPage(async () => {
+    const { page } = await import("../rules/page");
+    return () => page("about");
+  }),
+  Alerts: lazyPage(() => import("../alerts").then(({ page }) => page)),
+  Audit: lazyPage(() => import("../audit").then(({ page }) => page)),
+  Status: lazyPage(() => import("../status").then(({ page }) => page)),
 };

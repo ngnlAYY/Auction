@@ -4,11 +4,13 @@ import type { AdminJsonValue } from "@auction/contracts/dto/admin/rules";
 import { parseJson } from "@auction/web-shared/net/wire";
 import { cleanupScope, preserveProperty } from "../test-scope-fixture";
 
+import { type AdminWriteEndpoint, type AdminWriteFailure, observedResponseStatus } from "./failure";
 import {
   type AdminSession,
   type AdminSessionHostRegistration,
   registerAdminSessionHost,
 } from "./session";
+import { prepareJsonCommand, sendPreparedJsonWrite } from "./transport";
 
 const BROWSER_BASE = "https://auction.test";
 const CSRF_TOKEN = "csrf-token";
@@ -281,4 +283,32 @@ export function asAdminJsonValue(value: unknown): AdminJsonValue {
     result[key] = asAdminJsonValue(item);
   }
   return result;
+}
+
+/** 让真实写入发送器处理内存回执，保留原始状态、正文及端点证据。 */
+export async function writeFailureFromReply(
+  status: number,
+  body: string,
+  endpoint: AdminWriteEndpoint = "general",
+): Promise<AdminWriteFailure> {
+  const harness = createAdminRequestHarness();
+  try {
+    harness.installBrowserRequest();
+    harness.installFetch([{ body: JSON.stringify(TEST_SESSION_BODY) }, { status, body }]);
+    const { host } = harness.registerHost();
+    const prepared = prepareJsonCommand({});
+    if (!prepared.ok) throw new Error("测试命令准备失败");
+    const result = await sendPreparedJsonWrite(
+      host,
+      { url: "/api/v1/admin/test-write", method: "POST", endpoint },
+      prepared.value,
+      new AbortController().signal,
+    );
+    if (result.ok || observedResponseStatus(result.error) !== status) {
+      throw new Error("测试写入未收到预期的 HTTP 失败");
+    }
+    return result.error;
+  } finally {
+    harness.cleanup();
+  }
 }

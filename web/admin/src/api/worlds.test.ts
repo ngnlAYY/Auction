@@ -135,6 +135,39 @@ describe("Admin 业务世界接口（对应 Rust api/worlds.rs）", () => {
             2,
           ]);
 
+          for (const [field, wrong] of [
+            ["id", "main"],
+            ["policy_revision", 4],
+            ["enabled", true],
+          ] as const) {
+            commandResponseBody = JSON.stringify({
+              code: "ok",
+              message: "",
+              data: {
+                world: {
+                  id: "isekai",
+                  enabled: false,
+                  availability: "available",
+                  policy_revision: 2,
+                  [field]: wrong,
+                },
+              },
+            });
+            const start = requests.length;
+            expect(
+              await setAdminBusinessWorldEnabled(registration.host, prepared.value, signal()),
+              field,
+            ).toEqual({
+              ok: false,
+              error: { kind: "outcome-unknown", code: "invalid_response", responseStatus: null },
+            });
+            expect(requests.slice(start).map(({ method, url }) => [method, url])).toEqual([
+              ["GET", "/api/v1/admin/session?include=server_time"],
+              ["PATCH", "/api/v1/admin/worlds/isekai"],
+            ]);
+          }
+          commandResponseBody = fixture("world-command.json");
+
           const parsedCommand = parseJson(commandResponseBody);
           expect(parsedCommand.ok).toBe(true);
           if (!parsedCommand.ok) throw new Error("世界命令样本不是合法 JSON");
@@ -150,7 +183,10 @@ describe("Admin 业务世界接口（对应 Rust api/worlds.rs）", () => {
           const beforeNegative = requests.length;
           expect(
             await setAdminBusinessWorldEnabled(registration.host, prepared.value, signal()),
-          ).toEqual({ ok: false, error: { status: null, code: "invalid_response" } });
+          ).toEqual<unknown>({
+            ok: false,
+            error: { kind: "outcome-unknown", code: "invalid_response", responseStatus: null },
+          });
           // 负例必须真的发出写请求；先前的会话 GET 成功才可能走到 PATCH，排除前置解码失败顶替。
           const negativeRequests = requests.slice(beforeNegative);
           expect(negativeRequests.map(({ url, method }) => [url, method])).toEqual([

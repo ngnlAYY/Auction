@@ -328,9 +328,10 @@ function decodePagination(
   return ok(value);
 }
 
-/** 解码重放成功回执；回显的事件必须与请求的 schema 版本一致。 */
+/** 解码重放成功回执，核对冻结的原事件、流和提交的 schema 版本。 */
 export function decodeRealtimeReplayReceipt(
   response: TransportResponse,
+  failure: Readonly<Pick<AdminRealtimeFailureResponse, "event_id" | "stream_key">>,
   requestedSchema: number,
 ): Result<void, string> {
   const receipt = decodeAdminReceipt(
@@ -341,17 +342,23 @@ export function decodeRealtimeReplayReceipt(
   if (!receipt.ok) {
     return err(receipt.error);
   }
-  return validReplay(receipt.value.data.replay, requestedSchema)
+  return validReplay(receipt.value.data.replay, failure, requestedSchema)
     ? ok(undefined)
     : err(invalidResponseError("realtime_replay"));
 }
 
-function validReplay(replay: AdminRealtimeReplayEventResponse, requestedSchema: number): boolean {
+function validReplay(
+  replay: AdminRealtimeReplayEventResponse,
+  failure: Readonly<Pick<AdminRealtimeFailureResponse, "event_id" | "stream_key">>,
+  requestedSchema: number,
+): boolean {
   return (
     validUuid(replay.event_id) &&
     validUuid(replay.replay_of_event_id) &&
     replay.event_id !== replay.replay_of_event_id &&
+    replay.replay_of_event_id === failure.event_id &&
     validTrimmedText(replay.stream_key) &&
+    replay.stream_key === failure.stream_key &&
     replay.stream_sequence >= 1 &&
     replay.stream_sequence <= MAX_JSON_SAFE_INTEGER &&
     validTrimmedText(replay.kind) &&

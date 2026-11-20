@@ -6,14 +6,14 @@ import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
-import { err, ok } from "@auction/web-shared/result";
+import { err } from "@auction/web-shared/result";
 import { useAppBootReady } from "@auction/web-shared/ui/bootstrap";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { For, onCleanup, Show, useContext } from "solid-js";
 import { fetchDashboard } from "../../api/dashboard";
-import { adminApiFailureIsConflict } from "../../api/failure";
+import { observedResponseStatus, writeOutcomeUnknown } from "../../api/failure";
 import {
   type AdminMailPolling,
   prepareMailPauseCommand,
@@ -201,10 +201,10 @@ function MailPollerControls(props: MailPollerControlProps): JSX.Element {
               async (commandId, signal) => {
                 const prepared = prepare(commandId);
                 if (!prepared.ok) {
-                  return err(prepared.error.code);
+                  return prepared;
                 }
                 const result = await triggerMailPoll(host, prepared.value, signal);
-                return result.ok ? ok(result.value) : err(result.error.code);
+                return result;
               },
               (count, sourceAlive) => {
                 if (sourceAlive) {
@@ -261,20 +261,17 @@ function MailPollerControls(props: MailPollerControlProps): JSX.Element {
                   async (commandId, signal) => {
                     const prepared = prepare(commandId);
                     if (!prepared.ok) {
-                      return err(prepared.error.code);
+                      return prepared;
                     }
                     const result = await setMailPaused(host, prepared.value, signal);
                     // 任务取消后观察逻辑随 future 一起丢弃，不能推进页面刷新世代。
                     if (signal.aborted) {
-                      return err("network_error");
+                      return err(writeOutcomeUnknown("network_error"));
                     }
-                    if (!result.ok) {
-                      if (adminApiFailureIsConflict(result.error)) {
-                        advanceCommandReload(props.refresh);
-                      }
-                      return err(result.error.code);
+                    if (!result.ok && observedResponseStatus(result.error) === 409) {
+                      advanceCommandReload(props.refresh);
                     }
-                    return ok(result.value);
+                    return result;
                   },
                   (_updated, sourceAlive) => {
                     if (sourceAlive) {

@@ -19,16 +19,18 @@ use auction_contracts::{
 };
 #[cfg(test)]
 use dioxus::prelude::try_consume_context;
-use gloo_net::http::Request;
-#[cfg(test)]
-use gloo_net::http::Response;
+use gloo_net::http::Method;
 use serde::Deserialize;
 use serde_json::Value;
 use url::form_urlencoded;
 use uuid::Uuid;
 
+use super::AdminWriteFailure;
 #[cfg(not(test))]
 use super::send_get;
+#[cfg(test)]
+use super::transport::AdminResponse;
+use super::transport::WriteRequest;
 use super::{
     MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error, response_error,
     valid_admin_time, valid_count, valid_safe_text, valid_trimmed_text, valid_uuid,
@@ -36,7 +38,7 @@ use super::{
 
 /// 宿主页测试记录实际序列化后的 GET，把响应留在等待态，只观测发送时机。
 #[cfg(test)]
-pub(super) async fn send_get(url: &str) -> Result<Response, String> {
+pub(super) async fn send_get(url: &str) -> Result<AdminResponse, String> {
     if let Some(gets) = try_consume_context::<Rc<RefCell<Vec<String>>>>() {
         gets.borrow_mut().push(url.to_owned());
         return std::future::pending().await;
@@ -258,36 +260,47 @@ fn append_filter(query: &mut form_urlencoded::Serializer<String>, key: &str, val
     }
 }
 
+/// 发送一次已冻结的重放命令，回执须与确认时的原事件、流和 schema 版本一致。
 pub(crate) async fn replay_realtime_failure(
-    failure_id: String,
+    failure: &RealtimeFailure,
     command_id: Uuid,
     schema_version: i32,
     public_payload: String,
-) -> Result<(), String> {
-    let public_payload: Value =
-        serde_json::from_str(&public_payload).map_err(invalid_request_error)?;
+) -> Result<(), AdminWriteFailure> {
+    let (url, body) = prepare_replay_request(failure, command_id, schema_version, &public_payload)?;
+    let response = WriteRequest::general(&url, Method::POST).send_body(&body).await?;
+    let body = response.text().await.map_err(AdminWriteFailure::invalid_response)?;
+    replay_write_result(&body, failure, schema_version)
+}
+
+fn prepare_replay_request(
+    failure: &RealtimeFailure,
+    command_id: Uuid,
+    schema_version: i32,
+    public_payload: &str,
+) -> Result<(String, String), AdminWriteFailure> {
+    let public_payload: Value = serde_json::from_str(public_payload)
+        .map_err(|error| AdminWriteFailure::not_sent(invalid_request_error(error)))?;
     if !public_payload.is_object() {
-        return Err("invalid_request".to_owned());
+        return Err(AdminWriteFailure::not_sent("invalid_request"));
     }
-    let csrf_token = super::fetch_csrf_token().await?;
-    let url = format!("/api/v1/admin/realtime/failures/{failure_id}/replay");
+    let url = format!("/api/v1/admin/realtime/failures/{}/replay", failure.id);
     let command =
         AdminRealtimeReplayRequest { command_id: Some(command_id), schema_version, public_payload };
-    let response = super::send_request(|abort_signal| {
-        Request::post(&url)
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
-    .await?;
-    if !response.ok() {
-        return Err(response_error(response).await);
-    }
+    let body = serde_json::to_string(&command)
+        .map_err(|error| AdminWriteFailure::not_sent(invalid_request_error(error)))?;
+    Ok((url, body))
+}
+
+fn replay_write_result(
+    body: &str,
+    failure: &RealtimeFailure,
+    schema_version: i32,
+) -> Result<(), AdminWriteFailure> {
     let payload: ApiResponse<StrictReplayData> =
-        response.json().await.map_err(invalid_response_error)?;
-    decode_replay(payload.data, schema_version).map_err(invalid_response_error)?;
-    Ok(())
+        serde_json::from_str(body).map_err(AdminWriteFailure::invalid_response)?;
+    decode_replay(payload.data, failure, schema_version)
+        .map_err(AdminWriteFailure::invalid_response)
 }
 
 fn decode_lag_page(
@@ -455,12 +468,18 @@ fn decode_failure(value: StrictFailure) -> Result<RealtimeFailure, &'static str>
     })
 }
 
-fn decode_replay(data: StrictReplayData, requested_schema: i32) -> Result<(), &'static str> {
+fn decode_replay(
+    data: StrictReplayData,
+    failure: &RealtimeFailure,
+    requested_schema: i32,
+) -> Result<(), &'static str> {
     let replay = data.replay;
     if !valid_uuid(&replay.event_id)
         || !valid_uuid(&replay.replay_of_event_id)
         || replay.event_id == replay.replay_of_event_id
+        || replay.replay_of_event_id != failure.event_id
         || !valid_trimmed_text(&replay.stream_key)
+        || replay.stream_key != failure.stream_key
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&replay.stream_sequence)
         || !valid_trimmed_text(&replay.kind)
         || replay.schema_version <= 0
@@ -488,11 +507,110 @@ fn decode_pagination(
 #[cfg(test)]
 mod tests {
     use auction_contracts::ApiResponse;
+    use serde_json::{Value, json};
+    use uuid::Uuid;
 
     use super::{
-        StrictEventPage, StrictFailurePage, StrictLagPage, decode_event_page, decode_failure_page,
-        decode_lag_page,
+        RealtimeFailure, StrictEventPage, StrictFailurePage, StrictLagPage, StrictReplayData,
+        decode_event_page, decode_failure_page, decode_lag_page, decode_replay,
+        prepare_replay_request, replay_write_result,
     };
+    use crate::api::Rejection;
+
+    fn target_and_receipt() -> (RealtimeFailure, Value) {
+        let failures: ApiResponse<StrictFailurePage> = serde_json::from_str(include_str!(
+            "../../../auction-contracts/tests/fixtures/admin/realtime-failures.json"
+        ))
+        .unwrap();
+        let target =
+            decode_failure_page(failures.data, 1, 1, "", "", "", None).unwrap().failures.remove(0);
+        let events: ApiResponse<Value> = serde_json::from_str(include_str!(
+            "../../../auction-contracts/tests/fixtures/admin/realtime-events.json"
+        ))
+        .unwrap();
+        let mut replay = events.data["events"][0].clone();
+        replay["event_id"] = json!("00000000-0000-4000-8000-000000000028");
+        replay["replay_of_event_id"] = json!("00000000-0000-4000-8000-000000000026");
+        replay["schema_version"] = json!(3);
+        (target, json!({"code":"ok", "message":"已重放", "data":{"replay":replay}}))
+    }
+
+    fn check_replay_body(body: &str, target: &RealtimeFailure) -> Result<(), &'static str> {
+        let receipt: ApiResponse<StrictReplayData> =
+            serde_json::from_str(body).map_err(|_error| "receipt_shape")?;
+        decode_replay(receipt.data, target, 3)
+    }
+
+    #[test]
+    fn realtime_replay_serializes_the_frozen_command_id_in_the_post_body() {
+        let (target, _) = target_and_receipt();
+        let command_id = Uuid::parse_str("00000000-0000-4000-8000-00000000002a").unwrap();
+        let (url, body) =
+            prepare_replay_request(&target, command_id, 3, r#"{"checked":true}"#).unwrap();
+        assert_eq!(
+            url,
+            "/api/v1/admin/realtime/failures/00000000-0000-4000-8000-000000000027/replay"
+        );
+        assert_eq!(
+            body.as_bytes(),
+            br#"{"command_id":"00000000-0000-4000-8000-00000000002a","schema_version":3,"public_payload":{"checked":true}}"#
+        );
+    }
+
+    #[test]
+    fn realtime_replay_maps_a_mismatched_success_receipt_to_unknown() {
+        let (target, matching) = target_and_receipt();
+        let mut mismatched = matching.clone();
+        mismatched["data"]["replay"]["replay_of_event_id"] =
+            json!("00000000-0000-4000-8000-000000000029");
+        let failure = replay_write_result(&mismatched.to_string(), &target, 3)
+            .expect_err("错配回执不能作为重放成功交付");
+        assert_eq!(failure.display_code(), "invalid_response");
+        assert!(matches!(failure.classify(), Rejection::Unknown));
+        assert_eq!(replay_write_result(&matching.to_string(), &target, 3), Ok(()));
+    }
+
+    #[test]
+    fn realtime_replay_accepts_only_matching_original_event_stream_and_submitted_schema() {
+        let (target, receipt) = target_and_receipt();
+        assert_eq!(check_replay_body(&receipt.to_string(), &target), Ok(()));
+        for (field, replacement, expected) in [
+            ("replay_of_event_id", None, "receipt_shape"),
+            ("replay_of_event_id", Some(Value::Null), "receipt_shape"),
+            ("replay_of_event_id", Some(json!("")), "realtime_replay"),
+            ("replay_of_event_id", Some(json!("not-a-uuid")), "realtime_replay"),
+            (
+                "replay_of_event_id",
+                Some(json!("00000000-0000-4000-8000-000000000029")),
+                "realtime_replay",
+            ),
+            ("event_id", Some(json!(target.event_id)), "realtime_replay"),
+            ("stream_key", Some(json!("auction:other")), "realtime_replay"),
+            ("schema_version", Some(json!(2)), "realtime_replay"),
+        ] {
+            let mut wrong = receipt.clone();
+            let event = wrong["data"]["replay"].as_object_mut().unwrap();
+            if let Some(value) = replacement {
+                event.insert(field.to_owned(), value);
+            } else {
+                assert!(event.remove(field).is_some());
+            }
+            assert_eq!(
+                check_replay_body(&wrong.to_string(), &target),
+                Err(expected),
+                "字段 {field} 的回执：{wrong}",
+            );
+        }
+    }
+
+    #[test]
+    fn realtime_replay_rejects_fractional_event_sequence() {
+        let (target, receipt) = target_and_receipt();
+        let body = receipt.to_string();
+        assert_eq!(check_replay_body(&body, &target), Ok(()));
+        let fractional = body.replace("\"stream_sequence\":14", "\"stream_sequence\":14.0");
+        assert_eq!(check_replay_body(&fractional, &target), Err("receipt_shape"));
+    }
 
     #[test]
     fn realtime_reads_decode_backend_contract_fixtures() {

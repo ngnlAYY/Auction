@@ -10,6 +10,12 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { type Accessor, Match, Show, Switch } from "solid-js";
 
+import {
+  type AdminWriteFailure,
+  adminWriteFailureDisplayCode,
+  classifyAdminWriteFailure,
+} from "../../api/failure";
+import { readVerifiedWriteReceipt } from "../../api/transport";
 import { type AdminPagination, useAdminPage } from "../pagination";
 import { setIfAlive } from "../pending";
 import { advanceCommandReload } from "../pending/sources";
@@ -197,14 +203,30 @@ export function closeEditDraft<T>(
   }
 }
 
-/** 保留回执分类证据，避免把准备阶段的同名错误当成写命令的版本拒绝。 */
+/** 草稿的显示码与原围栏是否已被实际写回执拒绝。 */
+export interface DraftWriteFeedback {
+  readonly displayCode: string;
+  readonly staleWrite: boolean;
+}
+
+/** 只有已验证的版本拒绝会锁定草稿，前置读取的同名错误只用于展示。 */
 export async function observeDraftWrite<T>(
-  request: Promise<Result<T, string>>,
-  feedback: Cell<string | null>,
+  request: Promise<Result<T, AdminWriteFailure>>,
+  staleCode: "stale_auction_state" | "stale_lot_state",
+  feedback: Cell<DraftWriteFeedback | null>,
   alive: () => boolean,
-): Promise<Result<T, string>> {
+): Promise<Result<T, AdminWriteFailure>> {
   const result = await request;
-  setIfAlive(feedback, result.ok ? null : result.error, alive);
+  const outcome = result.ok
+    ? null
+    : {
+        displayCode: adminWriteFailureDisplayCode(result.error),
+        staleWrite:
+          result.error.kind === "verified-http" &&
+          readVerifiedWriteReceipt(result.error.receipt)?.protocolCode === staleCode &&
+          classifyAdminWriteFailure(result.error) === "replay_checked",
+      };
+  setIfAlive(feedback, outcome, alive);
   return result;
 }
 

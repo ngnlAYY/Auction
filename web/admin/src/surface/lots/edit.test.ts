@@ -162,6 +162,31 @@ test("incomplete_conflict_receipts_leave_the_original_price_intent_locked", asyn
   }
 });
 
+test("wrong_status_price_conflict_keeps_the_intent_until_a_verified_retry", () =>
+  withLotEdit(async (context) => {
+    const { page, reads } = context;
+    const form = await editingPrice(context);
+    page.reply(
+      422,
+      '{"code":"stale_lot_state","message":"版本已变化","data":null,"request_id":null}',
+    );
+    await submitForm(form);
+    const first = takeWrite(page);
+    assertLotRequest(first, 7, "set_start_price", 777);
+    expect(context.occupied()).toBe(true);
+    expect(reads.started()).toBe(1);
+    expect(page.text()).not.toContain("这条记录已被其他操作更新，本次修改没有生效。");
+    const retry = present(page.retry(commandId(first)), "原命令的重试按钮");
+    expect(retry.hasAttribute("disabled")).toBe(false);
+
+    page.conflict("stale_lot_state");
+    retry.click();
+    await settleEditor();
+    expect(takeWrite(page)).toEqual(first);
+    assertLotConflict(context);
+    expect(reads.started()).toBe(2);
+  }));
+
 test("timed_out_price_replays_identical_bytes_before_a_verified_conflict_unlocks_it", () =>
   withLotEdit(async (context) => {
     const { page } = context;

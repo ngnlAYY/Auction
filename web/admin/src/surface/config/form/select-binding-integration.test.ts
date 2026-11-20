@@ -1,6 +1,6 @@
 // 运行配置下拉框的挂载、预校验回填与暂停确认取消回归。
 
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { parseJson } from "@auction/web-shared/net/wire";
 import { createCell } from "@auction/web-shared/reactive/cell";
@@ -277,13 +277,22 @@ test("选择 6 小时后打开确认并返回，重挂的暂停时长仍显示 6
   const snapshot = readProjection("runtime-switches.json");
   // 使用已过期的暂停投影，卡片应允许重新选择暂停时长。
   snapshot.data.database_time = "2025-11-15T11:00:00Z";
+  const clock = spyOn(Date, "now").mockReturnValue(Date.parse("2026-11-20T00:00:00Z"));
+  scope.defer(() => clock.mockRestore());
   const { root, requests } = mountAdmin(
     () => createComponent(RuntimeSwitchCard, {}),
     (request) => {
       if (request.method === "GET" && request.path === "/api/v1/admin/runtime-switches") {
         return Response.json(snapshot);
       }
-      throw new Error(`意外请求 ${request.method} ${request.path}`);
+      expect([request.method, request.path]).toEqual([
+        "POST",
+        "/api/v1/admin/runtime-switches/external-access-paused",
+      ]);
+      return Response.json(
+        { code: "storage_unavailable", message: "暂不可用", data: null, request_id: null },
+        { status: 503 },
+      );
     },
   );
   await settle();
@@ -303,4 +312,22 @@ test("选择 6 小时后打开确认并返回，重挂的暂停时长仍显示 6
   expect(restored).not.toBe(initial);
   expect(selection(restored)).toEqual(["6", "6 h"]);
   expect(requests.map((request) => request.method)).toEqual(["GET"]);
+  required(root.querySelector("form"), "暂停表单").submit();
+  await settle();
+  required(
+    findElement(root, (node) => node.tag === "button" && node.textContent === "确认"),
+    "确认暂停",
+  ).click();
+  await settle();
+  expect(requests.map((request) => request.method)).toEqual(["GET", "POST"]);
+  expect(parseJson(required(requests[1], "暂停请求").body)).toMatchObject({
+    ok: true,
+    value: {
+      command_id: expect.any(String),
+      expected_revision: 1,
+      paused: true,
+      expires_at: "2026-11-20T06:00:00Z",
+      reason: "测试暂停时长",
+    },
+  });
 });

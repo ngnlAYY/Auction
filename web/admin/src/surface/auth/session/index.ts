@@ -1,6 +1,7 @@
-// Admin 会话的纯状态机。已认证才允许写入，例行 GET 在途仍属于已认证状态。
+// Admin 会话的纯状态机。只有已认证且身份和退出结果均无疑问时才允许写入。
+// 身份未确认或退出未确认时遮蔽一次性 Key，恢复后须由操作员重新打开。
 // 退出请求独立持有回执；收到广播立即卸载敏感页面，退出期间只登记事后复核。
-// 退出成功只通知一次。旧 Cookie 代际的回执只能要求重读当前 Cookie。
+// 过期与退出的证据独立于敏感宿主，结束通知按会话身份最多结清一次。
 // 同一代际的截止只向后更新，截止与单调计时基准来自同一份服务端投影。
 // 续期结果未知只做一次有界的只读复核。限流后仅保留 POST 发出之后的输入，
 // 在退避下界与会话截止之间重新安排，等待期间不因输入时效丢弃。
@@ -10,6 +11,7 @@ import { type Result, unreachable } from "@auction/web-shared/result";
 
 import type { AdminSession } from "../../../api/session";
 import type { RenewalTiming } from "../activity";
+import type { EndNotices } from "./notices";
 
 /** 可读的 CSRF Cookie 仅用于本地判断会话代际。 */
 export type Cookie =
@@ -67,6 +69,19 @@ export function requestIsStale(
   );
 }
 
+/** 登记、实际发送和收包均须有相同的可读代际，Cookie 可稳定缺失。 */
+export function requestMatchesGeneration(
+  request: Request,
+  sent: Cookie,
+  observed: Cookie,
+): boolean {
+  return (
+    sent.kind !== "unavailable" &&
+    cookiesEqual(request.cookie, sent) &&
+    cookiesEqual(sent, observed)
+  );
+}
+
 /** 已确认的会话宿主与当时的 Cookie 代际。 */
 export interface Verified {
   session: AdminSession;
@@ -83,23 +98,37 @@ export type CheckReason =
   | "startup"
   | "routine"
   | "explicit"
+  | "discover"
   | "login"
   | "broadcast"
   | "cookie_changed"
   | "after_logout"
+  | "stay_after_logout"
   | "after_renewal";
 
 /** 在途的只读复核。 */
 export interface Check {
   reason: CheckReason;
   request: Request;
+  origin: AdminSession | null;
+  logoutTicket: Ticket | null;
 }
 
 /** 退出请求及其事后复核登记。 */
 export interface Logout {
   request: Request;
+  target: Verified;
+  sawOtherGeneration: boolean;
   reviewAfter: boolean;
   wasWritable: boolean;
+  continuing: boolean;
+}
+
+/** 独立于敏感宿主的本地退出意图，只有实际派发 DELETE 时才登记。 */
+export interface LogoutIntent {
+  readonly target: Verified;
+  readonly lastSent: Ticket;
+  readonly canInferFromRead: boolean;
 }
 
 /** 用户可观察的会话阶段与当前认证宿主。 */
@@ -110,6 +139,7 @@ export type Phase =
   | { kind: "checking_login" }
   | { kind: "unavailable"; verified: Verified | null; error: string }
   | { kind: "logging_out"; verified: Verified | null; logout: Logout }
+  | { kind: "logout_unconfirmed"; verified: Verified | null }
   | { kind: "logged_out" };
 
 /** 返回当前阶段仍保留的已确认宿主。 */
@@ -120,6 +150,7 @@ export function phaseVerified(phase: Phase): Verified | null {
     case "checking":
     case "unavailable":
     case "logging_out":
+    case "logout_unconfirmed":
       return phase.verified;
     case "checking_login":
     case "starting":
@@ -130,6 +161,19 @@ export function phaseVerified(phase: Phase): Verified | null {
   }
 }
 
+/** 人工决定结清前保留退出锁，包括继续退出的 DELETE 在途时。 */
+export function logoutUnconfirmed(phase: Phase): boolean {
+  return (
+    phase.kind === "logout_unconfirmed" || (phase.kind === "logging_out" && phase.logout.continuing)
+  );
+}
+
+/** 一次性 Key 的展示围栏；遮蔽开始时递增版本，使旧打开动作失效。 */
+export interface KeyVisibility {
+  readonly hidden: boolean;
+  readonly revision: number;
+}
+
 /** 人工活动与续期限流的计时状态。 */
 export interface Activity {
   timing: RenewalTiming | null;
@@ -137,10 +181,12 @@ export interface Activity {
   retryNotBefore: number;
 }
 
-/** 在途续期及其派发时的已确认宿主；Cookie 代际变化后 source 置空。 */
+/** 在途续期的原宿主；撤销投影后仍可核对当前票的正文与失效证据。 */
 export interface Renewal {
   request: Request;
+  origin: AdminSession;
   source: Verified | null;
+  epoch: number;
 }
 
 /** 单个标签页的会话状态及属于它的在途请求。 */
@@ -150,8 +196,14 @@ export interface State {
   /** 只收起敏感子树的广播复核；收到回执后一次 GET 确认暂存的续期投影。 */
   bufferedRenewal: Verified | null;
   renewal: Renewal | null;
-  /** 已派发的登录 POST；收到广播后只收起表单，不重新派发。 */
+  /** 已派发的登录 POST，其回执和专属 GET 持有本次登录的归属。 */
   login: Ticket | null;
+  /** 记录存在即仍欠通知。能否由 GET 推断结束由意图单独保存。 */
+  logoutIntent: LogoutIntent | null;
+  notices: EndNotices;
+  identityUnconfirmed: boolean;
+  sawOtherGeneration: boolean;
+  keyVisibilityRevision: number;
   /** 登录失败码留在内存，供复核为匿名后重新挂载的表单显示。 */
   loginError: string | null;
   activity: Activity;
@@ -168,6 +220,9 @@ export interface View {
   epoch: number;
   canWrite: boolean;
   loggingOut: boolean;
+  logoutUnconfirmed: boolean;
+  logoutDecisionBusy: boolean;
+  keyVisibility: KeyVisibility;
   loggedOut: boolean;
   loginPending: boolean;
   loginError: string | null;
@@ -193,6 +248,11 @@ export function initialState(): State {
     bufferedRenewal: null,
     renewal: null,
     login: null,
+    logoutIntent: null,
+    notices: { expiration: null, peer: null, settled: null },
+    identityUnconfirmed: false,
+    sawOtherGeneration: false,
+    keyVisibilityRevision: 0,
     loginError: null,
     activity: initialActivity(),
     checkTimer: null,
@@ -210,6 +270,9 @@ export function initialView(): View {
     epoch: 0,
     canWrite: false,
     loggingOut: false,
+    logoutUnconfirmed: false,
+    logoutDecisionBusy: false,
+    keyVisibility: { hidden: false, revision: 0 },
     loggedOut: false,
     loginPending: false,
     loginError: null,
@@ -221,11 +284,17 @@ export function initialView(): View {
 /** 从状态机生成组件与写门禁共用的快照。 */
 export function stateView(state: State): View {
   const verified = phaseVerified(state.phase);
+  const loggingOut = state.phase.kind === "logging_out";
+  const unconfirmed = logoutUnconfirmed(state.phase);
+  const keysHidden = state.identityUnconfirmed || unconfirmed;
   return {
     session: verified === null ? null : verified.session,
     epoch: state.viewEpoch,
-    canWrite: state.phase.kind === "authenticated",
-    loggingOut: state.phase.kind === "logging_out",
+    canWrite: state.phase.kind === "authenticated" && !keysHidden,
+    loggingOut,
+    logoutUnconfirmed: unconfirmed,
+    logoutDecisionBusy: unconfirmed && (loggingOut || state.check !== null),
+    keyVisibility: { hidden: keysHidden, revision: state.keyVisibilityRevision },
     loggedOut: state.phase.kind === "logged_out" || state.phase.kind === "checking_login",
     loginPending: state.login !== null || state.phase.kind === "checking_login",
     loginError: state.loginError,
@@ -241,6 +310,10 @@ export function viewsEqual(left: View, right: View): boolean {
     left.epoch === right.epoch &&
     left.canWrite === right.canWrite &&
     left.loggingOut === right.loggingOut &&
+    left.logoutUnconfirmed === right.logoutUnconfirmed &&
+    left.logoutDecisionBusy === right.logoutDecisionBusy &&
+    left.keyVisibility.hidden === right.keyVisibility.hidden &&
+    left.keyVisibility.revision === right.keyVisibility.revision &&
     left.loggedOut === right.loggedOut &&
     left.loginPending === right.loginPending &&
     left.loginError === right.loginError &&
@@ -294,13 +367,21 @@ export type Event =
   | { kind: "login_finished"; ticket: Ticket; outcome: Result<AdminSession, string> }
   | { kind: "login_input_changed" }
   | { kind: "check_requested" }
+  | { kind: "write_review_identity"; epoch: number; session: AdminSession }
+  | { kind: "external_unauthenticated"; epoch: number; session: AdminSession }
   | { kind: "broadcast" }
   | { kind: "visible" }
   | { kind: "input"; onLogout: boolean }
   | { kind: "logout_clicked" }
+  | { kind: "continue_logout" }
+  | { kind: "stay_after_logout" }
   | { kind: "timer_elapsed"; timer: Timer; ticket: Ticket }
+  | { kind: "read_sending"; ticket: Ticket }
   | { kind: "read_finished"; ticket: Ticket; cookie: Cookie; outcome: ReadOutcome }
+  | { kind: "logout_sending"; ticket: Ticket }
   | { kind: "logout_finished"; ticket: Ticket; cookie: Cookie; outcome: LogoutOutcome }
+  | { kind: "logout_not_sent"; ticket: Ticket; cookie: Cookie; outcome: LogoutOutcome }
+  | { kind: "renewal_sending"; ticket: Ticket }
   | { kind: "renewal_finished"; ticket: Ticket; cookie: Cookie; outcome: RenewalOutcome };
 
 /** 外壳按顺序执行的副作用；广播内容由浏览器适配固定。 */

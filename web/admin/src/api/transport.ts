@@ -1,5 +1,5 @@
 // Admin 同源请求发送与写前 CSRF 复核。
-// 传输边界复用 `@auction/web-shared` 的统一超时与错误分类；本层只把结构化错误折回稳定 code。
+// 复用共享传输的超时与错误分类，在实际业务写响应处保留裁定所需的证据。
 // `x-csrf-token` 与 Basic Auth header 由调用方在 `build` 闭包叠加（共享层不感知凭据）。
 
 import {
@@ -15,17 +15,28 @@ import { err, ok, type Result } from "@auction/web-shared/result";
 
 import {
   type AdminApiFailure,
+  type AdminWriteEndpoint,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
+  type AdminWriteOutcomeUnknown,
   adminApiFailureClient,
   adminApiFailureNotSentCode,
+  decodeResponseFailure,
   invalidRequestError,
   responseFailure,
+  validHttpProtocolCode,
+  writeNotSent,
+  writeOutcomeUnknown,
 } from "./failure";
 import {
   type AdminSession,
   type AdminSessionHost,
   adminSessionHostLive,
   adminSessionSameIdentity,
+  adminSessionWriteReview,
   adminSessionWritesAllowed,
+  bindAdminSessionInvalidation,
+  captureAdminSessionInvalidation,
   confirmedAdminSession,
   fetchAdminSession,
   requestAdminSessionCheck,
@@ -44,12 +55,17 @@ export async function sendGet(
   if (signal.aborted || !adminSessionHostLive(host)) {
     return err("network_error");
   }
+  const invalidate = captureAdminSessionInvalidation(host);
   const result = await sharedSendGet(url, signal);
   // 等待期间的任务取消或宿主注销对应 Rust 被丢弃的 future；不能把已缓冲的成功响应当作本次结果。
   if (signal.aborted || !adminSessionHostLive(host)) {
     return err("network_error");
   }
-  return result.ok ? ok(result.value) : err(adminTransportErrorCode(result.error));
+  if (!result.ok) {
+    return err(adminTransportErrorCode(result.error));
+  }
+  bindAdminSessionInvalidation(result.value, invalidate);
+  return ok(result.value);
 }
 
 /**
@@ -62,6 +78,38 @@ export function sendRequest(
 ): Promise<Result<TransportResponse, string>> {
   return sendRequestWithTimeout(build, DEFAULT_REQUEST_TIMEOUT_MILLIS, signal);
 }
+
+/** 一次业务写操作的请求描述，端点类别与方法、URL 一同交给发送器。 */
+export interface AdminWriteOperation {
+  readonly url: string;
+  readonly method: "POST" | "PUT" | "PATCH" | "DELETE";
+  readonly endpoint: AdminWriteEndpoint;
+}
+
+const VERIFIED_WRITE_RECEIPT_BRAND: unique symbol = Symbol("admin.verified-write-receipt");
+
+/** 已验证写回执的句柄，只有发送器登记的原实例才能用于裁定命令。 */
+export interface VerifiedWriteReceipt {
+  readonly [VERIFIED_WRITE_RECEIPT_BRAND]: true;
+}
+
+interface VerifiedWriteEvidence {
+  readonly status: number;
+  readonly endpoint: AdminWriteEndpoint;
+  readonly protocolCode: string;
+}
+
+// 只有登记的原始回执才有资格了结未决命令；复制品牌不能复制证据。
+const VERIFIED_WRITE_RECEIPTS = new WeakMap<VerifiedWriteReceipt, VerifiedWriteEvidence>();
+
+/** 从发送器的登记表读取不可变证据；副本和未登记对象返回 `null`。 */
+export function readVerifiedWriteReceipt(
+  receipt: VerifiedWriteReceipt,
+): VerifiedWriteEvidence | null {
+  return VERIFIED_WRITE_RECEIPTS.get(receipt) ?? null;
+}
+
+type AdminSendFailure = AdminWriteNotSent | AdminWriteOutcomeUnknown;
 
 // 只有 `prepareJsonCommand` 能构造已固定的命令；外部同形对象在运行期也不会被接受。
 const preparedJsonCommandBrand: unique symbol = Symbol("admin.prepared-json-command");
@@ -76,17 +124,19 @@ export interface PreparedJsonCommand {
 const preparedJsonCommandBodies = new WeakMap<PreparedJsonCommand, string>();
 
 /** 在任何 await 之前序列化命令；同一 `command_id` 的重试只能发送这份文本。 */
-export function prepareJsonCommand(command: unknown): Result<PreparedJsonCommand, AdminApiFailure> {
+export function prepareJsonCommand(
+  command: unknown,
+): Result<PreparedJsonCommand, AdminWriteNotSent> {
   try {
     const body = JSON.stringify(command);
     if (body === undefined) {
-      return err(adminApiFailureClient(invalidRequestError(command)));
+      return err(writeNotSent(invalidRequestError(command)));
     }
     const prepared = Object.freeze({ [preparedJsonCommandBrand]: true as const, body });
     preparedJsonCommandBodies.set(prepared, body);
     return ok(prepared);
   } catch (error) {
-    return err(adminApiFailureClient(invalidRequestError(error)));
+    return err(writeNotSent(invalidRequestError(error)));
   }
 }
 
@@ -96,21 +146,21 @@ export function prepareJsonCommand(command: unknown): Result<PreparedJsonCommand
  */
 export function prepareJsonCommandOnce(
   build: (commandId: string) => unknown,
-): (commandId: string) => Result<PreparedJsonCommand, AdminApiFailure> {
+): (commandId: string) => Result<PreparedJsonCommand, AdminWriteNotSent> {
   let cachedId: string | null = null;
-  let cached: Result<PreparedJsonCommand, AdminApiFailure> | null = null;
+  let cached: Result<PreparedJsonCommand, AdminWriteNotSent> | null = null;
   return (commandId) => {
     if (cached !== null) {
       if (commandId !== cachedId) {
-        return err(adminApiFailureClient(invalidRequestError(commandId)));
+        return err(writeNotSent(invalidRequestError(commandId)));
       }
       return cached;
     }
-    let prepared: Result<PreparedJsonCommand, AdminApiFailure>;
+    let prepared: Result<PreparedJsonCommand, AdminWriteNotSent>;
     try {
       prepared = prepareJsonCommand(build(commandId));
     } catch (error) {
-      prepared = err(adminApiFailureClient(invalidRequestError(error)));
+      prepared = err(writeNotSent(invalidRequestError(error)));
     }
     cachedId = commandId;
     cached = prepared;
@@ -118,48 +168,102 @@ export function prepareJsonCommandOnce(
   };
 }
 
-/**
- * 发送一次已固定的 JSON 写请求，保留错误回执以便调用方按端点分类。
- * 缺省预算与 `sendRequest` 相同；只有需要更长等待的端点才传入 `timeoutMillis`。
- */
-export async function sendPreparedJsonWrite(
+/** 发送已固定的业务命令；只有实际写请求的有效错误信封可以成为裁定证据。 */
+export function sendPreparedJsonWrite(
+  host: AdminSessionHost,
+  operation: AdminWriteOperation,
+  prepared: PreparedJsonCommand,
+  signal: AbortSignal,
+  timeoutMillis: number = DEFAULT_REQUEST_TIMEOUT_MILLIS,
+): Promise<Result<TransportResponse, AdminWriteFailure>> {
+  const { url, method, endpoint } = operation;
+  return sendPreparedJsonRequest<AdminWriteFailure>(
+    host,
+    url,
+    method,
+    prepared,
+    signal,
+    timeoutMillis,
+    (failure) => failure,
+    (response) => {
+      const decoded = decodeResponseFailure(response, signal, host);
+      if (decoded === null) {
+        return writeOutcomeUnknown("network_error");
+      }
+      if (decoded.kind === "invalid-envelope" || !validHttpProtocolCode(decoded.protocolCode)) {
+        return writeOutcomeUnknown(`http_${decoded.status}`, decoded.status);
+      }
+      const receipt = Object.freeze<VerifiedWriteReceipt>({ [VERIFIED_WRITE_RECEIPT_BRAND]: true });
+      VERIFIED_WRITE_RECEIPTS.set(
+        receipt,
+        Object.freeze({ status: decoded.status, endpoint, protocolCode: decoded.protocolCode }),
+      );
+      return { kind: "verified-http", receipt };
+    },
+  );
+}
+
+/** 验证和预览的 POST 沿用原错误投影，不参与业务命令的裁定。 */
+export function sendPreparedJsonPreview(
+  host: AdminSessionHost,
+  url: string,
+  prepared: PreparedJsonCommand,
+  signal: AbortSignal,
+  timeoutMillis: number = DEFAULT_REQUEST_TIMEOUT_MILLIS,
+): Promise<Result<TransportResponse, AdminApiFailure>> {
+  return sendPreparedJsonRequest(
+    host,
+    url,
+    "POST",
+    prepared,
+    signal,
+    timeoutMillis,
+    (failure) => adminApiFailureClient(sendFailureCode(failure)),
+    (response) => responseFailure(response, signal, host),
+  );
+}
+
+async function sendPreparedJsonRequest<E>(
   host: AdminSessionHost,
   url: string,
   method: string,
   prepared: PreparedJsonCommand,
   signal: AbortSignal,
-  timeoutMillis: number = DEFAULT_REQUEST_TIMEOUT_MILLIS,
-): Promise<Result<TransportResponse, AdminApiFailure>> {
+  timeoutMillis: number,
+  sendFailure: (failure: AdminSendFailure) => E,
+  httpFailure: (response: TransportResponse) => E | Promise<E>,
+): Promise<Result<TransportResponse, E>> {
   // 只接受工厂返回的同一个对象；展开副本虽能复制品牌，却没有登记的正文。
   const body = preparedJsonCommandBodies.get(prepared);
   if (body === undefined) {
-    return err(adminApiFailureClient(invalidRequestError(prepared)));
+    return err(sendFailure(writeNotSent(invalidRequestError(prepared))));
   }
   // 写请求尚未发出：已取消时连 CSRF GET 都不发起。
   if (signal.aborted) {
-    return err(adminApiFailureClient(adminApiFailureNotSentCode("network_error")));
+    return err(sendFailure(writeNotSent("network_error")));
   }
   if (!adminSessionHostLive(host) || !adminSessionWritesAllowed(host)) {
-    return err(adminApiFailureClient(adminApiFailureNotSentCode("unauthenticated")));
+    return err(sendFailure(writeNotSent("unauthenticated")));
   }
   // 命令属于发起时的会话代际；CSRF 等待期间即使换成同账号的新 token，也不能借用。
   const expectedSession = confirmedAdminSession(host);
   if (expectedSession === null) {
-    return err(adminApiFailureClient(adminApiFailureNotSentCode("unauthenticated")));
+    return err(sendFailure(writeNotSent("unauthenticated")));
   }
   const csrfToken = await fetchCsrfToken(host, signal);
   // CSRF 复核成功兑现与调用方恢复之间仍可能被取消；此时业务写入尚未发出。
   if (signal.aborted || !adminSessionHostLive(host)) {
-    return err(adminApiFailureClient(adminApiFailureNotSentCode("network_error")));
+    return err(sendFailure(writeNotSent("network_error")));
   }
   if (!csrfToken.ok) {
-    return err(adminApiFailureClient(csrfToken.error));
+    return err(sendFailure(writeNotSent(csrfToken.error)));
   }
   const token = csrfToken.value;
   if (!writeSessionAuthorized(host, expectedSession, token)) {
-    return err(adminApiFailureClient(adminApiFailureNotSentCode("unauthenticated")));
+    return err(sendFailure(writeNotSent("unauthenticated")));
   }
-  const response = await sendRequestWithTimeout(
+  let invalidate: (() => void) | null = null;
+  const response = await sendWithFailurePhase(
     () => {
       // 所有 await 已经结束；交给 fetch 前同步复核原宿主、写许可、身份与本次 CSRF。
       // 会话复核可能在 CSRF 返回后撤回许可，不能把旧页面保存的命令继续发出。
@@ -169,6 +273,7 @@ export async function sendPreparedJsonWrite(
       if (!writeSessionAuthorized(host, expectedSession, token)) {
         return err("unauthenticated");
       }
+      invalidate = captureAdminSessionInvalidation(host);
       return ok({
         url,
         init: {
@@ -180,23 +285,24 @@ export async function sendPreparedJsonWrite(
     },
     timeoutMillis,
     signal,
+    sendFailure,
   );
   if (!response.ok) {
-    return err(adminApiFailureClient(response.error));
+    return response;
   }
   const received = response.value;
   if (signal.aborted || !adminSessionHostLive(host)) {
-    // 取消或宿主注销后 Rust 的 future 已被丢弃；不再读取回执或触发 401 会话复核。
-    return err(adminApiFailureClient("network_error"));
+    // 取消或宿主注销后 Rust 的 future 已被丢弃；不再读取回执或交付失效证据。
+    return err(sendFailure(writeOutcomeUnknown("network_error")));
   }
-  return responseOk(received) ? ok(received) : err(await responseFailure(received, signal, host));
+  bindAdminSessionInvalidation(received, invalidate);
+  return responseOk(received) ? ok(received) : err(await httpFailure(received));
 }
 
-/** 发送一次带 CSRF 复核的 JSON 写请求；先固定正文再交给每次尝试复用。 */
-export async function sendJsonWrite(
+/** 发送一次带 CSRF 复核的 JSON 验证或预览请求。 */
+export async function sendJsonPreview(
   host: AdminSessionHost,
   url: string,
-  method: string,
   command: unknown,
   signal: AbortSignal,
 ): Promise<Result<TransportResponse, AdminApiFailure>> {
@@ -206,20 +312,33 @@ export async function sendJsonWrite(
   }
   const prepared = prepareJsonCommand(command);
   if (!prepared.ok) {
-    return err(prepared.error);
+    return err(adminApiFailureClient(sendFailureCode(prepared.error)));
   }
-  return sendPreparedJsonWrite(host, url, method, prepared.value, signal);
+  return sendPreparedJsonPreview(host, url, prepared.value, signal);
 }
 
-/** 为单次 Admin 请求指定等待预算；仍复用共享 fetch，不改变其他请求预算或添加重试。 */
-export async function sendRequestWithTimeout(
+/** 为单次非命令请求指定等待预算，保留原有失败投影。 */
+export function sendRequestWithTimeout(
   build: AdminRequestBuilder,
   timeoutMillis: number,
   signal: AbortSignal,
 ): Promise<Result<TransportResponse, string>> {
+  return sendWithFailurePhase(build, timeoutMillis, signal, sendFailureCode);
+}
+
+function sendFailureCode(failure: AdminSendFailure): string {
+  return failure.kind === "not-sent" ? adminApiFailureNotSentCode(failure.code) : failure.code;
+}
+
+async function sendWithFailurePhase<E>(
+  build: AdminRequestBuilder,
+  timeoutMillis: number,
+  signal: AbortSignal,
+  projectFailure: (failure: AdminSendFailure) => E,
+): Promise<Result<TransportResponse, E>> {
   // 请求尚未交给共享传输；取消只能裁定本次尝试，不能占住未决命令。
   if (signal.aborted) {
-    return err(adminApiFailureNotSentCode("network_error"));
+    return err(projectFailure(writeNotSent("network_error")));
   }
   let buildFailure: string | null = null;
   let built = false;
@@ -261,14 +380,14 @@ export async function sendRequestWithTimeout(
   if (result.ok) {
     // 正文已完整缓冲，但调用方在返回前取消：请求已交给共享传输，不能回报为未发送的成功。
     if (signal.aborted) {
-      return err("network_error");
+      return err(projectFailure(writeOutcomeUnknown("network_error")));
     }
     return ok(result.value);
   }
   if (built) {
-    return err(adminTransportErrorCode(result.error));
+    return err(projectFailure(writeOutcomeUnknown(adminTransportErrorCode(result.error))));
   }
-  return err(adminApiFailureNotSentCode(buildFailure ?? adminTransportErrorCode(result.error)));
+  return err(projectFailure(writeNotSent(buildFailure ?? adminTransportErrorCode(result.error))));
 }
 
 /** 传输层的结构化错误折回稳定 code。 */
@@ -282,7 +401,11 @@ function writeSessionAuthorized(
   expected: AdminSession | null,
   token: string,
 ): boolean {
-  if (!adminSessionHostLive(host) || !adminSessionWritesAllowed(host)) {
+  if (
+    !adminSessionHostLive(host) ||
+    !adminSessionWritesAllowed(host) ||
+    adminSessionWriteReview(host)?.isCurrent() === false
+  ) {
     return false;
   }
   const confirmed = confirmedAdminSession(host);
@@ -295,45 +418,54 @@ function writeSessionAuthorized(
 }
 
 /** 写请求的 CSRF 门禁：取得 token 前后都重读写许可，并核对会话身份未被其他标签页替换。 */
-export async function fetchCsrfToken(
+async function fetchCsrfToken(
   host: AdminSessionHost,
   signal: AbortSignal,
 ): Promise<Result<string, string>> {
   // 已取消或宿主已注销时连 CSRF GET 都不发起。
   if (signal.aborted) {
-    return err(adminApiFailureNotSentCode("network_error"));
+    return err("network_error");
   }
   // 认证内状态不等于继续授权；会话复核未确认时不发起新的管理写入。
   if (!adminSessionHostLive(host) || !adminSessionWritesAllowed(host)) {
     return err("unauthenticated");
   }
+  const expected = confirmedAdminSession(host);
+  const review = adminSessionWriteReview(host);
+  if (expected === null || review?.isCurrent() === false) {
+    return err("unauthenticated");
+  }
   const current = await fetchAdminSession(host, signal);
   // 调用方取消或宿主注销后不再发出会话重查；Rust 里被丢弃的 future 同样不会继续执行。
   if (signal.aborted || !adminSessionHostLive(host)) {
-    return err(adminApiFailureNotSentCode("network_error"));
+    return err("network_error");
+  }
+  if (review?.isCurrent() === false) {
+    return err("unauthenticated");
   }
   if (!current.ok || current.value === null) {
-    // CSRF 复核失败也撤回写许可；旧宿主与未决命令交给既有会话重查流程保留。
-    requestAdminSessionCheck(host);
+    if (!current.ok) {
+      // 无可信失效证据的复核故障沿用普通重查；可信 401 已随响应归属交给外壳。
+      requestAdminSessionCheck(host);
+    }
     const code = current.ok ? "unauthenticated" : current.error;
     // 此处只有会话 GET 被发送；写入未开始，不能把 GET 的超时或坏响应当作写入结果未知。
-    return err(adminApiFailureNotSentCode(code));
-  }
-  // 获取 CSRF 的等待期间也可能进入暂时未确认状态，不能带着旧页面授权继续提交。
-  if (!adminSessionWritesAllowed(host)) {
-    return err("unauthenticated");
+    return err(code);
   }
   // 其他标签页可能已重新登录；新会话的 token 不能授权旧宿主保存的命令或草稿。
-  const confirmed = confirmedAdminSession(host);
-  const sameIdentity =
-    confirmed !== null &&
-    confirmed.actor === current.value.actor &&
-    confirmed.csrfToken === current.value.csrf_token;
-  if (!sameIdentity) {
-    requestAdminSessionCheck(host);
+  // 同宿主的写许可即使已被暂停，有效的异代正文仍要先交给宿主撤销 Key 展示。
+  if (!adminSessionSameIdentity(expected, current.value)) {
+    if (review === null) {
+      requestAdminSessionCheck(host);
+    } else {
+      review.observe(current.value);
+    }
     return err("unauthenticated");
   }
-  return ok(current.value.csrf_token);
+  if (!writeSessionAuthorized(host, expected, current.value.csrfToken)) {
+    return err("unauthenticated");
+  }
+  return ok(current.value.csrfToken);
 }
 
 /** gloo 的 `Response::ok`：状态码 200 到 299。 */

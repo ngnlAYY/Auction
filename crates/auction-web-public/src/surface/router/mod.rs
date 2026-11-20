@@ -206,6 +206,7 @@ mod tests {
     use dioxus::prelude::*;
 
     use super::history::PublicHistory;
+    use crate::surface::pagination::set_public_page_size;
     use crate::surface::{
         AuctionParameter, AuctionSelection, PublicBoardQuery, QueryCommit,
         commit_auction_selection, update_public_query_state, use_public_query_state,
@@ -256,7 +257,10 @@ mod tests {
         choose_auction: Callback<AuctionSelection, QueryCommit>,
         shared_size: Callback<i64, bool>,
         correct_world: Callback<&'static str, bool>,
+        freeze_sizes: Callback<(), bool>,
+        set_size: Callback<i64, bool>,
         back: Callback<()>,
+        forward: Callback<()>,
         push: Callback<&'static str>,
     }
 
@@ -318,7 +322,19 @@ mod tests {
                     QueryCommit::Applied(_)
                 )
             }),
+            freeze_sizes: use_callback(move |()| {
+                write_query_pairs(
+                    &["page_size", "movement_page_size"],
+                    &[
+                        ("page_size".to_owned(), "20".to_owned()),
+                        ("movement_page_size".to_owned(), "20".to_owned()),
+                    ],
+                    QueryWriteMode::Replace,
+                )
+            }),
+            set_size: use_callback(move |size| set_public_page_size(state, size)),
             back: use_callback(move |()| navigator().go_back()),
+            forward: use_callback(move |()| navigator().go_forward()),
             push: use_callback(move |location: &str| {
                 navigator().push(location);
             }),
@@ -602,5 +618,67 @@ mod tests {
             assert_eq!(mounted.view.query.borrow().page, page);
         }
         assert_eq!(mounted.history.current_route(), first);
+    }
+
+    #[test]
+    fn reselecting_the_same_page_clears_filters_and_history_restores_each_world() {
+        let mut mounted = Mounted::new("/history?world=isekai&name=Phase+Robe&page=3&page_size=20");
+        let assert_query = |view: &View, world, name, page| {
+            let query = view.query.borrow();
+            assert_eq!(query.world.as_deref(), Some(world));
+            assert_eq!(view.header_world.borrow().as_deref(), Some(world));
+            assert_eq!(query.history_name.as_deref(), name);
+            assert_eq!(query.page, page);
+        };
+        assert_query(&mounted.view, "isekai", Some("Phase Robe"), 3);
+        mounted.dom.in_runtime(|| mounted.actions().push.call("/history?world=isekai"));
+        mounted.settle();
+        assert_query(&mounted.view, "isekai", None, 1);
+        mounted.dom.in_runtime(|| mounted.actions().push.call("/bidlog?world=main"));
+        mounted.settle();
+        assert_query(&mounted.view, "main", None, 1);
+        mounted.dom.in_runtime(|| mounted.actions().back.call(()));
+        mounted.settle();
+        assert_query(&mounted.view, "isekai", None, 1);
+        mounted.dom.in_runtime(|| mounted.actions().back.call(()));
+        mounted.settle();
+        assert_query(&mounted.view, "isekai", Some("Phase Robe"), 3);
+        mounted.dom.in_runtime(|| mounted.actions().forward.call(()));
+        mounted.settle();
+        assert_query(&mounted.view, "isekai", None, 1);
+    }
+
+    #[test]
+    fn frozen_sizes_remain_applied_when_the_new_size_is_rejected_then_retry_syncs() {
+        let mut mounted = Mounted::new("/?page=3&ref=x");
+        assert!(mounted.dom.in_runtime(|| mounted.actions().freeze_sizes.call(())));
+        mounted.settle();
+        mounted.rejects_writes.set(true);
+        assert!(!mounted.dom.in_runtime(|| mounted.actions().set_size.call(50)));
+        mounted.settle();
+        assert_eq!(
+            mounted.history.current_route(),
+            "/?page=3&ref=x&page_size=20&movement_page_size=20"
+        );
+        assert_eq!(
+            (mounted.view.query.borrow().page, mounted.view.query.borrow().page_size),
+            (3, 20)
+        );
+        assert_eq!(mounted.pushes.get(), 0);
+
+        mounted.rejects_writes.set(false);
+        assert!(mounted.dom.in_runtime(|| mounted.actions().set_size.call(50)));
+        mounted.settle();
+        assert_eq!(
+            (mounted.view.query.borrow().page, mounted.view.query.borrow().page_size),
+            (1, 50)
+        );
+        assert_eq!(mounted.pushes.get(), 1);
+        mounted.dom.in_runtime(|| mounted.actions().back.call(()));
+        mounted.settle();
+        assert_eq!(
+            (mounted.view.query.borrow().page, mounted.view.query.borrow().page_size),
+            (3, 20)
+        );
     }
 }

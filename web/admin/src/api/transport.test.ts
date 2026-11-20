@@ -6,17 +6,35 @@ import { DEFAULT_REQUEST_TIMEOUT_MILLIS } from "@auction/web-shared/net/transpor
 import { err } from "@auction/web-shared/result";
 
 import {
+  type AdminWriteFailure,
+  adminWriteFailureDisplayCode,
+  classifyAdminWriteFailure,
+  observedResponseStatus,
+} from "./failure";
+import { runHistoryCase } from "./failure-history-fixture.test";
+import {
   type AdminSession,
   type AdminSessionHostRegistration,
   registerAdminSessionHost,
 } from "./session";
-import { type PreparedJsonCommand, prepareJsonCommand, sendPreparedJsonWrite } from "./transport";
+import {
+  type AdminWriteOperation,
+  type PreparedJsonCommand,
+  prepareJsonCommand,
+  sendPreparedJsonWrite,
+} from "./transport";
 
 const CSRF_TOKEN = "csrf-token";
 const SESSION_PATH = "/api/v1/admin/session?include=server_time";
 // 内核会在交给 fetch 前用 `new Request` 复核目标；Bun 测试没有文档基准地址，这里用绝对 URL。
 const WRITE_PATH =
   "https://auction.test/api/v1/admin/credentials/11111111-1111-4111-8111-111111111111/check";
+
+const WRITE_OPERATION: AdminWriteOperation = {
+  url: WRITE_PATH,
+  method: "POST",
+  endpoint: "general",
+};
 
 const SESSION: AdminSession = Object.freeze({
   actor: "admin",
@@ -115,8 +133,7 @@ test("自定义预算决定写请求的超时时刻", async () => {
   try {
     const pending = sendPreparedJsonWrite(
       host.host,
-      WRITE_PATH,
-      "POST",
+      WRITE_OPERATION,
       preparedCommand(),
       new AbortController().signal,
       3_000,
@@ -134,7 +151,9 @@ test("自定义预算决定写请求的超时时刻", async () => {
     jest.advanceTimersByTime(2_999);
     await expectStillPending(() => done);
     jest.advanceTimersByTime(1);
-    expect(await pending).toEqual(err({ status: null, code: "request_timeout" }));
+    expect(await pending).toEqual(
+      err({ kind: "outcome-unknown", code: "request_timeout", responseStatus: null }),
+    );
     expect(memory.requests).toEqual([SESSION_PATH, WRITE_PATH]);
   } finally {
     memory.restore();
@@ -150,8 +169,7 @@ test("缺省预算仍是共享层的默认值", async () => {
   try {
     const pending = sendPreparedJsonWrite(
       host.host,
-      WRITE_PATH,
-      "POST",
+      WRITE_OPERATION,
       preparedCommand(),
       new AbortController().signal,
     );
@@ -168,7 +186,9 @@ test("缺省预算仍是共享层的默认值", async () => {
     jest.advanceTimersByTime(DEFAULT_REQUEST_TIMEOUT_MILLIS - 1);
     await expectStillPending(() => done);
     jest.advanceTimersByTime(1);
-    expect(await pending).toEqual(err({ status: null, code: "request_timeout" }));
+    expect(await pending).toEqual(
+      err({ kind: "outcome-unknown", code: "request_timeout", responseStatus: null }),
+    );
   } finally {
     memory.restore();
     host.release();
@@ -184,14 +204,8 @@ test("没有登记的副本仍被内核拒绝且不发出请求", async () => {
   try {
     const copy = { ...preparedCommand() } as PreparedJsonCommand;
     expect(
-      await sendPreparedJsonWrite(
-        host.host,
-        WRITE_PATH,
-        "POST",
-        copy,
-        new AbortController().signal,
-      ),
-    ).toEqual(err({ status: null, code: "invalid_request" }));
+      await sendPreparedJsonWrite(host.host, WRITE_OPERATION, copy, new AbortController().signal),
+    ).toEqual(err({ kind: "not-sent", code: "invalid_request" }));
     expect(memory.requests).toEqual([]);
   } finally {
     memory.restore();
@@ -208,14 +222,8 @@ test("发出前取消不会发送会话或业务请求", async () => {
     const controller = new AbortController();
     controller.abort();
     expect(
-      await sendPreparedJsonWrite(
-        host.host,
-        WRITE_PATH,
-        "POST",
-        preparedCommand(),
-        controller.signal,
-      ),
-    ).toEqual(err({ status: null, code: "not_sent:network_error" }));
+      await sendPreparedJsonWrite(host.host, WRITE_OPERATION, preparedCommand(), controller.signal),
+    ).toEqual(err({ kind: "not-sent", code: "network_error" }));
     expect(memory.requests).toEqual([]);
   } finally {
     memory.restore();
@@ -234,12 +242,11 @@ test("CSRF 等待期间撤回写许可时不发送业务写入", async () => {
     expect(
       await sendPreparedJsonWrite(
         host.host,
-        WRITE_PATH,
-        "POST",
+        WRITE_OPERATION,
         preparedCommand(),
         new AbortController().signal,
       ),
-    ).toEqual(err({ status: null, code: "unauthenticated" }));
+    ).toEqual(err({ kind: "not-sent", code: "unauthenticated" }));
     expect(memory.requests).toEqual([SESSION_PATH]);
   } finally {
     memory.restore();
@@ -257,13 +264,127 @@ test("返回后宿主已注销时结果未知", async () => {
     expect(
       await sendPreparedJsonWrite(
         host.host,
-        WRITE_PATH,
-        "POST",
+        WRITE_OPERATION,
         preparedCommand(),
         new AbortController().signal,
       ),
-    ).toEqual(err({ status: null, code: "network_error" }));
+    ).toEqual(err({ kind: "outcome-unknown", code: "network_error", responseStatus: null }));
     expect(memory.requests).toEqual([SESSION_PATH, WRITE_PATH]);
+  } finally {
+    memory.restore();
+    host.release();
+  }
+});
+
+test("只从完整收到的畸形正文观察 HTTP 409，两种失败均保留未决", async () => {
+  const incompleteJson = '{"code":"alert_stale"';
+  let sentChunk = false;
+  const truncatedBody = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        if (sentChunk) {
+          controller.error(new Error("响应正文传输中断"));
+          return;
+        }
+        sentChunk = true;
+        controller.enqueue(new TextEncoder().encode(incompleteJson));
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  const cases = [
+    ["完整收到的畸形正文", new Response(incompleteJson, { status: 409 }), 409, "http_409"],
+    ["中途失败的正文流", new Response(truncatedBody, { status: 409 }), null, "network_error"],
+  ] as const;
+  const host = registerHost();
+  try {
+    for (const [label, response, status, display] of cases) {
+      const memory = installMemoryFetch(() => response);
+      try {
+        const result = await sendPreparedJsonWrite(
+          host.host,
+          WRITE_OPERATION,
+          preparedCommand(),
+          new AbortController().signal,
+        );
+        expect(memory.requests, label).toEqual([SESSION_PATH, WRITE_PATH]);
+        if (result.ok) throw new Error(`异常正文被当成成功：${label}`);
+        expect(result.error.kind, label).toBe("outcome-unknown");
+        expect(observedResponseStatus(result.error), label).toBe(status);
+        await runHistoryCase(result.error, { display, scope: "unknown" });
+      } finally {
+        memory.restore();
+      }
+    }
+  } finally {
+    host.release();
+  }
+});
+
+test("宿主只采信本发送器登记的原始写回执", async () => {
+  // Bun 用查询串单独求值模块，复用原会话和解码依赖，产生独立的回执登记表。
+  type Transport = typeof import("./transport");
+  // @ts-expect-error TypeScript 不解析 Bun 的模块查询串，类型由原模块提供。
+  const isolated: Transport = await import("./transport?isolated-write-receipts");
+  const host = registerHost();
+  const memory = installMemoryFetch(() =>
+    Response.json(
+      { code: "mail_template_conflict", message: "模板版本已变更", data: null, request_id: null },
+      { status: 409 },
+    ),
+  );
+  try {
+    const signal = new AbortController().signal;
+    const original = await sendPreparedJsonWrite(
+      host.host,
+      WRITE_OPERATION,
+      preparedCommand(),
+      signal,
+    );
+    const preparedElsewhere = isolated.prepareJsonCommand({
+      command_id: "00000000-0000-4000-8000-000000000001",
+    });
+    if (!preparedElsewhere.ok) throw new Error("独立发送器未能准备命令");
+    const foreign = await isolated.sendPreparedJsonWrite(
+      host.host,
+      WRITE_OPERATION,
+      preparedElsewhere.value,
+      signal,
+    );
+    expect(memory.requests).toEqual([SESSION_PATH, WRITE_PATH, SESSION_PATH, WRITE_PATH]);
+    if (original.ok || original.error.kind !== "verified-http") {
+      throw new Error("原发送器未返回可裁定的回执");
+    }
+    if (foreign.ok || foreign.error.kind !== "verified-http") {
+      throw new Error("独立发送器未返回自己的回执");
+    }
+
+    expect(observedResponseStatus(original.error)).toBe(409);
+    await runHistoryCase(original.error, {
+      display: "mail_template_conflict",
+      scope: "replay_checked",
+    });
+    const untrustedCases = [
+      [
+        "未登记的同形对象",
+        {
+          ...original.error.receipt,
+          status: 409,
+          endpoint: "general",
+          protocolCode: "mail_template_conflict",
+        },
+      ],
+      ["展开副本", { ...original.error.receipt }],
+      ["结构化克隆", structuredClone(original.error.receipt)],
+      ["另一发送器的原始回执", foreign.error.receipt],
+    ] as const;
+    for (const [label, receipt] of untrustedCases) {
+      const failure: AdminWriteFailure = { kind: "verified-http", receipt };
+      expect(classifyAdminWriteFailure(failure), label).toBe("unknown");
+      expect(adminWriteFailureDisplayCode(failure), label).toBe("invalid_response");
+      expect(observedResponseStatus(failure), label).toBeNull();
+      await runHistoryCase(failure, { display: "invalid_response", scope: "unknown" });
+    }
   } finally {
     memory.restore();
     host.release();

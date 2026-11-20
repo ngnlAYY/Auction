@@ -4,8 +4,6 @@ import { focusElementById } from "@auction/web-shared/platform/a11y";
 import { ThemePicker } from "@auction/web-shared/platform/theme";
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { Link, type RouteMatch, RouteOutlet } from "@auction/web-shared/router";
-import { reportAppFailure } from "@auction/web-shared/ui/bootstrap";
-import { reloadAfterPageLoadError } from "@auction/web-shared/ui/bootstrap/page-load-recovery";
 import { LanguagePicker, t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { Show } from "solid-js";
@@ -19,6 +17,7 @@ import { PUBLIC_LOCALE_CATALOG } from "../router/locale-catalog";
 import { NotFoundPage, PUBLIC_PAGES } from "../router/route";
 import { SessionMenu } from "../session";
 
+/** 外壳向展示树提供的状态及交互入口。 */
 export interface PublicShellViewProps {
   readonly navigationOpen: Cell<boolean>;
   readonly sidebarCollapsed: Cell<boolean>;
@@ -47,7 +46,9 @@ export interface PublicShellViewProps {
   } | null;
   readonly realtimeUserId: () => string | null;
   readonly realtimeTarget: () => PublicRealtimeTarget;
+  readonly pageLoadFailure: () => RouteMatch | null;
   readonly onRouteLoadFailure: () => void;
+  readonly onReloadFailedPage: (route: RouteMatch) => void;
   readonly onToggleNavigation: () => void;
   readonly onCloseNavigation: () => void;
   readonly onHome: () => void;
@@ -55,6 +56,7 @@ export interface PublicShellViewProps {
   readonly onToggleSidebar: () => void;
 }
 
+/** 保持导航与竞价提示区常驻，在正文显示当前页面或局部错误。 */
 export function PublicShellView(props: PublicShellViewProps): JSX.Element {
   return (
     <div
@@ -209,17 +211,26 @@ export function PublicShellView(props: PublicShellViewProps): JSX.Element {
         />
         <main id="public-content" class="console-main" tabindex="-1">
           <CompetitionNotices />
+          <Show when={props.pageLoadFailure()} keyed>
+            {(route) => (
+              <div class="ui-async-state ui-async-state--error">
+                <p class="ui-async-state__title" role="alert">
+                  {t("page-load-failed")}
+                </p>
+                <button
+                  class="ui-async-state__retry"
+                  type="button"
+                  onClick={() => props.onReloadFailedPage(route)}
+                >
+                  {t("stale-build-refresh")}
+                </button>
+              </div>
+            )}
+          </Show>
           <RouteOutlet
             pages={PUBLIC_PAGES}
             notFound={<NotFoundPage />}
-            onLoadError={(error) => {
-              props.onRouteLoadFailure();
-              // 页面代码加载失败多半是部署后旧标签页引用的分块已不存在：先整页重载一次，
-              // 同一地址短时间内已经重载过才显示错误横幅。
-              if (!reloadAfterPageLoadError()) {
-                reportAppFailure(error);
-              }
-            }}
+            onLoadError={props.onRouteLoadFailure}
           />
         </main>
       </div>

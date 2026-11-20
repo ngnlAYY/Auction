@@ -9,10 +9,13 @@ use dioxus::prelude::*;
 
 use super::super::deliveries::labels::action_feedback_message;
 use super::super::query::{MailQuery, use_mail_query_state};
-use super::super::{AdminActionFeedback, admin_api_error_message, admin_world_label};
+use super::super::{admin_api_error_message, admin_world_label};
+use super::deliveries::MailDeliveryNotices;
 #[cfg(test)]
 use crate::api::{AdminMailIntakePage, AdminMailPolling};
-use crate::api::{fetch_mail_intake_detail, fetch_mail_intakes, fetch_mail_state};
+use crate::api::{
+    AdminMailIntakeQuery, fetch_mail_intake_detail, fetch_mail_intakes, fetch_mail_state,
+};
 #[cfg(test)]
 use crate::surface::auctions::draft_page_tests::RecordRead;
 use crate::surface::pagination::{use_admin_page, use_admin_pagination};
@@ -24,17 +27,15 @@ pub fn page() -> Element {
     // 邮箱轮询输入、详情面板开合和操作反馈是瞬态，仍由 signal 持有、不入 URL。
     let query = use_mail_query_state();
     let query_state = query.state;
-    let requested_query = use_memo(move || {
-        let current = query_state.read();
-        (current.to_intake_query(), current.page)
-    });
+    let intake_filters = use_memo(move || query_state.read().to_intake_query());
+    let requested_query = use_memo(move || (intake_filters(), query_state.read().page));
     let mut mailbox_key = use_signal(String::new);
     let mut active_mailbox = use_signal(String::new);
     let mut refresh = use_signal(|| 0_u64);
     let mut polling_refresh = use_signal(|| 0_u64);
-    // 重排反馈由页面持有，详情刷新或切换期间不会把成功排队误报为已送达。
-    let mut delivery_notice = use_signal(|| None::<(String, AdminActionFeedback)>);
-    let mut selected_intake = use_signal(|| None::<String>);
+    // 重排反馈按投递归属保存，切换收件时迟到回执不能覆盖其他投递的结果。
+    let mut delivery_notices = use_signal(MailDeliveryNotices::new);
+    let (mut selected_intake, active_intake) = use_intake_selection(intake_filters);
 
     let polling = use_resource(move || {
         let generation = polling_refresh();
@@ -71,7 +72,7 @@ pub fn page() -> Element {
     );
     let detail = use_resource(move || {
         let _ = refresh();
-        let intake_id = selected_intake();
+        let intake_id = active_intake();
         async move {
             let result = match intake_id.as_ref() {
                 Some(intake_id) => {
@@ -93,16 +94,21 @@ pub fn page() -> Element {
             return false;
         };
         let selected = selected_intake.peek();
-        selected.is_some()
-            && detail
-                .peek()
-                .as_ref()
-                .filter(|(intake_id, _)| intake_id == &*selected)
-                .and_then(|(_, result)| result.as_ref().ok())
-                .and_then(Option::as_ref)
-                .is_none_or(|detail| {
-                    detail.deliveries.iter().any(|delivery| delivery.id == delivery_id)
-                })
+        let Some((intake_id, _)) = selected
+            .as_ref()
+            .filter(|(_, opened_with)| opened_with == &query_state.peek().to_intake_query())
+        else {
+            return false;
+        };
+        detail
+            .peek()
+            .as_ref()
+            .filter(|(loaded_id, _)| loaded_id.as_ref() == Some(intake_id))
+            .and_then(|(_, result)| result.as_ref().ok())
+            .and_then(Option::as_ref)
+            .is_none_or(|detail| {
+                detail.deliveries.iter().any(|delivery| delivery.id == delivery_id)
+            })
     });
 
     let load_polling = move |event: FormEvent| {
@@ -158,18 +164,18 @@ pub fn page() -> Element {
                         on_sort_change.push(next);
                     },
                     on_select: move |intake_id| {
-                        delivery_notice.set(None);
-                        selected_intake.set(Some(intake_id));
+                        selected_intake.set(Some((intake_id, query_state.peek().to_intake_query())));
                     },
                 }
             }
         }
     };
     // Resource 重启会保留旧值；只有同一收件的快照可继续展示和操作。
+    let current_intake = active_intake();
     let detail_state = detail.read_unchecked();
     let current_detail = detail_state
         .as_ref()
-        .and_then(|(intake_id, result)| (intake_id == &selected_intake()).then_some(result));
+        .and_then(|(intake_id, result)| (intake_id == &current_intake).then_some(result));
     let (detail_value, detail_loading, detail_error) = match current_detail {
         None => (None, true, None),
         Some(Err(code)) => (None, false, Some(code.clone())),
@@ -219,6 +225,10 @@ pub fn page() -> Element {
         }
     };
 
+    let notice_state = delivery_notices.read();
+    let current_notices = notice_state
+        .iter()
+        .filter(|(_, (intake_id, _))| current_intake.as_ref() == Some(intake_id));
     rsx! {
         section { class: "admin-mail-page", aria_labelledby: "mail-title",
                     h1 { id: "mail-title", {t!("page-mails-title")} }
@@ -236,7 +246,6 @@ pub fn page() -> Element {
                                 onchange: move |event| {
                                     apply_mail_filter(
                                         &mut world_query,
-                                        selected_intake,
                                         |next| next.world = event.value(),
                                     );
                                 },
@@ -257,7 +266,6 @@ pub fn page() -> Element {
                                 onchange: move |event| {
                                     apply_mail_filter(
                                         &mut status_query,
-                                        selected_intake,
                                         |next| next.status = event.value(),
                                     );
                                 },
@@ -279,7 +287,6 @@ pub fn page() -> Element {
                                 onchange: move |event| {
                                     apply_mail_filter(
                                         &mut kind_query,
-                                        selected_intake,
                                         |next| next.kind = event.value(),
                                     );
                                 },
@@ -296,28 +303,30 @@ pub fn page() -> Element {
                     }
                     {intake_content}
                     super::detail::MailIntakeDetailPanel {
-                        visible: selected_intake().is_some(),
+                        visible: current_intake.is_some(),
                         detail: detail_value,
                         loading: detail_loading,
                         error: detail_error,
                         refresh,
-                        delivery_notice,
+                        delivery_notices,
                         on_close: move |_| {
-                            delivery_notice.set(None);
+                            if let Some((intake_id, _)) = selected_intake.peek().as_ref() {
+                                delivery_notices.write().retain(|_, (owner, _)| owner.as_str() != intake_id.as_str());
+                            }
                             selected_intake.set(None);
                         },
                     }
-                    if let Some((intake_id, feedback)) = delivery_notice()
-                        && selected_intake().as_ref() == Some(&intake_id)
-                    {
+                    for (delivery_id, (_, feedback)) in current_notices {
                         p {
+                            key: "{delivery_id}",
                             class: if feedback.is_success() {
                                 "admin-panel__note action-feedback action-feedback--success"
                             } else {
                                 "admin-panel__note action-feedback action-feedback--error"
                             },
                             role: if feedback.is_success() { "status" } else { "alert" },
-                            {action_feedback_message(&feedback, t!("admin-mail-delivery-requeued"))}
+                            "{delivery_id} · "
+                            {action_feedback_message(feedback, t!("admin-mail-delivery-requeued"))}
                         }
                     }
                     details { class: "admin-mail-polling",
@@ -351,19 +360,41 @@ pub fn page() -> Element {
     }
 }
 
-/// 闭集筛选选择变化后立即生效：push 到地址栏并回到第一页，同时清理详情——
-/// 旧选择不再属于新结果集。查询资源响应 `query.state` 变化自动重新加载，无需手动刷新。
-fn apply_mail_filter(
-    query: &mut QueryState<MailQuery>,
-    mut selected_intake: Signal<Option<String>>,
-    update: impl FnOnce(&mut MailQuery),
-) {
+type IntakeSelection = (String, AdminMailIntakeQuery);
+
+fn use_intake_selection(
+    intake_filters: Memo<AdminMailIntakeQuery>,
+) -> (Signal<Option<IntakeSelection>>, Memo<Option<String>>) {
+    let mut selected_intake = use_signal(|| None::<IntakeSelection>);
+    let active_intake = use_memo(move || {
+        let filters = intake_filters.read();
+        selected_intake
+            .read()
+            .as_ref()
+            .filter(|(_, opened_with)| opened_with == &*filters)
+            .map(|(intake_id, _)| intake_id.clone())
+    });
+    // 手动筛选与历史恢复都使旧选择失效，返回原筛选也不能重新打开已清除的详情。
+    use_effect(move || {
+        let filters = intake_filters.read();
+        let stale = selected_intake
+            .peek()
+            .as_ref()
+            .is_some_and(|(_, opened_with)| opened_with != &*filters);
+        if stale {
+            selected_intake.set(None);
+        }
+    });
+    (selected_intake, active_intake)
+}
+
+/// 闭集筛选写入地址栏并回到第一页，列表与详情共同响应筛选变化。
+fn apply_mail_filter(query: &mut QueryState<MailQuery>, update: impl FnOnce(&mut MailQuery)) {
     let state = query.state;
     let mut next = state();
     update(&mut next);
     next.page = 1;
     query.push(next);
-    selected_intake.set(None);
 }
 
 #[cfg(test)]
@@ -374,14 +405,54 @@ mod tests {
     use dioxus::core::Mutation;
     use dioxus::prelude::*;
 
-    use super::page;
-    use crate::api::{AdminMailIntakePage, AdminMailPolling};
+    use super::{page, use_intake_selection};
+    use crate::api::{AdminMailIntakePage, AdminMailIntakeQuery, AdminMailPolling};
     use crate::surface::auctions::draft_page_tests::{
         RecordRead, button, click_button, has_live_text, init_i18n, mount_writer, settle_writer,
         writer_form,
     };
     use crate::surface::mail::actions::PollingReply;
     use crate::surface::pending::{PendingCommandHost, PendingCommandNotices};
+
+    #[test]
+    fn intake_selection_stays_closed_after_each_filter_is_restored() {
+        const INTAKE_ID: &str = "00000000-0000-4000-8000-000000000022";
+        for (dimension, filters) in [
+            ("world", AdminMailIntakeQuery { world_id: "isekai".to_owned(), ..Default::default() }),
+            ("kind", AdminMailIntakeQuery { kind: "bid".to_owned(), ..Default::default() }),
+            ("status", AdminMailIntakeQuery { status: "failed".to_owned(), ..Default::default() }),
+        ] {
+            let (mut dom, _) = mount_writer(move || {
+                let changed = filters.clone();
+                let mut query = use_signal(AdminMailIntakeQuery::default);
+                let applied = use_memo(move || query.read().clone());
+                let (mut selection, active) = use_intake_selection(applied);
+                rsx! {
+                    button {
+                        onclick: move |_| selection.set(Some((INTAKE_ID.to_owned(), applied()))),
+                        {"打开收件".to_owned()}
+                    }
+                    button {
+                        onclick: move |_| query.set(changed.clone()),
+                        {"改变筛选".to_owned()}
+                    }
+                    button {
+                        onclick: move |_| query.set(AdminMailIntakeQuery::default()),
+                        {"恢复筛选".to_owned()}
+                    }
+                    if let Some(intake_id) = active() {
+                        p { "{intake_id}" }
+                    }
+                }
+            });
+            click_button(&mut dom, "打开收件");
+            assert!(has_live_text(&dom, INTAKE_ID), "{dimension}");
+            click_button(&mut dom, "改变筛选");
+            assert!(!has_live_text(&dom, INTAKE_ID), "{dimension}");
+            click_button(&mut dom, "恢复筛选");
+            assert!(!has_live_text(&dom, INTAKE_ID), "{dimension}");
+        }
+    }
 
     #[test]
     fn mail_poll_receipt_survives_the_failed_mailbox_read() {

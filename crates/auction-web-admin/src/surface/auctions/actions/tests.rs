@@ -10,7 +10,7 @@ use gloo_net::http::Method;
 
 use super::super::editor::tests::{
     CapturedWrite, DIALOG_TITLE_CLOSE, RecordRead, WriteScript, assert_field, button, click_button,
-    has_live_text, has_text, init_i18n, mount_writer, settle_writer, writer_form,
+    command_button, has_live_text, has_text, init_i18n, mount_writer, settle_writer, writer_form,
 };
 use super::super::editor::use_draft_page;
 use super::{AdminAuctionDraftDialogs, AdminAuctionRow, AuctionDrafts, use_auction_drafts};
@@ -284,6 +284,32 @@ fn schedule_close_scenario(close_label: &str) {
     assert_ne!(first.command_id(), second.command_id());
 }
 
+#[test]
+fn wrong_status_schedule_conflict_waits_for_a_verified_retry() {
+    let mut test = AuctionCommandTest::mount();
+    let (form, input) = test.open(SCHEDULE, END, "2099-04-01T13:00");
+    test.page.dispatch("input", input, EDITED_END);
+    test.writes.reply_http(
+        422,
+        r#"{"code":"stale_auction_state","message":"版本已变化","data":null,"request_id":null}"#,
+    );
+    test.submit(form);
+    let first = test.take_request();
+    assert_schedule_body(&first, 7, "11:00:00", "12:00:00", "14:17:00");
+    let owner = test.test.owner.get().unwrap();
+    assert!(owner.contains(&format!("auction:{AUCTION_ID}")));
+    assert_eq!(test.test.reads.started(), 1);
+    assert!(!has_live_text(&test.page, "这条记录已被其他操作更新，本次修改没有生效。"));
+    let (retry, disabled) = command_button(&test.page, first.command_id(), "原样重试").unwrap();
+    assert!(!disabled);
+
+    test.writes.reply_conflict("stale_auction_state");
+    let updates = test.page.dispatch("click", retry, "");
+    assert_eq!(test.take_request(), first);
+    test.assert_conflict(&updates, input, EDITED_END, SAVE_SCHEDULE);
+    assert_eq!(test.test.reads.started(), 2);
+}
+
 fn assert_cancel_body(request: &CapturedWrite, version: i64, reason: &str) {
     let id = request.command_id();
     let expected = format!(
@@ -292,6 +318,70 @@ fn assert_cancel_body(request: &CapturedWrite, version: i64, reason: &str) {
     assert_eq!(request.method, Method::POST);
     assert_eq!(request.url, format!("/api/v1/admin/auctions/{AUCTION_ID}/cancel"));
     assert_eq!(request.body, expected.as_bytes());
+}
+
+#[test]
+fn wrong_status_lifecycle_conflict_waits_for_a_verified_retry() {
+    let mut test = AuctionCommandTest::mount();
+    let (form, input) = test.open(CANCEL, REASON, "");
+    test.page.dispatch("input", input, EDITED_REASON);
+    test.writes.reply_http(
+        422,
+        r#"{"code":"stale_auction_state","message":"版本已变化","data":null,"request_id":null}"#,
+    );
+    test.submit(form);
+    let first = test.take_request();
+    assert_cancel_body(&first, 7, EDITED_REASON);
+    let owner = test.test.owner.get().unwrap();
+    assert!(owner.contains(&format!("auction:{AUCTION_ID}")));
+    assert_eq!(test.test.reads.started(), 1);
+    assert!(!has_live_text(&test.page, "这条记录已被其他操作更新，本次修改没有生效。"));
+    let (retry, disabled) = command_button(&test.page, first.command_id(), "原样重试").unwrap();
+    assert!(!disabled);
+
+    test.writes.reply_conflict("stale_auction_state");
+    let updates = test.page.dispatch("click", retry, "");
+    assert_eq!(test.take_request(), first);
+    test.assert_conflict(&updates, input, EDITED_REASON, CONFIRM_CANCEL);
+    assert_eq!(test.test.reads.started(), 2);
+}
+
+#[test]
+fn lifecycle_ignores_another_auctions_receipt_and_retries_the_original_command() {
+    const OTHER_AUCTION: &str = "20f99cb5-7b75-4853-bc49-9c71df78381d";
+    let mut test = AuctionCommandTest::mount();
+    let (form, input) = test.open(CANCEL, REASON, "");
+    test.page.dispatch("input", input, EDITED_REASON);
+    let cancelled = AdminAuction {
+        status: "cancelled".to_owned(),
+        state_version: 8,
+        scheduled_ends_at: None,
+        cancelled_at: Some("2026-11-01T00:00:00Z".to_owned()),
+        cancelled_by: Some("operator".to_owned()),
+        cancelled_reason: Some(EDITED_REASON.to_owned()),
+        ..auction()
+    };
+    for id in [OTHER_AUCTION, AUCTION_ID] {
+        let response = AdminAuction { id: id.to_owned(), ..cancelled.clone() };
+        test.writes.reply_http(200, serde_json::json!({
+            "code": "ok", "message": "操作成功", "request_id": null, "data": {"auction": response},
+        }).to_string());
+    }
+    test.submit(form);
+    let first = test.take_request();
+    assert_cancel_body(&first, 7, EDITED_REASON);
+    let owner = test.test.owner.get().unwrap();
+    let entity = format!("auction:{AUCTION_ID}");
+    assert!(owner.contains(&entity));
+    assert_eq!(test.test.reads.started(), 1);
+    assert_eq!(test.test.drafts.get().unwrap().auction_id().as_deref(), Some(AUCTION_ID));
+    let (retry, disabled) = command_button(&test.page, first.command_id(), "原样重试").unwrap();
+    assert!(!disabled);
+    test.page.dispatch("click", retry, "");
+    assert_eq!(test.take_request(), first);
+    assert!(!owner.contains(&entity));
+    assert!(test.test.drafts.get().unwrap().auction_id().is_none());
+    assert_eq!(test.test.reads.started(), 2);
 }
 
 #[test]

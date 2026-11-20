@@ -2,7 +2,7 @@
 
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createCell } from "@auction/web-shared/reactive/cell";
-import { createRoot, flush } from "solid-js";
+import { createEffect, createRoot, flush } from "solid-js";
 import type { AdminSession } from "../../api/session";
 import { registerAdminSessionHost } from "../../api/session";
 import { cleanupScope } from "../../test-scope-fixture";
@@ -116,5 +116,24 @@ export async function settlePending(): Promise<void> {
   for (let round = 0; round < 6; round += 1) {
     await Promise.resolve();
     flush();
+  }
+}
+
+/** 宿主公布尝试完成后解除等待；未完成的尝试由测试运行器超时。 */
+export async function waitForAttempt(isBusy: () => boolean): Promise<void> {
+  const completed = Promise.withResolvers<void>();
+  const dispose = createRoot((dispose) => {
+    createEffect(isBusy, (busy) => {
+      if (!busy) {
+        completed.resolve();
+      }
+    });
+    return dispose;
+  });
+  try {
+    flush();
+    await completed.promise;
+  } finally {
+    dispose();
   }
 }

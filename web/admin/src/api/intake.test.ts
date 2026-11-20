@@ -51,6 +51,23 @@ test("intake_command_contract_fixture", async () => {
   });
 });
 
+test("intake_keeps_receipts_with_a_different_seller_or_price_unknown", async () => {
+  const raw = fixtureText("lot-intake-command");
+  const payload = checkedFixture(raw, AdminIntakeResponseSchema, "/data/equipment_level");
+  for (const change of [{ seller_player_id: "OtherPlayer" }, { start_price: 1001 }]) {
+    const body = JSON.stringify({ ...payload, data: { ...payload.data, ...change } });
+    const result = await requestFixture(
+      [SESSION_REPLY, { body, status: 201 }],
+      [SESSION_REQUEST, ["POST", INTAKE_PATH, intakeBody(equipmentJson())]],
+      jsonIntake(equipmentJson()),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: { kind: "outcome-unknown", code: "invalid_response", responseStatus: null },
+    });
+  }
+});
+
 function intakeBody(equipment: string): string {
   return `{"command_id":"${COMMAND_ID}","source_kind":"json","equipment_url":null,"equipment":${equipment},"start_price":1000,"player_id":"Player"}`;
 }
@@ -64,9 +81,13 @@ function jsonIntake(text: string) {
 async function assertIntakeDtoRejection(text: string): Promise<void> {
   const expected = { ok: false, error: "invalid_request" } as const;
   const result = await requestFixture([], [], jsonIntake(text));
-  expect(result).toEqual(expected);
+  expect(result).toEqual({ ok: false, error: { kind: "not-sent", code: "invalid_request" } });
   expect(parseCanonicalEquipment(text)).toEqual(expected);
 }
+
+test("invalid_intake_equipment_is_rejected_before_review_or_write", async () => {
+  await assertIntakeDtoRejection('{"prefix":"旧","prefix":""}');
+});
 
 test("录入 DTO 在复核会话和发送前拒绝重复的具名字段", async () => {
   for (const text of [
@@ -129,7 +150,10 @@ test.each([
       ],
       [SESSION_REQUEST, expectedWrite, SESSION_REQUEST, expectedWrite],
       async (host, signal) => {
-        expect(await send(host, signal)).toEqual({ ok: false, error: "http_503" });
+        expect(await send(host, signal)).toEqual<unknown>({
+          ok: false,
+          error: { kind: "outcome-unknown", code: "http_503", responseStatus: 503 },
+        });
         // 首发后切换能力，重新生成正文会改变 base 的词法。
         if (available) {
           expect(Reflect.deleteProperty(JSON, "rawJSON")).toBe(true);

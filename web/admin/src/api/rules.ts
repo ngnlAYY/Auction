@@ -18,17 +18,19 @@ import { utf8ByteLength } from "@auction/web-shared/text";
 import {
   type AdminApiFailure,
   type AdminWriteEndpoint,
-  adminApiFailureAtWriteEndpoint,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   adminApiFailureClient,
   decodeAdminReceipt,
   responseFailure,
+  writeOutcomeUnknown,
 } from "./failure";
 import type { AdminSessionHost } from "./session";
 import {
   type PreparedJsonCommand,
   prepareJsonCommandOnce,
   sendGet,
-  sendJsonWrite,
+  sendJsonPreview,
   sendPreparedJsonWrite,
 } from "./transport";
 import { MAX_JSON_SAFE_INTEGER, validAdminTime, validTrimmedText } from "./validation";
@@ -65,7 +67,7 @@ const ADMIN_RULES_CANDIDATE_FIELD_POLICY: JsonFieldPolicy = {
 /** 准备一次发布；返回的函数在第一次运行时生成并缓存固定正文。 */
 export type AdminRulesPublishPreparation = (
   commandId: string,
-) => Result<PreparedAdminRulesPublish, AdminApiFailure>;
+) => Result<PreparedAdminRulesPublish, AdminWriteNotSent>;
 
 /** 已冻结的发布输入与首次执行时生成的正文；正文供首次发送和原样重试共用，回执也用同一份输入核对。 */
 export interface PreparedAdminRulesPublish {
@@ -148,13 +150,7 @@ export async function validateAdminRules(
   signal: AbortSignal,
 ): Promise<Result<AdminRulesCandidate, AdminRulesApiError>> {
   const request: AdminRulesCandidateRequest = { locale, title, markdown };
-  const response = await sendJsonWrite(
-    host,
-    adminDocumentKindApiPath(kind),
-    "POST",
-    request,
-    signal,
-  );
+  const response = await sendJsonPreview(host, adminDocumentKindApiPath(kind), request, signal);
   if (!response.ok) {
     return err(response.error);
   }
@@ -214,7 +210,7 @@ export async function publishAdminRules(
   commandId: string,
   prepare: AdminRulesPublishPreparation,
   signal: AbortSignal,
-): Promise<Result<AdminRules, AdminRulesApiError>> {
+): Promise<Result<AdminRules, AdminWriteFailure>> {
   const prepared = prepare(commandId);
   if (!prepared.ok) {
     return err(prepared.error);
@@ -222,13 +218,12 @@ export async function publishAdminRules(
   const endpoint: AdminWriteEndpoint = kind === "rules" ? "rules-publish" : "about-publish";
   const response = await sendPreparedJsonWrite(
     host,
-    adminDocumentKindApiPath(kind),
-    "PUT",
+    { url: adminDocumentKindApiPath(kind), method: "PUT", endpoint },
     prepared.value.body,
     signal,
   );
   if (!response.ok) {
-    return err(adminApiFailureAtWriteEndpoint(response.error, endpoint));
+    return err(response.error);
   }
   const decoded = decodeAdminReceipt(
     response.value,
@@ -236,7 +231,7 @@ export async function publishAdminRules(
     ADMIN_RULES_DOCUMENT_FIELD_POLICY,
   );
   if (!decoded.ok) {
-    return err(adminApiFailureClient("invalid_response"));
+    return err(writeOutcomeUnknown("invalid_response"));
   }
   return decodePublishReceipt(decoded.value.data, prepared.value);
 }
@@ -244,7 +239,7 @@ export async function publishAdminRules(
 function decodePublishReceipt(
   value: AdminRules,
   request: PreparedAdminRulesPublish,
-): Result<AdminRules, AdminRulesApiError> {
+): Result<AdminRules, AdminWriteFailure> {
   const rules = decodeRules(value);
   if (
     !rules.ok ||
@@ -254,7 +249,7 @@ function decodePublishReceipt(
     rules.value.revision !==
       (request.expectedRevision < MAX_JSON_SAFE_INTEGER ? request.expectedRevision + 1 : null)
   ) {
-    return err(adminApiFailureClient("invalid_response"));
+    return err(writeOutcomeUnknown("invalid_response"));
   }
   return ok(rules.value);
 }

@@ -17,12 +17,14 @@ pub(crate) use auction_contracts::{
 };
 #[cfg(test)]
 use auction_web_shared::TransportError;
-use gloo_net::http::Request;
+use gloo_net::http::Method;
 use uuid::Uuid;
 
+use super::AdminWriteFailure;
+use super::transport::WriteRequest;
 use super::{
-    AdminApiFailure, fetch_csrf_token, invalid_request_error, invalid_response_error,
-    response_error, response_failure, send_get, send_request, valid_count,
+    AdminApiFailure, invalid_request_error, invalid_response_error, response_error,
+    response_failure, send_get, valid_count,
 };
 
 /// 读取一页告警台条目；`status` 为 active/resolved/all。
@@ -32,7 +34,7 @@ pub(crate) async fn fetch_admin_alerts(
     page_size: i64,
 ) -> Result<AdminAlertPage, String> {
     let url = alert_list_url(status, page, page_size)?;
-    let body = send_alert_request(&url, None).await.map_err(|failure| failure.code)?;
+    let body = read_alert_response(&url).await.map_err(|failure| failure.code)?;
     decode_alert_page(&body, status, page, page_size)
 }
 
@@ -93,7 +95,7 @@ pub(crate) async fn fetch_admin_webhooks(limit: usize) -> Result<Vec<AdminAlertW
         return Err("invalid_request".to_owned());
     }
     let url = format!("/api/v1/admin/alerts/webhooks?limit={limit}");
-    let body = send_alert_request(&url, None).await.map_err(|failure| failure.code)?;
+    let body = read_alert_response(&url).await.map_err(|failure| failure.code)?;
     decode_webhook_page(&body, limit)
 }
 
@@ -146,7 +148,7 @@ pub(crate) async fn acknowledge_admin_alert(
     alert_id: &str,
     incident_generation: i64,
     reason: &str,
-) -> Result<AdminAlertCommandResult, AdminApiFailure> {
+) -> Result<AdminAlertCommandResult, AdminWriteFailure> {
     let command = acknowledge_request(command_id, incident_generation, reason);
     submit_alert_command(command_id, alert_id, "acknowledge", command).await
 }
@@ -158,7 +160,7 @@ pub(crate) async fn silence_admin_alert(
     incident_generation: i64,
     silence_seconds: i64,
     reason: &str,
-) -> Result<AdminAlertCommandResult, AdminApiFailure> {
+) -> Result<AdminAlertCommandResult, AdminWriteFailure> {
     let command = silence_request(command_id, incident_generation, silence_seconds, reason)?;
     submit_alert_command(command_id, alert_id, "silence", command).await
 }
@@ -182,9 +184,9 @@ fn silence_request(
     incident_generation: i64,
     silence_seconds: i64,
     reason: &str,
-) -> Result<AdminAlertSilenceRequest, AdminApiFailure> {
+) -> Result<AdminAlertSilenceRequest, AdminWriteFailure> {
     if !(60..=7 * 24 * 3_600).contains(&silence_seconds) {
-        return Err(AdminApiFailure::client("invalid_request"));
+        return Err(AdminWriteFailure::not_sent("invalid_request"));
     }
     Ok(AdminAlertSilenceRequest {
         command_id: command_id.to_string(),
@@ -199,14 +201,14 @@ async fn submit_alert_command<T: serde::Serialize>(
     alert_id: &str,
     action: &str,
     command: T,
-) -> Result<AdminAlertCommandResult, AdminApiFailure> {
+) -> Result<AdminAlertCommandResult, AdminWriteFailure> {
     if alert_id.len() != 64 || !alert_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(AdminApiFailure::client("invalid_request"));
+        return Err(AdminWriteFailure::not_sent("invalid_request"));
     }
     let url = format!("/api/v1/admin/alerts/{alert_id}/{action}");
     let request_body = serde_json::to_string(&command)
-        .map_err(|error| AdminApiFailure::client(invalid_request_error(error)))?;
-    let body = send_alert_request(&url, Some(request_body)).await?;
+        .map_err(|error| AdminWriteFailure::not_sent(invalid_request_error(error)))?;
+    let body = send_alert_command(&url, &request_body).await?;
     decode_alert_receipt(&body, command_id, alert_id, action)
 }
 
@@ -215,9 +217,9 @@ fn decode_alert_receipt(
     command_id: Uuid,
     alert_id: &str,
     action: &str,
-) -> Result<AdminAlertCommandResult, AdminApiFailure> {
-    let payload: ApiResponse<AdminAlertCommandResponse> = serde_json::from_str(body)
-        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
+) -> Result<AdminAlertCommandResult, AdminWriteFailure> {
+    let payload: ApiResponse<AdminAlertCommandResponse> =
+        serde_json::from_str(body).map_err(AdminWriteFailure::invalid_response)?;
     let result = payload.data.alert;
     if result.id != alert_id
         || result.action != action
@@ -226,16 +228,16 @@ fn decode_alert_receipt(
         || result.id.is_empty()
         || command_id.is_nil()
     {
-        return Err(AdminApiFailure::client(invalid_response_error("alert command")));
+        return Err(AdminWriteFailure::invalid_response("alert command"));
     }
     Ok(result)
 }
 
-async fn send_alert_request(url: &str, body: Option<String>) -> Result<String, AdminApiFailure> {
+async fn read_alert_response(url: &str) -> Result<String, AdminApiFailure> {
     #[cfg(test)]
     if let Some(stub) = dioxus::prelude::try_consume_context::<AlertResponseStub>() {
-        let (status, response) = (stub.0)(url, body.as_deref())
-            .map_err(|error| AdminApiFailure::client(error.code()))?;
+        let (status, response) =
+            (stub.0)(url, None).map_err(|error| AdminApiFailure::client(error.code()))?;
         return if (200..300).contains(&status) {
             Ok(response)
         } else {
@@ -243,25 +245,26 @@ async fn send_alert_request(url: &str, body: Option<String>) -> Result<String, A
         };
     }
 
-    let response = if let Some(body) = body {
-        let csrf_token = fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
-        send_request(|abort_signal| {
-            Request::post(url)
-                .abort_signal(abort_signal)
-                .header("x-csrf-token", &csrf_token)
-                .header("Content-Type", "application/json")
-                .body(body)
-                .map_err(invalid_request_error)
-        })
-        .await
-    } else {
-        send_get(url).await
-    }
-    .map_err(AdminApiFailure::client)?;
+    let response = send_get(url).await.map_err(AdminApiFailure::client)?;
     if !response.ok() {
         return Err(response_failure(response).await);
     }
     response.text().await.map_err(|error| AdminApiFailure::client(invalid_response_error(error)))
+}
+
+async fn send_alert_command(url: &str, body: &str) -> Result<String, AdminWriteFailure> {
+    let request = WriteRequest::general(url, Method::POST);
+    #[cfg(test)]
+    if let Some(stub) = dioxus::prelude::try_consume_context::<AlertResponseStub>() {
+        let (status, response) = (stub.0)(url, Some(body))
+            .map_err(|error| AdminWriteFailure::outcome_unknown(error.code()))?;
+        return if (200..300).contains(&status) {
+            Ok(response)
+        } else {
+            Err(request.decode_stub_failure(status, &response))
+        };
+    }
+    request.send_body(body).await?.text().await.map_err(AdminWriteFailure::invalid_response)
 }
 
 #[cfg(test)]

@@ -24,9 +24,8 @@ import { AdminRecoveryTable, type RecoveryConfirmationDraft, type RecoveryRead }
 
 const I64_MAX = 9_223_372_036_854_775_807n;
 
-/** 结算报告的分页所有者；页码只在本地报告内变化，不写筛选历史。 */
-export function AdminSettlementReportView(props: {
-  readonly report: AdminSettlementReport;
+interface AdminSettlementReportViewProps {
+  readonly report: AdminSettlementReport | null;
   readonly recovery: AdminRecoveryReport | null;
   readonly lotPage: Cell<number>;
   readonly recoveryPage: Cell<number>;
@@ -35,23 +34,72 @@ export function AdminSettlementReportView(props: {
   readonly confirmation: Cell<RecoveryConfirmationDraft | null>;
   readonly reason: Cell<string>;
   readonly actionFeedback: Cell<AdminActionFeedback | null>;
+  readonly recoveryStatus?: JSX.Element;
+}
+
+/** 结算报告与独立的恢复面板；页码只在本地报告内变化。 */
+export function AdminSettlementReportView(props: AdminSettlementReportViewProps): JSX.Element {
+  return (
+    <>
+      <Show when={props.report}>
+        {(report) => <AdminSettlementLots report={report()} lotPage={props.lotPage} />}
+      </Show>
+      <section
+        class="admin-auction-report admin-auction-recovery"
+        aria-labelledby="settlement-recovery-title"
+      >
+        <h2 id="settlement-recovery-title" tabindex="-1">
+          {t("admin-recovery-title")}
+        </h2>
+        {props.recoveryStatus}
+        <Show when={props.report !== null}>
+          <AdminSettlementRecovery state={props} />
+        </Show>
+      </section>
+    </>
+  );
+}
+
+function AdminSettlementRecovery(props: {
+  readonly state: AdminSettlementReportViewProps;
 }): JSX.Element {
-  const lotPagination = useAdminPagination("settlement-lots", ["lot_page_size"], null, I64_MAX);
+  const state = props.state;
+  // 目录与结算报告确认同一场次后才挂载分页，预读与重试不提前写入数量参数。
   const recoveryPagination = useAdminPagination(
     "settlement-recovery",
     ["recovery_page_size"],
     null,
     I64_MAX,
   );
+  const recoveryTotalPages = (): number =>
+    state.recovery === null
+      ? 1
+      : pageCount(state.recovery.recoveries.length, recoveryPagination.size());
+  const currentRecoveryPage = (): number => clamp(state.recoveryPage(), 1, recoveryTotalPages());
+  return (
+    <AdminRecoveryTable
+      report={state.recovery}
+      currentPage={currentRecoveryPage()}
+      pagination={recoveryPagination}
+      page={state.recoveryPage}
+      actionBusy={state.actionBusy}
+      recoveryRead={state.recoveryRead}
+      confirmation={state.confirmation}
+      reason={state.reason}
+      actionFeedback={state.actionFeedback}
+    />
+  );
+}
+
+function AdminSettlementLots(props: {
+  readonly report: AdminSettlementReport;
+  readonly lotPage: Cell<number>;
+}): JSX.Element {
+  const lotPagination = useAdminPagination("settlement-lots", ["lot_page_size"], null, I64_MAX);
   const lotTotalPages = (): number => pageCount(props.report.lots.length, lotPagination.size());
   const currentLotPage = (): number => clamp(props.lotPage(), 1, lotTotalPages());
   const lotRows = (): AdminSettlementLot[] =>
     pageSlice(props.report.lots, currentLotPage(), lotPagination.size());
-  const recoveryTotalPages = (): number =>
-    props.recovery === null
-      ? 1
-      : pageCount(props.recovery.recoveries.length, recoveryPagination.size());
-  const currentRecoveryPage = (): number => clamp(props.recoveryPage(), 1, recoveryTotalPages());
   return (
     <>
       <div class="admin-settlement__table-wrap">
@@ -123,17 +171,6 @@ export function AdminSettlementReportView(props: {
         label={t("admin-settlement-lots-pagination")}
       />
       <AdminSettlementSummaryCard summary={props.report.settlement} />
-      <AdminRecoveryTable
-        report={props.recovery}
-        currentPage={currentRecoveryPage()}
-        pagination={recoveryPagination}
-        page={props.recoveryPage}
-        actionBusy={props.actionBusy}
-        recoveryRead={props.recoveryRead}
-        confirmation={props.confirmation}
-        reason={props.reason}
-        actionFeedback={props.actionFeedback}
-      />
     </>
   );
 }

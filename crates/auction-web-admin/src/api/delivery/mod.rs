@@ -13,7 +13,8 @@ use auction_contracts::{
 use gloo_net::http::{Method, Request};
 use uuid::Uuid;
 
-use super::transport::send_json_write;
+use super::AdminWriteFailure;
+use super::transport::WriteRequest;
 use super::{
     AdminApiFailure, MAX_JSON_SAFE_INTEGER, PlayerSupportBundle, fetch_csrf_token,
     invalid_request_error, invalid_response_error, response_error, response_failure, send_get,
@@ -34,6 +35,9 @@ pub(crate) use queue::{DeliveryAction, DeliverySearchFilters, execute_delivery, 
 
 /// 与服务端 `MAX_PLAYER_SUPPORT_ROWS` 对齐；超过即视为损坏响应。
 const MAX_PLAYER_SUPPORT_ROWS: usize = 50;
+
+/// 玩家支持用户检索词的 UTF-8 字节上限，与服务端 `MAX_PLAYER_SUPPORT_USER_LEN` 对齐。
+pub(crate) const MAX_PLAYER_SUPPORT_USER_BYTES: usize = 256;
 
 /// 列表与玩家支持请求的扩展投影（`include` 取值）。本页面的闭集认识结算退件 Take 来源
 /// （`settlement_return_action`）与装备收回处置（`recovery_equipment_recovered`），必须显式请求；
@@ -111,33 +115,18 @@ pub(crate) async fn acknowledge_delivery(
     delivery_id: String,
     expected_fencing_version: i64,
     reason: String,
-) -> Result<AdminDeliveryAcknowledgeResponse, AdminApiFailure> {
+) -> Result<AdminDeliveryAcknowledgeResponse, AdminWriteFailure> {
     if command_id.is_nil()
         || !valid_uuid(&delivery_id)
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&expected_fencing_version)
-        || !valid_safe_text(&reason, 2048)
+        || !SentProofCommand::valid_reason(&reason)
     {
-        return Err(AdminApiFailure::client("invalid_delivery_command"));
+        return Err(AdminWriteFailure::not_sent("invalid_delivery_command"));
     }
     let request = AdminDeliveryAcknowledgeRequest { command_id, expected_fencing_version, reason };
     let url = format!("/api/v1/admin/deliveries/{delivery_id}/acknowledge");
-    let csrf_token = fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
-    let response = send_request(|abort_signal| {
-        Request::post(&url)
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&request)
-            .map_err(invalid_request_error)
-    })
-    .await
-    .map_err(AdminApiFailure::client)?;
-    if !response.ok() {
-        return Err(response_failure(response).await);
-    }
-    let body = response
-        .text()
-        .await
-        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
+    let response = WriteRequest::general(&url, Method::POST).send_json(&request).await?;
+    let body = response.text().await.map_err(AdminWriteFailure::invalid_response)?;
     decode_acknowledgement(&body, &delivery_id, expected_fencing_version)
 }
 
@@ -145,17 +134,16 @@ fn decode_acknowledgement(
     body: &str,
     delivery_id: &str,
     expected_fencing_version: i64,
-) -> Result<AdminDeliveryAcknowledgeResponse, AdminApiFailure> {
+) -> Result<AdminDeliveryAcknowledgeResponse, AdminWriteFailure> {
     let payload: StrictDeliveryEnvelope<AdminDeliveryAcknowledgeResponse> =
-        serde_json::from_str(body)
-            .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
+        serde_json::from_str(body).map_err(AdminWriteFailure::invalid_response)?;
     if !valid_success_code(&payload.code)
         || payload.message.is_empty()
         || payload.data.delivery_id != delivery_id
         || payload.data.fencing_version != expected_fencing_version
         || payload.data.kind != "operator_acknowledged"
     {
-        return Err(AdminApiFailure::client(invalid_response_error("delivery_acknowledge")));
+        return Err(AdminWriteFailure::invalid_response("delivery_acknowledge"));
     }
     Ok(payload.data)
 }
@@ -172,10 +160,20 @@ pub(crate) struct SentProofCommand {
     pub(crate) accept_attempt_history: bool,
 }
 
+impl SentProofCommand {
+    /// 解除告警和人工 Sent 证明共用的理由上限，按 UTF-8 字节计算。
+    pub(crate) const MAX_REASON_BYTES: usize = 2_048;
+
+    /// 校验将写入处置事实的单行理由，表单在调用前去除首尾空白。
+    pub(crate) fn valid_reason(reason: &str) -> bool {
+        valid_safe_text(reason, Self::MAX_REASON_BYTES)
+    }
+}
+
 /// 提交人工 Sent 证明确认；同 `command_id` 同参由服务端重放原结果。
 pub(crate) async fn confirm_delivery_sent_proof(
     command: SentProofCommand,
-) -> Result<AdminDeliverySentProofResponse, AdminApiFailure> {
+) -> Result<AdminDeliverySentProofResponse, AdminWriteFailure> {
     let SentProofCommand {
         command_id,
         delivery_id,
@@ -190,9 +188,9 @@ pub(crate) async fn confirm_delivery_sent_proof(
         || !valid_uuid(&delivery_id)
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&expected_fencing_version)
         || !valid_safe_text(&evidence_reference, 128)
-        || !valid_safe_text(&reason, 2048)
+        || !SentProofCommand::valid_reason(&reason)
     {
-        return Err(AdminApiFailure::client("invalid_delivery_command"));
+        return Err(AdminWriteFailure::not_sent("invalid_delivery_command"));
     }
     let url = format!("/api/v1/admin/deliveries/{delivery_id}/sent-proof/confirm");
     let request = AdminDeliverySentProofConfirmRequest {
@@ -204,13 +202,16 @@ pub(crate) async fn confirm_delivery_sent_proof(
         accept_collected_assets,
         accept_attempt_history,
     };
-    let response = send_json_write(&url, Method::POST, &request).await?;
-    let payload: StrictDeliveryEnvelope<AdminDeliverySentProofResponse> = response
-        .json()
-        .await
-        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
+    let response = WriteRequest::general(&url, Method::POST).send_json(&request).await?;
+    let payload: StrictDeliveryEnvelope<AdminDeliverySentProofResponse> =
+        response.json().await.map_err(AdminWriteFailure::invalid_response)?;
     decode_confirmation(payload, command_id, &delivery_id)
-        .map_err(|_| AdminApiFailure::client(invalid_response_error("delivery_sent_confirmation")))
+        .map_err(|()| AdminWriteFailure::invalid_response("delivery_sent_confirmation"))
+}
+
+/// 判断去除首尾空白后的用户检索词是否超过字节上限。
+pub(crate) fn player_support_user_too_long(user: &str) -> bool {
+    user.len() > MAX_PLAYER_SUPPORT_USER_BYTES
 }
 
 /// 玩家支持只读汇总；`user` 与 `reference` 必须恰好提供一个。
@@ -219,7 +220,7 @@ pub(crate) async fn fetch_player_support(
     reference: String,
 ) -> Result<PlayerSupportBundle, String> {
     let (key, value) = match (user.trim(), reference.trim()) {
-        (user, "") if !user.is_empty() && user.len() <= 256 => ("user", user),
+        (user, "") if !user.is_empty() && !player_support_user_too_long(user) => ("user", user),
         ("", reference) if valid_uuid(reference) => ("reference", reference),
         _ => return Err("invalid_player_support_query".to_owned()),
     };

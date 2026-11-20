@@ -3,11 +3,13 @@
 import { expect, test } from "bun:test";
 import { DELIVERY_RENDER, settle, withDeliveryDom } from "../deliveries/delivery-dom-fixture.test";
 import {
+  bodyOf,
   businessRequests,
   jsonReply,
   unavailableReply,
   withHttp,
 } from "../deliveries/delivery-http-fixture.test";
+import { firstOf } from "../deliveries/sent-proof/sent-proof-fixture";
 import { pausedPollingWire, polling } from "./polling-fixture";
 
 const READ_POLLING = "/api/v1/admin/mail?mailbox_key=mail-a&include_diagnostics=true";
@@ -120,4 +122,62 @@ test("mail_poll_receipt_survives_the_failed_mailbox_read", async () => {
         expect(dom.hasExactText(RECEIPT)).toBe(true);
       }),
   );
+});
+
+test("mail_trigger_only_delivers_the_matching_accepted_count", async () => {
+  const { MailPageFixture } = await DELIVERY_RENDER.mailPolling();
+  const trigger = "/api/v1/admin/mail/polls:trigger";
+  for (const mismatch of ["id", "count", "status", null]) {
+    let submissions = 0;
+    await withHttp(
+      (request) => {
+        if (request.path === READ_INTAKE) {
+          return jsonReply({
+            code: "ok",
+            message: "邮件列表",
+            data: { intakes: [], pagination: { page: 1, page_size: 10, total: 0 } },
+          });
+        }
+        if (request.path !== trigger) throw new Error(`未预期的请求 ${request.path}`);
+        const defect = submissions++ === 0 ? mismatch : null;
+        return jsonReply(
+          {
+            code: "accepted",
+            message: "已接受轮询",
+            data: {
+              command_id:
+                defect === "id"
+                  ? "00000000-0000-4000-8000-000000000099"
+                  : bodyOf(request).command_id,
+              pollers: defect === "count" ? 0 : 3,
+            },
+          },
+          defect === "status" ? 200 : 202,
+        );
+      },
+      (requests) =>
+        withDeliveryDom("https://auction.test/mails?page_size=10", async (dom, mount) => {
+          const accepted = "请求已接受，将唤醒 3 个轮询器。";
+          mount(MailPageFixture);
+          await settle();
+          dom.button("唤醒全部邮件轮询器").click();
+          await settle();
+          expect(dom.hasExactText(accepted)).toBe(mismatch === null);
+          expect(dom.findButton("原样重试") !== null).toBe(mismatch !== null);
+          if (mismatch !== null) {
+            expect(dom.button("唤醒全部邮件轮询器").disabled).toBe(true);
+            dom.button("原样重试").click();
+            await settle();
+            expect(dom.hasExactText(accepted)).toBe(true);
+            expect(dom.findButton("原样重试")).toBeNull();
+          }
+          expect(dom.findButton("关闭回执")).toBeNull();
+          const writes = requests.filter((request) => request.path === trigger);
+          expect(writes).toHaveLength(mismatch === null ? 1 : 2);
+          expect(writes[0]?.method).toBe("POST");
+          expect(bodyOf(firstOf(writes))).toEqual({ command_id: expect.any(String) });
+          if (mismatch !== null) expect(writes[1]).toEqual(writes[0]);
+        }),
+    );
+  }
 });

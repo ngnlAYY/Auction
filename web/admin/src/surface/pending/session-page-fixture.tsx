@@ -4,7 +4,7 @@ import { createCell } from "@auction/web-shared/reactive/cell";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import type { JSX } from "@solidjs/web";
 import { createComponent, createMemo, createRoot, onCleanup, Show } from "solid-js";
-
+import type { AdminWriteFailure } from "../../api/failure";
 import { type PreparedJsonCommand, prepareJsonCommandOnce } from "../../api/transport";
 import { AdminUserGeneratedKeyDialog, adminUserGeneratedKeyDelivery } from "../users/create";
 import { type PendingCommandHost, PendingCommandHostContext, usePendingCommandGate } from ".";
@@ -12,12 +12,14 @@ import { PendingCommandNotices, PendingCommandPanel } from "./panel";
 import { createCommandReload, usePendingCommands, usePendingCommandsWithGate } from "./sources";
 
 /** 页面提交一次命令时由测试提供的写请求。 */
-export type SessionPageSubmit = (prepared: PreparedJsonCommand) => Promise<Result<void, string>>;
+export type SessionPageSubmit = (
+  prepared: PreparedJsonCommand,
+) => Promise<Result<void, AdminWriteFailure>>;
 
 /** 会话页的测试控制面。 */
 export interface SessionPageRequests {
   readonly submit: SessionPageSubmit;
-  readonly submitGenerated?: (() => Promise<Result<string, string>>) | undefined;
+  readonly submitGenerated?: (() => Promise<Result<string, AdminWriteFailure>>) | undefined;
   submitted(entity: string, accepted: boolean): void;
   delivered(): void;
   keyDelivered(sourceAlive: boolean): void;
@@ -172,9 +174,7 @@ function OriginPage(props: { readonly requests: SessionPageRequests }): JSX.Elem
               "测试静默",
               async (commandId) => {
                 const prepared = prepare(commandId);
-                return prepared.ok
-                  ? props.requests.submit(prepared.value)
-                  : err(prepared.error.code);
+                return prepared.ok ? props.requests.submit(prepared.value) : err(prepared.error);
               },
               () => {
                 props.requests.delivered();
@@ -208,7 +208,7 @@ function OriginPage(props: { readonly requests: SessionPageRequests }): JSX.Elem
 
 function GeneratedKeySource(props: {
   readonly requests: SessionPageRequests;
-  readonly submitGenerated: () => Promise<Result<string, string>>;
+  readonly submitGenerated: () => Promise<Result<string, AdminWriteFailure>>;
 }): JSX.Element {
   const owner = usePendingCommands(createCommandReload(0n), () => true);
   return (

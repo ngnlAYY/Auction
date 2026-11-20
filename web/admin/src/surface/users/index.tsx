@@ -8,9 +8,10 @@ import { err } from "@auction/web-shared/result";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createEffect, Match, Show, Switch, untrack } from "solid-js";
+import { createEffect, For, Match, Show, Switch, untrack, useContext } from "solid-js";
 
 import { type AdminUserStatusFilter, fetchAdminUsers } from "../../api/users";
+import { KeyVisibilityContext } from "../auth/key-visibility";
 import { useAdminSessionHost } from "../auth/shell";
 import { useAdminPagination, useVersionedAdminPage } from "../pagination";
 import { PendingCommandsContext, usePendingCommandGate } from "../pending";
@@ -28,7 +29,11 @@ import {
   useUsersQueryState,
 } from "../query/users";
 import type { SortDirection } from "../sort";
-import { AdminUserCreateForm, AdminUserGeneratedKeyDialog } from "./create";
+import {
+  AdminUserCreateForm,
+  type AdminUserGeneratedKey,
+  AdminUserGeneratedKeyDialog,
+} from "./create";
 import { AdminUserFilters, AdminUserTable } from "./table";
 
 /** 改名回滚和用户页的动作共用用户的实体围栏。 */
@@ -60,6 +65,10 @@ export function page(): JSX.Element {
   const pending = usePendingCommandsWithGate(reloadGeneration, commandGate, (entity) => {
     return entity === "create-user" || entity.startsWith("user:");
   });
+  const generatedKeys = () => {
+    const receipt = pending.generatedKey();
+    return receipt === null ? [] : [receipt];
+  };
   // effect 仅用于既有控件的忙态展示；首次提交/重试在执行边界同步占用同一门禁。
   createEffect(
     () => pending.anyBusy() || commandGate.blocked(),
@@ -180,6 +189,15 @@ export function page(): JSX.Element {
         <Show when={commandGate.blocked()}>
           <p role="status">{t("admin-users-key-gate-help")}</p>
         </Show>
+        <For each={generatedKeys()} keyed={(receipt) => receipt.commandId}>
+          {(receipt) => (
+            <SourceGeneratedKey
+              commandId={receipt().commandId}
+              generated={receipt().key}
+              onAcknowledge={(commandId) => pending.acknowledgeKey(commandId)}
+            />
+          )}
+        </For>
         <Show when={createOpen()}>
           <AdminUserCreateForm gate={commandGate} open={createOpen} notice={createNotice} />
         </Show>
@@ -249,14 +267,59 @@ export function page(): JSX.Element {
           </Match>
         </Switch>
       </section>
-      <Show when={pending.generatedKey()}>
-        {(generated) => (
+    </PendingCommandsContext>
+  );
+}
+
+function SourceGeneratedKey(props: {
+  readonly commandId: string;
+  readonly generated: AdminUserGeneratedKey;
+  readonly onAcknowledge: (commandId: string) => void;
+}): JSX.Element {
+  const visibility = useContext(KeyVisibilityContext);
+  const openRevision = createCell(untrack(() => props.generated.autoOpenRevision));
+  const activeDialog = createValueMemo(() => {
+    const current = visibility();
+    return !current.hidden && openRevision() === current.revision
+      ? { commandId: props.commandId, revision: current.revision }
+      : null;
+  });
+  return (
+    <>
+      <Show when={activeDialog() === null}>
+        <button
+          type="button"
+          disabled={visibility().hidden}
+          onClick={() => {
+            const current = visibility();
+            if (!current.hidden) {
+              openRevision.set(current.revision);
+            }
+          }}
+        >
+          {t("admin-pending-view-key")}
+        </button>
+      </Show>
+      <Show when={visibility().hidden}>
+        <p class="admin-panel__note">{t("admin-session-key-hidden")}</p>
+      </Show>
+      <Show when={activeDialog()} keyed>
+        {(opened) => (
           <AdminUserGeneratedKeyDialog
-            generated={generated().key}
-            onClose={() => pending.acknowledgeKey(generated().commandId)}
+            generated={props.generated}
+            onClose={() => {
+              const current = visibility();
+              if (
+                !current.hidden &&
+                opened.revision === current.revision &&
+                openRevision.peek() === opened.revision
+              ) {
+                props.onAcknowledge(opened.commandId);
+              }
+            }}
           />
         )}
       </Show>
-    </PendingCommandsContext>
+    </>
   );
 }

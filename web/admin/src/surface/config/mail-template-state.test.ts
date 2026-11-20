@@ -6,7 +6,7 @@ import { parseJson } from "@auction/web-shared/net/wire";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
 import { ok } from "@auction/web-shared/result";
-import { adminApiFailureDisplayCode } from "../../api/failure";
+import { adminWriteFailureDisplayCode, observedResponseStatus } from "../../api/failure";
 import { cleanupScope } from "../../test-scope-fixture";
 import { required } from "../solid-dom-fixture";
 import {
@@ -166,6 +166,43 @@ test("版本冲突在刷新前就阻止保存", async () => {
   }
 });
 
+test("首次保存模板仅在完整 413 后释放实体", async () => {
+  for (const [reply, pending] of [
+    [apiFailure(413, "body_too_large", "请求体过大"), false],
+    [
+      new Response('{"code":"body_too_large","message":"请求体过大","data":null}', { status: 413 }),
+      true,
+    ],
+  ] as const) {
+    const page = configPage((request) => {
+      expect([request.method, request.path]).toEqual([
+        "PUT",
+        `/api/v1/admin/mail-templates/${KEY}`,
+      ]);
+      return reply;
+    });
+    try {
+      const { state } = editState(page);
+      await settle();
+      draftAt(state, 5, "保留草稿");
+      expect(state.beginSave(published(5))).toBeNull();
+      state.submit(required(state.confirmation.peek(), "确认保存模板"));
+      await settle();
+      expect(page.requests).toHaveLength(1);
+      expect(JSON.parse(required(page.requests[0], "模板写入").body)).toEqual({
+        command_id: expect.stringMatching(COMMAND_ID_V4),
+        expected_revision: 5,
+        body: "保留草稿",
+      });
+      expect(state.pending.contains(ENTITY)).toBe(pending);
+      expect(state.drafts.peek().get(KEY)?.body).toBe("保留草稿");
+      expect(state.accepted.peek()).toBeNull();
+    } finally {
+      page.dispose();
+    }
+  }
+});
+
 test("模板重试发送冻结的修订直到账本核对冲突后才允许重新加载", async () => {
   const conflicts = [
     '{"code":"mail_template_conflict","message":"版本已变化","data":null}',
@@ -200,10 +237,18 @@ test("模板重试发送冻结的修订直到账本核对冲突后才允许重�
     if (index === 3) {
       return networkFailure();
     }
-    if (index === 8) {
+    if (index === 4) {
+      return apiFailure(413, "body_too_large", "请求体过大");
+    }
+    if (index === 5) {
+      return new Response('{"code":"body_too_large","message":"请求体过大","data":null}', {
+        status: 413,
+      });
+    }
+    if (index === 10) {
       return saved(7, "以最新版本编辑");
     }
-    return new Response(required(conflicts[index - 4], "冲突回执"), { status: 409 });
+    return new Response(required(conflicts[index - 6], "冲突回执"), { status: 409 });
   });
   scope.defer(page.dispose);
   try {
@@ -217,7 +262,7 @@ test("模板重试发送冻结的修订直到账本核对冲突后才允许重�
       outcomes.push(
         result.ok
           ? [null, "accepted"]
-          : [result.error.status, adminApiFailureDisplayCode(result.error.code)],
+          : [observedResponseStatus(result.error), adminWriteFailureDisplayCode(result.error)],
       );
       return result;
     });
@@ -257,12 +302,12 @@ test("模板重试发送冻结的修订直到账本核对冲突后才允许重�
     latest.set(published(6));
     await settle();
     expect(state.currentRevision(KEY)).toBe(6);
-    for (let count = 2; count <= 8; count += 1) {
+    for (let count = 2; count <= 10; count += 1) {
       page.pending.host.retry(commandId);
       await settle();
       expect(page.requests).toHaveLength(count);
       expect(required(page.requests[count - 1], "重试请求").body).toBe(firstBytes);
-      if (count < 8) {
+      if (count < 10) {
         expect(state.pending.contains(ENTITY)).toBe(true);
         expect(state.conflicts.peek().has(KEY)).toBe(false);
         state.discard(KEY, true);
@@ -282,8 +327,8 @@ test("模板重试发送冻结的修订直到账本核对冲突后才允许重�
     expect(state.beginSave(published(6))).toBeNull();
     state.submit(required(state.confirmation.peek(), "重新加载后的确认"));
     await settle();
-    expect(page.requests).toHaveLength(9);
-    const next = jsonObject(accepted(parseJson(required(page.requests[8], "第九次请求").body)));
+    expect(page.requests).toHaveLength(11);
+    const next = jsonObject(accepted(parseJson(required(page.requests[10], "第十一次请求").body)));
     expect(next.expected_revision).toBe(6);
     expect(next.body).toBe("以最新版本编辑");
     expect(next.command_id).not.toBe(first.command_id);
@@ -292,6 +337,8 @@ test("模板重试发送冻结的修订直到账本核对冲突后才允许重�
       [401, "unauthenticated"],
       [429, "rate_limited"],
       [null, "network_error"],
+      [413, "body_too_large"],
+      [413, "http_413"],
       [409, "http_409"],
       [409, "http_409"],
       [409, "http_409"],

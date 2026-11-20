@@ -12,8 +12,10 @@ import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
 import { createTaskScope } from "@auction/web-shared/reactive/tasks";
-import { useRouter } from "@auction/web-shared/router";
+import { type RouteMatch, useRouter } from "@auction/web-shared/router";
 import { useAppBootReady } from "@auction/web-shared/ui/bootstrap";
+import { reloadAfterPageLoadError } from "@auction/web-shared/ui/bootstrap/page-load-recovery";
+import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { createEffect, onSettled, untrack, useContext } from "solid-js";
 import { fetchCurrentAuction } from "../../api/queries/current";
@@ -91,6 +93,11 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
   const secondTicker = useSecondTicker();
   const router = useRouter();
   const currentRoute = () => router.current();
+  const failedPage = createCell<RouteMatch | null>(null);
+  const currentPageLoadFailure = () => {
+    const failure = failedPage();
+    return failure === currentRoute() ? failure : null;
+  };
   const auctionPageOwnsInitialBoot = createValueMemo(() => {
     const route = currentRoute();
     return (
@@ -195,7 +202,12 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
   const bootPrerequisitesReady = () =>
     readiness() !== undefined && session() !== undefined && currentAuction() !== undefined;
   // 默认拍卖页还要等待首屏 lots；其他路由在三项外壳请求都有结果后即可接管静态骨架。
-  useAppBootReady(() => bootPrerequisitesReady() && !auctionPageOwnsInitialBoot());
+  // 分块失败时由页内横幅接管，避免首屏看板无法挂载而一直遮住导航。
+  useAppBootReady(
+    () =>
+      currentPageLoadFailure() !== null ||
+      (bootPrerequisitesReady() && !auctionPageOwnsInitialBoot()),
+  );
   const displayedAuction = createCell<CurrentAuctionItemResponse | null>(null);
   const lotViewRequest = createCell<LotViewRequest | null>(null);
   createEffect(router.currentEntryKey, () => {
@@ -211,6 +223,33 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
     const frozen = lotLinkLocation.peek();
     if (frozen !== null && frozen.route !== untrack(currentRoute)) lotLinkLocation.set(null);
   });
+  const hasCompetitionRecords = () => competition.current.peek()?.hasRecoveryRecords() === true;
+  const onRouteLoadFailure = (): void => {
+    const route = currentRoute();
+    lotLinkLocation.set(null);
+    // 先保护宿主的请求与回执，再写防循环标记，确保未知结果仍能用原命令和原请求重试。
+    if (!hasCompetitionRecords() && reloadAfterPageLoadError()) {
+      return;
+    }
+    if (route.kind === "matched") {
+      console.warn("公开站点页面分块加载失败", { route: route.name });
+    }
+    failedPage.set(route);
+    router.restoreScrollAfterCommit();
+  };
+  const reloadFailedPage = (route: RouteMatch): void => {
+    if (!tasks.alive() || currentPageLoadFailure() !== route || typeof window === "undefined") {
+      return;
+    }
+    try {
+      if (hasCompetitionRecords() && !window.confirm(t("command-reload-confirm"))) {
+        return;
+      }
+      window.location.reload();
+    } catch {
+      // 浏览器拒绝确认或重载时，保留记录与页内恢复入口。
+    }
+  };
   const contentLoading = createCell<ReadonlySet<number>>(new Set());
   usePopstateRevision(locationGeneration);
   const readinessState = createValueMemo((): PublicReadinessState => {
@@ -371,10 +410,22 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
       return;
     }
     manualRefreshError.set(false);
+    const failedRoute = untrack(currentPageLoadFailure);
+    if (failedRoute !== null) {
+      reloadFailedPage(failedRoute);
+      return;
+    }
     manualRefreshBusy.set(true);
     tasks.spawn(async (context) => {
       await sleep(80, context.signal);
       if (!context.alive()) {
+        return;
+      }
+      // 等待时也可能发生分块失败，重载前仍须保护宿主持有的请求与回执。
+      const failure = untrack(currentPageLoadFailure);
+      if (failure !== null) {
+        manualRefreshBusy.set(false);
+        reloadFailedPage(failure);
         return;
       }
       let reloaded = false;
@@ -451,7 +502,9 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
         tickerCountdown={tickerLabels.countdown}
         realtimeUserId={realtimeUserId}
         realtimeTarget={realtimeTarget}
-        onRouteLoadFailure={() => lotLinkLocation.set(null)}
+        pageLoadFailure={currentPageLoadFailure}
+        onRouteLoadFailure={onRouteLoadFailure}
+        onReloadFailedPage={reloadFailedPage}
         onToggleNavigation={() => navigationOpen.set(!navigationOpen())}
         onCloseNavigation={() => navigationOpen.set(false)}
         onHome={goHome}

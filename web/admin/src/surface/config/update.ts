@@ -2,7 +2,7 @@
 
 import type { AdminRuntimeConfigResponse } from "@auction/contracts/dto/admin/rules";
 import { err, ok, type Result } from "@auction/web-shared/result";
-
+import { type AdminWriteFailure, writeOutcomeUnknown } from "../../api/failure";
 import {
   type AdminRuntimeConfig,
   type AdminRuntimeConfigCommandPreparation,
@@ -16,20 +16,20 @@ export interface ConfigUpdateOutcome {
   readonly nextForm: RuntimeConfigForm;
 }
 
-/** 每次重试复用同一个准备好的命令正文，失败只映射为稳定错误码。 */
+/** 每次重试复用同一个准备好的命令正文，校验失败视为写入结果未知。 */
 export async function updateRuntimeConfigCommand(
   host: AdminSessionHost,
   commandId: string,
   prepared: AdminRuntimeConfigCommandPreparation,
   signal: AbortSignal,
-): Promise<Result<ConfigUpdateOutcome, string>> {
+): Promise<Result<ConfigUpdateOutcome, AdminWriteFailure>> {
   const result = await updateAdminRuntimeConfig(host, commandId, prepared, signal);
   if (!result.ok) {
-    return err(result.error.code);
+    return result;
   }
   const nextForm = runtimeConfigFormFromResponse(responseFromApi(result.value));
   if (!nextForm.ok) {
-    return err("invalid_response");
+    return err(writeOutcomeUnknown("invalid_response"));
   }
   return ok({ result: result.value, nextForm: nextForm.value });
 }

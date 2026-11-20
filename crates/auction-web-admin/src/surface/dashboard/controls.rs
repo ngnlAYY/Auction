@@ -8,7 +8,7 @@ use std::rc::Rc;
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};
+use crate::api::{AdminMailPolling, AdminWriteFailure, set_mail_paused, trigger_mail_poll};
 #[cfg(test)]
 use crate::surface::auctions::draft_page_tests::RecordRead;
 use crate::surface::mail::{MAILBOX_ENTITY_PREFIX, mailbox_command_entity};
@@ -56,7 +56,7 @@ pub(super) fn MailPollerControls(
                             "mail-poll-trigger".to_owned(),
                             t!("dashboard-legacy-trigger-poll"),
                             |command_id| async move {
-                                trigger_mail_poll(command_id).await.map_err(|error| error.code)
+                                trigger_mail_poll(command_id).await
                             },
                             move |count, source_alive| {
                                 if source_alive {
@@ -91,16 +91,10 @@ pub(super) fn MailPollerControls(
                                     async move {
                                         #[cfg(test)]
                                         if let Some(reply) = try_consume_context::<Rc<RecordRead<AdminMailPolling>>>() {
-                                            return reply.fetch().await;
+                                            return reply.fetch().await.map_err(crate::api::AdminWriteFailure::outcome_unknown);
                                         }
                                         let result = set_mail_paused(command_id, polling, desired_paused).await;
-                                        let mut refresh = refresh;
-                                        if result.as_ref().is_err_and(crate::api::AdminApiFailure::is_conflict)
-                                            && let Ok(mut generation) = refresh.try_write()
-                                        {
-                                            *generation = generation.saturating_add(1);
-                                        }
-                                        result.map_err(|error| error.code)
+                                        observe_pause_resume(result, refresh)
                                     }
                                 },
                                 move |_, source_alive| {
@@ -123,5 +117,88 @@ pub(super) fn MailPollerControls(
                 }
             }
         }
+    }
+}
+
+fn observe_pause_resume(
+    result: Result<AdminMailPolling, AdminWriteFailure>,
+    mut refresh: Signal<u64>,
+) -> Result<AdminMailPolling, AdminWriteFailure> {
+    if result.as_ref().is_err_and(|failure| failure.observed_response_status() == Some(409))
+        && let Ok(mut generation) = refresh.try_write()
+    {
+        *generation = generation.saturating_add(1);
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::{Cell, RefCell};
+    use std::collections::VecDeque;
+    use std::rc::Rc;
+
+    use dioxus::prelude::{
+        dioxus_core, dioxus_elements, dioxus_signals, rsx, use_resource, use_signal,
+    };
+
+    use super::observe_pause_resume;
+    use crate::api::{AdminWriteEndpoint, AdminWriteFailure};
+    use crate::surface::auctions::draft_page_tests::{button, click_button, mount_writer};
+    use crate::surface::pending::{PendingCommandPanel, use_pending_commands};
+
+    #[test]
+    fn dashboard_pause_resume_keeps_pending_when_the_retry_was_not_sent() {
+        assert_no_refresh_on_retry(AdminWriteFailure::not_sent("http_409"));
+    }
+
+    #[test]
+    fn dashboard_pause_resume_keeps_pending_when_the_retry_has_no_response_status() {
+        assert_no_refresh_on_retry(AdminWriteFailure::outcome_unknown("network_error"));
+    }
+
+    fn assert_no_refresh_on_retry(retry_failure: AdminWriteFailure) {
+        let outcomes = Rc::new(RefCell::new(VecDeque::from([
+            AdminWriteFailure::from_test_http(AdminWriteEndpoint::General, 503, b"{"),
+            retry_failure,
+        ])));
+        let reads = Rc::new(Cell::new(0));
+        let (mut page, _) = mount_writer({
+            let outcomes = outcomes.clone();
+            let reads = reads.clone();
+            move || {
+                let refresh = use_signal(|| 0_u64);
+                let reads = reads.clone();
+                let _snapshot = use_resource(move || {
+                    let _ = refresh();
+                    reads.set(reads.get() + 1);
+                    async {}
+                });
+                let pending = use_pending_commands(refresh, |key| key == "mailbox:main");
+                let outcomes = outcomes.clone();
+                let label = "提交轮询控制";
+                rsx! {
+                    PendingCommandPanel { owner: pending }
+                    button {
+                        onclick: move |_| {
+                            let outcomes = outcomes.clone();
+                            pending.submit("mailbox:main".into(), "轮询控制".into(), move |_| {
+                                let failure = outcomes.borrow_mut().pop_front().unwrap();
+                                async move { observe_pause_resume(Err(failure), refresh) }
+                            }, |_| panic!("没有写响应不能交付成功回执"), |_| ());
+                        },
+                        "{label}"
+                    }
+                }
+            }
+        });
+        assert_eq!(reads.get(), 1);
+        click_button(&mut page, "提交轮询控制");
+        assert!(button(&page, "原样重试").is_some());
+        click_button(&mut page, "原样重试");
+        assert!(outcomes.borrow().is_empty());
+        assert_eq!(reads.get(), 1, "缺少写响应状态不得重读 Dashboard");
+        assert!(button(&page, "原样重试").is_some());
+        assert!(button(&page, "关闭已拒绝操作").is_none());
     }
 }

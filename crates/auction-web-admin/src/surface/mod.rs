@@ -47,7 +47,7 @@ use dioxus::prelude::*;
 use dioxus_i18n::prelude::*;
 use unic_langid::langid;
 
-pub(super) use command::{run_admin_action, run_admin_feedback_action};
+pub(super) use command::run_admin_feedback_action;
 pub(super) use presentation::{
     AdminActionFeedback, admin_api_error_message, admin_world_label, format_admin_time,
     lot_status_label,

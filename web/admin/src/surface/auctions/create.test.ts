@@ -72,3 +72,45 @@ test("creates_only_positive_json_safe_sequence_numbers", () =>
       },
     );
   }));
+
+test("create_only_marks_the_world_field_for_world_not_found", () =>
+  withUtc(async () => {
+    const { AdminAuctionCreateForm } = await loadRenderModule<typeof import("./create")>(
+      `${import.meta.dir}/create.tsx`,
+      "AdminAuctionCreateForm",
+    );
+    for (const [status, code, expected] of [
+      [404, "world_not_found", true],
+      [409, "world_has_active_auction", false],
+    ] as const) {
+      await withEditor(
+        () => createComponent(AdminAuctionCreateForm, { notice: createCell(null) }),
+        async (page) => {
+          await page.click("创建拍卖");
+          const world = page.field("create-world");
+          world.change("main");
+          await settleEditor();
+          await editField(page.field("create-preview"), "2099-04-01T11:00");
+          await editField(page.field("create-open"), "2099-04-01T12:00");
+          await editField(page.field("create-end"), "2099-04-01T13:00");
+          page.reply(
+            status,
+            JSON.stringify({ code, message: "拒绝", data: null, request_id: null }),
+          );
+          await submitForm(page.form());
+          const write = takeWrite(page);
+          expect(write.method).toBe("POST");
+          expect(write.path).toBe("/api/v1/admin/auctions");
+          expect(world.getAttribute("aria-invalid")).toBe(String(expected));
+          expect(world.getAttribute("aria-describedby")).toBe(
+            expected ? "create-world-error" : null,
+          );
+          if (expected) {
+            expect(page.field("create-world-error").textContent).toBe(
+              "该业务世界已不存在，请重新加载当前状态。",
+            );
+          }
+        },
+      );
+    }
+  }));

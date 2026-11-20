@@ -607,6 +607,7 @@ command-retry-unchanged = 結果仍未知。你可以離開此頁，回來後原
 command-retry-price-changed = 價格已變動。再次操作前請查看拍品的目前價格。
 command-unknown-count = 結果未知的命令：{ $count } 筆
 command-memory-only = 這些記錄僅保留在目前分頁的記憶體中。重新整理或關閉頁面會清除記錄。
+command-reload-confirm = 重新整理會清除目前分頁內未完成的出價與代理操作記錄，以及尚未確認的回執。仍要重新整理嗎？
 command-create-proxy = 建立代理授權
 command-lot-unresolved = 此拍品有一筆結果未知的命令。開啟可查看處理選項。
 command-recovery-open = 檢視拍品 { $code } 的命令
@@ -647,6 +648,7 @@ watch-save-error = 標記儲存失敗，請先重新整理伺服器標記再重�
 watch-retry-command = 重試原儲存命令
 
 boot-error = 頁面發生錯誤，請重新整理頁面再試一次。
+page-load-failed = 此頁面載入失敗。
 stale-build-notice = 站點已更新。請重新整理此頁面以載入新版本；目前輸入不會被自動送出。
 stale-build-refresh = 重新整理頁面
 

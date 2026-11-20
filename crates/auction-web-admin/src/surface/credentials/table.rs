@@ -357,7 +357,11 @@ fn submit_credential(
             async move {
                 #[cfg(all(test, not(target_arch = "wasm32")))]
                 if let Some(reply) = try_consume_context::<tests::CredentialReply>() {
-                    return reply.0.fetch().await;
+                    return reply
+                        .0
+                        .fetch()
+                        .await
+                        .map_err(crate::api::AdminWriteFailure::outcome_unknown);
                 }
                 mutate_admin_credential(command_id, &credential, action, label, status).await
             }
@@ -392,7 +396,7 @@ fn sort_credentials(credentials: &mut [AdminCredential], column: &str, direction
 
 #[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
-mod tests {
+pub(super) mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -401,12 +405,14 @@ mod tests {
     use dioxus::core::{AttributeValue, Mutation};
     use dioxus::prelude::*;
     use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
+    use gloo_net::http::Method;
 
     use super::{CredentialRenameDialog, CredentialRow, submit_credential};
-    use crate::api::{AdminCredential, AdminCredentialPage};
+    use crate::api::{AdminApiFailure, AdminCredential, AdminCredentialPage};
     use crate::surface::ADMIN_LOCALE_CATALOG;
     use crate::surface::auctions::draft_page_tests::{
-        RecordRead, button, click_button, has_live_text, init_i18n, mount_writer, settle_writer,
+        RecordRead, button, click_button, command_button, has_live_text, init_i18n, mount_writer,
+        settle_writer,
     };
     use crate::surface::config::test_form::{dispatch, listener};
     use crate::surface::credentials::labels::CredentialFeedback;
@@ -415,11 +421,14 @@ mod tests {
     use crate::surface::pending::{
         PendingCommandHost, PendingCommandNotices, PendingCommands, use_pending_commands,
     };
+    use crate::surface::realtime::{submit_forms, text_attributes};
 
     #[derive(Clone)]
-    pub(super) struct CredentialReply(pub(super) Rc<RecordRead<AdminCredentialMutationResponse>>);
+    pub(in crate::surface::credentials) struct CredentialReply(
+        pub(in crate::surface::credentials) Rc<RecordRead<AdminCredentialMutationResponse>>,
+    );
 
-    fn credential() -> AdminCredential {
+    pub(in crate::surface::credentials) fn credential() -> AdminCredential {
         AdminCredential {
             id: "0f8fad5b-d9cb-469f-a165-70867728950e".to_owned(),
             kind: "mail_cookie".to_owned(),
@@ -485,6 +494,134 @@ mod tests {
         settle_writer(&mut dom);
         assert!(button(&dom, "启用").is_some());
         assert!(has_live_text(&dom, receipt));
+    }
+
+    #[test]
+    fn credential_action_keeps_its_entity_gate_while_an_import_is_unknown() {
+        let reads = Rc::new(RecordRead::<AdminCredentialPage>::new());
+        let writes = Rc::new(RecordRead::new());
+        let (mut view, mounted) = mount_writer({
+            let reads = reads.clone();
+            let writes = writes.clone();
+            move || {
+                init_i18n();
+                use_context_provider(|| reads.clone());
+                use_context_provider(|| CredentialReply(writes.clone()));
+                use_hook(|| {
+                    AdminApiFailure::stub_write_response(
+                        "/api/v1/admin/credentials",
+                        Method::POST,
+                        503,
+                        r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+                    );
+                });
+                let host = use_context::<PendingCommandHost>();
+                rsx! {
+                    PendingCommandNotices { host }
+                    {page()}
+                }
+            }
+        });
+        let projection = |credential| AdminCredentialPage {
+            credentials: vec![credential],
+            page: 1,
+            page_size: 10,
+            total: 1,
+            restart_required: true,
+        };
+        reads.respond(Ok(projection(credential())));
+        settle_writer(&mut view);
+
+        let form = submit_forms(&mounted).next().unwrap();
+        let label = listener(&mounted, "input");
+        let cookie =
+            text_attributes(&mounted, "id").find(|(_, id)| *id == "import-secret").unwrap().0;
+        view.dispatch("input", label, "新的凭据");
+        view.dispatch("input", cookie, "fake-test-cookie=second-placeholder");
+        view.dispatch("submit", form, "");
+        assert!(button(&view, "原样重试").is_some());
+
+        click_button(&mut view, "停用");
+        assert_eq!(writes.started(), 1);
+        let mut disabled = credential();
+        disabled.status = "disabled".to_owned();
+        disabled.state_version = 2;
+        writes.respond(Ok(AdminCredentialMutationResponse {
+            credential: disabled.clone(),
+            restart_required: true,
+        }));
+        settle_writer(&mut view);
+        assert_eq!(reads.started(), 2);
+        reads.respond(Ok(projection(disabled)));
+        settle_writer(&mut view);
+        assert!(button(&view, "启用").is_some_and(|(_, disabled)| !disabled));
+        assert!(button(&view, "原样重试").is_some());
+    }
+
+    #[test]
+    fn credential_rename_can_complete_while_import_is_unknown() {
+        let reads = Rc::new(RecordRead::<AdminCredentialPage>::new());
+        let writes = Rc::new(RecordRead::new());
+        let (mut view, mounted) = mount_writer({
+            let reads = reads.clone();
+            let writes = writes.clone();
+            move || {
+                init_i18n();
+                use_context_provider(|| reads.clone());
+                use_context_provider(|| CredentialReply(writes.clone()));
+                use_hook(|| {
+                    AdminApiFailure::stub_write_response(
+                        "/api/v1/admin/credentials",
+                        Method::POST,
+                        503,
+                        r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+                    );
+                });
+                let host = use_context::<PendingCommandHost>();
+                rsx! {
+                    PendingCommandNotices { host }
+                    {page()}
+                }
+            }
+        });
+        reads.respond(Ok(AdminCredentialPage {
+            credentials: vec![credential()],
+            page: 1,
+            page_size: 10,
+            total: 1,
+            restart_required: false,
+        }));
+        settle_writer(&mut view);
+        let form = submit_forms(&mounted).next().unwrap();
+        let cookie =
+            text_attributes(&mounted, "id").find(|(_, id)| *id == "import-secret").unwrap().0;
+        view.dispatch("input", listener(&mounted, "input"), "新的凭据");
+        view.dispatch("input", cookie, "fake-test-cookie=second-placeholder");
+        let submitted = view.dispatch("submit", form, "");
+        let import_id = text_attributes(&submitted, "data-command-id")
+            .next()
+            .unwrap()
+            .1
+            .parse::<uuid::Uuid>()
+            .unwrap();
+
+        let dialog = click_button(&mut view, "改名");
+        view.dispatch("input", listener(&dialog, "input"), "新标签");
+        view.dispatch("submit", submit_forms(&dialog).next().unwrap(), "");
+        assert_eq!(writes.started(), 1);
+        writes.respond(Ok(AdminCredentialMutationResponse {
+            credential: AdminCredential {
+                label: "新标签".to_owned(),
+                state_version: 2,
+                ..credential()
+            },
+            restart_required: true,
+        }));
+        settle_writer(&mut view);
+        assert_eq!(reads.started(), 2);
+        assert!(
+            command_button(&view, import_id, "原样重试").is_some_and(|(_, disabled)| !disabled)
+        );
     }
 
     #[test]

@@ -91,7 +91,10 @@ test("重复装备字段通过表单校验，再显示录入 API 拒绝", () =>
       expect(field.getAttribute("aria-invalid")).toBeNull();
       expect(field.getAttribute("aria-describedby")).toBe("auction-intake-json-hint");
       expect(add).toHaveBeenCalledTimes(1);
-      expect(await add.mock.results[0]?.value).toEqual({ ok: false, error: "invalid_request" });
+      expect(await add.mock.results[0]?.value).toEqual({
+        ok: false,
+        error: { kind: "not-sent", code: "invalid_request" },
+      });
       expect(page.hasText("请输入有效的规范装备 JSON 对象。")).toBe(false);
       const alerts = page.find(
         (node) => node.getAttribute("role") === "alert" && node.matches(".action-feedback--error"),

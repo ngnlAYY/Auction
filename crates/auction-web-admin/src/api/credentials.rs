@@ -1,6 +1,8 @@
 //! Admin 凭据管理 API 客户端。
-//! 浏览器只保存凭据安全投影。导入的密码/CK 仅留在当前表单与请求内存中，成功后清空，
-//! 未知结果只允许原样手动重试；列表和命令响应都不包含凭据内容。
+//! 导入的密码和 Cookie 随会话命令驻留内存，未知结果只允许原样手动重试。
+//! 列表和命令响应只包含凭据安全投影。
+
+use std::cell::{Cell, OnceCell};
 
 use auction_contracts::{
     AdminCredentialCheckRequest, AdminCredentialCreateRequest, AdminCredentialDeleteRequest,
@@ -12,13 +14,15 @@ pub(crate) use auction_contracts::{
     AdminCredentialDeleteResponse as AdminCredentialDeleteResult,
     AdminCredentialResponse as AdminCredential,
 };
-use gloo_net::http::Request;
+use gloo_net::http::{Method, Request};
 use uuid::Uuid;
 
+use super::AdminWriteFailure;
+use super::transport::WriteRequest;
 use super::{
     MAX_JSON_SAFE_INTEGER, fetch_csrf_token, invalid_request_error, invalid_response_error,
-    response_error, send_get, send_request, send_request_with_timeout, valid_admin_time,
-    valid_trimmed_text, valid_uuid,
+    response_error, send_get, send_request_with_timeout, valid_admin_time, valid_trimmed_text,
+    valid_uuid,
 };
 
 // 导入须容纳服务端 10 秒论坛获取及原子写入；不延长其他 API 请求，也不自动重试。
@@ -148,36 +152,99 @@ pub(crate) async fn fetch_admin_credentials(
         .map_err(invalid_response_error)
 }
 
-/// 导入一条凭据；来源由完整命令确定，密码/CK 不进入持久化状态或响应模型。
-pub(crate) async fn create_admin_credential(
-    command: AdminCredentialCreateRequest,
-) -> Result<AdminCredentialMutationResponse, String> {
-    let csrf_token = fetch_csrf_token().await?;
-    let response = send_request_with_timeout(
-        |abort_signal| {
-            Request::post("/api/v1/admin/credentials")
-                .abort_signal(abort_signal)
-                .header("x-csrf-token", &csrf_token)
-                .json(&command)
-                .map_err(invalid_request_error)
-        },
-        CREDENTIAL_IMPORT_TIMEOUT_MILLIS,
-    )
-    .await?;
-    if !response.ok() {
-        return Err(response_error(response).await);
+struct PreparedCredentialCreate {
+    body: String,
+    kind: String,
+    world: String,
+    label: String,
+    player_name: Option<String>,
+}
+
+struct CredentialCreatePreparation<F> {
+    request: Cell<Option<F>>,
+    prepared: OnceCell<Result<PreparedCredentialCreate, AdminWriteFailure>>,
+}
+
+impl<F: FnOnce(Uuid) -> AdminCredentialCreateRequest> CredentialCreatePreparation<F> {
+    fn new(request: F) -> Self {
+        Self { request: Cell::new(Some(request)), prepared: OnceCell::new() }
     }
+
+    fn prepare(&self, command_id: Uuid) -> Result<&PreparedCredentialCreate, AdminWriteFailure> {
+        self.prepared
+            .get_or_init(|| {
+                // 初次执行消费原输入，此后宿主只持有序列化正文及安全回执核对字段。
+                let request = self
+                    .request
+                    .take()
+                    .ok_or_else(|| AdminWriteFailure::not_sent("invalid_request"))?;
+                let command = request(command_id);
+                let body = serde_json::to_string(&command)
+                    .map_err(|error| AdminWriteFailure::not_sent(invalid_request_error(error)))?;
+                Ok(PreparedCredentialCreate {
+                    body,
+                    kind: command.kind,
+                    world: command.world,
+                    label: command.label,
+                    player_name: command.player_name,
+                })
+            })
+            .as_ref()
+            .map_err(Clone::clone)
+    }
+}
+
+/// 冻结导入输入，首次执行时用宿主分配的命令 ID 编码，重试复用原正文。
+pub(crate) fn create_admin_credential(
+    request: impl FnOnce(Uuid) -> AdminCredentialCreateRequest + 'static,
+) -> impl AsyncFn(Uuid) -> Result<AdminCredentialMutationResponse, AdminWriteFailure> + 'static {
+    let preparation = CredentialCreatePreparation::new(request);
+    async move |command_id| send_prepared_credential_create(preparation.prepare(command_id)?).await
+}
+
+async fn send_prepared_credential_create(
+    command: &PreparedCredentialCreate,
+) -> Result<AdminCredentialMutationResponse, AdminWriteFailure> {
+    let response = WriteRequest::general("/api/v1/admin/credentials", Method::POST)
+        .send_body_with_timeout(&command.body, CREDENTIAL_IMPORT_TIMEOUT_MILLIS)
+        .await?;
     let payload: ApiResponse<AdminCredentialMutationResponse> =
-        response.json().await.map_err(invalid_response_error)?;
-    let data = decode_credential_data(payload.data).map_err(invalid_response_error)?;
+        response.json().await.map_err(AdminWriteFailure::invalid_response)?;
+    validate_credential_create(command, payload.data)
+}
+
+fn validate_credential_create(
+    command: &PreparedCredentialCreate,
+    data: AdminCredentialMutationResponse,
+) -> Result<AdminCredentialMutationResponse, AdminWriteFailure> {
+    let data = decode_credential_data(data).map_err(AdminWriteFailure::invalid_response)?;
     if data.credential.kind != command.kind
         || data.credential.world != command.world
         || data.credential.label != command.label
         || data.credential.player_name != command.player_name
     {
-        return Err("invalid_response".to_owned());
+        return Err(AdminWriteFailure::outcome_unknown("invalid_response"));
     }
     Ok(data)
+}
+
+fn credential_mutation_request(
+    command_id: Uuid,
+    credential: &AdminCredential,
+    action: &str,
+    label: Option<String>,
+    status: Option<String>,
+) -> Result<AdminCredentialMutationRequest, AdminWriteFailure> {
+    let credential_id = Uuid::parse_str(&credential.id)
+        .map_err(|error| AdminWriteFailure::not_sent(invalid_request_error(error)))?;
+    Ok(AdminCredentialMutationRequest {
+        command_id,
+        credential_id,
+        expected_state_version: credential.state_version,
+        action: action.to_owned(),
+        label,
+        status,
+    })
 }
 
 /// 修改凭据标签或状态。
@@ -187,32 +254,22 @@ pub(crate) async fn mutate_admin_credential(
     action: &'static str,
     label: Option<String>,
     status: Option<String>,
-) -> Result<AdminCredentialMutationResponse, String> {
-    let credential_id =
-        Uuid::parse_str(&credential.id).map_err(|_| "invalid_request".to_owned())?;
-    let csrf_token = fetch_csrf_token().await?;
-    let command = AdminCredentialMutationRequest {
-        command_id,
-        credential_id,
-        expected_state_version: credential.state_version,
-        action: action.to_owned(),
-        label,
-        status,
-    };
-    let response = send_request(|abort_signal| {
-        Request::patch("/api/v1/admin/credentials")
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
-    .await?;
-    if !response.ok() {
-        return Err(response_error(response).await);
-    }
+) -> Result<AdminCredentialMutationResponse, AdminWriteFailure> {
+    let command = credential_mutation_request(command_id, credential, action, label, status)?;
+    let response = WriteRequest::general("/api/v1/admin/credentials", Method::PATCH)
+        .send_json(&command)
+        .await?;
     let payload: ApiResponse<AdminCredentialMutationResponse> =
-        response.json().await.map_err(invalid_response_error)?;
-    let data = decode_credential_data(payload.data).map_err(invalid_response_error)?;
+        response.json().await.map_err(AdminWriteFailure::invalid_response)?;
+    validate_credential_mutation(&command, credential, payload.data)
+}
+
+fn validate_credential_mutation(
+    command: &AdminCredentialMutationRequest,
+    credential: &AdminCredential,
+    data: AdminCredentialMutationResponse,
+) -> Result<AdminCredentialMutationResponse, AdminWriteFailure> {
+    let data = decode_credential_data(data).map_err(AdminWriteFailure::invalid_response)?;
     let updated = &data.credential;
     if updated.id != command.credential_id.to_string()
         || Some(updated.state_version) != command.expected_state_version.checked_add(1)
@@ -233,7 +290,7 @@ pub(crate) async fn mutate_admin_credential(
             _ => true,
         }
     {
-        return Err("invalid_response".to_owned());
+        return Err(AdminWriteFailure::outcome_unknown("invalid_response"));
     }
     Ok(data)
 }
@@ -242,34 +299,25 @@ pub(crate) async fn mutate_admin_credential(
 pub(crate) async fn delete_admin_credential(
     command_id: Uuid,
     credential: &AdminCredential,
-) -> Result<AdminCredentialDeleteResult, String> {
-    let credential_id =
-        Uuid::parse_str(&credential.id).map_err(|_| "invalid_request".to_owned())?;
-    let csrf_token = fetch_csrf_token().await?;
+) -> Result<AdminCredentialDeleteResult, AdminWriteFailure> {
+    let credential_id = Uuid::parse_str(&credential.id)
+        .map_err(|error| AdminWriteFailure::not_sent(invalid_request_error(error)))?;
     let command = AdminCredentialDeleteRequest {
         command_id,
         credential_id,
         expected_state_version: credential.state_version,
     };
-    let response = send_request(|abort_signal| {
-        Request::delete("/api/v1/admin/credentials")
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
-    .await?;
-    if !response.ok() {
-        return Err(response_error(response).await);
-    }
+    let response = WriteRequest::general("/api/v1/admin/credentials", Method::DELETE)
+        .send_json(&command)
+        .await?;
     let payload: ApiResponse<AdminCredentialDeleteResponse> =
-        response.json().await.map_err(invalid_response_error)?;
+        response.json().await.map_err(AdminWriteFailure::invalid_response)?;
     decode_credential_delete(
         payload.data,
         &command.credential_id.to_string(),
         command.expected_state_version,
     )
-    .map_err(invalid_response_error)
+    .map_err(AdminWriteFailure::invalid_response)
 }
 
 fn decode_credential_list(
@@ -357,13 +405,19 @@ fn decode_credential(value: AdminCredential) -> Result<AdminCredential, &'static
 
 #[cfg(test)]
 mod tests {
-    use auction_contracts::{AdminCredentialDeleteResponse, AdminCredentialMutationResponse};
+    use auction_contracts::{
+        AdminCredentialCreateRequest, AdminCredentialDeleteResponse, AdminCredentialLoginRequest,
+        AdminCredentialMutationRequest, AdminCredentialMutationResponse,
+    };
     use serde_json::{Value, json};
+    use uuid::Uuid;
 
     use super::{
-        AdminCredential, credential_check_timeout, decode_credential_check, decode_credential_data,
-        decode_credential_delete,
+        AdminCredential, CredentialCreatePreparation, credential_check_timeout,
+        credential_mutation_request, decode_credential_check, decode_credential_data,
+        decode_credential_delete, validate_credential_create, validate_credential_mutation,
     };
+    use crate::api::AdminWriteFailure;
 
     const CREDENTIAL_ID: &str = "11111111-1111-4111-8111-111111111111";
     const OBSERVED_AT: &str = "2026-11-18T00:00:00Z";
@@ -411,6 +465,168 @@ mod tests {
             let mut invalid = mutation;
             invalid.credential.status = "unknown".to_owned();
             assert!(decode_credential_data(invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn credential_rename_request_contains_only_the_expected_fields() {
+        let mut document = credential_document();
+        document["id"] = json!("0f8fad5b-d9cb-469f-a165-70867728950e");
+        document["state_version"] = json!(1);
+        let previous: AdminCredential = serde_json::from_value(document).unwrap();
+        let command_id = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
+        let request = credential_mutation_request(
+            command_id,
+            &previous,
+            "rename",
+            Some("新标签".to_owned()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            json!({
+                "action": "rename",
+                "command_id": command_id,
+                "credential_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+                "expected_state_version": 1,
+                "label": "新标签",
+                "status": null,
+            })
+        );
+    }
+
+    #[test]
+    fn credential_mutation_requires_matching_version_target_and_action_projection() {
+        let previous: AdminCredential = serde_json::from_value(credential_document()).unwrap();
+        for (action, label, status) in
+            [("rename", Some("New label"), None), ("set_status", None, Some("disabled"))]
+        {
+            let command = AdminCredentialMutationRequest {
+                command_id: Uuid::nil(),
+                credential_id: previous.id.parse().unwrap(),
+                expected_state_version: 7,
+                action: action.to_owned(),
+                label: label.map(str::to_owned),
+                status: status.map(str::to_owned),
+            };
+            let mut valid = credential_document();
+            valid["state_version"] = json!(8);
+            if let Some(label) = label {
+                valid["label"] = json!(label);
+            }
+            if let Some(status) = status {
+                valid["status"] = json!(status);
+            }
+            for (key, value) in [
+                ("state_version", json!(7)),
+                ("id", json!("22222222-2222-4222-8222-222222222222")),
+                ("label", json!("Different")),
+                ("status", json!("invalid")),
+            ] {
+                let mut mismatch = valid.clone();
+                mismatch[key] = value;
+                assert_eq!(
+                    validate_credential_mutation(&command, &previous, mutation_reply(mismatch)),
+                    Err(AdminWriteFailure::outcome_unknown("invalid_response")),
+                    "{action}: {key}",
+                );
+            }
+            assert_eq!(
+                validate_credential_mutation(&command, &previous, mutation_reply(valid.clone())),
+                Ok(mutation_reply(valid)),
+            );
+        }
+    }
+
+    fn mutation_reply(credential: Value) -> AdminCredentialMutationResponse {
+        serde_json::from_value(json!({ "credential": credential, "restart_required": true }))
+            .unwrap()
+    }
+
+    fn import_request(command_id: Uuid, forum: bool) -> AdminCredentialCreateRequest {
+        AdminCredentialCreateRequest {
+            command_id,
+            kind: if forum { "forum_cookie" } else { "mail_cookie" }.to_owned(),
+            world: if forum { "shared" } else { "main" }.to_owned(),
+            label: "测试凭据".to_owned(),
+            player_name: None,
+            secret: if forum { String::new() } else { "fake-test-cookie=placeholder".to_owned() },
+            login: forum.then(|| AdminCredentialLoginRequest {
+                username: "fake-test-forum-account".to_owned(),
+                password: "fake-test-forum-password".to_owned(),
+            }),
+        }
+    }
+
+    #[test]
+    fn credential_create_requires_matching_kind_world_and_player_name() {
+        let preparation = CredentialCreatePreparation::new(|id| import_request(id, false));
+        let command = preparation.prepare(Uuid::nil()).unwrap();
+        let mut mail = credential_document();
+        mail["world"] = json!("main");
+        mail["label"] = json!("测试凭据");
+        mail["status"] = json!("disabled");
+        mail["state_version"] = json!(1);
+        for (key, value) in [
+            ("kind", json!("forum_cookie")),
+            ("world", json!("isekai")),
+            ("player_name", json!("Other Player")),
+        ] {
+            let mut mismatch = mail.clone();
+            mismatch[key] = value;
+            assert_eq!(
+                validate_credential_create(command, mutation_reply(mismatch)),
+                Err(AdminWriteFailure::outcome_unknown("invalid_response")),
+                "{key}",
+            );
+        }
+        assert_eq!(
+            validate_credential_create(command, mutation_reply(mail.clone())),
+            Ok(mutation_reply(mail.clone())),
+        );
+
+        let forum = CredentialCreatePreparation::new(|id| import_request(id, true));
+        mail["kind"] = json!("forum_cookie");
+        mail["world"] = json!("shared");
+        assert_eq!(
+            validate_credential_create(
+                forum.prepare(Uuid::nil()).unwrap(),
+                mutation_reply(mail.clone())
+            ),
+            Ok(mutation_reply(mail)),
+        );
+    }
+
+    #[test]
+    fn credential_create_reuses_the_same_prepared_object_for_either_source() {
+        for forum in [false, true] {
+            let command_id = Uuid::from_u128(1);
+            let preparation = CredentialCreatePreparation::new(|id| import_request(id, forum));
+            let first = preparation.prepare(command_id).unwrap();
+            let body = serde_json::to_string(&import_request(command_id, forum)).unwrap();
+            assert!(first.body == body);
+            assert!(std::ptr::eq(first, preparation.prepare(command_id).unwrap()));
+        }
+    }
+
+    #[test]
+    fn credential_deletion_requires_matching_target_and_frozen_version() {
+        for (credential_id, state_version, matches) in [
+            (CREDENTIAL_ID, 8, true),
+            (CREDENTIAL_ID, 7, false),
+            ("22222222-2222-4222-8222-222222222222", 8, false),
+        ] {
+            let payload = json!({
+                "credential_id": credential_id,
+                "state_version": state_version,
+                "restart_required": true,
+            });
+            let reply: AdminCredentialDeleteResponse = serde_json::from_value(payload).unwrap();
+            assert_eq!(
+                decode_credential_delete(reply.clone(), CREDENTIAL_ID, 7),
+                if matches { Ok(reply) } else { Err("credential_delete") },
+            );
         }
     }
 

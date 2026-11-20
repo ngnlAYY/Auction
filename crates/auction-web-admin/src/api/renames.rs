@@ -6,16 +6,17 @@ pub(crate) use auction_contracts::AdminRenameResponse as AdminRename;
 use auction_contracts::{
     AdminRenameListResponse, AdminRenamePaginationResponse, AdminRenameRevertRequest, ApiResponse,
 };
-use gloo_net::http::Request;
+use gloo_net::http::Method;
 use serde::Deserialize;
 use uuid::Uuid;
 
+use super::AdminWriteFailure;
 use super::failure::AdminWriteEndpoint;
-use super::users::decode_user_mutation;
+use super::transport::WriteRequest;
+use super::users::{decode_user_mutation, matches_user_mutation_target};
 use super::{
-    AdminApiFailure, AdminUser, MAX_JSON_SAFE_INTEGER, invalid_request_error,
-    invalid_response_error, response_error, send_get, valid_admin_time, valid_trimmed_text,
-    valid_uuid,
+    AdminUser, MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error,
+    response_error, send_get, valid_admin_time, valid_trimmed_text, valid_uuid,
 };
 
 /// 改名命令准备阶段读取历史的固定数量；可见列表数量由页面显式传入。
@@ -107,6 +108,7 @@ pub(crate) async fn fetch_admin_renames(
 pub(crate) struct AdminRenameRevertCommand {
     rename_id: Uuid,
     user_id: Uuid,
+    previous_username: String,
     request: AdminRenameRevertRequest,
 }
 
@@ -114,17 +116,20 @@ pub(crate) struct AdminRenameRevertCommand {
 pub(crate) async fn prepare_admin_rename_revert(
     command_id: Uuid,
     rename: &AdminRename,
-) -> Result<AdminRenameRevertCommand, String> {
-    let rename_id = Uuid::parse_str(&rename.id).map_err(|_| "invalid_request".to_owned())?;
-    let user_id = Uuid::parse_str(&rename.user_id).map_err(|_| "invalid_request".to_owned())?;
+) -> Result<AdminRenameRevertCommand, AdminWriteFailure> {
+    let rename_id = Uuid::parse_str(&rename.id)
+        .map_err(|error| AdminWriteFailure::not_sent(invalid_request_error(error)))?;
+    let user_id = Uuid::parse_str(&rename.user_id)
+        .map_err(|error| AdminWriteFailure::not_sent(invalid_request_error(error)))?;
     if command_id.is_nil() || rename_id.is_nil() || user_id.is_nil() {
-        return Err("invalid_request".to_owned());
+        return Err(AdminWriteFailure::not_sent("invalid_request"));
     }
     let history = fetch_admin_renames(user_id.to_string(), String::new(), 1, TABLE_PAGE_SIZE).await;
     let expected_state_version = prepare_revert_version(history)?;
     Ok(AdminRenameRevertCommand {
         rename_id,
         user_id,
+        previous_username: rename.previous_username.clone(),
         request: AdminRenameRevertRequest {
             command_id: command_id.to_string(),
             expected_state_version,
@@ -132,9 +137,11 @@ pub(crate) async fn prepare_admin_rename_revert(
     })
 }
 
-fn prepare_revert_version(history: Result<AdminRenamePage, String>) -> Result<i64, String> {
+fn prepare_revert_version(
+    history: Result<AdminRenamePage, String>,
+) -> Result<i64, AdminWriteFailure> {
     // 此阶段只有读取；写入尚未发出。准备成功后冻结版本，重试必须沿用同一命令 ID 与请求体。
-    let history = history.map_err(|code| AdminApiFailure::not_sent_code(&code))?;
+    let history = history.map_err(AdminWriteFailure::not_sent)?;
     // 每行的版本来自同一次事务中 JOIN 的当前用户；任一改名行都能提供该用户的版本。
     history
         .renames
@@ -143,34 +150,26 @@ fn prepare_revert_version(history: Result<AdminRenamePage, String>) -> Result<i6
         .filter(|version| {
             *version > 0 && history.renames.iter().all(|row| row.user_state_version == *version)
         })
-        .ok_or_else(|| AdminApiFailure::not_sent_code("invalid_response"))
+        .ok_or_else(|| AdminWriteFailure::not_sent("invalid_response"))
 }
 
 /// 发送已冻结的回滚命令；响应丢失后的重试直接进入服务端命令账本重放。
 pub(crate) async fn revert_admin_rename(
     command: &AdminRenameRevertCommand,
-) -> Result<AdminUser, String> {
-    let csrf_token = super::fetch_csrf_token().await?;
+) -> Result<AdminUser, AdminWriteFailure> {
     let url = format!("/api/v1/admin/renames/{}/revert", command.rename_id);
-    let response = super::send_request(|abort_signal| {
-        Request::post(&url)
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command.request)
-            .map_err(invalid_request_error)
-    })
-    .await?;
-    if !response.ok() {
-        return Err(super::response_failure(response)
-            .await
-            .at_write_endpoint(AdminWriteEndpoint::RenameRevert)
-            .code);
-    }
+    let response = WriteRequest::new(&url, Method::POST, AdminWriteEndpoint::RenameRevert)
+        .send_json(&command.request)
+        .await?;
     let user = decode_user_mutation(response, false).await?.user;
-    if user.id != command.user_id.to_string()
-        || Some(user.state_version) != command.request.expected_state_version.checked_add(1)
+    if user.username != command.previous_username
+        || !matches_user_mutation_target(
+            &user,
+            &command.user_id.to_string(),
+            command.request.expected_state_version,
+        )
     {
-        return Err("invalid_response".to_owned());
+        return Err(AdminWriteFailure::invalid_response("rename_revert_receipt"));
     }
     Ok(user)
 }
@@ -243,7 +242,7 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{AdminRenamePage, StrictRenameList, decode_rename_list, prepare_revert_version};
-    use crate::api::AdminApiFailure;
+    use crate::api::{AdminApiFailure, Rejection};
 
     fn rename() -> Value {
         json!({
@@ -289,8 +288,8 @@ mod tests {
 
         for code in ["network_error", "request_timeout", "invalid_response", "http_503"] {
             let failure = prepare_revert_version(Err(code.to_owned())).unwrap_err();
-            assert!(AdminApiFailure::definite_rejection(&failure));
-            assert_eq!(AdminApiFailure::display_code(&failure), code);
+            assert!(matches!(failure.classify(), Rejection::ThisAttempt));
+            assert_eq!(failure.display_code(), code);
             assert!(!AdminApiFailure::definite_rejection(code));
         }
 
@@ -302,10 +301,75 @@ mod tests {
         let empty = AdminRenamePage { renames: Vec::new(), total: 0, ..history };
         for history in [missing_version, inconsistent, empty] {
             let failure = prepare_revert_version(Ok(history)).unwrap_err();
-            assert!(AdminApiFailure::definite_rejection(&failure));
-            assert_eq!(AdminApiFailure::display_code(&failure), "invalid_response");
+            assert!(matches!(failure.classify(), Rejection::ThisAttempt));
+            assert_eq!(failure.display_code(), "invalid_response");
         }
     }
+    #[test]
+    fn rename_history_conflict_only_rejects_this_attempt() {
+        let body = r#"{"code":"rename_not_revertable","message":"无法回滚","data":null,"request_id":null}"#;
+        let history = AdminApiFailure::from_http_body(409, body);
+        let failure = prepare_revert_version(Err(history.code)).unwrap_err();
+        assert!(matches!(failure.classify(), Rejection::ThisAttempt));
+        assert_eq!(failure.display_code(), "rename_not_revertable");
+        assert_eq!(failure.observed_response_status(), None);
+    }
+
+    #[test]
+    fn rename_post_replays_only_a_verified_rename_rejection() {
+        use std::future::Future;
+        use std::pin::pin;
+        use std::task::{Context, Poll, Waker};
+
+        use auction_contracts::AdminRenameRevertRequest;
+        use dioxus::prelude::{ScopeId, VNode, VirtualDom};
+        use gloo_net::http::Method;
+        use uuid::Uuid;
+
+        use super::{AdminRenameRevertCommand, revert_admin_rename};
+
+        let command = AdminRenameRevertCommand {
+            rename_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+            user_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
+            previous_username: "before".to_owned(),
+            request: AdminRenameRevertRequest {
+                command_id: "00000000-0000-4000-8000-000000000003".to_owned(),
+                expected_state_version: 3,
+            },
+        };
+        for (body, rejection, code) in [
+            (
+                r#"{"code":"rename_not_revertable","message":"无法回滚","data":null,"request_id":null}"#,
+                Rejection::ReplayChecked,
+                "rename_not_revertable",
+            ),
+            (
+                r#"{"code":"state_conflict","message":"拒绝","data":null,"request_id":null}"#,
+                Rejection::Unknown,
+                "state_conflict",
+            ),
+        ] {
+            let mut dom = VirtualDom::new(VNode::empty);
+            dom.rebuild_in_place();
+            dom.in_scope(ScopeId::APP, || {
+                AdminApiFailure::stub_write_response(
+                    "/api/v1/admin/renames/00000000-0000-4000-8000-000000000001/revert",
+                    Method::POST,
+                    409,
+                    body,
+                );
+                let mut request = pin!(revert_admin_rename(&command));
+                let Poll::Ready(Err(failure)) =
+                    request.as_mut().poll(&mut Context::from_waker(Waker::noop()))
+                else {
+                    panic!("回滚 POST 应经传输替身返回拒绝回执");
+                };
+                assert!(failure.classify() == rejection, "{failure:?}");
+                assert_eq!(failure.display_code(), code);
+            });
+        }
+    }
+
     #[test]
     fn rename_list_contract_fixtures() {
         use auction_contracts::ApiResponse;

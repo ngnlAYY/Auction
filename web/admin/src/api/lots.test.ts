@@ -17,6 +17,42 @@ import {
 } from "./auction-contract-fixture.test";
 import { fetchAdminLots, prepareAdminLotUpdateOnce, updateAdminLot } from "./lots";
 
+test("lot_update_receipt_delivers_only_the_matching_lot", async () => {
+  const body = fixtureText("lot-update-command");
+  const payload = checkedFixture(body, AdminLotUpdateResponseSchema, "/data/lot/state_version");
+  const { lot } = payload.data;
+  const request = [
+    "PATCH",
+    `/api/v1/admin/lots/${lot.id}`,
+    `{"command_id":"${COMMAND_ID}","expected_state_version":1,"action":"set_start_price","start_price":2000}`,
+  ] as const;
+  for (const id of [lot.id, "00000000-0000-4000-8000-000000000024"]) {
+    const result = await requestFixture(
+      [
+        SESSION_REPLY,
+        { status: 200, body: JSON.stringify({ ...payload, data: { lot: { ...lot, id } } }) },
+      ],
+      [SESSION_REQUEST, request],
+      (host, signal) =>
+        updateAdminLot(
+          host,
+          lot.id,
+          COMMAND_ID,
+          prepareAdminLotUpdateOnce(1, "set_start_price", 2000),
+          signal,
+        ),
+    );
+    expect(result).toEqual(
+      id === lot.id
+        ? { ok: true, value: lot }
+        : {
+            ok: false,
+            error: { kind: "outcome-unknown", code: "invalid_response", responseStatus: null },
+          },
+    );
+  }
+});
+
 test("lot_contract_fixtures", async () => {
   for (const [name, page, size, count] of [
     ["lots", 1, 50, 1],

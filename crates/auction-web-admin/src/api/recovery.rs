@@ -12,12 +12,13 @@ use auction_contracts::{
     AdminRecoveryConfirmationRequest, AdminRecoveryConfirmationResponse,
     AdminRecoveryConfirmationResultResponse as AdminRecoveryConfirmationResult, ApiResponse,
 };
-use gloo_net::http::Request;
+use gloo_net::http::Method;
 use uuid::Uuid;
 
+use super::AdminWriteFailure;
+use super::transport::WriteRequest;
 use super::{
-    AdminApiFailure, fetch_csrf_token, invalid_request_error, invalid_response_error,
-    response_error, response_failure, send_get, send_request, valid_admin_time, valid_trimmed_text,
+    invalid_response_error, response_error, send_get, valid_admin_time, valid_trimmed_text,
     valid_uuid,
 };
 
@@ -49,8 +50,7 @@ pub(crate) async fn confirm_admin_recovery(
     expected_state_version: i64,
     action: String,
     reason: String,
-) -> Result<AdminRecoveryConfirmationResult, AdminApiFailure> {
-    let csrf_token = fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
+) -> Result<AdminRecoveryConfirmationResult, AdminWriteFailure> {
     let url = format!("/api/v1/admin/recoveries/{recovery_id}/confirm");
     let command = AdminRecoveryConfirmationRequest {
         command_id: command_id.to_string(),
@@ -58,28 +58,13 @@ pub(crate) async fn confirm_admin_recovery(
         action: action.clone(),
         reason,
     };
-    let response = send_request(|abort_signal| {
-        Request::post(&url)
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
-    .await
-    .map_err(AdminApiFailure::client)?;
-    if !response.ok() {
-        return Err(response_failure(response).await);
-    }
-    let payload: ApiResponse<AdminRecoveryConfirmationResponse> = response
-        .json()
-        .await
-        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
+    let response = WriteRequest::general(&url, Method::POST).send_json(&command).await?;
+    let payload: ApiResponse<AdminRecoveryConfirmationResponse> =
+        response.json().await.map_err(AdminWriteFailure::invalid_response)?;
     let recovery = payload.data.recovery;
     validate_recovery_confirmation(&recovery, &recovery_id, &action, expected_state_version)
         .then_some(recovery)
-        .ok_or_else(|| {
-            AdminApiFailure::client(invalid_response_error("recovery confirmation 无效"))
-        })
+        .ok_or_else(|| AdminWriteFailure::invalid_response("recovery confirmation 无效"))
 }
 
 /// 恢复旧浏览器的严格 report 语义；服务端 mapper 正常不代表 wire 漂移可以被静默接受。

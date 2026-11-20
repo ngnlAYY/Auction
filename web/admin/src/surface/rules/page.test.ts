@@ -3,7 +3,7 @@
 import { expect, test } from "bun:test";
 import { parseJson } from "@auction/web-shared/net/wire";
 import type { Reply } from "../../api/api-request-fixture";
-import { SESSION_REPLY, success } from "../../api/auction-contract-fixture.test";
+import { fixtureText, SESSION_REPLY, success } from "../../api/auction-contract-fixture.test";
 import { jsonObject } from "../../api/json-fixture";
 import type { AdminDocumentKind, AdminRules } from "../../api/rules";
 import { loadRenderModule } from "../../solid-render-fixture.test";
@@ -11,10 +11,11 @@ import {
   click,
   okReply,
   type PageRequest,
+  submit,
   textParts,
   withPage,
 } from "../browser-page-fixture.test";
-import { createComponent, settle } from "../solid-dom-fixture";
+import { createComponent, required, settle } from "../solid-dom-fixture";
 
 async function checkPublicationRead(kind: AdminDocumentKind, remount: boolean): Promise<void> {
   const { DocumentHarness } = await loadRenderModule<
@@ -124,5 +125,82 @@ test("about_reloads_after_returning_before_publication_settles", () =>
 test("publication_receipts_survive_a_failed_read_for_both_document_kinds", async () => {
   for (const kind of ["rules", "about"] as const) {
     await checkPublicationRead(kind, false);
+  }
+});
+
+test("only_a_verified_publication_conflict_settles_rules_and_about", async () => {
+  const { DocumentHarness } = await loadRenderModule<
+    Pick<typeof import("./document-fixture"), "DocumentHarness">
+  >(new URL("./document-fixture.tsx", import.meta.url).pathname, "DocumentHarness");
+  const conflict = fixtureText("error-document-state-conflict");
+  for (const kind of ["rules", "about"] as const) {
+    const endpoint = `/api/v1/admin/${kind}`;
+    const writes: string[] = [];
+    const previews: string[] = [];
+    await withPage(
+      `/${kind}`,
+      () => createComponent(DocumentHarness, { kind }),
+      ({ method, url, body }) => {
+        if (url.pathname === "/api/v1/admin/session") return SESSION_REPLY;
+        expect(url.pathname).toBe(endpoint);
+        if (method === "GET") {
+          expect(url.search).toBe("?lang=en");
+          return okReply({
+            locale: "en",
+            title: "原始标题",
+            markdown: "原始正文",
+            published_by: "operator",
+            published_at: "2026-11-18T00:00:00Z",
+            revision: 1,
+          });
+        }
+        if (method === "POST") {
+          previews.push(body);
+          return { status: 409, body: conflict };
+        }
+        expect(method).toBe("PUT");
+        writes.push(body);
+        switch (writes.length) {
+          case 1:
+            return {
+              status: 503,
+              body: '{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}',
+            };
+          case 2:
+            return { status: 429, body: conflict };
+          case 3:
+            return { status: 409, body: conflict };
+          default:
+            throw new Error("额外的文档发布");
+        }
+      },
+      async ({ document }) => {
+        const texts = () => textParts(document.roots);
+        await click(document, "准备已校验草稿");
+        await submit(required(document.querySelector("form"), "文档校验表单"));
+        expect(previews.map((body) => success(parseJson(body)))).toEqual([
+          { locale: "en", title: "新标题", markdown: "新正文" },
+        ]);
+        expect(writes).toEqual([]);
+        expect(texts()).not.toContain("原样重试");
+
+        await click(document, "准备已校验草稿");
+        await click(document, "保存并发布");
+        expect(texts()).toContain("原样重试");
+        await click(document, "原样重试");
+        expect(texts()).toContain("原样重试");
+        await click(document, "原样重试");
+        expect(texts()).not.toContain("原样重试");
+        expect(writes).toHaveLength(3);
+        expect(new Set(writes).size).toBe(1);
+        expect(JSON.parse(writes[0] ?? "")).toEqual({
+          command_id: expect.stringMatching(/^[\da-f-]{36}$/u),
+          expected_revision: 1,
+          locale: "en",
+          title: "新标题",
+          markdown: "新正文",
+        });
+      },
+    );
   }
 });

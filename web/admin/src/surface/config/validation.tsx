@@ -6,8 +6,9 @@ import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { unreachable } from "@auction/web-shared/result";
 import { t, useLocaleSession } from "@auction/web-shared/ui/i18n";
+import type { LocaleCode } from "@auction/web-shared/ui/i18n/catalog";
 import type { JSX } from "@solidjs/web";
-import { createContext, createEffect, For, onSettled } from "solid-js";
+import { createContext, createEffect, createMemo, For, onSettled } from "solid-js";
 
 import { trimRustWhitespace } from "../../api/session-time";
 import {
@@ -187,31 +188,45 @@ function visitNumberControls(
   }
 }
 
-function currentNumberLabel(path: string): string | null {
+function currentNumberLabel(path: string): ControlLabelParts | null {
   if (typeof document === "undefined") {
     return null;
   }
   const field = document.getElementById(fieldId(path));
-  return field === null ? null : controlLabel(field, path);
+  return field === null ? null : readControlLabel(field, path);
 }
 
 /** 将所属分组带入字段名称，避免多个“启用”或“超时”在摘要和变更清单里无法区分。 */
 export function controlLabel(field: Element, path: string): string {
-  let label = field.getAttribute("data-runtime-label") ?? path;
+  return formatControlLabel(readControlLabel(field, path));
+}
+
+interface ControlLabelParts {
+  readonly label: string;
+  readonly groups: readonly string[];
+}
+
+function readControlLabel(field: Element, path: string): ControlLabelParts {
+  const label = field.getAttribute("data-runtime-label") ?? path;
+  const groups: string[] = [];
   let ancestor = field.parentElement;
   while (ancestor !== null) {
     if (matchesRuntimeGroup(ancestor)) {
       const title = queryGroupTitle(ancestor);
       if (title !== null) {
-        label = t("admin-runtime-field-context", {
-          context: trimRustWhitespace(title),
-          field: label,
-        });
+        groups.push(trimRustWhitespace(title));
       }
     }
     ancestor = ancestor.parentElement;
   }
-  return label;
+  return { label, groups };
+}
+
+function formatControlLabel(parts: ControlLabelParts): string {
+  return parts.groups.reduce(
+    (field, context) => t("admin-runtime-field-context", { context, field }),
+    parts.label,
+  );
 }
 
 function matchesRuntimeGroup(element: Element): boolean {
@@ -262,26 +277,43 @@ export function focusSummary(): void {
 /** 字段错误摘要；渲染后聚焦摘要节点，链接触发字段聚焦。 */
 export function ErrorSummary(props: { readonly issues: readonly FieldIssue[] }): JSX.Element {
   const locale = useLocaleSession();
-  const numbers = createCell<ReadonlyMap<string, NumberCacheEntry>>(new Map());
-  // 列表与语言都参与依赖：apply 阶段只读 DOM 与译文，不会自己订阅后续变化。
+  const numberLabels = createCell<NumberLabelSnapshot | null>(null);
+  // 语言变化后等待控件与祖先标题更新，再从 DOM 读取实际名称。
   const dependency = createValueMemo(() => ({
     issues: props.issues,
     language: locale.current(),
   }));
   createEffect(dependency, (snapshot) => {
-    // 控件与祖先标题先完成语言更新，再读取实际显示的层级名称与同语种的错误正文。
-    const next = new Map<string, NumberCacheEntry>();
+    const entries = [];
     for (const issue of snapshot.issues) {
       if (issue.kind.kind !== "number") {
         continue;
       }
-      const label = currentNumberLabel(issue.path);
-      next.set(issue.path, { kind: issue.kind, text: fieldIssueText(issue, label) });
+      entries.push({ issue, label: currentNumberLabel(issue.path) });
     }
-    if (!structuralEquals(numbers.peek(), next)) {
-      numbers.set(next);
+    const next = { language: snapshot.language, entries };
+    if (!structuralEquals(numberLabels.peek(), next)) {
+      numberLabels.set(next);
     }
   });
+  const numbers = createMemo<ReadonlyMap<string, NumberCacheEntry>>(
+    (previous) => {
+      const snapshot = numberLabels();
+      // 等当前语言的 DOM 快照到齐再格式化，避免新译文拼接旧字段名。
+      if (snapshot === null || snapshot.language !== locale.current()) {
+        return previous ?? new Map();
+      }
+      const formatted = new Map<string, NumberCacheEntry>();
+      for (const { issue, label } of snapshot.entries) {
+        formatted.set(issue.path, {
+          kind: issue.kind,
+          text: fieldIssueText(issue, label === null ? null : formatControlLabel(label)),
+        });
+      }
+      return formatted;
+    },
+    { equals: structuralEquals },
+  );
   const rows = createValueMemo((): readonly ErrorRow[] => {
     const cachedNumbers = numbers();
     return props.issues.map((issue) => {
@@ -323,6 +355,14 @@ export function ErrorSummary(props: { readonly issues: readonly FieldIssue[] }):
       </ul>
     </section>
   );
+}
+
+interface NumberLabelSnapshot {
+  readonly language: LocaleCode;
+  readonly entries: readonly {
+    readonly issue: FieldIssue;
+    readonly label: ControlLabelParts | null;
+  }[];
 }
 
 interface NumberCacheEntry {

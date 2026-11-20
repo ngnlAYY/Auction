@@ -25,11 +25,12 @@ import { decode } from "@auction/contracts/wire";
 import { err, ok, type Result } from "@auction/web-shared/result";
 
 import {
-  type AdminApiFailure,
-  adminApiFailureClient,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   decodeAdminReceipt,
   invalidResponseError,
   responseError,
+  writeOutcomeUnknown,
 } from "./failure";
 import {
   acceptedPollers,
@@ -223,7 +224,7 @@ export function prepareMailPauseCommand(
   mailboxKey: string,
   expectedStateVersion: number,
   paused: boolean,
-): (commandId: string) => Result<PreparedMailPauseCommand, AdminApiFailure> {
+): (commandId: string) => Result<PreparedMailPauseCommand, AdminWriteNotSent> {
   const parameters: AdminMailPauseCommand = Object.freeze({
     mailboxKey,
     expectedStateVersion,
@@ -252,11 +253,10 @@ export async function setMailPaused(
   host: AdminSessionHost,
   prepared: PreparedMailPauseCommand,
   signal: AbortSignal,
-): Promise<Result<AdminMailPolling, AdminApiFailure>> {
+): Promise<Result<AdminMailPolling, AdminWriteFailure>> {
   const response = await sendPreparedJsonWrite(
     host,
-    "/api/v1/admin/mail/polling",
-    "PUT",
+    { url: "/api/v1/admin/mail/polling", method: "PUT", endpoint: "general" },
     prepared.body,
     signal,
   );
@@ -269,11 +269,11 @@ export async function setMailPaused(
     ADMIN_MAIL_RECEIPT_FIELD_POLICY,
   );
   if (!payload.ok) {
-    return err(adminApiFailureClient(payload.error));
+    return err(writeOutcomeUnknown(payload.error));
   }
   const updated = decodeMailState(payload.value.data);
   if (!updated.ok) {
-    return err(adminApiFailureClient(invalidResponseError(updated.error)));
+    return err(writeOutcomeUnknown(invalidResponseError(updated.error)));
   }
   const command = prepared.command;
   if (
@@ -281,7 +281,7 @@ export async function setMailPaused(
     updated.value.paused !== command.paused ||
     updated.value.state_version !== command.expectedStateVersion + 1
   ) {
-    return err(adminApiFailureClient("invalid_response"));
+    return err(writeOutcomeUnknown("invalid_response"));
   }
   return ok(updated.value);
 }
@@ -295,7 +295,7 @@ export interface PreparedMailPollTriggerCommand {
 /** 冻结立即轮询命令；执行体第一次运行时才结合 command ID 生成并缓存正文。 */
 export function prepareMailPollTriggerCommand(): (
   commandId: string,
-) => Result<PreparedMailPollTriggerCommand, AdminApiFailure> {
+) => Result<PreparedMailPollTriggerCommand, AdminWriteNotSent> {
   const prepare = prepareJsonCommandOnce((commandId) => {
     const command: AdminMailPollTriggerRequest = { command_id: commandId };
     return command;
@@ -314,11 +314,10 @@ export async function triggerMailPoll(
   host: AdminSessionHost,
   prepared: PreparedMailPollTriggerCommand,
   signal: AbortSignal,
-): Promise<Result<number, AdminApiFailure>> {
+): Promise<Result<number, AdminWriteFailure>> {
   const response = await sendPreparedJsonWrite(
     host,
-    "/api/v1/admin/mail/polls:trigger",
-    "POST",
+    { url: "/api/v1/admin/mail/polls:trigger", method: "POST", endpoint: "general" },
     prepared.body,
     signal,
   );
@@ -327,7 +326,7 @@ export async function triggerMailPoll(
   }
   const received = response.value;
   if (received.status !== 202) {
-    return err(adminApiFailureClient(invalidResponseError("mail_poll_trigger_status")));
+    return err(writeOutcomeUnknown(invalidResponseError("mail_poll_trigger_status")));
   }
   const payload = decodeAdminReceipt(
     received,
@@ -335,11 +334,11 @@ export async function triggerMailPoll(
     ADMIN_MAIL_RECEIPT_FIELD_POLICY,
   );
   if (!payload.ok) {
-    return err(adminApiFailureClient(payload.error));
+    return err(writeOutcomeUnknown(payload.error));
   }
   const pollers = acceptedPollers(payload.value, prepared.commandId);
   if (pollers === null) {
-    return err(adminApiFailureClient(invalidResponseError("mail_poll_trigger_receipt")));
+    return err(writeOutcomeUnknown(invalidResponseError("mail_poll_trigger_receipt")));
   }
   return ok(pollers);
 }

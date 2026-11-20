@@ -42,6 +42,7 @@ export interface AlertsPageFixture {
 export async function withAlertsPage(
   run: (page: AlertsPageFixture) => Promise<void>,
   respondToWrite?: (request: RecordedRequest) => Reply,
+  respondToSession?: () => Reply,
 ): Promise<void> {
   const { page: Page } = await loadRenderModule<typeof import("./index")>(
     new URL("./index.tsx", import.meta.url).pathname,
@@ -119,7 +120,7 @@ export async function withAlertsPage(
     data.total = status === "resolved" ? 0 : 1;
     data.alerts = status === "resolved" ? [] : [first];
     return { body: JSON.stringify(body) };
-  });
+  }, respondToSession);
   try {
     await withT11AdminPage("/alerts", Page, async ({ tree, document, navigate }) => {
       await run({

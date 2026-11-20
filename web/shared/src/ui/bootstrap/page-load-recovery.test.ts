@@ -155,3 +155,18 @@ test("会话存储不能写入时停止重载", () => {
   expect(recoverIn(tab)).toBe(false);
   expect(tab.location.reload).not.toHaveBeenCalled();
 });
+
+test("防循环标记写入成功后自动重载抛错，返回失败", () => {
+  const tab = recoveryTab(ROUTE_PATH, memoryStorage());
+  let markAtReload: string | null = null;
+  tab.location.reload.mockImplementation(() => {
+    markAtReload = tab.sessionStorage.getItem(MARK_KEY);
+    throw new Error("拒绝自动重载");
+  });
+
+  const reloading = recoverIn(tab);
+
+  expect(tab.location.reload).toHaveBeenCalledTimes(1);
+  expect(markAtReload).toMatch(/^\[\{"path":"\/bidlog","at":\d+\}\]$/);
+  expect(reloading).toBe(false);
+});

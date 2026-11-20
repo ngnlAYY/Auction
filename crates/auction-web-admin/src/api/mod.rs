@@ -55,14 +55,17 @@ pub(crate) use dashboard::{
 #[cfg(test)]
 pub(crate) use delivery::DeliveryDetailGetFixture;
 pub(crate) use delivery::{
-    DeliveryAction, DeliverySearchFilters, SentProofCommand, acknowledge_delivery,
-    confirm_delivery_sent_proof, execute_delivery, fetch_deliveries, fetch_delivery_detail,
-    fetch_player_support, preview_delivery_sent_proof, valid_status,
+    DeliveryAction, DeliverySearchFilters, MAX_PLAYER_SUPPORT_USER_BYTES, SentProofCommand,
+    acknowledge_delivery, confirm_delivery_sent_proof, execute_delivery, fetch_deliveries,
+    fetch_delivery_detail, fetch_player_support, player_support_user_too_long,
+    preview_delivery_sent_proof, valid_status,
 };
 pub(crate) use failure::{
-    AdminApiFailure, invalid_request_error, invalid_response_error, response_error,
-    response_failure,
+    AdminApiFailure, AdminWriteFailure, Rejection, invalid_request_error, invalid_response_error,
+    response_error, response_failure, return_failure_needs_reload,
 };
+#[cfg(test)]
+pub(crate) use failure::{AdminWriteEndpoint, write_rejection_rules};
 pub(crate) use forum::{AdminForumStatus, fetch_admin_forum_status};
 pub(crate) use intake::{AdminIntakeResult, add_admin_intake};
 pub(crate) use lifecycle::{AdminAuctionLifecycleAction, execute_admin_auction_lifecycle};
@@ -104,8 +107,9 @@ pub(crate) use runtime_config::{
     fetch_admin_runtime_config, update_admin_runtime_config, validate_admin_runtime_config,
 };
 pub(crate) use session::{
-    AdminSession, AdminSessionCheckTrigger, AdminSessionWritePermission,
-    admin_session_writes_allowed, fetch_admin_session, login_admin, logout_admin,
+    AdminSession, AdminSessionCheckTrigger, AdminSessionWritePermission, AdminSessionWriteReview,
+    admin_session_cookie, admin_session_writes_allowed, fetch_admin_session, login_admin,
+    logout_admin,
 };
 pub(crate) use settlement::{
     AdminSettlementLot, AdminSettlementReport, AdminSettlementSummary, fetch_admin_settlement,
@@ -115,6 +119,8 @@ pub(crate) use settlement_catalog::{
 };
 pub(crate) use setup::{submit_first_run, verify_first_run};
 pub(crate) use status::{AdminReadinessState, fetch_admin_readiness};
+#[cfg(test)]
+pub(crate) use transport::{WriteDispatchStub, WriteTransportStub, send_stub_write};
 pub(crate) use transport::{fetch_csrf_token, send_get, send_request, send_request_with_timeout};
 pub(crate) use users::{
     AdminUser, AdminUserPage, AdminUserStatusFilter, blacklist_admin_user, create_admin_user,
@@ -158,6 +164,9 @@ pub(crate) use notification_templates::{
     MailTemplateAttempt, MailTemplateBodyProblem, fetch_mail_templates, mail_template_body_problem,
     submit_mail_template,
 };
+
+#[cfg(test)]
+pub(crate) use contract_fixtures::admin_fixture;
 
 #[cfg(test)]
 mod contract_fixtures {

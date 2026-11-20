@@ -3,6 +3,7 @@
 import { expect, mock, spyOn, test } from "bun:test";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { installFakeWindow } from "@auction/web-shared/router/test-window";
+import { LocaleSessionContext } from "@auction/web-shared/ui/i18n/session";
 import {
   createAdminRequestHarness,
   parseJsonObject,
@@ -11,8 +12,9 @@ import {
 import type { AdminCredential, AdminCredentialPage } from "../../api/credentials";
 import { adminApiFailureFromHttpBody } from "../../api/failure";
 import { mustSucceed } from "../../api/t10-contract-fixture.test";
+import { adminLocaleSession } from "../admin-locale-fixture.test";
 import type { TestDocument } from "../solid-dom-fixture";
-import { settle } from "../solid-dom-fixture";
+import { createComponent, settle } from "../solid-dom-fixture";
 import {
   button,
   clickButton,
@@ -20,6 +22,7 @@ import {
   findButton,
   hasText,
   loadCredentialTable,
+  onlyElement,
   submitForm,
   withT10View,
 } from "../t10-view-fixture.test";
@@ -60,7 +63,16 @@ async function withCredentials(
   try {
     restoreWindow = installFakeWindow("/credentials?page_size=10").restore;
     const { host } = harness.registerHost();
-    await withT10View(() => Fixture(row === undefined ? { host } : { host, row }), run);
+    await withT10View(
+      () =>
+        createComponent(LocaleSessionContext, {
+          value: adminLocaleSession,
+          get children() {
+            return Fixture(row === undefined ? { host } : { host, row });
+          },
+        }),
+      run,
+    );
   } finally {
     try {
       harness.cleanup();
@@ -327,5 +339,174 @@ test("rename_rejects_invalid_labels_before_submitting_and_accepts_corrections", 
     } finally {
       requests.cleanup();
     }
+  }
+});
+
+test("credential_pagination_pushes_navigation_and_replaces_only_the_invalid_page", async () => {
+  const Fixture = await loadCredentialTable();
+  const credentials = await import("../../api/credentials");
+  const first = "/cookies?page_size=10";
+  const second = "/cookies?page_size=10&page=2";
+  const { fake, restore } = installFakeWindow("/audit");
+  fake.history.pushState(null, "", first);
+  const harness = createAdminRequestHarness();
+  const read = spyOn(credentials, "fetchAdminCredentials");
+  const initial = Promise.withResolvers<Result<AdminCredentialPage, string>>();
+  const failed = Promise.withResolvers<Result<AdminCredentialPage, string>>();
+  const empty = Promise.withResolvers<Result<AdminCredentialPage, string>>();
+  const corrected = Promise.withResolvers<Result<AdminCredentialPage, string>>();
+  const projection = (page: number, total: number): AdminCredentialPage => ({
+    credentials: [],
+    page,
+    page_size: 10,
+    total,
+    restart_required: true,
+  });
+  try {
+    read.mockImplementationOnce(() => initial.promise);
+    read.mockImplementationOnce(() => failed.promise);
+    read.mockImplementationOnce(() => empty.promise);
+    read.mockImplementationOnce(() => corrected.promise);
+    const { host } = harness.registerHost();
+    await withT10View(
+      () => Fixture({ host }),
+      async (document) => {
+        const writes = () =>
+          fake.writes.splice(0).map(({ mode, url }) => [mode, url.pathname + url.search]);
+        writes();
+        initial.resolve(ok(projection(1, 11)));
+        await settle();
+        expect(writes()).toEqual([]);
+
+        onlyElement(document, '[aria-label="下一页"]').click();
+        await settle();
+        expect(writes()).toEqual([["push", second]]);
+        failed.resolve(err("storage_unavailable"));
+        await settle();
+        expect(writes()).toEqual([]);
+        expect(fake.location.pathname + fake.location.search).toBe(second);
+
+        await clickButton(document, "重试");
+        await settle();
+        empty.resolve(ok(projection(2, 10)));
+        await settle();
+        expect(writes()).toEqual([["replace", first]]);
+        corrected.resolve(ok(projection(1, 10)));
+        await settle();
+        expect(writes()).toEqual([]);
+        expect(read.mock.calls.map(([, , , , page, size]) => [page, size])).toEqual([
+          [1, 10],
+          [2, 10],
+          [2, 10],
+          [1, 10],
+        ]);
+        fake.history.back();
+        expect(fake.location.pathname + fake.location.search).toBe(first);
+        fake.history.back();
+        expect(fake.location.pathname).toBe("/audit");
+      },
+    );
+  } finally {
+    read.mockRestore();
+    harness.cleanup();
+    restore();
+  }
+});
+
+test("credential_actions_keep_their_own_payload_while_an_import_is_unknown", async () => {
+  const credentials = await import("../../api/credentials");
+  const harness = createAdminRequestHarness();
+  const read = spyOn(credentials, "fetchAdminCredentials");
+  const fresh = Promise.withResolvers<Result<AdminCredentialPage, string>>();
+  const empty = Promise.withResolvers<Result<AdminCredentialPage, string>>();
+  read.mockResolvedValueOnce(ok(projection(CREDENTIAL)));
+  read.mockImplementationOnce(() => fresh.promise);
+  read.mockImplementationOnce(() => empty.promise);
+  const session = { body: JSON.stringify(TEST_SESSION_BODY) };
+  const endpoint = "/api/v1/admin/credentials";
+  const checkPath = `${endpoint}/${CREDENTIAL.id}/check`;
+  function response(data: object) {
+    return { body: JSON.stringify({ code: "ok", message: "", data }) };
+  }
+  try {
+    harness.installBrowserRequest();
+    const writes = harness.installFetch([
+      session,
+      { status: 503, body: FAILURE },
+      session,
+      response({
+        credential_id: CREDENTIAL.id,
+        state_version: 1,
+        checked_at: CREDENTIAL.updated_at,
+        checks: [{ world: "main", status: "inconclusive" }],
+      }),
+      session,
+      { body: mutationReply(UPDATED) },
+      session,
+      response({ credential_id: CREDENTIAL.id, state_version: 3, restart_required: true }),
+    ]);
+    await withCredentials(undefined, async (document) => {
+      field(document, "import-label").input("新的凭据");
+      field(document, "import-secret").input("fake-test-cookie=second-placeholder");
+      submitForm(onlyElement(document, ".admin-credentials-import"));
+      await settle();
+      expect(document.getElementById("import-unknown-help")).not.toBeNull();
+
+      await clickButton(document, "校验 Cookie");
+      await clickButton(document, "停用");
+      fresh.resolve(ok(projection(UPDATED)));
+      await settle();
+      await clickButton(document, "删除");
+      const dialog = onlyElement(document, '[role="dialog"]');
+      const confirm = dialog.querySelector(".admin-btn-danger");
+      if (confirm === null) throw new Error("缺少删除确认按钮");
+      confirm.click();
+      await settle();
+      empty.resolve(ok({ ...projection(UPDATED), credentials: [], total: 0 }));
+      await settle();
+
+      const business = writes.filter(({ method }) => method !== "GET");
+      expect(business.map(({ method, url }) => [method, url])).toEqual([
+        ["POST", endpoint],
+        ["POST", checkPath],
+        ["PATCH", endpoint],
+        ["DELETE", endpoint],
+      ]);
+      const check = parseJsonObject(business[1]?.body ?? "", "校验正文");
+      const patch = parseJsonObject(business[2]?.body ?? "", "停用正文");
+      const deletion = parseJsonObject(business[3]?.body ?? "", "删除正文");
+      // 比较字段集合再比较安全值，意外包含的秘密不会出现在断言的实际值里。
+      expect(Object.keys(check).sort()).toEqual(["expected_state_version"]);
+      expect(check.expected_state_version).toBe(1);
+      expect(Object.keys(patch).sort()).toEqual([
+        "action",
+        "command_id",
+        "credential_id",
+        "expected_state_version",
+        "label",
+        "status",
+      ]);
+      expect(patch.credential_id === CREDENTIAL.id && patch.expected_state_version === 1).toBe(
+        true,
+      );
+      expect(
+        patch.action === "set_status" && patch.status === "disabled" && patch.label === null,
+      ).toBe(true);
+      expect(Object.keys(deletion).sort()).toEqual([
+        "command_id",
+        "credential_id",
+        "expected_state_version",
+      ]);
+      expect(
+        deletion.credential_id === CREDENTIAL.id && deletion.expected_state_version === 2,
+      ).toBe(true);
+      const importId = parseJsonObject(business[0]?.body ?? "", "导入正文").command_id;
+      expect(new Set([importId, patch.command_id, deletion.command_id]).size).toBe(3);
+      expect(document.getElementById("import-unknown-help")).not.toBeNull();
+      expect(findButton(document, "原样重试")).not.toBeNull();
+    });
+  } finally {
+    read.mockRestore();
+    harness.cleanup();
   }
 });

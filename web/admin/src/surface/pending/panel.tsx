@@ -3,15 +3,17 @@
 import { focusElementById } from "@auction/web-shared/platform/a11y";
 import { sleep } from "@auction/web-shared/platform/timer";
 import { createCell } from "@auction/web-shared/reactive/cell";
+import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskScope, type TaskScope } from "@auction/web-shared/reactive/tasks";
 import type { Result } from "@auction/web-shared/result";
 import { Dialog } from "@auction/web-shared/ui/components/dialog";
 import { TruncatedText } from "@auction/web-shared/ui/components/truncated-text";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { For, Show } from "solid-js";
+import { For, Show, useContext } from "solid-js";
 
 import { adminSessionWritesAllowed } from "../../api/session";
+import { KeyVisibilityContext } from "../auth/key-visibility";
 import { adminApiErrorMessage } from "../presentation";
 import { type AdminUserGeneratedKey, AdminUserGeneratedKeyDialog } from "../users/create";
 import {
@@ -184,7 +186,7 @@ export function PendingCommandNotices(props: { readonly host: PendingCommandHost
                     <button
                       id={recordButtonId(entry().identity.commandId, "abandon")}
                       type="button"
-                      disabled={writesBlocked() || entry().busy}
+                      disabled={entry().busy}
                       onClick={() => confirmAbandon.set(entry().identity.commandId)}
                     >
                       {t("admin-pending-abandon")}
@@ -217,7 +219,6 @@ export function PendingCommandNotices(props: { readonly host: PendingCommandHost
               <button
                 type="button"
                 class="admin-btn-danger"
-                disabled={writesBlocked()}
                 onClick={() => {
                   const commandId = entry().identity.commandId;
                   const focus = focusTargetsAfter(props.host, commandId);
@@ -239,23 +240,25 @@ export function PendingCommandNotices(props: { readonly host: PendingCommandHost
 }
 
 function CommandReceipts(props: { readonly host: PendingCommandHost }): JSX.Element {
-  const openKey = createCell<string | null>(null);
+  const openKey = createCell<{ commandId: string; revision: number } | null>(null);
+  const visibility = useContext(KeyVisibilityContext);
   const tasks = createTaskScope();
   const notices = () => props.host.notices();
   const visible = () =>
     notices().filter((notice) => !pendingCommandHostKeyInSource(props.host, notice));
-  const activeKey = () => {
-    const commandId = openKey();
-    if (commandId === null) {
+  const activeKey = createValueMemo(() => {
+    const opened = openKey();
+    const current = visibility();
+    if (opened === null || current.hidden || opened.revision !== current.revision) {
       return null;
     }
-    const notice = visible().find((candidate) => candidate.identity.commandId === commandId);
+    const notice = visible().find((candidate) => candidate.identity.commandId === opened.commandId);
     if (notice === undefined) {
       return null;
     }
-    const key = generatedKeyOf(notice.result);
-    return key === null ? null : Object.freeze({ commandId, key });
-  };
+    const generated = generatedKeyOf(notice.result);
+    return generated === null ? null : { ...opened, generated };
+  });
   return (
     <>
       <div
@@ -305,10 +308,22 @@ function CommandReceipts(props: { readonly host: PendingCommandHost }): JSX.Elem
                     <button
                       id={recordButtonId(notice().identity.commandId, "receipt")}
                       type="button"
-                      onClick={() => openKey.set(notice().identity.commandId)}
+                      disabled={visibility().hidden}
+                      onClick={() => {
+                        const current = visibility();
+                        if (!current.hidden) {
+                          openKey.set({
+                            commandId: notice().identity.commandId,
+                            revision: current.revision,
+                          });
+                        }
+                      }}
                     >
                       {t("admin-pending-view-key")}
                     </button>
+                    <Show when={visibility().hidden}>
+                      <p class="admin-panel__note">{t("admin-session-key-hidden")}</p>
+                    </Show>
                   </Show>
                 </li>
               )}
@@ -316,13 +331,23 @@ function CommandReceipts(props: { readonly host: PendingCommandHost }): JSX.Elem
           </ul>
         </section>
       </Show>
-      <Show when={activeKey()}>
+      <Show when={activeKey()} keyed>
         {(active) => (
           <AdminUserGeneratedKeyDialog
-            generated={active().key}
+            generated={active.generated}
             onClose={() => {
-              openKey.set(null);
-              closeReceipt(props.host, active().commandId, tasks);
+              const opened = openKey.peek();
+              const current = visibility();
+              // 迟到的关闭动作只可确认创建该对话框时的回执。
+              if (
+                !current.hidden &&
+                current.revision === active.revision &&
+                opened?.commandId === active.commandId &&
+                opened.revision === active.revision
+              ) {
+                openKey.set(null);
+                closeReceipt(props.host, active.commandId, tasks);
+              }
             }}
           />
         )}
@@ -355,12 +380,11 @@ function focusTargetsAfter(host: PendingCommandHost, removed: string): readonly 
     if (!entry.unknown) {
       continue;
     }
-    const actionable = writesAllowed && !entry.busy;
     rows.push({
       commandId: entry.identity.commandId,
       buttons: [
-        actionable && !pendingCommandRetryBlocked(entry, host) ? "retry" : null,
-        actionable ? "abandon" : null,
+        writesAllowed && !pendingCommandRetryBlocked(entry, host) ? "retry" : null,
+        entry.busy ? null : "abandon",
       ],
     });
   }

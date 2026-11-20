@@ -14,9 +14,10 @@ import type { AdminReadinessResource } from "../index";
 import { adminApiErrorMessage } from "../presentation";
 import { restoreInitialAdminLocation } from "../router";
 import { useSession } from "./effects";
+import { KeyVisibilityContext } from "./key-visibility";
 import { AdminLogin } from "./login";
 import { AdminLoginRedirect, AdminReturnRedirect } from "./redirect";
-import { AdminAuthenticatedShell, AdminSessionHostContext } from "./shell";
+import { AdminAuthenticatedShell, AdminSessionHostContext, LogoutRecovery } from "./shell";
 
 /** 已认证外壳唯一拥有的 readiness 快照；Dashboard 也从这里协调首屏门禁。 */
 export const AdminReadinessContext = createContext<AdminReadinessResource>();
@@ -37,8 +38,15 @@ export function AdminShell() {
     const route = currentRoute();
     return route.kind === "matched" && route.name === "Dashboard";
   });
-  const { view, dispatch, submitLogin, host } = useSession();
+  const { view, dispatch, submitLogin, host, writeReview } = useSession();
   const recheck = () => dispatch({ kind: "check_requested" });
+  const continueLogout = () => dispatch({ kind: "continue_logout" });
+  const stayAfterLogout = () => dispatch({ kind: "stay_after_logout" });
+  const logoutRecovery = () =>
+    view().logoutUnconfirmed
+      ? { busy: view().logoutDecisionBusy, onContinue: continueLogout, onStay: stayAfterLogout }
+      : null;
+  const keyVisibility = () => view().keyVisibility;
 
   // 已认证外壳在站内路由切换时递增，顶栏就绪徽标随之重读；重读期间保留旧值，不影响首屏门禁。
   const readinessRefresh = createCell(0);
@@ -80,17 +88,21 @@ export function AdminShell() {
                   keyed={(entry) => entry.epoch}
                 >
                   {(entry) => (
-                    <AdminAuthenticatedShell
-                      session={entry().session}
-                      readiness={readinessState()}
-                      readinessRefresh={readinessRefresh}
-                      sessionConfirmed={snapshot().canWrite}
-                      redirecting={isLoginPath()}
-                      loggingOut={snapshot().loggingOut}
-                      logoutError={snapshot().logoutError}
-                      onLogout={() => dispatch({ kind: "logout_clicked" })}
-                      onRecheck={recheck}
-                    />
+                    <KeyVisibilityContext value={keyVisibility}>
+                      <AdminAuthenticatedShell
+                        session={entry().session}
+                        writeReview={writeReview(entry().epoch)}
+                        readiness={readinessState()}
+                        readinessRefresh={readinessRefresh}
+                        sessionConfirmed={snapshot().canWrite}
+                        redirecting={isLoginPath()}
+                        loggingOut={snapshot().loggingOut}
+                        logoutRecovery={logoutRecovery()}
+                        logoutError={snapshot().logoutError}
+                        onLogout={() => dispatch({ kind: "logout_clicked" })}
+                        onRecheck={recheck}
+                      />
+                    </KeyVisibilityContext>
                   )}
                 </For>
                 {/* 已认证访问登录地址只重定向，不卸载会话草稿和未决命令宿主。 */}
@@ -114,6 +126,17 @@ export function AdminShell() {
                 </button>
               </section>
             </main>
+          </Match>
+          <Match when={logoutRecovery()}>
+            {(recovery) => (
+              <main class="admin-login-page">
+                <LogoutRecovery
+                  busy={recovery().busy}
+                  onContinue={continueLogout}
+                  onStay={stayAfterLogout}
+                />
+              </main>
+            )}
           </Match>
           <Match when={snapshot().loggedOut}>
             <Show when={isLoginPath()} fallback={<AdminLoginRedirect />}>

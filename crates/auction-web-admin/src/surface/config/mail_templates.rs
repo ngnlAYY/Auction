@@ -132,7 +132,6 @@ impl TemplateEditState {
                         body: confirmation.body,
                     })
                     .await
-                    .map_err(|failure| failure.code)
                 }
             },
             move |template: AdminMailTemplateDto, source_alive| {
@@ -551,7 +550,8 @@ mod tests {
         placeholder_list, template_entity, use_template_edit_state,
     };
     use crate::api::{
-        AdminApiFailure, AdminSessionWritePermission, MailTemplateAttempt, MailTemplateBodyProblem,
+        AdminApiFailure, AdminSessionWritePermission, AdminWriteEndpoint, AdminWriteFailure,
+        MailTemplateAttempt, MailTemplateBodyProblem,
     };
     use crate::surface::auctions::draft_page_tests::{
         button, click_button, has_live_text, init_i18n, mount_writer, writer_form,
@@ -566,7 +566,7 @@ mod tests {
         editor: Cell<Option<TemplateEditState>>,
         latest: Cell<Option<Signal<AdminMailTemplateDto>>>,
         requests: RefCell<Vec<String>>,
-        failures: RefCell<VecDeque<AdminApiFailure>>,
+        failures: RefCell<VecDeque<AdminWriteFailure>>,
     }
 
     fn published(revision: i64) -> AdminMailTemplateDto {
@@ -683,7 +683,8 @@ mod tests {
                 use_hook(move || {
                     MailTemplateAttempt::stub_submit(move |body| {
                         requests.borrow_mut().push(body.to_owned());
-                        Err(AdminApiFailure::from_http_body(
+                        Err(AdminWriteFailure::from_test_http(
+                            AdminWriteEndpoint::MailTemplate,
                             503,
                             r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
                         ))
@@ -748,26 +749,90 @@ mod tests {
     }
 
     #[test]
+    fn only_a_complete_first_template_413_releases_the_entity() {
+        for (body, pending) in [
+            (
+                r#"{"code":"body_too_large","message":"请求体过大","data":null,"request_id":null}"#,
+                false,
+            ),
+            (r#"{"code":"body_too_large","message":"请求体过大","data":null}"#, true),
+        ] {
+            let harness = Rc::new(EditorHarness::default());
+            harness.failures.borrow_mut().push_back(AdminWriteFailure::from_test_http(
+                AdminWriteEndpoint::MailTemplate,
+                413,
+                body,
+            ));
+            let mut dom = VirtualDom::new(test_editor).with_root_context(harness.clone());
+            dom.rebuild_in_place();
+            dom.process_events();
+            let mut editor = harness.editor.get().unwrap();
+            let template = published(5);
+            let key = &template.key;
+            dom.in_scope(ScopeId::APP, || {
+                editor.drafts.write().insert(
+                    key.clone(),
+                    TemplateDraft { revision: 5, body: "保留草稿".to_owned() },
+                );
+                assert_eq!(editor.begin_save(&template), None);
+                let confirmation = editor.confirmation.peek().clone().unwrap();
+                editor.submit(confirmation);
+            });
+            dom.process_events();
+            let requests = harness.requests.borrow();
+            assert_eq!(requests.len(), 1);
+            let sent: AdminMailTemplateUpdateRequest = serde_json::from_str(&requests[0]).unwrap();
+            assert_eq!(sent.expected_revision, 5);
+            assert_eq!(sent.body.as_deref(), Some("保留草稿"));
+            assert_eq!(editor.pending.contains(&template_entity(key)), pending);
+            assert_eq!(editor.drafts.peek()[key].body, "保留草稿");
+            assert!(editor.accepted.peek().is_none());
+        }
+    }
+
+    #[test]
     fn template_retries_send_the_frozen_revision_until_a_ledger_conflict_allows_reload() {
         let harness = Rc::new(EditorHarness::default());
         let attempts = [
-            AdminApiFailure::client("request_timeout"),
-            AdminApiFailure { status: Some(401), code: "unauthenticated".into() },
-            AdminApiFailure { status: Some(429), code: "rate_limited".into() },
-            AdminApiFailure::client("network_error"),
-            AdminApiFailure::from_http_body(
+            AdminWriteFailure::outcome_unknown("request_timeout"),
+            AdminWriteFailure::from_test_http(
+                AdminWriteEndpoint::MailTemplate,
+                401,
+                r#"{"code":"unauthenticated","message":"请求已拒绝","data":null,"request_id":null}"#,
+            ),
+            AdminWriteFailure::from_test_http(
+                AdminWriteEndpoint::MailTemplate,
+                429,
+                r#"{"code":"rate_limited","message":"请求已拒绝","data":null,"request_id":null}"#,
+            ),
+            AdminWriteFailure::outcome_unknown("network_error"),
+            AdminWriteFailure::from_test_http(
+                AdminWriteEndpoint::MailTemplate,
+                413,
+                r#"{"code":"body_too_large","message":"请求体过大","data":null,"request_id":null}"#,
+            ),
+            AdminWriteFailure::from_test_http(
+                AdminWriteEndpoint::MailTemplate,
+                413,
+                r#"{"code":"body_too_large","message":"请求体过大","data":null}"#,
+            ),
+            AdminWriteFailure::from_test_http(
+                AdminWriteEndpoint::MailTemplate,
                 409,
                 r#"{"code":"mail_template_conflict","message":"版本已变化","data":null}"#,
             ),
-            AdminApiFailure::from_http_body(
+            AdminWriteFailure::from_test_http(
+                AdminWriteEndpoint::MailTemplate,
                 409,
                 r#"{"code":"mail_template_conflict","message":"版本已变化","data":null,"request_id":7}"#,
             ),
-            AdminApiFailure::from_http_body(
+            AdminWriteFailure::from_test_http(
+                AdminWriteEndpoint::MailTemplate,
                 409,
                 r#"{"code":"mail_template_conflict","message":"版本已变化","data":null,"request_id":null,"extra":true}"#,
             ),
-            AdminApiFailure::from_http_body(
+            AdminWriteFailure::from_test_http(
+                AdminWriteEndpoint::MailTemplate,
                 409,
                 r#"{"code":"mail_template_conflict","message":"版本已变化","data":null,"request_id":null}"#,
             ),
@@ -791,6 +856,7 @@ mod tests {
                 Some(MailTemplateBodyProblem::RequestTooLarge)
             );
             assert!(editor.confirmation.peek().is_none());
+            assert!(harness.requests.borrow().is_empty());
 
             editor.drafts.write().get_mut(key).unwrap().body = "保留草稿".to_owned();
             assert_eq!(editor.begin_save(&original), None);

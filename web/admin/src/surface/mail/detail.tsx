@@ -7,13 +7,8 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { For, onCleanup, Show } from "solid-js";
 import type { AdminMailIntakeDetail } from "../../api/mail";
-import {
-  type AdminActionFeedback,
-  adminApiErrorMessage,
-  adminWorldLabel,
-  formatAdminTime,
-} from "../presentation";
-import { MailDeliveriesPanel } from "./deliveries";
+import { adminApiErrorMessage, adminWorldLabel, formatAdminTime } from "../presentation";
+import { MailDeliveriesPanel, type MailDeliveryNoticeWriter } from "./deliveries";
 import { mailKindLabel, mailStatusClass, mailStatusLabel } from "./labels";
 import {
   equipmentCategoryMessage,
@@ -32,7 +27,7 @@ export interface MailIntakeDetailPanelProps {
   readonly loading: boolean;
   readonly error: string | null;
   readonly refresh: Cell<bigint>;
-  readonly deliveryNotice: Cell<readonly [string, AdminActionFeedback] | null>;
+  readonly deliveryNotice: MailDeliveryNoticeWriter;
   readonly onClose: () => void;
 }
 
@@ -106,7 +101,7 @@ export function MailIntakeDetailPanel(props: MailIntakeDetailPanelProps): JSX.El
 interface MailIntakeDetailContentProps {
   readonly detail: AdminMailIntakeDetail;
   readonly refresh: Cell<bigint>;
-  readonly deliveryNotice: Cell<readonly [string, AdminActionFeedback] | null>;
+  readonly deliveryNotice: MailDeliveryNoticeWriter;
   readonly pageAlive: () => boolean;
   readonly onClose: () => void;
 }

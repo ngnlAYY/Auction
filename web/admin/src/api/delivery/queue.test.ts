@@ -4,10 +4,13 @@ import { expect, spyOn, test } from "bun:test";
 import { parseJson } from "@auction/web-shared/net/wire";
 import { err } from "@auction/web-shared/result";
 
+import { setAt } from "../api-request-fixture";
 import { type AdminSession, type AdminSessionHost, registerAdminSessionHost } from "../session";
 import {
   jsonObject,
+  parseFixture,
   DELIVERY_ID as RUST_DELIVERY_ID,
+  readAdminFixture,
   requireDecoded,
   requireElement,
 } from "./delivery-fixture.test";
@@ -45,9 +48,14 @@ interface MockAdminFetch {
   readonly requests: readonly RecordedRequest[];
 }
 
-/** 内存 fetch 替身：会话复核成功，写请求只记录正文并以固定拒绝结束。 */
+/** 内存 fetch 替身：会话复核成功，写请求记录正文并返回用例指定的回执。 */
 async function withAdminFetch(
   run: (host: AdminSessionHost, mock: MockAdminFetch) => Promise<void>,
+  writeReply = () =>
+    Response.json(
+      { code: "stale_delivery_state", message: "stale", data: null, request_id: null },
+      { status: 409 },
+    ),
 ): Promise<void> {
   const calls: string[] = [];
   const requests: RecordedRequest[] = [];
@@ -91,10 +99,7 @@ async function withAdminFetch(
               url,
               body: typeof init?.body === "string" ? init.body : null,
             });
-            return Response.json(
-              { code: "stale_delivery_state", message: "stale", data: null, request_id: null },
-              { status: 409 },
-            );
+            return writeReply();
           },
           { preconnect: () => {} },
         ),
@@ -194,7 +199,7 @@ test("换一个 command_id 被拒绝且不发请求", () =>
       OTHER_COMMAND_ID,
       new AbortController().signal,
     );
-    expect(result).toEqual(err({ status: null, code: "invalid_request" }));
+    expect(result).toEqual<unknown>(err({ kind: "not-sent", code: "invalid_request" }));
     expect(calls).toEqual([]);
   }));
 
@@ -272,4 +277,53 @@ test("list_url_requests_the_settlement_returns_projection", () => {
   expect(deliveryListUrl("manual_reconcile", filters, 0, 20)).toBe(
     `/api/v1/admin/deliveries?page=1&page_size=20&status=manual_reconcile&reference=${RUST_DELIVERY_ID}&world=isekai&include=settlement_returns`,
   );
+});
+
+test("queue_reconcile_checks_target_and_new_fence", async () => {
+  const deliveryId = "00000000-0000-4000-8000-000000000031";
+  for (const defect of [null, "target", "fence", "body"]) {
+    const wire = parseFixture(readAdminFixture("delivery-release-command"));
+    if (defect === "target") setAt(wire, "/data/delivery/id", RUST_DELIVERY_ID);
+    if (defect === "fence") setAt(wire, "/data/delivery/fencing_version", 4);
+    await withAdminFetch(
+      async (host, { requests }) => {
+        const prepared = prepareDeliveryCommandOnce(
+          deliverySnapshot({
+            deliveryId,
+            expectedFencingVersion: 4,
+          }),
+        );
+        const result = await executeDelivery(
+          host,
+          prepared,
+          COMMAND_ID,
+          new AbortController().signal,
+        );
+        if (defect === null) {
+          expect(requireDecoded(result, "有效重排回执")).toMatchObject({
+            id: deliveryId,
+            status: "pending",
+            fencing_version: 5,
+          });
+        } else {
+          expect(result).toEqual(
+            err({
+              kind: "outcome-unknown",
+              responseStatus: null,
+              code: "invalid_response",
+            }),
+          );
+        }
+        expect(requests.map(({ method, url }) => [method, url])).toEqual([
+          ["POST", `/api/v1/admin/deliveries/${deliveryId}/reconcile`],
+        ]);
+        expect(parseCommandBody(requireElement(requests, 0, "重排请求").body)).toEqual({
+          command_id: COMMAND_ID,
+          action: "retry",
+          expected_fencing_version: 4,
+        });
+      },
+      () => (defect === "body" ? new Response("{") : Response.json(wire)),
+    );
+  }
 });

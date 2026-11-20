@@ -10,8 +10,10 @@ import { err } from "@auction/web-shared/result";
 import {
   asAdminJsonValue,
   createAdminRequestHarness,
+  jsonObject,
   type RecordedRequest,
   type Reply,
+  setAt,
   TEST_SESSION_BODY,
 } from "../api-request-fixture";
 import {
@@ -93,7 +95,10 @@ async function validateWithResponse(responseBody: string): Promise<{
   return { result, requests: [...recorded] };
 }
 
-async function updateWithResponse(responseBody: string): Promise<{
+async function updateWithResponse(
+  responseBody: string,
+  document = defaultDocument(),
+): Promise<{
   readonly result: Awaited<ReturnType<typeof updateAdminRuntimeConfig>>;
   readonly requests: readonly RecordedRequest[];
 }> {
@@ -105,7 +110,7 @@ async function updateWithResponse(responseBody: string): Promise<{
   ]);
   const prepare = prepareAdminRuntimeConfigUpdateOnce(
     defaultProjection().data.fingerprint,
-    asAdminJsonValue(defaultDocument()),
+    asAdminJsonValue(document),
   );
   const result = await updateAdminRuntimeConfig(
     registration.host,
@@ -298,5 +303,61 @@ test("编辑器只在 HTTP 400 invalid_query 时回退一次", async () => {
     expect(requestedUrls).toEqual([EXTENDED_URL]);
   } finally {
     spy.mockRestore();
+  }
+});
+
+test("保存回执必须匹配冻结候选的规范化投影", async () => {
+  const candidate = defaultDocument();
+  candidate.bot_players = [];
+  setAt(candidate, "/equipment_filter/qualities", []);
+  const earlyBird = {
+    enabled: false,
+    timezone: "UTC",
+    worlds: ["isekai"],
+    season_starts: ["05-01", "11-01"],
+    season_start_time: "09:00",
+    window_days: 7,
+    session_days: [1, 3, 5, 7],
+    open_time: "18:00",
+    preview_lead_minutes: 120,
+    live_minutes: 1440,
+    qualities: [],
+    pause_intake_before_season: true,
+  };
+  jsonObject(jsonObject(candidate.operations, "运行参数").schedule, "排期").early_bird = {
+    ...earlyBird,
+    pre_season_session: true,
+    pre_season_days_before: 3,
+  };
+  const response = defaultProjection();
+  response.data.restart_required = true;
+  const document = response.data.document;
+  jsonObject(jsonObject(document.operations, "运行参数").schedule, "排期").early_bird = earlyBird;
+  response.data.document = Object.fromEntries(Object.entries(document).reverse());
+
+  const accepted = await updateWithResponse(JSON.stringify(response), candidate);
+  expect(accepted.result).toMatchObject({ ok: true, value: { document: response.data.document } });
+  const frozen = accepted.requests[1]?.body;
+  expect(JSON.parse(frozen ?? "")).toEqual({
+    command_id: COMMAND_ID,
+    expected_fingerprint: defaultProjection().data.fingerprint,
+    document: candidate,
+  });
+  for (const [path, value] of [
+    ["/metrics/enabled", true],
+    ["/operations/schedule/early_bird/season_starts", ["11-01", "05-01"]],
+  ] as const) {
+    const invalid = cloneProjection(response);
+    setAt(invalid.data.document, path, value);
+    const rejected = await updateWithResponse(JSON.stringify(invalid), candidate);
+    expect(rejected.result, path).toEqual({
+      ok: false,
+      error: { kind: "outcome-unknown", code: "invalid_response", responseStatus: null },
+    });
+    expect(requestLines(rejected.requests)).toEqual([
+      ["GET", SESSION_URL],
+      ["PUT", BASE_URL],
+    ]);
+    expect(rejected.requests[1]?.body).toBe(frozen);
   }
 });

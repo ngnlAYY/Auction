@@ -24,10 +24,13 @@ import { validUuid } from "@auction/web-shared/ui/validation";
 import type * as v from "valibot";
 
 import {
-  type AdminApiFailure,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   decodeAdminReceipt,
   invalidResponseError,
   responseError,
+  writeNotSent,
+  writeOutcomeUnknown,
 } from "./failure";
 import { validate as validatePagination, validPageEcho } from "./pagination";
 import type { AdminSessionHost } from "./session";
@@ -54,7 +57,7 @@ export type AdminAuction = AdminAuctionResponse;
 /** 未决命令执行体复用的正文工厂；同一 `command_id` 的重试只会得到同一份文本。 */
 export type AdminAuctionCommandPreparation = (
   commandId: string,
-) => Result<PreparedJsonCommand, AdminApiFailure>;
+) => Result<PreparedJsonCommand, AdminWriteNotSent>;
 
 /** 列表回执里的版本与计数会决定后续命令，因此按整数词法严格解析。 */
 const ADMIN_AUCTION_LIST_RESPONSE_FIELD_POLICY: JsonFieldPolicy = {
@@ -151,20 +154,19 @@ export async function createAdminAuction(
   auctionId: string,
   prepare: AdminAuctionCommandPreparation,
   signal: AbortSignal,
-): Promise<Result<AdminAuctionCommandResponse, string>> {
+): Promise<Result<AdminAuctionCommandResponse, AdminWriteFailure>> {
   const prepared = prepare(commandId);
   if (!prepared.ok) {
-    return err(prepared.error.code);
+    return err(prepared.error);
   }
   const response = await sendPreparedJsonWrite(
     host,
-    "/api/v1/admin/auctions",
-    "POST",
+    { url: "/api/v1/admin/auctions", method: "POST", endpoint: "general" },
     prepared.value,
     signal,
   );
   if (!response.ok) {
-    return err(response.error.code);
+    return err(response.error);
   }
   const payload = decodeAdminReceipt(
     response.value,
@@ -172,15 +174,15 @@ export async function createAdminAuction(
     ADMIN_AUCTION_LIFECYCLE_RESPONSE_FIELD_POLICY,
   );
   if (!payload.ok) {
-    return err(payload.error);
+    return err(writeOutcomeUnknown(payload.error));
   }
   const decoded = decodeAuctionCommandResponse(payload.value);
   if (!decoded.ok) {
-    return err(decoded.error);
+    return err(writeOutcomeUnknown(decoded.error));
   }
   const auction = decoded.value;
   if (auction.id !== auctionId || auction.status !== "draft") {
-    return err("invalid_response");
+    return err(writeOutcomeUnknown("invalid_response"));
   }
   return ok(auction);
 }
@@ -215,16 +217,16 @@ export async function updateAdminAuctionSchedule(
   expectedStateVersion: number,
   prepare: AdminAuctionCommandPreparation,
   signal: AbortSignal,
-): Promise<Result<AdminAuction, string>> {
+): Promise<Result<AdminAuction, AdminWriteFailure>> {
   if (!validUuid(auctionId) || expectedStateVersion <= 0) {
-    return err("invalid_request");
+    return err(writeNotSent("invalid_request"));
   }
   const expectedPreview = parseAdminTime(previewScheduledAt);
   const expectedOpen = parseAdminTime(scheduledOpenAt);
   const expectedEnd = parseAdminTime(scheduledEndAt);
   const prepared = prepare(commandId);
   if (!prepared.ok) {
-    return err(prepared.error.code);
+    return err(prepared.error);
   }
   const url = `/api/v1/admin/auctions/${auctionId}/schedule`;
   const payload = await sendAuctionEdit(
@@ -241,7 +243,7 @@ export async function updateAdminAuctionSchedule(
   }
   const decoded = decodeAuction(payload.value.data.auction);
   if (!decoded.ok) {
-    return err(invalidResponseError(decoded.error));
+    return err(writeOutcomeUnknown(invalidResponseError(decoded.error)));
   }
   const auction = decoded.value;
   if (
@@ -253,7 +255,7 @@ export async function updateAdminAuctionSchedule(
     (auction.scheduled_ends_at === null ? null : parseAdminTime(auction.scheduled_ends_at)) !==
       expectedEnd
   ) {
-    return err("invalid_response");
+    return err(writeOutcomeUnknown("invalid_response"));
   }
   return ok(auction);
 }
@@ -271,18 +273,24 @@ export function decodeAuctionCommandResponse(
 /** 场次与拍品的可变命令共用写入边界；成功回执按调用方给出的闭集与字段策略解析。 */
 export async function sendAuctionEdit<const TSchema extends v.GenericSchema>(
   host: AdminSessionHost,
-  method: string,
+  method: "PATCH" | "POST",
   url: string,
   prepared: PreparedJsonCommand,
   responseSchema: TSchema,
   responsePolicy: JsonFieldPolicy,
   signal: AbortSignal,
-): Promise<Result<v.InferOutput<TSchema>, string>> {
-  const response = await sendPreparedJsonWrite(host, url, method, prepared, signal);
+): Promise<Result<v.InferOutput<TSchema>, AdminWriteFailure>> {
+  const response = await sendPreparedJsonWrite(
+    host,
+    { url, method, endpoint: "general" },
+    prepared,
+    signal,
+  );
   if (!response.ok) {
-    return err(response.error.code);
+    return err(response.error);
   }
-  return decodeAdminReceipt(response.value, responseSchema, responsePolicy);
+  const decoded = decodeAdminReceipt(response.value, responseSchema, responsePolicy);
+  return decoded.ok ? decoded : err(writeOutcomeUnknown(decoded.error));
 }
 
 function decodeAuctionList(data: AdminAuctionPage): Result<AdminAuctionPage, string> {

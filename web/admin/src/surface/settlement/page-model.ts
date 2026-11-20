@@ -33,12 +33,6 @@ export interface DetailLoad<T> {
   readonly result: Result<T | null, string>;
 }
 
-/** 报告区域要展示的结算报告与读取错误。 */
-export interface SettlementDetail {
-  readonly report: AdminSettlementReport | null;
-  readonly error: string | null;
-}
-
 /** 目录对当前地址的解析状态：处理中、命中某一场次或已证实矛盾。 */
 export type CatalogSelection =
   | { readonly kind: "resolving" }
@@ -152,7 +146,7 @@ export function reportForSelection(
 /** 目录归并需要的响应身份、地址版本与全部选择状态。 */
 export interface CatalogReconcileState {
   readonly load: CatalogLoad;
-  /** 归并计算时已恢复到本地筛选的 popstate 版本。 */
+  /** 归并计算时已恢复到本地筛选的位置版本。 */
   readonly appliedLocationRevision: number;
   /** 当前位置版本，用 peek 读取，避免 apply 阶段建立订阅。 */
   readonly locationRevision: Cell<number>;
@@ -176,8 +170,8 @@ export interface CatalogReconcileState {
 }
 
 function reconciliationIsCurrent(state: CatalogReconcileState): boolean {
-  // 前进/后退与响应可能在同一轮到达；先确认新地址已恢复到本地筛选。
-  // 历史写入失败时不会产生 popstate，本地筛选仍可接收匹配的目录。
+  // 同页导航及前进后退可能与响应在同一轮到达；先确认新地址已恢复到本地筛选。
+  // 历史写入失败时位置版本不变，本地筛选仍可接收匹配的目录。
   if (state.locationRevision.peek() !== state.appliedLocationRevision) {
     return false;
   }
@@ -202,6 +196,11 @@ function reconciliationIsCurrent(state: CatalogReconcileState): boolean {
   );
 }
 
+/** 目录总数收缩时，空尾页由目录归并钳制到有数据的页。 */
+export function isEmptyCatalogTail(page: AdminSettlementCatalogPage): boolean {
+  return page.auctions.length === 0 && page.total > 0 && page.page > 1;
+}
+
 /** 把已加载目录与当前筛选对齐：空尾页钳制、深链接解析并规范化地址。 */
 export function reconcileSettlementCatalog(state: CatalogReconcileState): void {
   const load = state.load;
@@ -209,7 +208,7 @@ export function reconcileSettlementCatalog(state: CatalogReconcileState): void {
     return;
   }
   const page = load.result.value;
-  if (page.auctions.length === 0 && page.total > 0 && state.currentPage > 1) {
+  if (isEmptyCatalogTail(page)) {
     const lastPage = Math.max(Math.trunc((page.total - 1) / page.pageSize) + 1, 1);
     const clamped = Math.min(lastPage, Math.trunc(100_000 / page.pageSize) + 1);
     state.catalogPage.set(clamped);

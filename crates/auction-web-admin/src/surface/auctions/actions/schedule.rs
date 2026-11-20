@@ -5,14 +5,14 @@ use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
 use super::super::editor::{
-    DraftFeedback, DraftRead, DraftRefreshButton, close_edit_draft, close_matching_draft,
-    focus_draft_field_after_render, observe_draft_write,
+    DraftFeedback, DraftRead, DraftRefreshButton, DraftWriteFeedback, close_edit_draft,
+    close_matching_draft, focus_draft_field_after_render, observe_draft_write,
 };
 use super::super::presentation::{
     ScheduleField, ScheduleIssue, ScheduleMode, ScheduleTimes, parse_local_schedule_time,
     validate_schedule,
 };
-use super::model::{AdminAuctionNotice, stale_auction_failure};
+use super::model::AdminAuctionNotice;
 use crate::api::{AdminAuction, datetime_local_value, update_admin_auction_schedule};
 use crate::surface::pending::{PendingCommandPanel, PendingCommands, set_if_alive};
 use crate::surface::validation::FieldError;
@@ -26,7 +26,7 @@ pub(super) fn AdminAuctionScheduleDialog(
     reload_generation: Signal<u64>,
 ) -> Element {
     let owner = use_context::<PendingCommands>();
-    let mut feedback = use_signal(|| None::<String>);
+    let mut feedback = use_signal(|| None::<DraftWriteFeedback>);
     let mut issue = use_signal(|| None::<(ScheduleField, ScheduleIssue)>);
     let Some(open_draft) = draft() else {
         return rsx! {};
@@ -36,7 +36,7 @@ pub(super) fn AdminAuctionScheduleDialog(
     let busy = owner.is_busy(&entity);
     let failure = feedback();
     let conflict = !blocked
-        && (failure.as_deref().is_some_and(stale_auction_failure)
+        && (failure.as_ref().is_some_and(|feedback| feedback.stale_write)
             || read.version_changed(open_draft.state_version, latest_version));
     let can_submit = read.is_ready()
         && !blocked
@@ -87,7 +87,7 @@ pub(super) fn AdminAuctionScheduleDialog(
                     }
                 }
                 if !blocked {
-                    DraftFeedback { conflict, read: read.clone(), failure }
+                    DraftFeedback { conflict, read: read.clone(), failure: failure.map(|feedback| feedback.display_code) }
                 }
                 div { class: "admin-shell__dialog-actions",
                     if !conflict {
@@ -283,7 +283,7 @@ fn submit_schedule(
     owner: PendingCommands,
     notice: Signal<Option<AdminAuctionNotice>>,
     open: Signal<Option<ScheduleDraft>>,
-    feedback: Signal<Option<String>>,
+    feedback: Signal<Option<DraftWriteFeedback>>,
 ) -> bool {
     let submitted_id = draft.auction_id.clone();
     let submitted_version = draft.state_version;
@@ -301,6 +301,7 @@ fn submit_schedule(
                     draft.state_version,
                 ),
                 feedback,
+                "stale_auction_state",
             )
         },
         move |_| {

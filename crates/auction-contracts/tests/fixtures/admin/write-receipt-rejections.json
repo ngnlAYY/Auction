@@ -1,0 +1,240 @@
+{
+  "description": "Admin 写回执裁定样本，由 Rust/Dioxus 与 TypeScript/SolidJS 的测试共同读取。改拒绝码表时须同步修改本样本。每组取端点、协议码和回执的所有组合，每条回执跑两种历史。display_code 为 null 时沿用协议码。",
+  "histories": ["first_attempt", "prior_unknown"],
+  "groups": [
+    {
+      "endpoints": ["general"],
+      "protocol_codes": [
+        "invalid_request_id",
+        "invalid_query",
+        "invalid_json",
+        "invalid_replay",
+        "invalid_command_id",
+        "invalid_auction_id",
+        "invalid_auction_command",
+        "invalid_auction_schedule",
+        "invalid_auction_intake",
+        "unsupported_equipment_source",
+        "invalid_lot_id",
+        "invalid_lot_action",
+        "invalid_lot_command",
+        "invalid_recovery_command",
+        "invalid_world",
+        "invalid_world_command",
+        "invalid_delivery_id",
+        "invalid_user_id",
+        "invalid_user_command",
+        "invalid_rename_id",
+        "invalid_rename_command",
+        "invalid_delivery_command",
+        "invalid_alert_command",
+        "invalid_credential_action",
+        "invalid_credential_kind",
+        "invalid_credential_label",
+        "invalid_credential_player_name",
+        "invalid_credential_request",
+        "invalid_credential_secret",
+        "invalid_credential_status",
+        "invalid_credential_world",
+        "invalid_mail_request",
+        "invalid_runtime_config",
+        "invalid_locale",
+        "invalid_rule_document",
+        "invalid_settlement_return_command",
+        "invalid_settlement_return_id"
+      ],
+      "responses": [
+        {"http_status": 400, "ruling": "this_attempt", "display_code": null},
+        {"http_status": 418, "ruling": "unknown", "display_code": "http_418"}
+      ]
+    },
+    {
+      "endpoints": ["general"],
+      "protocol_codes": ["unauthenticated"],
+      "responses": [
+        {"http_status": 401, "ruling": "this_attempt", "display_code": null},
+        {"http_status": 418, "ruling": "unknown", "display_code": "http_418"}
+      ]
+    },
+    {
+      "endpoints": ["general"],
+      "protocol_codes": [
+        "origin_forbidden",
+        "csrf_invalid",
+        "manual_early_settlement_disabled"
+      ],
+      "responses": [
+        {"http_status": 403, "ruling": "this_attempt", "display_code": null},
+        {"http_status": 418, "ruling": "unknown", "display_code": "http_418"}
+      ]
+    },
+    {
+      "endpoints": ["general"],
+      "protocol_codes": [
+        "not_found",
+        "mail_template_not_found",
+        "world_not_found",
+        "delivery_not_found",
+        "settlement_return_not_found"
+      ],
+      "responses": [
+        {"http_status": 404, "ruling": "this_attempt", "display_code": null},
+        {"http_status": 418, "ruling": "unknown", "display_code": "http_418"}
+      ]
+    },
+    {
+      "endpoints": ["general"],
+      "protocol_codes": ["method_not_allowed"],
+      "responses": [
+        {"http_status": 405, "ruling": "this_attempt", "display_code": null},
+        {"http_status": 418, "ruling": "unknown", "display_code": "http_418"}
+      ]
+    },
+    {
+      "endpoints": ["general"],
+      "protocol_codes": [
+        "command_conflict",
+        "credential_conflict",
+        "stale_credential_state",
+        "rename_name_taken",
+        "user_conflict",
+        "stale_state_version",
+        "stale_world_state",
+        "world_has_active_auction",
+        "auction_intake_unavailable",
+        "seller_blacklisted",
+        "equipment_conflict",
+        "stale_recovery_state",
+        "stale_delivery_state",
+        "invalid_auction_state",
+        "invalid_lot_state",
+        "delivery_sent_sighted",
+        "delivery_recipient_renamed",
+        "delivery_command_snapshot_unreadable",
+        "settlement_obligation_ineligible",
+        "sent_proof_rejected",
+        "settlement_return_action_conflict",
+        "settlement_return_resend_limit",
+        "settlement_return_obligation_ineligible",
+        "settlement_return_send_unresolved",
+        "settlement_return_observation_required",
+        "recovery_send_unattributed",
+        "recovery_not_confirmable",
+        "recovery_evidence_unresolved",
+        "external_access_paused",
+        "poll_rejected"
+      ],
+      "responses": [
+        {"http_status": 409, "ruling": "this_attempt", "display_code": null},
+        {"http_status": 418, "ruling": "unknown", "display_code": "http_418"}
+      ]
+    },
+    {
+      "endpoints": ["general"],
+      "protocol_codes": ["body_too_large"],
+      "responses": [
+        {"http_status": 413, "ruling": "this_attempt", "display_code": null},
+        {"http_status": 418, "ruling": "unknown", "display_code": "http_418"}
+      ]
+    },
+    {
+      "endpoints": ["general"],
+      "protocol_codes": ["unsupported_media_type"],
+      "responses": [
+        {"http_status": 415, "ruling": "this_attempt", "display_code": null},
+        {"http_status": 418, "ruling": "unknown", "display_code": "http_418"}
+      ]
+    },
+    {
+      "endpoints": ["general"],
+      "protocol_codes": [
+        "invalid_mail_template",
+        "invalid_runtime_switch",
+        "not_acknowledgeable",
+        "credential_login_rejected",
+        "credential_login_challenge"
+      ],
+      "responses": [
+        {"http_status": 422, "ruling": "this_attempt", "display_code": null},
+        {"http_status": 418, "ruling": "unknown", "display_code": "http_418"}
+      ]
+    },
+    {
+      "endpoints": ["general"],
+      "protocol_codes": [
+        "rate_limited",
+        "credential_login_busy"
+      ],
+      "responses": [
+        {"http_status": 429, "ruling": "this_attempt", "display_code": null},
+        {"http_status": 418, "ruling": "unknown", "display_code": "http_418"}
+      ]
+    },
+    {
+      "endpoints": ["general"],
+      "protocol_codes": ["feature_not_supported"],
+      "responses": [
+        {"http_status": 501, "ruling": "this_attempt", "display_code": null},
+        {"http_status": 418, "ruling": "unknown", "display_code": "http_418"}
+      ]
+    },
+    {
+      "endpoints": ["general"],
+      "protocol_codes": ["credential_login_unavailable"],
+      "responses": [
+        {"http_status": 503, "ruling": "this_attempt", "display_code": null},
+        {"http_status": 418, "ruling": "unknown", "display_code": "http_418"}
+      ]
+    },
+    {
+      "endpoints": ["general"],
+      "protocol_codes": [
+        "alert_stale",
+        "stale_auction_state",
+        "stale_lot_state",
+        "stale_user_state",
+        "rename_not_revertable",
+        "mail_template_conflict",
+        "runtime_switch_conflict",
+        "already_disposed",
+        "stale_settlement_return_state",
+        "settlement_return_untrusted",
+        "settlement_return_unbound",
+        "settlement_return_assets_mismatch",
+        "settlement_return_proof_required",
+        "conflict"
+      ],
+      "responses": [
+        {"http_status": 409, "ruling": "replay_checked", "display_code": null},
+        {"http_status": 400, "ruling": "unknown", "display_code": "http_400"},
+        {"http_status": 401, "ruling": "unknown", "display_code": "http_401"},
+        {"http_status": 403, "ruling": "unknown", "display_code": "http_403"},
+        {"http_status": 404, "ruling": "unknown", "display_code": "http_404"},
+        {"http_status": 422, "ruling": "unknown", "display_code": "http_422"},
+        {"http_status": 429, "ruling": "unknown", "display_code": "http_429"},
+        {"http_status": 500, "ruling": "unknown", "display_code": "http_500"},
+        {"http_status": 502, "ruling": "unknown", "display_code": "http_502"},
+        {"http_status": 503, "ruling": "unknown", "display_code": "http_503"},
+        {"http_status": 504, "ruling": "unknown", "display_code": "http_504"}
+      ]
+    },
+    {
+      "endpoints": ["user-mutation", "rules-publish", "about-publish"],
+      "protocol_codes": ["state_conflict"],
+      "responses": [
+        {"http_status": 409, "ruling": "replay_checked", "display_code": null},
+        {"http_status": 400, "ruling": "unknown", "display_code": "http_400"},
+        {"http_status": 503, "ruling": "unknown", "display_code": "http_503"}
+      ]
+    },
+    {
+      "endpoints": ["general", "rename-revert", "mail-template"],
+      "protocol_codes": ["state_conflict"],
+      "responses": [
+        {"http_status": 409, "ruling": "unknown", "display_code": null},
+        {"http_status": 400, "ruling": "unknown", "display_code": null},
+        {"http_status": 503, "ruling": "unknown", "display_code": null}
+      ]
+    }
+  ]
+}

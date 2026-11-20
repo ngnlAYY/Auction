@@ -77,7 +77,7 @@ export function Pager(props: PagerProps): JSX.Element {
   });
   const appliedPage = createValueMemo(() => Math.max(props.page, 1));
   const validPage = createValueMemo(() => Math.min(appliedPage(), totalPages()));
-  const jumpPage = createCell(appliedPage().toString());
+  const jumpPage = createCell(untrack(appliedPage).toString());
   const clampRejected = createCell(false);
   let jumpInput: HTMLInputElement | undefined;
 
@@ -101,7 +101,8 @@ export function Pager(props: PagerProps): JSX.Element {
   const clampDependency = createValueMemo(() => [props.page, validPage()] as const);
   const correctPage = ([page, target]: readonly [number, number]) =>
     clampRejected.set(
-      page !== target && !changePage(target, props.onPageClamp ?? props.onPageChange),
+      page !== target &&
+        !untrack(() => changePage(target, props.onPageClamp ?? props.onPageChange)),
     );
   createEffect(clampDependency, correctPage);
   const retryClamp = () => {

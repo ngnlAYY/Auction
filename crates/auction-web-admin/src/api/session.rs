@@ -5,16 +5,21 @@
 use auction_contracts::{AdminSessionResponse, ApiResponse};
 use auction_time::Timestamp;
 use auction_web_shared::clock::monotonic_millis;
+use auction_web_shared::storage::read_cookie;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use dioxus::{
     core::Runtime,
-    prelude::{EventHandler, Memo, try_consume_context},
+    prelude::{EventHandler, Memo, ReadableExt, try_consume_context},
 };
-use gloo_net::http::{Request, Response};
+use gloo_net::http::Request;
 use serde_json::Value;
 
 use super::failure::read_response_failure;
-use super::{AdminApiFailure, invalid_response_error, response_error, send_get, send_request};
+use super::transport::AdminResponse;
+use super::{
+    AdminApiFailure, invalid_response_error, response_error, response_failure, send_get,
+    send_request,
+};
 
 const SESSION_WITH_SERVER_TIME: &str = "/api/v1/admin/session?include=server_time";
 
@@ -26,6 +31,54 @@ pub(crate) struct AdminSessionCheckTrigger(pub(crate) EventHandler<()>);
 #[derive(Clone, Copy)]
 pub(crate) struct AdminSessionWritePermission(pub(crate) Memo<bool>);
 
+/// 请求发出时记录代际，异代正文与可信 401 都交回原宿主。
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct AdminSessionWriteReview {
+    pub(crate) epoch: u64,
+    pub(crate) current_epoch: Memo<u64>,
+    pub(crate) observe: EventHandler<(u64, AdminSession)>,
+    pub(crate) invalidate: EventHandler<(u64, AdminSession)>,
+}
+
+/// 读取管理端的可读 CSRF Cookie，保留无 Cookie 与不可读的区别。
+pub(crate) fn admin_session_cookie() -> Option<Option<String>> {
+    read_cookie("auction_admin_csrf")
+}
+
+/// 为请求固定实际发出时的宿主与会话身份。
+pub(super) struct AdminSessionInvalidation {
+    review: AdminSessionWriteReview,
+    session: AdminSession,
+}
+
+impl AdminSessionInvalidation {
+    /// 实发代际可核对时才登记；回执到达时不能重新认领宿主或代际。
+    pub(super) fn capture() -> Option<Self> {
+        let runtime = Runtime::try_current()?;
+        runtime.try_current_scope_id()?;
+        let review = try_consume_context::<AdminSessionWriteReview>()?;
+        let session = try_consume_context::<AdminSession>()?;
+        if !review.is_current()
+            || admin_session_cookie().flatten().as_deref() != Some(session.csrf_token.as_str())
+        {
+            return None;
+        }
+        Some(Self { review, session })
+    }
+
+    /// 将可信的失效证据交给原宿主；状态机仍须核对当时的归属。
+    pub(super) fn report(self) {
+        self.review.invalidate.call((self.review.epoch, self.session));
+    }
+}
+
+impl AdminSessionWriteReview {
+    /// 旧认证宿主即使尚未完成卸载，也不能把回执交给新宿主。
+    pub(super) fn is_current(self) -> bool {
+        self.current_epoch.try_read().is_ok_and(|epoch| *epoch == self.epoch)
+    }
+}
+
 /// API 与页面命令宿主共用门禁；缺少认证上下文或已卸载时失败关闭。
 pub(crate) fn admin_session_writes_allowed() -> bool {
     let Some(runtime) = Runtime::try_current() else { return false };
@@ -35,7 +88,7 @@ pub(crate) fn admin_session_writes_allowed() -> bool {
     try_consume_context::<AdminSessionWritePermission>().is_some_and(|permission| (permission.0)())
 }
 
-/// 业务 API 明确返回未认证后重新检查会话，统一退出旧登录态或展示会话读取错误。
+/// 写前复核没有可信结论时请求普通重查。
 pub(super) fn request_admin_session_check() {
     let Some(runtime) = Runtime::try_current() else { return };
     if runtime.try_current_scope_id().is_none() {
@@ -91,7 +144,7 @@ impl AdminSession {
                 headers.get("retry-after").as_deref(),
                 headers.get("date").as_deref(),
             );
-            let failure = read_response_failure(response).await;
+            let failure = read_response_failure(&response).await;
             return Err(AdminSessionRenewalFailure { failure, retry_after_millis });
         }
         decode_session_response(response).await.map_err(client_failure)
@@ -148,7 +201,7 @@ fn decode_admin_session(body: &str) -> Result<AdminSession, String> {
     })
 }
 
-async fn decode_session_response(response: Response) -> Result<AdminSession, String> {
+async fn decode_session_response(response: AdminResponse) -> Result<AdminSession, String> {
     let body = response.text().await.map_err(invalid_response_error)?;
     decode_admin_session(&body)
 }
@@ -166,7 +219,8 @@ fn session_read_failure(failure: AdminApiFailure) -> Result<Option<AdminSession>
 pub(crate) async fn fetch_admin_session() -> Result<Option<AdminSession>, String> {
     let response = send_get(SESSION_WITH_SERVER_TIME).await?;
     if !response.ok() {
-        return session_read_failure(read_response_failure(response).await);
+        // 外壳自己的读票没有业务宿主归属；写前 GET 的可信 401 则按实发归属交回外壳。
+        return session_read_failure(response_failure(response).await);
     }
     decode_session_response(response).await.map(Some)
 }
@@ -201,7 +255,7 @@ pub(crate) async fn logout_admin(csrf_token: String) -> Result<(), AdminApiFailu
     .await
     .map_err(AdminApiFailure::client)?;
     if !response.ok() {
-        return Err(read_response_failure(response).await);
+        return Err(read_response_failure(&response).await);
     }
     let payload: ApiResponse<Value> = response
         .json()
@@ -251,6 +305,28 @@ mod tests {
             session.expires_at.signed_duration_since(session.server_time),
             Duration::minutes(15)
         );
+    }
+
+    #[test]
+    fn session_body_only_provides_identity_when_authenticated_with_actor_and_token() {
+        let original = decode_admin_session(SESSION_FIXTURE).unwrap();
+        let body: Value = serde_json::from_str(SESSION_FIXTURE).unwrap();
+        let mut rotated = body.clone();
+        rotated["data"]["csrf_token"] = json!("rotated-cookie");
+        let rotated = decode_admin_session(&rotated.to_string()).unwrap();
+        assert_eq!(rotated.actor, original.actor);
+        assert!(!original.same_identity(&rotated));
+        for (field, value) in
+            [("authenticated", json!(false)), ("actor", json!("")), ("csrf_token", json!(""))]
+        {
+            let mut invalid = body.clone();
+            invalid["data"][field] = value;
+            assert_eq!(
+                decode_admin_session(&invalid.to_string()).unwrap_err(),
+                "invalid_response",
+                "{field}"
+            );
+        }
     }
 
     #[test]

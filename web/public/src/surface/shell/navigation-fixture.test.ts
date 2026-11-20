@@ -7,6 +7,7 @@ import { createRouter, RouterContext } from "@auction/web-shared/router";
 import { installFakeWindow } from "@auction/web-shared/router/test-window";
 import { type LocaleSession, LocaleSessionContext } from "@auction/web-shared/ui/i18n";
 import { transform } from "@solidjs/compiler";
+import { ref as browserRef } from "@solidjs/web";
 import {
   children,
   createEffect,
@@ -15,13 +16,29 @@ import {
   flush,
   createComponent as mount,
 } from "solid-js";
-import { createComponent, findElement, TestElement } from "../catalog/command-scope-fixture.test";
+import {
+  findElement,
+  createComponent as mountTestComponent,
+  TestElement,
+} from "../catalog/command-scope-fixture.test";
+import type { PublicPagerProps } from "../pagination";
 import { InitialPublicLocationContext, initialPublicLocation } from "../query";
 import { PUBLIC_ROUTES } from "../router/route";
 
 export { createEffect as effect, createMemo as memo } from "solid-js";
 export { insert, insertNode, setProp } from "../catalog/command-scope-fixture.test";
-export { createComponent };
+
+let pagerDiagnostics = false;
+
+/** 正常使用 DOM 替身的装配，分页诊断用例启用 Solid 的组件体读取检查。 */
+export function createComponent<P extends object>(
+  component: (props: P) => Element,
+  props: P,
+): Element {
+  return pagerDiagnostics
+    ? mount(component, props, component.name)
+    : mountTestComponent(component, props);
+}
 
 const NAMESPACE = "public-shell-test";
 const SOURCES = new Set(
@@ -86,6 +103,7 @@ const SOURCES = new Set(
     "../../../../shared/src/ui/components/async-state.tsx",
     "../../../../shared/src/ui/components/dialog.tsx",
     "../../../../shared/src/ui/components/pager/index.tsx",
+    "../../../../shared/src/ui/components/pager/size.tsx",
     "../../../../shared/src/ui/components/truncated-text/index.tsx",
     "../../../../shared/src/ui/i18n/index.tsx",
   ].map((path) => resolve(import.meta.dir, path)),
@@ -139,6 +157,10 @@ export class DomElement extends TestElement {
 }
 
 export function ref(read: () => unknown, element: DomElement): void {
+  if (pagerDiagnostics) {
+    Reflect.apply(browserRef, undefined, [read, element]);
+    return;
+  }
   const callback = read();
   if (typeof callback === "function") callback(element);
 }
@@ -165,15 +187,20 @@ const appModule = `${NAMESPACE}:${resolve(import.meta.dir, "../router/index.tsx"
 const routeModule = `${NAMESPACE}:${resolve(import.meta.dir, "../router/route.ts")}`;
 
 /** 控制首次详情分块的交付，独立于其他用例已加载的模块和路由缓存。 */
-export async function deferLotPage() {
+export function deferLotPage() {
+  return deferPublicPage("LotDetail");
+}
+
+/** 控制指定分块的首次交付，后续加载沿用原页面。 */
+export async function deferPublicPage(name: "LotDetail" | "AuctionIndex") {
   const { PUBLIC_PAGES }: typeof import("../router/route") = await import(routeModule);
-  const page = PUBLIC_PAGES.LotDetail;
-  if (page?.kind !== "lazy") throw new Error("拍品详情必须经按需路由加载");
+  const page = PUBLIC_PAGES[name];
+  if (page?.kind !== "lazy") throw new Error(`页面必须经按需路由加载：${name}`);
   const started = Promise.withResolvers<void>();
   const release = Promise.withResolvers<boolean>();
   let loadingStarted = false;
   Object.assign(PUBLIC_PAGES, {
-    LotDetail: {
+    [name]: {
       kind: page.kind,
       async load() {
         if (!loadingStarted) {
@@ -191,7 +218,7 @@ export async function deferLotPage() {
     fail: () => release.resolve(false),
     restore() {
       release.resolve(true);
-      Object.assign(PUBLIC_PAGES, { LotDetail: page });
+      Object.assign(PUBLIC_PAGES, { [name]: page });
     },
   };
 }
@@ -249,6 +276,33 @@ function observeNodes(render: () => Element) {
     );
     return node instanceof DomElement ? node : null;
   };
+}
+
+/** 挂载实际编译的 Public 分页控件，开发模式保留组件体与 ref 诊断。 */
+export async function mountPublicPagerForDiagnostics(props: PublicPagerProps) {
+  const pagerModule = `${NAMESPACE}:${resolve(import.meta.dir, "../pagination/index.tsx")}`;
+  const { PublicPager }: typeof import("../pagination") = await import(pagerModule);
+  const previous = pagerDiagnostics;
+  pagerDiagnostics = true;
+  let disposeRoot = () => {};
+  const dispose = () => {
+    try {
+      disposeRoot();
+      flush();
+    } finally {
+      pagerDiagnostics = previous;
+    }
+  };
+  try {
+    const find = createRoot((cleanup) => {
+      disposeRoot = cleanup;
+      return observeNodes(() => mount(PublicPager, props));
+    });
+    return { find, dispose };
+  } catch (error) {
+    dispose();
+    throw error;
+  }
 }
 
 /** 挂载生产入口，历史替身驱动真实路由匹配与兜底。 */

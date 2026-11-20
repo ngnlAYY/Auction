@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use super::{CommandIdentity, CommandReceipt, PendingCommandHost, PendingCommands};
 use crate::surface::admin_api_error_message;
+use crate::surface::auth::generated_key_visibility;
 use crate::surface::users::AdminUserGeneratedKeyDialog;
 
 /// 来源页内的操作区读取会话宿主的同一条命令，并展示本页的拒绝原因。
@@ -122,7 +123,7 @@ pub(crate) fn PendingCommandNotices(host: PendingCommandHost) -> Element {
                                 button { id: record_button_id(command_id, "retry"), r#type: "button", disabled: writes_blocked || entry.retry_blocked(host),
                                     onclick: move |_| host.retry(command_id), {t!("admin-pending-retry")}
                                 }
-                                button { id: record_button_id(command_id, "abandon"), r#type: "button", disabled: writes_blocked || entry.busy,
+                                button { id: record_button_id(command_id, "abandon"), r#type: "button", disabled: entry.busy,
                                     onclick: move |_| confirm_abandon.set(Some(command_id)), {t!("admin-pending-abandon")}
                                 }
                             }
@@ -141,7 +142,7 @@ pub(crate) fn PendingCommandNotices(host: PendingCommandHost) -> Element {
                     button { r#type: "button", class: "admin-btn-secondary", autofocus: true,
                         onclick: move |_| confirm_abandon.set(None), {t!("admin-pending-keep")}
                     }
-                    button { r#type: "button", class: "admin-btn-danger", disabled: writes_blocked,
+                    button { r#type: "button", class: "admin-btn-danger",
                         onclick: {
                             let command_id = entry.identity.command_id;
                             move |_| {
@@ -163,13 +164,19 @@ pub(crate) fn PendingCommandNotices(host: PendingCommandHost) -> Element {
 
 #[component]
 fn CommandReceipts(host: PendingCommandHost) -> Element {
-    let mut open_key = use_signal(|| None::<Uuid>);
+    let mut open_key = use_signal(|| None::<(Uuid, u64)>);
+    let visibility = generated_key_visibility();
     let notices = host.notices.read();
     let visible = notices.iter().filter(|notice| !host.key_in_source(notice));
-    let active_key = open_key().and_then(|command_id| {
+    let active_key = open_key().and_then(|(command_id, revision)| {
+        if visibility.hidden || visibility.revision != revision {
+            return None;
+        }
         let notice = visible.clone().find(|notice| notice.identity.command_id == command_id)?;
         match &notice.result {
-            Ok(Some(CommandReceipt::GeneratedKey(key))) => Some((command_id, key.clone())),
+            Ok(Some(CommandReceipt::GeneratedKey(key))) => {
+                Some((command_id, revision, key.clone()))
+            }
             _ => None,
         }
     });
@@ -197,8 +204,17 @@ fn CommandReceipts(host: PendingCommandHost) -> Element {
                                     p { class: "admin-panel__note", "{message}" }
                                 }
                                 if matches!(notice.result, Ok(Some(CommandReceipt::GeneratedKey(_)))) {
-                                    button { id: record_button_id(command_id, "receipt"), r#type: "button", onclick: move |_| open_key.set(Some(command_id)),
+                                    button { id: record_button_id(command_id, "receipt"), r#type: "button", disabled: visibility.hidden,
+                                        onclick: move |_| {
+                                            let current = generated_key_visibility();
+                                            if !current.hidden && current == visibility {
+                                                open_key.set(Some((command_id, current.revision)));
+                                            }
+                                        },
                                         {t!("admin-pending-view-key")}
+                                    }
+                                    if visibility.hidden {
+                                        p { class: "admin-panel__note", {t!("admin-session-key-hidden")} }
                                     }
                                 } else {
                                     button { id: record_button_id(command_id, "receipt"), r#type: "button", onclick: move |_| close_receipt(host, command_id),
@@ -211,11 +227,22 @@ fn CommandReceipts(host: PendingCommandHost) -> Element {
                 }
             }
         }
-        if let Some((command_id, key)) = active_key {
-            AdminUserGeneratedKeyDialog { generated: key, on_close: move |_| {
-                open_key.set(None);
-                close_receipt(host, command_id);
-            } }
+        if let Some(active) = active_key {
+            for (command_id, revision, generated) in [active] {
+                AdminUserGeneratedKeyDialog {
+                    key: "{command_id}:{revision}",
+                    generated,
+                    on_close: move |_| {
+                        // 迟到的关闭动作只可确认创建该对话框时的回执。
+                        if generated_key_visibility() == visibility
+                            && open_key.try_peek().is_ok_and(|opened| *opened == Some((command_id, revision)))
+                        {
+                            open_key.set(None);
+                            close_receipt(host, command_id);
+                        }
+                    },
+                }
+            }
         }
     }
 }
@@ -245,10 +272,9 @@ fn focus_targets_after(host: PendingCommandHost, removed: Uuid) -> Vec<String> {
         .iter()
         .filter(|entry| entry.unknown)
         .map(|entry| {
-            let actionable = writes_allowed && !entry.busy;
             let buttons = [
-                (actionable && !entry.retry_blocked(host)).then_some("retry"),
-                actionable.then_some("abandon"),
+                (writes_allowed && !entry.retry_blocked(host)).then_some("retry"),
+                (!entry.busy).then_some("abandon"),
             ];
             (entry.identity.command_id, buttons)
         })
@@ -323,7 +349,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::{CommandReceipts, FocusTargets, PendingCommandNotices, record_button_id};
-    use crate::api::AdminApiFailure;
+    use crate::api::{AdminWriteEndpoint, AdminWriteFailure};
     use crate::surface::auctions::draft_page_tests::{button, click_button, mount_writer};
     use crate::surface::pending::{
         CommandDelivery, CommandIdentity, CommandNotice, PendingCommandHost, use_pending_commands,
@@ -385,10 +411,11 @@ mod tests {
                                     assert!(owner.submit_with_receipt(
                                         entity.to_owned(), "测试操作".to_owned(), move |_| {
                                             ready((!unknown).ok_or_else(|| {
-                                                AdminApiFailure::from_http_body(
+                                                AdminWriteFailure::from_test_http(
+                                                    AdminWriteEndpoint::General,
                                                     503,
                                                     r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
-                                                ).code
+                                                )
                                             }))
                                         },
                                         |(), _| CommandDelivery::Receipt(None), |_| {},

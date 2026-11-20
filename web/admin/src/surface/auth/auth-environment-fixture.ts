@@ -6,15 +6,38 @@ import { installTestDocument, TestDocument } from "../test-dom-fixture";
 
 /** 带会话 Cookie 与页面级事件监听的内存文档。 */
 export class AuthTestDocument extends TestDocument {
-  readonly visibilityState = "visible";
+  hidden = false;
+  get visibilityState(): "hidden" | "visible" {
+    return this.hidden ? "hidden" : "visible";
+  }
   readonly documentElement = null;
   readonly body = null;
   private readonly events = new EventTarget();
   readonly addEventListener = this.events.addEventListener.bind(this.events);
   readonly removeEventListener = this.events.removeEventListener.bind(this.events);
 
-  constructor(public cookie: string) {
+  private cookieValue: string;
+  readonly cookieReads: (string | null)[] = [];
+
+  constructor(cookie: string) {
     super();
+    this.cookieValue = cookie;
+  }
+
+  get cookie(): string {
+    const value = this.cookieReads.shift();
+    if (value === null) throw new Error("测试文档无法读取 Cookie");
+    return value ?? this.cookieValue;
+  }
+
+  set cookie(value: string) {
+    this.cookieValue = value;
+  }
+
+  /** 模拟浏览器 visibilitychange 事件，不发起真实导航。 */
+  setHidden(hidden: boolean): void {
+    this.hidden = hidden;
+    this.events.dispatchEvent(new Event("visibilitychange"));
   }
 }
 
@@ -30,6 +53,18 @@ const realSetTimeout = globalThis.setTimeout;
 export async function settleAuth(): Promise<void> {
   await new Promise((resolve) => realSetTimeout(resolve, 0));
   flush();
+}
+
+/** 等待按需加载的页面实际挂载标题，兼容测试替换全局定时器或固定日历时钟。 */
+export async function waitForPageTitle(document: AuthTestDocument, id: string) {
+  const deadline = Bun.nanoseconds() + 2_000_000_000;
+  let title = document.getElementById(id);
+  while (title === null) {
+    if (Bun.nanoseconds() >= deadline) throw new Error(`等待页面标题挂载超时：${id}`);
+    await settleAuth();
+    title = document.getElementById(id);
+  }
+  return title;
 }
 
 /** 在用例内安装定时器，按精确延时手动派发并恢复原属性。 */
@@ -88,4 +123,36 @@ export function installManualTimers() {
     restore();
     throw error;
   }
+}
+
+/** 记录当前标签页的固定消息；可独立交付对端广播。 */
+export function installAuthBroadcast() {
+  const restore = preserveProperty(globalThis, "BroadcastChannel");
+  const sent: string[] = [];
+  const receivers = new Set<MemoryChannel>();
+  class MemoryChannel {
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    constructor(name: string) {
+      if (name !== "hv-auction-admin-session") throw new Error(`意外的测试通道 ${name}`);
+      receivers.add(this);
+    }
+    postMessage(value: string): void {
+      sent.push(value);
+    }
+    close(): void {
+      receivers.delete(this);
+    }
+  }
+  Object.defineProperty(globalThis, "BroadcastChannel", {
+    configurable: true,
+    value: MemoryChannel,
+  });
+  return {
+    sent,
+    deliver(value = "session-ended"): void {
+      for (const channel of receivers)
+        channel.onmessage?.(new MessageEvent("message", { data: value }));
+    },
+    restore,
+  };
 }

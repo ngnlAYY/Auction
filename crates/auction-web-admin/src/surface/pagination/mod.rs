@@ -154,6 +154,9 @@ pub(crate) fn AdminPager(
     /// 本地报告页码不写历史；数量选择自行创建历史项。
     #[props(default)]
     local: bool,
+    /// 首次写历史前确认页长事件仍有效。缺省放行；拒绝时也不修改本地状态或偏好。
+    #[props(default = |()| true)]
+    can_change_page_size: Callback<(), bool>,
     /// 目录数量变化只重置目录页，不清除其他独立报告分页或命令上下文。
     /// 返回 true 表示已重置，缺省回调返回 false，由常规翻页动作回到首页。
     #[props(default)]
@@ -200,6 +203,7 @@ pub(crate) fn AdminPager(
             },
             on_page_size_change: move |size| {
                 if current_size() != page_size || size <= 0 || maximum.is_some_and(|maximum| size > maximum) { return; }
+                if !can_change_page_size.call(()) { return; }
                 // 先固定离开历史项的旧数量，随后由原页面 push 首页，再 replace 新数量。
                 // 各 hook 只写自己拥有的键，保留筛选、排序及未知参数。
                 write_query_pairs(pagination.keys, &[(pagination.keys[0].to_owned(), pagination.size().to_string())], QueryWriteMode::Replace);

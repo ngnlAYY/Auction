@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use self::sources::CommandSource;
 use super::users::AdminUserGeneratedKey;
-use crate::api::AdminApiFailure;
+use crate::api::{AdminWriteFailure, Rejection};
 
 mod panel;
 mod sources;
@@ -21,7 +21,7 @@ pub(super) use sources::advance_command_reload;
 pub(crate) use sources::{use_pending_commands, use_pending_commands_with_gate};
 
 type Deliver = Box<dyn FnOnce(bool) -> CommandDelivery>;
-type Attempt = Pin<Box<dyn Future<Output = Result<Deliver, String>>>>;
+type Attempt = Pin<Box<dyn Future<Output = Result<Deliver, AdminWriteFailure>>>>;
 type CommandFactory = Rc<dyn Fn(Uuid) -> Attempt>;
 
 #[derive(Clone)]
@@ -192,7 +192,7 @@ impl PendingCommands {
     ) -> bool
     where
         T: 'static,
-        F: Future<Output = Result<T, String>> + 'static,
+        F: Future<Output = Result<T, AdminWriteFailure>> + 'static,
     {
         self.submit_with_receipt(
             entity,
@@ -221,7 +221,7 @@ impl PendingCommands {
     ) -> bool
     where
         T: 'static,
-        F: Future<Output = Result<T, String>> + 'static,
+        F: Future<Output = Result<T, AdminWriteFailure>> + 'static,
     {
         let Ok(source) = self.source.try_peek() else { return false };
         if !crate::api::admin_session_writes_allowed()
@@ -334,7 +334,7 @@ impl PendingCommandHost {
         });
     }
 
-    fn complete(mut self, command_id: Uuid, result: Result<Deliver, String>) {
+    fn complete(mut self, command_id: Uuid, result: Result<Deliver, AdminWriteFailure>) {
         let mut entries = self.entries;
         let mut entries = entries.write();
         let Some(index) = entries.iter().position(|entry| entry.identity.command_id == command_id)
@@ -343,13 +343,16 @@ impl PendingCommandHost {
         };
         let entry = &mut entries[index];
         // 只有经本 ID 的账本核对的拒绝才能清除较早的未知。其余未知保留原 UUID 与负载。
-        if let Err(code) = &result
-            && (!definite_rejection(code)
-                || (entry.unknown && !AdminApiFailure::rejection_after_replay_check(code)))
+        if let Err(failure) = &result
+            && match failure.classify() {
+                Rejection::Unknown => true,
+                Rejection::ThisAttempt => entry.unknown,
+                Rejection::ReplayChecked => false,
+            }
         {
             entry.busy = false;
             entry.unknown = true;
-            let display = AdminApiFailure::display_code(code).to_owned();
+            let display = failure.display_code().into_owned();
             entry.error = Some(display.clone());
             let source = self.live_source(&entry.source);
             let on_failure = Rc::clone(&entry.on_failure);
@@ -382,8 +385,8 @@ impl PendingCommandHost {
                     });
                 }
             }
-            Err(code) => {
-                let code = AdminApiFailure::display_code(&code).to_owned();
+            Err(failure) => {
+                let code = failure.display_code().into_owned();
                 let mut notices = if let Some(source) = source {
                     (entry.on_failure)(code.clone());
                     source.rejections
@@ -406,11 +409,10 @@ impl PendingCommandHost {
     }
 
     fn abandon(mut self, command_id: Uuid) -> bool {
-        if !crate::api::admin_session_writes_allowed() {
+        // 放弃只释放本地记录和负载。服务器仍可能执行已发出的命令。
+        let Ok(mut entries) = self.entries.try_write() else {
             return false;
-        }
-        // 放弃仅移除本地未知记录，已发出的命令仍可能生效。
-        let mut entries = self.entries.write();
+        };
         let Some(index) = entries.iter().position(|entry| {
             entry.identity.command_id == command_id && !entry.busy && entry.unknown
         }) else {
@@ -456,11 +458,6 @@ pub(super) fn try_set_if_alive<T: 'static>(mut signal: Signal<T>, value: T) -> b
     }
 }
 
-/// 只认能排除本次命令效果的拒绝码；不据此推断较早的尝试。
-pub(crate) fn definite_rejection(code: &str) -> bool {
-    AdminApiFailure::definite_rejection(code)
-}
-
 #[cfg(test)]
 mod tests {
     use std::{
@@ -477,18 +474,23 @@ mod tests {
 
     use super::{
         CommandNotice, PendingCommandHost, PendingCommandNotices, PendingCommandPanel,
-        PendingCommands, definite_rejection, use_pending_command_gate, use_pending_command_host,
-        use_pending_commands, use_pending_commands_with_gate,
+        PendingCommands, use_pending_command_gate, use_pending_command_host, use_pending_commands,
+        use_pending_commands_with_gate,
     };
     use crate::api::{
         AdminApiFailure, AdminDocumentKind, AdminSessionWritePermission, AdminUser,
-        MailTemplateAttempt, mutate_admin_user, publish_admin_rules, submit_mail_template,
+        AdminWriteEndpoint, AdminWriteFailure, MailTemplateAttempt, WriteDispatchStub,
+        WriteTransportStub, admin_fixture, blacklist_admin_user, mutate_admin_user,
+        publish_admin_rules, submit_mail_template,
     };
     use crate::surface::auctions::draft_page_tests::{
         RecordRead, button, click_button, has_live_text, has_text, mount_writer, settle_writer,
     };
     use crate::surface::realtime::TestPage;
     use crate::surface::users::{AdminUserGeneratedKey, AdminUserGeneratedKeyDialog};
+
+    mod evidence;
+    mod transport;
 
     #[derive(Default)]
     struct CommandHarness {
@@ -512,6 +514,30 @@ mod tests {
         commands.source.peek().rejections
     }
 
+    const MAIL_TEMPLATE_ENTITY: &str = "mail-template:auction_no_attachments";
+
+    fn stub_mail_template_transport(
+        review: impl Fn() -> Result<String, String> + 'static,
+        dispatch: impl Fn(&[u8]) -> WriteDispatchStub + 'static,
+    ) {
+        WriteTransportStub::install(review, move |url, method, body, _timeout_millis| {
+            assert_eq!(url, "/api/v1/admin/mail-templates/auction_no_attachments");
+            assert_eq!(method, &Method::PUT);
+            dispatch(body)
+        });
+    }
+
+    async fn send_mail_template(command_id: Uuid) -> Result<(), AdminWriteFailure> {
+        submit_mail_template(&MailTemplateAttempt {
+            command_id,
+            key: "auction_no_attachments".to_owned(),
+            expected_revision: 5,
+            body: Some("首次确认的正文".to_owned()),
+        })
+        .await
+        .map(|_| ())
+    }
+
     #[test]
     fn rejected_panel_entries_render_their_specific_error_messages() {
         let (page, _) = mount_writer(|| {
@@ -527,9 +553,11 @@ mod tests {
                                 "code": code, "message": "写入已拒绝", "data": null,
                                 "request_id": null,
                             });
-                            ready(Err::<(), _>(
-                                AdminApiFailure::from_http_body(status, &body.to_string()).code,
-                            ))
+                            ready(Err::<(), _>(AdminWriteFailure::from_test_http(
+                                AdminWriteEndpoint::General,
+                                status,
+                                body.to_string(),
+                            )))
                         },
                         |()| panic!("拒绝不能交付成功回执"),
                         |_| {},
@@ -542,128 +570,6 @@ mod tests {
         assert!(has_live_text(&page, "告警状态已变化。请核对重新读取后的列表，再决定是否处置。"));
         assert!(has_live_text(&page, "请求体过大。请缩短内容后重试。"));
         assert!(!has_live_text(&page, "原样重试"));
-    }
-
-    #[test]
-    fn discarded_auxiliary_actions_and_ledger_conflicts_are_definite_rejections() {
-        for code in [
-            "command_conflict",
-            "not_found",
-            "stale_credential_state",
-            "credential_conflict",
-            "credential_login_rejected",
-            "credential_login_challenge",
-            "credential_login_busy",
-            "invalid_auction_intake",
-            "unsupported_equipment_source",
-            "auction_intake_unavailable",
-            "seller_blacklisted",
-            "equipment_conflict",
-        ] {
-            assert!(definite_rejection(code), "{code}");
-        }
-    }
-
-    #[test]
-    fn errors_that_can_follow_a_committed_command_are_kept_pending() {
-        for code in [
-            "state_conflict",
-            "storage_unavailable",
-            "reconciliation_required",
-            "outcome_unknown",
-            "internal_error",
-            "invalid_credentials",
-        ] {
-            assert!(!definite_rejection(code), "{code}");
-        }
-    }
-
-    #[test]
-    fn clean_rejections_include_rolled_back_transactions_and_transient_guards() {
-        for code in [
-            "invalid_json",
-            "invalid_replay",
-            "rate_limited",
-            "invalid_runtime_config",
-            "invalid_runtime_switch",
-            "stale_recovery_state",
-            "recovery_send_unattributed",
-            "recovery_not_confirmable",
-            "recovery_evidence_unresolved",
-            "stale_auction_state",
-            "stale_lot_state",
-            "stale_delivery_state",
-            "sent_proof_rejected",
-            "world_has_active_auction",
-            "world_not_found",
-            "delivery_not_found",
-            "not_acknowledgeable",
-            "rename_name_taken",
-            "user_conflict",
-            "alert_stale",
-            "invalid_alert_command",
-            "invalid_delivery_command",
-            "delivery_sent_sighted",
-            "settlement_obligation_ineligible",
-            "invalid_auction_state",
-            "invalid_lot_state",
-            "manual_early_settlement_disabled",
-            "invalid_credential_request",
-            "invalid_credential_secret",
-            "external_access_paused",
-            "invalid_mail_request",
-            "poll_rejected",
-            "conflict",
-        ] {
-            assert!(definite_rejection(code), "{code}");
-        }
-    }
-
-    #[test]
-    fn pre_write_validation_is_a_definite_rejection() {
-        for code in [
-            "invalid_request_id",
-            "invalid_query",
-            "unsupported_media_type",
-            "body_too_large",
-            "method_not_allowed",
-            "origin_forbidden",
-            "csrf_invalid",
-            "invalid_command_id",
-            "invalid_auction_id",
-            "invalid_auction_command",
-            "invalid_auction_schedule",
-            "invalid_lot_id",
-            "invalid_lot_action",
-            "invalid_lot_command",
-            "invalid_recovery_command",
-            "invalid_world",
-            "invalid_world_command",
-            "invalid_delivery_id",
-            "invalid_user_id",
-            "invalid_rename_id",
-            "invalid_rename_command",
-            "invalid_credential_action",
-            "invalid_credential_kind",
-            "invalid_credential_label",
-            "invalid_credential_player_name",
-            "invalid_credential_status",
-            "invalid_credential_world",
-            "invalid_mail_template",
-            "mail_template_not_found",
-            "mail_template_conflict",
-            "runtime_switch_conflict",
-            "already_disposed",
-        ] {
-            assert!(definite_rejection(code), "{code}");
-        }
-    }
-
-    #[test]
-    fn an_unreadable_error_response_does_not_prove_rejection() {
-        for code in ["invalid_response", "http_400", "http_413", "http_503", "new_error"] {
-            assert!(!definite_rejection(code), "{code}");
-        }
     }
 
     #[test]
@@ -683,11 +589,11 @@ mod tests {
                     let mut seen = seen_ids.borrow_mut();
                     seen.push(command_id);
                     ready(match seen.len() {
-                        1 => Err("request_timeout".to_owned()),
-                        2 => Err(AdminApiFailure::not_sent_code("alert_stale")),
-                        3 => Err("rate_limited".to_owned()),
-                        4 => Err("unauthenticated".to_owned()),
-                        5 => Err("rename_name_taken".to_owned()),
+                        1 => Err(AdminWriteFailure::outcome_unknown("request_timeout")),
+                        2 => Err(AdminWriteFailure::not_sent("alert_stale")),
+                        3 => Err(failure(429, "rate_limited")),
+                        4 => Err(failure(401, "unauthenticated")),
+                        5 => Err(failure(409, "rename_name_taken")),
                         _ => Ok(()),
                     })
                 },
@@ -729,35 +635,48 @@ mod tests {
         dom.rebuild_in_place();
         let commands = control.pending.get().unwrap();
         let requests = Rc::new(RefCell::new(Vec::new()));
-        let entity = "mail-template:auction_no_attachments";
+        let entity = MAIL_TEMPLATE_ENTITY;
+        const REJECTIONS: &[(u16, &[u8], &str)] = &[
+            (409, b"{\"code\":\"mail_template_conflict\",\"message\":\"\xff\",\"data\":null,\"request_id\":null}", "http_409"),
+            (409, br#"{"code":"state_conflict","message":"","data":null,"request_id":null}"#, "state_conflict"),
+            (400, admin_fixture!("error-mail-template-conflict").as_bytes(), "http_400"),
+            (409, br#"{"code":"mail_template_conflict""#, "http_409"),
+            (409, br#"{"code":"mail_template_conflict","message":"","data":null}"#, "http_409"),
+            (409, br#"{"code":"outcome_unknown","code":"mail_template_conflict","message":"","data":null,"request_id":null}"#, "http_409"),
+            (409, br#"{"code":"mail_template_conflict","message":"","data":[],"request_id":null}"#, "http_409"),
+            (409, br#"{"code":"write_endpoint:mail-template:409:mail_template_conflict","message":"","data":null,"request_id":null}"#, "http_409"),
+            (409, br#"{"code":"write_endpoint:user-mutation:409:state_conflict","message":"","data":null,"request_id":null}"#, "http_409"),
+            (409, br#"{"code":"not_sent:mail_template_conflict","message":"","data":null,"request_id":null}"#, "http_409"),
+            (409, br#"{"code":"not_sent:alert_stale","message":"","data":null,"request_id":null}"#, "http_409"),
+            (409, br#"{"code":"invalid_request","message":"","data":null,"request_id":null}"#, "http_409"),
+            (413, b"<html>Payload Too Large</html>", "http_413"),
+            (413, admin_fixture!("mail-template-body-too-large").as_bytes(), "body_too_large"),
+            (409, b"{\"code\":\"mail_template_conflict\",\"message\":\"\xef\xbf\xbd\",\"data\":null,\"request_id\":null}", "mail_template_conflict"),
+        ];
 
         dom.in_scope(ScopeId::APP, || {
             let requests = requests.clone();
-            MailTemplateAttempt::stub_submit(move |request| {
-                let mut requests = requests.borrow_mut();
-                requests.push(request.to_owned());
-                let receipt: &[u8] = match requests.len() {
-                    1 => return Err(AdminApiFailure::client("request_timeout")),
-                    2 => b"{\"code\":\"mail_template_conflict\",\"message\":\"\xff\",\"data\":null,\"request_id\":null}",
-                    3 => b"{\"code\":\"mail_template_conflict\",\"message\":\"\xef\xbf\xbd\",\"data\":null,\"request_id\":null}",
-                    _ => panic!("出现额外的模板写入"),
-                };
-                Err(AdminApiFailure::from_http_bytes(409, receipt))
-            });
+            stub_mail_template_transport(
+                || Ok("csrf-fixture".to_owned()),
+                move |request| {
+                    let mut requests = requests.borrow_mut();
+                    let index = requests.len();
+                    requests.push(request.to_owned());
+                    let Some(index) = index.checked_sub(1) else {
+                        return WriteDispatchStub::Failed {
+                            built: true,
+                            error: auction_web_shared::TransportError::Timeout,
+                        };
+                    };
+                    let (status, receipt, _) = REJECTIONS[index];
+                    WriteDispatchStub::Response { status, body: Some(receipt) }
+                },
+            );
             assert!(commands.submit(
                 entity.to_owned(),
                 "保存模板".to_owned(),
-                move |command_id| async move {
-                    submit_mail_template(&MailTemplateAttempt {
-                        command_id,
-                        key: "auction_no_attachments".to_owned(),
-                        expected_revision: 5,
-                        body: Some("首次确认的正文".to_owned()),
-                    })
-                    .await
-                    .map_err(|failure| failure.code)
-                },
-                |_| panic!("冲突不能交付成功回执"),
+                send_mail_template,
+                |()| panic!("冲突不能交付成功回执"),
                 |_| {},
             ));
         });
@@ -782,22 +701,31 @@ mod tests {
         assert_eq!(requests.borrow().len(), 2);
         assert!(commands.host.entries.peek()[0].unknown);
 
+        dom.in_scope(ScopeId::APP, || writes_allowed.set(true));
+        for &(_, _, display) in &REJECTIONS[1..REJECTIONS.len() - 1] {
+            dom.in_scope(ScopeId::APP, || commands.host.retry(command_id));
+            dom.process_events();
+            assert!(commands.contains(entity), "{display}");
+            assert!(!commands.is_busy(entity), "{display}");
+            assert_eq!(commands.host.entries.peek()[0].error.as_deref(), Some(display));
+            assert!(rejections(commands).peek().is_empty(), "{display}");
+        }
         dom.in_scope(ScopeId::APP, || {
-            writes_allowed.set(true);
             commands.host.retry(command_id);
         });
         dom.process_events();
         assert!(commands.host.entries.peek().is_empty());
         assert_eq!(
             rejections(commands).peek()[0].result.as_ref().err().unwrap(),
-            "mail_template_conflict"
+            REJECTIONS.last().unwrap().2
         );
         let requests = requests.borrow();
-        assert_eq!(requests.len(), 3);
-        assert_eq!(requests[1], requests[0]);
-        assert_eq!(requests[2], requests[0]);
+        assert_eq!(requests.len(), REJECTIONS.len() + 1);
+        for request in &requests[1..] {
+            assert_eq!(request, &requests[0]);
+        }
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&requests[2]).unwrap(),
+            serde_json::from_slice::<serde_json::Value>(&requests[0]).unwrap(),
             serde_json::json!({
                 "command_id": command_id,
                 "expected_revision": 5,
@@ -822,9 +750,11 @@ mod tests {
                 move |command_id| {
                     let mut seen = seen_ids.borrow_mut();
                     seen.push(command_id);
-                    ready(Err::<(), _>(
-                        if seen.len() == 1 { "request_timeout" } else { "alert_stale" }.to_owned(),
-                    ))
+                    ready(Err::<(), _>(if seen.len() == 1 {
+                        AdminWriteFailure::outcome_unknown("request_timeout")
+                    } else {
+                        failure(409, "alert_stale")
+                    }))
                 },
                 |()| {},
                 |_| {},
@@ -868,7 +798,7 @@ mod tests {
             assert!(commands.submit(
                 "first".into(),
                 "old".into(),
-                |_| ready(Err::<(), _>("rate_limited".into())),
+                |_| ready(Err::<(), _>(failure(429, "rate_limited"))),
                 |()| {},
                 move |code| observed.borrow_mut().push(code),
             ));
@@ -884,7 +814,7 @@ mod tests {
             assert!(commands.submit(
                 "other".into(),
                 "other".into(),
-                |_| ready(Err::<(), _>("invalid_json".into())),
+                |_| ready(Err::<(), _>(failure(400, "invalid_json"))),
                 |()| {},
                 |_| {},
             ));
@@ -901,7 +831,7 @@ mod tests {
             assert!(commands.submit(
                 "first".into(),
                 "new".into(),
-                |_| ready(Err::<(), _>("invalid_json".into())),
+                |_| ready(Err::<(), _>(failure(400, "invalid_json"))),
                 |()| {},
                 |_| {},
             ));
@@ -920,7 +850,8 @@ mod tests {
 
     #[test]
     fn a_first_definite_failure_can_be_dismissed() {
-        for code in [AdminApiFailure::not_sent_code("network_error"), "stale_lot_state".to_owned()]
+        for failure in
+            [AdminWriteFailure::not_sent("network_error"), failure(409, "stale_lot_state")]
         {
             let control = Rc::new(CommandHarness::default());
             let mut dom = VirtualDom::new(test_page).with_root_context(control.clone());
@@ -930,7 +861,7 @@ mod tests {
                 assert!(commands.submit(
                     "first".into(),
                     "test".into(),
-                    move |_| ready(Err::<(), _>(code.clone())),
+                    move |_| ready(Err::<(), _>(failure.clone())),
                     |()| {},
                     |_| {}
                 ));
@@ -955,7 +886,7 @@ mod tests {
             assert!(commands.submit(
                 "first".into(),
                 "test".into(),
-                |_| ready(Err::<(), _>(AdminApiFailure::not_sent_code("network_error"))),
+                |_| ready(Err::<(), _>(AdminWriteFailure::not_sent("network_error"))),
                 |()| {},
                 move |code| *displayed.borrow_mut() = Some(code),
             ));
@@ -966,40 +897,70 @@ mod tests {
         assert!(!commands.contains("first"));
     }
 
-    fn assert_first_version_conflict_releases_entity<F>(
+    fn assert_version_conflict_releases_entity<F>(
         url: &'static str,
         method: Method,
         body: &'static str,
         send: impl Fn(Uuid) -> F + 'static,
     ) where
-        F: Future<Output = Result<(), String>> + 'static,
+        F: Future<Output = Result<(), AdminWriteFailure>> + 'static,
     {
-        let control = Rc::new(CommandHarness::default());
-        let mut dom = VirtualDom::new(test_page).with_root_context(control.clone());
-        dom.rebuild_in_place();
-        let commands = control.pending.get().unwrap();
-        let displayed = Rc::new(RefCell::new(None));
-        dom.in_scope(ScopeId::APP, || {
-            AdminApiFailure::stub_write_response(url, method, 409, body);
-            let displayed = displayed.clone();
-            assert!(commands.submit(
-                "first".into(),
-                "test".into(),
-                send,
-                |()| panic!("版本冲突不能交付成功结果"),
-                move |code| *displayed.borrow_mut() = Some(code),
-            ));
-            assert!(commands.contains("first"));
-        });
-        dom.process_events();
-        assert_eq!(displayed.borrow().as_deref(), Some("state_conflict"));
-        assert!(!commands.contains("first"));
+        let send = Rc::new(send);
+        for prior_unknown in [false, true] {
+            let control = Rc::new(CommandHarness::default());
+            let mut dom = VirtualDom::new(test_page).with_root_context(control.clone());
+            dom.rebuild_in_place();
+            let commands = control.pending.get().unwrap();
+            let displayed = Rc::new(RefCell::new(Vec::new()));
+            let attempts = Rc::new(RefCell::new(Vec::new()));
+            dom.in_scope(ScopeId::APP, || {
+                AdminApiFailure::stub_write_response(url, method.clone(), 409, body);
+                let displayed = displayed.clone();
+                let attempts = attempts.clone();
+                let send = send.clone();
+                assert!(commands.submit(
+                    "first".into(),
+                    "test".into(),
+                    move |command_id| {
+                        let mut attempts = attempts.borrow_mut();
+                        attempts.push(command_id);
+                        let first_unknown = prior_unknown && attempts.len() == 1;
+                        let send = send.clone();
+                        async move {
+                            if first_unknown {
+                                Err(AdminWriteFailure::outcome_unknown("request_timeout"))
+                            } else {
+                                send(command_id).await
+                            }
+                        }
+                    },
+                    |()| panic!("版本冲突不能交付成功结果"),
+                    move |code| displayed.borrow_mut().push(code),
+                ));
+                assert!(commands.contains("first"));
+            });
+            dom.process_events();
+            let command_id = attempts.borrow()[0];
+            if prior_unknown {
+                assert!(commands.contains("first"));
+                assert!(rejections(commands).peek().is_empty());
+                dom.in_scope(ScopeId::APP, || commands.host.retry(command_id));
+                dom.process_events();
+                assert_eq!(attempts.borrow().as_slice(), &[command_id; 2]);
+                assert_eq!(displayed.borrow().as_slice(), &["request_timeout", "state_conflict"]);
+            } else {
+                assert_eq!(attempts.borrow().as_slice(), &[command_id]);
+                assert_eq!(displayed.borrow().as_slice(), &["state_conflict"]);
+            }
+            assert!(!commands.contains("first"));
+            assert_eq!(rejections(commands).peek()[0].identity.command_id, command_id);
+        }
     }
 
     #[test]
-    fn a_first_user_api_version_conflict_leaves_the_entity_available() {
+    fn user_api_version_conflicts_leave_the_entity_available() {
         let user = AdminUser {
-            id: Uuid::new_v4().to_string(),
+            id: "00000000-0000-4000-8000-000000000001".to_owned(),
             username: "玩家甲".to_owned(),
             forum_account_id: None,
             status: "active".to_owned(),
@@ -1010,12 +971,14 @@ mod tests {
             blacklist_count: 0,
             blacklist_history: Vec::new(),
         };
-        assert_first_version_conflict_releases_entity(
+        let body = r#"{"code":"state_conflict","message":"用户版本已变化","data":{"current_state_version":6},"request_id":null}"#;
+        let renamed = user.clone();
+        assert_version_conflict_releases_entity(
             "/api/v1/admin/users",
             Method::PATCH,
-            r#"{"code":"state_conflict","message":"用户版本已变化","data":{"current_state_version":6},"request_id":null}"#,
+            body,
             move |command_id| {
-                let user = user.clone();
+                let user = renamed.clone();
                 async move {
                     mutate_admin_user(command_id, &user, "rename", Some("玩家乙".to_owned()), None)
                         .await
@@ -1023,15 +986,26 @@ mod tests {
                 }
             },
         );
+        assert_version_conflict_releases_entity(
+            "/api/v1/admin/users/00000000-0000-4000-8000-000000000001/blacklist",
+            Method::PUT,
+            body,
+            move |command_id| {
+                let user = user.clone();
+                async move {
+                    blacklist_admin_user(command_id, &user, "测试原因".to_owned()).await.map(|_| ())
+                }
+            },
+        );
     }
 
     #[test]
-    fn first_rules_and_about_api_version_conflicts_leave_the_entity_available() {
+    fn rules_and_about_api_version_conflicts_leave_the_entity_available() {
         for (kind, url) in [
             (AdminDocumentKind::Rules, "/api/v1/admin/rules"),
             (AdminDocumentKind::About, "/api/v1/admin/about"),
         ] {
-            assert_first_version_conflict_releases_entity(
+            assert_version_conflict_releases_entity(
                 url,
                 Method::PUT,
                 r#"{"code":"state_conflict","message":"文档版本已变化","data":{"current_revision":6},"request_id":null}"#,
@@ -1046,7 +1020,6 @@ mod tests {
                     )
                     .await
                     .map(|_| ())
-                    .map_err(|failure| failure.code)
                 },
             );
         }
@@ -1058,14 +1031,15 @@ mod tests {
 
     struct SessionRequests {
         writes: RefCell<Vec<String>>,
-        replies: RefCell<VecDeque<Result<(), String>>>,
-        delayed: Option<RecordRead<()>>,
+        replies: RefCell<VecDeque<Result<(), AdminWriteFailure>>>,
+        delayed: Option<RecordRead<(), AdminWriteFailure>>,
         source: Cell<Option<PendingCommands>>,
         delivered: Cell<usize>,
+        failures: RefCell<Vec<String>>,
     }
 
     impl SessionRequests {
-        async fn write(&self, command_id: Uuid) -> Result<(), String> {
+        async fn write(&self, command_id: Uuid) -> Result<(), AdminWriteFailure> {
             let first = self.writes.borrow().is_empty();
             self.writes.borrow_mut().push(
                 serde_json::json!({"command_id": command_id, "reason": "第一次提交的原因"})
@@ -1078,14 +1052,14 @@ mod tests {
         }
     }
 
-    fn failure(status: u16, code: &str) -> String {
+    fn failure(status: u16, code: &str) -> AdminWriteFailure {
         let body = serde_json::json!({"code": code, "message": "请求失败", "data": null, "request_id": null});
-        AdminApiFailure::from_http_body(status, &body.to_string()).code
+        AdminWriteFailure::from_test_http(AdminWriteEndpoint::General, status, body.to_string())
     }
 
     fn mount_session_requests(
         delayed: bool,
-        replies: impl IntoIterator<Item = Result<(), String>>,
+        replies: impl IntoIterator<Item = Result<(), AdminWriteFailure>>,
         gated_destination: bool,
     ) -> (TestPage, Rc<SessionRequests>) {
         let requests = Rc::new(SessionRequests {
@@ -1094,6 +1068,7 @@ mod tests {
             delayed: delayed.then(RecordRead::new),
             source: Cell::new(None),
             delivered: Cell::new(0),
+            failures: RefCell::new(Vec::new()),
         });
         let (page, _) = mount_writer({
             let requests = requests.clone();
@@ -1125,6 +1100,7 @@ mod tests {
             button { disabled: owner.contains(SOURCE_ENTITY), onclick: move |_| {
                 let send = requests.clone();
                 let deliver = requests.clone();
+                let failures = requests.clone();
                 owner.submit(
                     SOURCE_ENTITY.to_owned(), "测试静默".to_owned(),
                     move |command_id| {
@@ -1137,7 +1113,7 @@ mod tests {
                         success.set(true);
                         deliver.delivered.set(deliver.delivered.get() + 1);
                     },
-                    |_| {},
+                    move |code| failures.failures.borrow_mut().push(code),
                 );
             }, {SUBMIT.to_owned()} }
             button { onclick: move |_| {
@@ -1233,6 +1209,32 @@ mod tests {
         assert!(button(&page, "关闭已拒绝操作").is_some());
         assert!(button(&page, "原样重试").is_none());
         assert_eq!(requests.delivered.get(), 1);
+        assert_eq!(requests.failures.borrow().as_slice(), &["alert_stale"]);
+    }
+
+    #[test]
+    fn detached_replay_rejection_goes_to_the_shell_once() {
+        let (mut page, requests) =
+            mount_session_requests(true, [Err(failure(409, "alert_stale"))], false);
+        click_button(&mut page, SUBMIT);
+        let host = requests.source.get().unwrap().host;
+        click_button(&mut page, NAVIGATE);
+        requests.delayed.as_ref().unwrap().respond(Err(failure(503, "storage_unavailable")));
+        settle_writer(&mut page);
+        assert!(host.notices.peek().is_empty());
+        assert!(requests.failures.borrow().is_empty());
+        click_button(&mut page, "原样重试");
+        assert!(button(&page, "原样重试").is_none());
+        assert!(requests.failures.borrow().is_empty());
+        assert_eq!(requests.delivered.get(), 0);
+        let notices = host.notices.peek();
+        assert_eq!(notices.len(), 1);
+        assert_eq!(notices[0].result.as_ref().err().map(String::as_str), Some("alert_stale"));
+        let writes = requests.writes.borrow();
+        assert_eq!(writes.len(), 2);
+        assert_eq!(writes[0], writes[1]);
+        let request: serde_json::Value = serde_json::from_str(&writes[0]).unwrap();
+        assert_eq!(request["command_id"], notices[0].identity.command_id.to_string());
     }
 
     #[test]
@@ -1280,7 +1282,7 @@ mod tests {
 
     #[component]
     fn GeneratedKeySource() -> Element {
-        let reply = use_context::<Rc<RecordRead<String>>>();
+        let reply = use_context::<Rc<RecordRead<String, AdminWriteFailure>>>();
         let reload = use_signal(|| 0);
         let owner = use_pending_commands(reload, |_| true);
         rsx! {
@@ -1303,7 +1305,7 @@ mod tests {
 
     #[test]
     fn detached_generated_key_is_only_exposed_in_the_one_time_dialog() {
-        let reply = Rc::new(RecordRead::new());
+        let reply = Rc::new(RecordRead::<String, AdminWriteFailure>::new());
         let (mut page, _) = mount_writer({
             let reply = reply.clone();
             move || {

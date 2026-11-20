@@ -3,10 +3,11 @@
 use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
+use super::SourceKeyDelivery;
 use super::fields::{
     UserFieldError, UserFieldIssue, forum_account_issue, manual_key_issue, username_issue,
 };
-use crate::api::{AdminApiFailure, create_admin_user};
+use crate::api::create_admin_user;
 use crate::surface::AdminActionFeedback;
 use crate::surface::pending::{
     CommandDelivery, CommandReceipt, PendingCommandGate, PendingCommands, set_if_alive,
@@ -86,6 +87,7 @@ pub(super) fn AdminUserCreateForm(
     let mut key_mode = use_signal(|| "generated".to_owned());
     let mut manual_key = use_signal(String::new);
     let pending = use_context::<PendingCommands>();
+    let key_delivery = try_consume_context::<SourceKeyDelivery>();
     let mut feedback = use_signal(|| None::<AdminActionFeedback>);
     let mut field_errors = use_signal(UserFieldErrors::default);
 
@@ -143,7 +145,12 @@ pub(super) fn AdminUserCreateForm(
                                     .await
                                 }
                             },
-                            move |result, source_alive| finish_create(result.user.username, result.generated_key, source_alive, open, notice),
+                            move |result, source_alive| {
+                                if source_alive && result.generated_key.is_some() && let Some(delivery) = key_delivery {
+                                    delivery.record();
+                                }
+                                finish_create(result.user.username, result.generated_key, source_alive, open, notice)
+                            },
                             move |code| {
                                 let mut field_errors = field_errors;
                                 if code == "user_conflict"
@@ -151,7 +158,7 @@ pub(super) fn AdminUserCreateForm(
                                 {
                                     errors.username = Some(UserFieldIssue::UsernameConflict);
                                 }
-                                set_if_alive(feedback, Some(AdminActionFeedback::Error(AdminApiFailure::display_code(&code).to_owned())));
+                                set_if_alive(feedback, Some(AdminActionFeedback::Error(code)));
                             },
                         );
                         if submitted {
@@ -318,17 +325,20 @@ mod tests {
     use std::rc::Rc;
 
     use dioxus::prelude::*;
+    use gloo_net::http::Method;
 
-    use super::{AdminUserGeneratedKey, AdminUserGeneratedKeyDialog, finish_create};
-    use crate::api::AdminApiFailure;
+    use super::{
+        AdminUserCreateForm, AdminUserGeneratedKey, AdminUserGeneratedKeyDialog, finish_create,
+    };
+    use crate::api::{AdminApiFailure, AdminWriteEndpoint, AdminWriteFailure};
     use crate::surface::auctions::draft_page_tests::{
-        button, click_button, has_live_text, mount_writer,
+        button, click_button, has_live_text, mount_writer, writer_form,
     };
     use crate::surface::pending::{
         PendingCommandPanel, PendingCommands, use_pending_command_gate,
         use_pending_commands_with_gate,
     };
-    use crate::surface::realtime::TestPage;
+    use crate::surface::realtime::{TestPage, text_attributes};
 
     #[component]
     fn CreateDialogFixture(
@@ -346,9 +356,11 @@ mod tests {
                     move |_| {
                         let prior = attempts.replace(attempts.get() + 1);
                         ready(if prior == 0 && generate_key {
-                            Err(AdminApiFailure::from_http_body(
-                                503, r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
-                            ).code)
+                            Err(AdminWriteFailure::from_test_http(
+                                AdminWriteEndpoint::General,
+                                503,
+                                r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
+                            ))
                         } else { Ok(generate_key.then(|| "一次性测试值".to_owned())) })
                     },
                     move |key, live| finish_create("玩家".to_owned(), key, live, open, notice),
@@ -376,6 +388,44 @@ mod tests {
                 }
             }
         }).0
+    }
+
+    #[test]
+    fn a_verified_user_conflict_is_shown_at_the_username_field() {
+        let (mut mounted, edits) = mount_writer(|| {
+            use_hook(|| {
+                AdminApiFailure::stub_write_response(
+                    "/api/v1/admin/users",
+                    Method::POST,
+                    409,
+                    r#"{"code":"user_conflict","message":"用户已存在","data":null,"request_id":null}"#,
+                );
+            });
+            let open = use_signal(|| true);
+            let notice = use_signal(|| None);
+            let reload = use_signal(|| 0);
+            let gate = use_pending_command_gate();
+            let owner = use_pending_commands_with_gate(reload, Some(gate), |_| true);
+            rsx! {
+                PendingCommandPanel { owner }
+                AdminUserCreateForm { gate, open, notice }
+                button { disabled: gate.blocked(), onclick: move |_| {}, {"开始下一次".to_owned()} }
+            }
+        });
+        let username = text_attributes(&edits, "aria-invalid").next().unwrap().0;
+        mounted.dispatch("input", username, "玩家");
+        let changes = mounted.dispatch("submit", writer_form(&edits), "");
+        assert!(
+            text_attributes(&changes, "aria-invalid")
+                .any(|(id, value)| id == username && value == "true")
+        );
+        assert!(
+            text_attributes(&changes, "aria-describedby")
+                .any(|(id, value)| id == username && value == "create-username-error")
+        );
+        assert!(has_live_text(&mounted, "用户名或论坛账号与现有记录冲突。"));
+        assert!(button(&mounted, "原样重试").is_none());
+        assert!(!button(&mounted, "开始下一次").unwrap().1);
     }
 
     #[test]

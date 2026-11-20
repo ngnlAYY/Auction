@@ -17,23 +17,28 @@ import { apiResponseSchema } from "@auction/contracts/dto/response";
 import { decode } from "@auction/contracts/wire";
 import type { JsonFieldPolicy } from "@auction/web-shared/net/wire";
 import { parseJson } from "@auction/web-shared/net/wire";
+import { structuralEquals } from "@auction/web-shared/reactive/equality";
 import { err, ok, type Result } from "@auction/web-shared/result";
 
 import {
   type AdminApiFailure,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   adminApiFailureClient,
   adminApiFailureDisplayCode,
   decodeAdminReceipt,
   invalidRequestError,
   invalidResponseError,
   responseFailure,
+  writeNotSent,
+  writeOutcomeUnknown,
 } from "../failure";
 import { type AdminSessionHost, adminSessionHostLive } from "../session";
 import {
   type PreparedJsonCommand,
   prepareJsonCommandOnce,
   sendGet,
-  sendJsonWrite,
+  sendJsonPreview,
   sendPreparedJsonWrite,
 } from "../transport";
 import { validRuntimeDocument } from "./document";
@@ -71,7 +76,7 @@ const RUNTIME_CONFIG_DOCUMENT_FIELD_POLICY: JsonFieldPolicy = {
 /** 未决命令执行体复用的正文工厂；同一 `command_id` 的重试只会得到同一份文本。 */
 export type AdminRuntimeConfigCommandPreparation = (
   commandId: string,
-) => Result<PreparedJsonCommand, AdminApiFailure>;
+) => Result<PreparedJsonCommand, AdminWriteNotSent>;
 
 /** 解析操作者编辑的配置文档原文；整数词法与安全范围都在转成 JS 数值前检查。 */
 export function parseAdminRuntimeConfigDocumentText(
@@ -235,10 +240,9 @@ export async function validateAdminRuntimeConfig(
     return candidate;
   }
   const command: AdminRuntimeConfigValidateRequest = { document: candidate.value };
-  const response = await sendJsonWrite(
+  const response = await sendJsonPreview(
     host,
     `/api/v1/admin/config:validate?${RUNTIME_CONFIG_QUERY}`,
-    "POST",
     command,
     signal,
   );
@@ -271,13 +275,13 @@ export function prepareAdminRuntimeConfigUpdateOnce(
     // 写成 `0`、把已超出安全范围的整数写成另一个值，这些输入不能静默改写后发出。
     const candidate = runtimeConfigDocument(document);
     if (!candidate.ok) {
-      const error = candidate.error;
+      const error = writeNotSent(candidate.error.code);
       return () => err(error);
     }
     frozen = structuredClone(candidate.value);
   } catch (error) {
     // 输入不是可克隆的 JSON 值；错误对象与消息都不进入页面或控制台。
-    return () => err(adminApiFailureClient(invalidRequestError(error)));
+    return () => err(writeNotSent(invalidRequestError(error)));
   }
   return prepareJsonCommandOnce((commandId) => {
     const command: AdminRuntimeConfigUpdateRequest = {
@@ -353,20 +357,26 @@ export async function updateAdminRuntimeConfig(
   commandId: string,
   prepare: AdminRuntimeConfigCommandPreparation,
   signal: AbortSignal,
-): Promise<Result<AdminRuntimeConfig, AdminRuntimeConfigApiError>> {
+): Promise<Result<AdminRuntimeConfig, AdminWriteFailure>> {
   const prepared = prepare(commandId);
   if (!prepared.ok) {
     return err(prepared.error);
   }
   const response = await sendPreparedJsonWrite(
     host,
-    `/api/v1/admin/config?${RUNTIME_CONFIG_QUERY}`,
-    "PUT",
+    { url: `/api/v1/admin/config?${RUNTIME_CONFIG_QUERY}`, method: "PUT", endpoint: "general" },
     prepared.value,
     signal,
   );
   if (runtimeConfigCancelled(host, signal)) {
-    return err(runtimeConfigCancellationFailure(response.ok ? undefined : response.error));
+    if (
+      !response.ok &&
+      response.error.kind !== "verified-http" &&
+      response.error.code === "network_error"
+    ) {
+      return response;
+    }
+    return err(writeOutcomeUnknown("network_error"));
   }
   if (!response.ok) {
     return err(response.error);
@@ -377,9 +387,71 @@ export async function updateAdminRuntimeConfig(
     RUNTIME_CONFIG_RESPONSE_FIELD_POLICY,
   );
   if (!payload.ok) {
-    return err(adminApiFailureClient(payload.error));
+    return err(writeOutcomeUnknown(payload.error));
   }
-  return decodeRuntimeConfig(configFromResponse(payload.value.data, null), true);
+  const receipt = decodeRuntimeConfig(configFromResponse(payload.value.data, null), true);
+  if (!receipt.ok) {
+    return err(writeOutcomeUnknown(receipt.error.code));
+  }
+  const sent = parseJson(prepared.value.body, RUNTIME_CONFIG_DOCUMENT_FIELD_POLICY);
+  if (!sent.ok || !isJsonObject(sent.value)) {
+    return err(writeOutcomeUnknown(invalidRuntimeResponse().code));
+  }
+  // 只有与冻结候选对应的回执才能推进编辑基线。投影只作用于正文副本，重试复用原请求。
+  const expected = sent.value.document;
+  projectUpdateDocument(expected);
+  return structuralEquals(receipt.value.document, expected)
+    ? receipt
+    : err(writeOutcomeUnknown(invalidRuntimeResponse().code));
+}
+
+/** 将完整的页面候选转成 HTTP 保存回执的文档投影，供结构相等比较。 */
+function projectUpdateDocument(document: unknown): void {
+  if (!isJsonObject(document)) {
+    return;
+  }
+  // HTTP 已补齐邮件默认值、可交易开关和告警阈值，候选中含这些字段时会按原值回显。
+  omitEmptyArrays(document, ["bot_players"]);
+  if (!Object.hasOwn(document, "equipment_colors")) {
+    document.equipment_colors = { rules: [] };
+  }
+  const colors = document.equipment_colors;
+  if (isJsonObject(colors) && Array.isArray(colors.rules)) {
+    for (const rule of colors.rules) {
+      if (isJsonObject(rule)) {
+        omitEmptyArrays(rule, ["categories", "equipment_types", "qualities"]);
+      }
+    }
+  }
+  const equipmentFilter = document.equipment_filter;
+  if (
+    isJsonObject(equipmentFilter) &&
+    Array.isArray(equipmentFilter.qualities) &&
+    equipmentFilter.qualities.length === 0
+  ) {
+    // HTTP 以实际生效的品质门槛投影空配置（materialize_business_defaults）。
+    equipmentFilter.qualities = ["Legendary", "Peerless"];
+  }
+  const operations = document.operations;
+  const schedule = isJsonObject(operations) ? operations.schedule : null;
+  const earlyBird = isJsonObject(schedule) ? schedule.early_bird : null;
+  if (isJsonObject(earlyBird)) {
+    if (earlyBird.pre_season_session === true) {
+      delete earlyBird.pre_season_session;
+    }
+    if (earlyBird.pre_season_days_before === 3) {
+      delete earlyBird.pre_season_days_before;
+    }
+  }
+}
+
+function omitEmptyArrays(object: Record<string, unknown>, keys: readonly string[]): void {
+  for (const key of keys) {
+    const value = object[key];
+    if (Array.isArray(value) && value.length === 0) {
+      delete object[key];
+    }
+  }
 }
 
 function decodeRuntimeConfig(
@@ -413,7 +485,7 @@ function configFromResponse(
 }
 
 /** JSON 对象：非 null、非数组的 `typeof "object"`；解析产物只来自 JSON。 */
-function isJsonObject(value: unknown): value is Readonly<Record<string, unknown>> {
+function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

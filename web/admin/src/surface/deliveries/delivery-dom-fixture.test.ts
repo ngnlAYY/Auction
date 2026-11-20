@@ -27,6 +27,11 @@ export { settle } from "../solid-dom-fixture";
 
 /** 投递与邮件测试加载已登记的真实组件。 */
 export const DELIVERY_RENDER = {
+  queue: () =>
+    loadRenderModule<typeof import("./page")>(
+      new URL("./page.tsx", import.meta.url).pathname,
+      "page",
+    ),
   detail: () =>
     loadRenderModule<typeof import("./detail")>(
       new URL("./detail/index.tsx", import.meta.url).pathname,
@@ -36,6 +41,7 @@ export const DELIVERY_RENDER = {
     loadRenderModule<typeof import("./detail/detail-page-fixture")>(
       new URL("./detail/detail-page-fixture.tsx", import.meta.url).pathname,
       "DetailWithListCommand",
+      "DeliveryRouteFixture",
     ),
   dialog: () =>
     loadRenderModule<typeof import("./dialog")>(
@@ -68,6 +74,7 @@ export const DELIVERY_RENDER = {
       new URL("../mail/polling-fixture.tsx", import.meta.url).pathname,
       "PollingActionsFixture",
       "MailPageFixture",
+      "UnmountableMailPageFixture",
     ),
 };
 

@@ -14,13 +14,14 @@ import { utf8ByteLength } from "@auction/web-shared/text";
 
 import { parseRustUuid, rustUuidIsNil } from "./credentials/decode";
 import {
-  type AdminApiFailure,
-  adminApiFailureAtWriteEndpoint,
-  adminApiFailureClient,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   decodeAdminReceipt,
   invalidRequestError,
   invalidResponseError,
   responseError,
+  writeNotSent,
+  writeOutcomeUnknown,
 } from "./failure";
 import type { AdminSessionHost } from "./session";
 import { trimRustWhitespace } from "./session-time";
@@ -115,7 +116,7 @@ function encodeTemplateRequest(
   commandId: string,
   expectedRevision: number,
   body: string | null,
-): Result<PreparedJsonCommand, string> {
+): Result<PreparedJsonCommand, AdminWriteNotSent> {
   const command: AdminMailTemplateUpdateRequest = {
     command_id: commandId,
     expected_revision: expectedRevision,
@@ -123,10 +124,10 @@ function encodeTemplateRequest(
   };
   const prepared = prepareJsonCommand(command);
   if (!prepared.ok) {
-    return err(prepared.error.code);
+    return err(prepared.error);
   }
   if (utf8ByteLength(prepared.value.body) > MAX_TEMPLATE_REQUEST_BYTES) {
-    return err("body_too_large");
+    return err(writeNotSent("body_too_large"));
   }
   return ok(prepared.value);
 }
@@ -137,7 +138,7 @@ function encodeTemplateRequest(
  */
 export function prepareMailTemplateAttemptOnce(
   attempt: MailTemplateAttempt,
-): (commandId: string) => Result<PreparedMailTemplateAttempt, AdminApiFailure> {
+): (commandId: string) => Result<PreparedMailTemplateAttempt, AdminWriteNotSent> {
   const frozen = Object.freeze({
     commandId: attempt.commandId,
     key: attempt.key,
@@ -146,10 +147,10 @@ export function prepareMailTemplateAttemptOnce(
   });
   // 预检与首次发送共用同一个编码器；结果（包括超限失败）随命令 ID 缓存，重试不再重新编码。
   let cachedId: string | null = null;
-  let cached: Result<PreparedJsonCommand, AdminApiFailure> | null = null;
+  let cached: Result<PreparedJsonCommand, AdminWriteNotSent> | null = null;
   const wrap = (
-    prepared: Result<PreparedJsonCommand, AdminApiFailure>,
-  ): Result<PreparedMailTemplateAttempt, AdminApiFailure> =>
+    prepared: Result<PreparedJsonCommand, AdminWriteNotSent>,
+  ): Result<PreparedMailTemplateAttempt, AdminWriteNotSent> =>
     prepared.ok ? ok(Object.freeze({ attempt: frozen, body: prepared.value })) : prepared;
   return (commandId) => {
     const canonicalCommandId = parseRustUuid(frozen.commandId);
@@ -162,17 +163,16 @@ export function prepareMailTemplateAttemptOnce(
       !validTemplateKey(frozen.key) ||
       frozen.body === ""
     ) {
-      return err(adminApiFailureClient("invalid_request"));
+      return err(writeNotSent("invalid_request"));
     }
     if (cached !== null) {
       if (commandId !== cachedId) {
-        return err(adminApiFailureClient(invalidRequestError(commandId)));
+        return err(writeNotSent(invalidRequestError(commandId)));
       }
       return wrap(cached);
     }
-    const encoded = encodeTemplateRequest(commandId, frozen.expectedRevision, frozen.body);
     cachedId = commandId;
-    cached = encoded.ok ? ok(encoded.value) : err(adminApiFailureClient(encoded.error));
+    cached = encodeTemplateRequest(commandId, frozen.expectedRevision, frozen.body);
     return wrap(cached);
   };
 }
@@ -182,17 +182,20 @@ export async function submitMailTemplate(
   host: AdminSessionHost,
   prepared: PreparedMailTemplateAttempt,
   signal: AbortSignal,
-): Promise<Result<AdminMailTemplateDto, AdminApiFailure>> {
+): Promise<Result<AdminMailTemplateDto, AdminWriteFailure>> {
   const attempt = prepared.attempt;
   const response = await sendPreparedJsonWrite(
     host,
-    `/api/v1/admin/mail-templates/${attempt.key}`,
-    "PUT",
+    {
+      url: `/api/v1/admin/mail-templates/${attempt.key}`,
+      method: "PUT",
+      endpoint: "mail-template",
+    },
     prepared.body,
     signal,
   );
   if (!response.ok) {
-    return err(adminApiFailureAtWriteEndpoint(response.error, "mail-template"));
+    return err(response.error);
   }
   const payload = decodeAdminReceipt(
     response.value,
@@ -200,7 +203,7 @@ export async function submitMailTemplate(
     ADMIN_MAIL_TEMPLATE_UPDATE_FIELD_POLICY,
   );
   if (!payload.ok) {
-    return err(adminApiFailureClient(payload.error));
+    return err(writeOutcomeUnknown(payload.error));
   }
   const accepted = payload.value.data.template;
   // 重放返回的是原结果，版本恰好是期望版本加一；正文与“是否自定义”必须与命令一致。
@@ -216,7 +219,7 @@ export async function submitMailTemplate(
     accepted.customized !== (attempt.body !== null) ||
     (attempt.body !== null && accepted.body !== attempt.body)
   ) {
-    return err(adminApiFailureClient(invalidResponseError("mail template update")));
+    return err(writeOutcomeUnknown(invalidResponseError("mail template update")));
   }
   return ok(accepted);
 }
@@ -308,7 +311,7 @@ export function mailTemplateBodyProblem(
   if (encoded.ok) {
     return null;
   }
-  return encoded.error === "body_too_large" ? "request_too_large" : "format";
+  return encoded.error.code === "body_too_large" ? "request_too_large" : "format";
 }
 
 function hasForbiddenControlCharacter(value: string): boolean {

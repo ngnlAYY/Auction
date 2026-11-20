@@ -194,6 +194,8 @@ export interface AdminPagerProps {
   readonly onPageChange: (page: number) => void;
   /** 本地报告页码不写历史；数量选择自行创建历史项。 */
   readonly local?: boolean;
+  /** 结算目录在第一次历史写入前复核事件所属的位置；缺省放行。 */
+  readonly canChangePageSize?: () => boolean;
   /** 目录数量变化只重置目录页，不清除其他独立报告分页或命令上下文。
    * 返回 true 表示已重置，缺省回调返回 false，由常规翻页动作回到首页。 */
   readonly onSizeReset?: () => boolean;
@@ -255,9 +257,10 @@ export function AdminPager(props: AdminPagerProps): JSX.Element {
         if (
           pagination.size() !== props.pageSize ||
           size <= 0 ||
-          (pagination.maximum !== null && size > pagination.maximum)
+          (pagination.maximum !== null && size > pagination.maximum) ||
+          props.canChangePageSize?.() === false
         ) {
-          return;
+          return false;
         }
         // 先固定离开历史项的旧数量，随后由原页面 push 首页，再 replace 新数量。
         // 各 hook 只写自己拥有的键，保留筛选、排序及未知参数。
@@ -275,6 +278,7 @@ export function AdminPager(props: AdminPagerProps): JSX.Element {
           pagination.query.replace(size);
         }
         savePreference(pagination.scope, size);
+        return true;
       }}
     />
   );

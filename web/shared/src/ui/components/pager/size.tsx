@@ -1,7 +1,7 @@
 // 分页数量预设与正整数输入；只提交可表示的合法整数，不截断或静默修正用户输入。
 
 import type { JSX } from "@solidjs/web";
-import { createEffect, For, onSettled, Show } from "solid-js";
+import { createEffect, For, onSettled, Show, untrack } from "solid-js";
 
 import { createCell } from "../../../reactive/cell";
 import { createValueMemo } from "../../../reactive/memo";
@@ -26,7 +26,7 @@ export interface PageSizePickerProps {
 
 /** 数量文案与可选上限由 surface 注入；显式启用才显示自定义输入。 */
 export function PageSizePicker(props: PageSizePickerProps): JSX.Element {
-  const input = createCell(props.pageSize.toString());
+  const input = createCell(untrack(() => props.pageSize.toString()));
   const touched = createCell(false);
   let inputElement: HTMLInputElement | undefined;
   const hintId = `page-size-hint-${nextHintId}`;

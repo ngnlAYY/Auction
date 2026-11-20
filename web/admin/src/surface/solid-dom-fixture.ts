@@ -1,5 +1,6 @@
 // 内存 DOM 上执行 Solid universal JSX 的插入、属性绑定与宿主装配。
 
+import { ref as browserRef } from "@solidjs/web";
 import {
   createMemo,
   createRenderEffect,
@@ -33,11 +34,23 @@ export function valueUpdates(element: TestElement): readonly unknown[] {
   return element.propWrites.filter(({ key }) => key === "value").map(({ value }) => value);
 }
 
+let componentDiagnostics = false;
+
+/** 在专门核对开发期诊断的用例中启用浏览器组件体与 ref 读取规则。 */
+export function enableSolidComponentDiagnostics(): () => void {
+  const previous = componentDiagnostics;
+  componentDiagnostics = true;
+  return () => {
+    componentDiagnostics = previous;
+  };
+}
+
 /** 在组件 owner 内执行真实组件，保持 universal 输出的响应式边界。 */
 export function createComponent<P extends object>(
   component: (props: P) => Element,
   props: P,
 ): Element {
+  if (componentDiagnostics) return mountComponent(component, props, component.name);
   return mountComponent((input: P) => untrack(() => component(input)), props, component.name);
 }
 
@@ -216,6 +229,10 @@ export function setProp(element: TestElement, key: string, value: unknown): void
 
 /** 转发编译器生成的 ref 访问器。 */
 export function ref(callback: unknown, element: TestElement): void {
+  if (componentDiagnostics && typeof callback === "function") {
+    Reflect.apply(browserRef, undefined, [callback, element]);
+    return;
+  }
   const target = typeof callback === "function" ? callback() : callback;
   if (typeof target === "function") target(element);
 }

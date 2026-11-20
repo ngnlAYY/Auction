@@ -17,13 +17,14 @@ import { err, ok, type Result } from "@auction/web-shared/result";
 import { validUuid } from "@auction/web-shared/ui/validation";
 
 import {
-  type AdminApiFailure,
-  adminApiFailureClient,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   decodeAdminReceipt,
   invalidRequestError,
   invalidResponseError,
   responseError,
-  responseFailure,
+  writeNotSent,
+  writeOutcomeUnknown,
 } from "./failure";
 import { type AdminSessionHost, adminSessionHostLive } from "./session";
 import {
@@ -107,13 +108,13 @@ const adminRecoveryConfirmationSubmissionBrand: unique symbol = Symbol(
 export interface AdminRecoveryConfirmationSubmission {
   readonly [adminRecoveryConfirmationSubmissionBrand]: true;
   readonly intent: AdminRecoveryConfirmationIntent;
-  readonly prepare: (commandId: string) => Result<PreparedJsonCommand, AdminApiFailure>;
+  readonly prepare: (commandId: string) => Result<PreparedJsonCommand, AdminWriteNotSent>;
 }
 
 /** 登记表中的提交状态：路由、正文与回执期望都取自同一份冻结意图。 */
 interface AdminRecoveryConfirmationSubmissionState {
   readonly intent: AdminRecoveryConfirmationIntent;
-  readonly prepare: (commandId: string) => Result<PreparedJsonCommand, AdminApiFailure>;
+  readonly prepare: (commandId: string) => Result<PreparedJsonCommand, AdminWriteNotSent>;
 }
 
 // 品牌会随对象展开被复制；冻结意图与正文工厂只按原对象从私有表取出，副本不能提交。
@@ -152,40 +153,42 @@ export async function confirmAdminRecovery(
   commandId: string,
   submission: AdminRecoveryConfirmationSubmission,
   signal: AbortSignal,
-): Promise<Result<AdminRecoveryConfirmationResult, AdminApiFailure>> {
+): Promise<Result<AdminRecoveryConfirmationResult, AdminWriteFailure>> {
   const state = adminRecoveryConfirmationSubmissions.get(submission);
   if (state === undefined) {
-    return err(adminApiFailureClient(invalidRequestError(submission)));
+    return err(writeNotSent(invalidRequestError(submission)));
   }
   const intent = state.intent;
   // Rust 用 i64 构造该字段；NaN 会被序列化成 null，小数也不是服务端能构造的版本。
   if (!Number.isSafeInteger(intent.expectedStateVersion)) {
-    return err(adminApiFailureClient(invalidRequestError(intent.expectedStateVersion)));
+    return err(writeNotSent(invalidRequestError(intent.expectedStateVersion)));
   }
   const prepared = state.prepare(commandId);
   if (!prepared.ok) {
     return err(prepared.error);
   }
   const url = `/api/v1/admin/recoveries/${intent.recoveryId}/confirm`;
-  const response = await sendPreparedJsonWrite(host, url, "POST", prepared.value, signal);
+  const response = await sendPreparedJsonWrite(
+    host,
+    { url, method: "POST", endpoint: "general" },
+    prepared.value,
+    signal,
+  );
   if (!response.ok) {
     return err(response.error);
   }
   // 已发出的写请求在传输层最后一次存活检查之后取消：结果未知，不能按未发送处理。
   if (signal.aborted || !adminSessionHostLive(host)) {
-    return err(adminApiFailureClient("network_error"));
+    return err(writeOutcomeUnknown("network_error"));
   }
   const received = response.value;
-  if (!responseOk(received)) {
-    return err(await responseFailure(received, signal, host));
-  }
   const payload = decodeAdminReceipt(
     received,
     apiResponseSchema(AdminRecoveryConfirmationResponseSchema),
     ADMIN_RECOVERY_CONFIRMATION_FIELD_POLICY,
   );
   if (!payload.ok) {
-    return err(adminApiFailureClient(payload.error));
+    return err(writeOutcomeUnknown(payload.error));
   }
   const recovery = payload.value.data.recovery;
   if (
@@ -196,7 +199,7 @@ export async function confirmAdminRecovery(
       intent.expectedStateVersion,
     )
   ) {
-    return err(adminApiFailureClient(invalidResponseError("recovery confirmation 无效")));
+    return err(writeOutcomeUnknown(invalidResponseError("recovery confirmation 无效")));
   }
   return ok(recovery);
 }

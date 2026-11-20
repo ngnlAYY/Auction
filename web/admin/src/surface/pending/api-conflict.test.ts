@@ -2,7 +2,6 @@
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { parseJson } from "@auction/web-shared/net/wire";
-import { err } from "@auction/web-shared/result";
 import { flush } from "solid-js";
 import { installBrowserRequest, installWriteFetch } from "../../api/api-request-fixture";
 import { prepareAdminRulesPublish, publishAdminRules } from "../../api/rules";
@@ -135,7 +134,7 @@ test("首次规则与关于文档版本冲突释放实体", async () => {
                 prepare,
                 signal,
               );
-              return result.ok ? result : err(result.error.code);
+              return result;
             },
             () => {
               successCalls += 1;

@@ -33,23 +33,26 @@ import {
 import { actionBlockerLabel, deliveryStatusLabel } from "../deliveries/labels";
 import { closeDeliveryModal, DeliveryModal } from "../deliveries/modal";
 import { AdminPager, useAdminPagination } from "../pagination";
-import {
-  commandDeliveryReported,
-  requirePendingCommands,
-  setIfAlive,
-  trySetIfAlive,
-} from "../pending";
+import { commandDeliveryReported, requirePendingCommands } from "../pending";
 import type { AdminActionFeedback } from "../presentation";
 
 const DIALOG_ID = "mail-delivery-action-dialog";
 const I64_MAX = 9_223_372_036_854_775_807n;
 const U64_MAX = 18_446_744_073_709_551_615n;
 
-/** 收件关联投递面板属性；反馈与刷新信号由详情页持有。 */
+/** 由邮件页持有的反馈写入口，每次写入或清除只针对指定投递。 */
+export interface MailDeliveryNoticeWriter {
+  set(
+    notice: readonly [intakeId: string, feedback: AdminActionFeedback] | null,
+    deliveryId: string,
+  ): void;
+}
+
+/** 收件关联投递面板属性；反馈与刷新状态由邮件页持有。 */
 export interface MailDeliveriesPanelProps {
   readonly intakeId: string;
   readonly deliveries: readonly AdminMailIntakeDelivery[];
-  readonly notice: Cell<readonly [string, AdminActionFeedback] | null>;
+  readonly notice: MailDeliveryNoticeWriter;
   readonly pageAlive: () => boolean;
   readonly refresh: Cell<bigint>;
 }
@@ -109,19 +112,21 @@ export function MailDeliveriesPanel(props: MailDeliveriesPanelProps): JSX.Elemen
       externalReference: null,
       failureCode: null,
     });
-    notice.set(null);
+    notice.set(null, deliveryId);
     const submitted = commands.submitWithReceipt(
       deliveryCommandEntity(deliveryId),
       operationLabel,
       async (commandId, signal) => {
         const result = await executeDelivery(host, preparation, commandId, signal);
-        return result.ok ? ok(result.value) : err(result.error.code);
+        return result;
       },
       (_updated, sourceAlive) => {
-        const delivered =
-          sourceAlive &&
-          lifetime.active() &&
-          trySetIfAlive(notice, [intakeId, { kind: "success" }] as const, lifetime.active);
+        // 邮件页仍存活时，成功回执覆盖同一投递的旧错误，即使原面板已卸载。
+        const pageActive = sourceAlive && pageAlive();
+        if (pageActive) {
+          notice.set([intakeId, { kind: "success" }], deliveryId);
+        }
+        const delivered = pageActive && lifetime.active();
         return commandDeliveryReported(delivered, () => ({
           kind: "text",
           text: t("admin-mail-delivery-requeued"),
@@ -136,7 +141,9 @@ export function MailDeliveriesPanel(props: MailDeliveriesPanelProps): JSX.Elemen
           const current = refresh();
           refresh.set(current === U64_MAX ? U64_MAX : current + 1n);
         }
-        setIfAlive(notice, [intakeId, { kind: "error", code }] as const, pageAlive);
+        if (pageAlive()) {
+          notice.set([intakeId, { kind: "error", code }], deliveryId);
+        }
       },
     );
     if (submitted) {
@@ -176,7 +183,7 @@ export function MailDeliveriesPanel(props: MailDeliveriesPanelProps): JSX.Elemen
                     if (busy() || commands.contains(deliveryCommandEntity(target.id))) {
                       return;
                     }
-                    props.notice.set(null);
+                    props.notice.set(null, target.id);
                     pending.set(target);
                   }}
                 />

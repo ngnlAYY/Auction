@@ -61,7 +61,6 @@ impl PauseControlState {
                         reason: confirmation.reason,
                     })
                     .await
-                    .map_err(|failure| failure.code)
                 }
             },
             move |_, source_alive| {
@@ -321,13 +320,17 @@ fn ExternalAccessPauseControl(
                         select {
                             name: "duration",
                             disabled: occupied,
-                            value: "{hours()}",
                             onchange: move |event| {
                                 let value = event.value().parse::<i64>().ok().filter(|value| PAUSE_HOURS.contains(value));
                                 hours.set(value.unwrap_or(2));
                             },
                             for option_hours in PAUSE_HOURS {
-                                option { value: "{option_hours}", "{option_hours} h" }
+                                option {
+                                    key: "{option_hours}",
+                                    value: "{option_hours}",
+                                    selected: option_hours == hours(),
+                                    "{option_hours} h"
+                                }
                             }
                         }
                     }
@@ -389,7 +392,7 @@ mod tests {
         AdminExternalAccessPauseRequest, RuntimeSwitchIntentDto, RuntimeSwitchListResponse,
     };
     use auction_time::{TimeDelta, Timestamp};
-    use dioxus::core::ElementId;
+    use dioxus::core::{ElementId, Mutation};
     use dioxus::prelude::*;
     use serde_json::json;
 
@@ -397,7 +400,7 @@ mod tests {
         ExternalAccessPauseControl, PAUSE_ENTITY, PAUSE_REASON_ID, PauseControlState,
         RuntimeSwitchCard, pause_refresh_millis, pause_state, reason_error_text,
     };
-    use crate::api::{AdminApiFailure, ExternalAccessPauseAttempt};
+    use crate::api::ExternalAccessPauseAttempt;
     use crate::surface::auctions::draft_page_tests::{
         RecordRead, assert_field, button, click_button, has_live_text, mount_writer, settle_writer,
         submit_button_disabled, writer_form,
@@ -405,7 +408,7 @@ mod tests {
     use crate::surface::pending::{
         PendingCommandHost, PendingCommandNotices, use_pending_commands,
     };
-    use crate::surface::realtime::{TestPage, text_attributes};
+    use crate::surface::realtime::{TestPage, selected_options, text_attributes};
 
     pub(super) struct PauseRequests {
         reads: Cell<usize>,
@@ -413,6 +416,8 @@ mod tests {
         refresh_reply: RecordRead<RuntimeSwitchListResponse>,
         writes: RefCell<Vec<String>>,
         accept_replay: bool,
+        first_reply: Option<(u16, &'static str)>,
+        before_settlement: Vec<(u16, &'static str)>,
     }
 
     impl PauseRequests {
@@ -423,6 +428,8 @@ mod tests {
                 refresh_reply: RecordRead::new(),
                 writes: RefCell::new(Vec::new()),
                 accept_replay: false,
+                first_reply: None,
+                before_settlement: Vec::new(),
             }
         }
 
@@ -440,33 +447,48 @@ mod tests {
             self.refresh_reply.respond(Ok(data));
         }
 
-        fn write(
-            &self,
-            attempt: &AdminExternalAccessPauseRequest,
-        ) -> Result<RuntimeSwitchIntentDto, AdminApiFailure> {
+        fn write(&self, attempt: &AdminExternalAccessPauseRequest) -> (u16, String) {
             let mut writes = self.writes.borrow_mut();
             writes.push(serde_json::to_string(attempt).unwrap());
-            let failure = match writes.len() {
-                1 => AdminApiFailure::from_http_body(
+            if writes.len() == 1
+                && let Some((status, body)) = self.first_reply
+            {
+                return (status, body.to_owned());
+            }
+            if let Some(&(status, body)) =
+                writes.len().checked_sub(2).and_then(|index| self.before_settlement.get(index))
+            {
+                return (status, body.to_owned());
+            }
+            let attempt_number =
+                if writes.len() > 1 { writes.len() - self.before_settlement.len() } else { 1 };
+            let (status, body) = match attempt_number {
+                1 => (
                     503,
                     r#"{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}"#,
                 ),
-                2 | 4 => AdminApiFailure::from_http_body(
+                2 | 4 => (
                     429,
                     r#"{"code":"rate_limited","message":"请求过多","data":null,"request_id":null}"#,
                 ),
                 3 if self.accept_replay => {
                     let mut accepted = snapshot("set", attempt.expires_at, Timestamp::now());
                     accepted.database_intent[0].revision = 8;
-                    return Ok(accepted.database_intent.remove(0));
+                    let mut intent = accepted.database_intent.remove(0);
+                    intent.entrypoint = Some("admin".to_owned());
+                    intent.reason = Some(attempt.reason.clone());
+                    return (
+                        200,
+                        json!({"code":"ok","message":"","data":{"accepted":intent}}).to_string(),
+                    );
                 }
-                3 => AdminApiFailure::from_http_body(
+                3 => (
                     409,
                     r#"{"code":"runtime_switch_conflict","message":"版本已变化","data":null,"request_id":null}"#,
                 ),
                 _ => panic!("收到额外的暂停命令"),
             };
-            Err(failure)
+            (status, body.to_owned())
         }
 
         fn install(self: &Rc<Self>) {
@@ -525,6 +547,48 @@ mod tests {
         click_button(&mut page, "完成命令后重读");
         click_button(&mut page, "确认");
         assert_eq!(requests.writes.borrow().len(), 1);
+    }
+
+    #[test]
+    fn cancelling_pause_keeps_six_hours_selected_and_submits_that_duration() {
+        let requests = Rc::new(PauseRequests::new());
+        let (mut page, edits) = mount_writer({
+            let requests = requests.clone();
+            move || {
+                requests.install();
+                rsx! { RuntimeSwitchCard {} }
+            }
+        });
+        assert_eq!(selected_options(&edits), ["2"]);
+        let duration = edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "change" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let reason = text_attributes(&edits, "id")
+            .find_map(|(id, value)| (value == PAUSE_REASON_ID).then_some(id))
+            .unwrap();
+        let form = writer_form(&edits);
+        page.dispatch("change", duration, "6");
+        page.dispatch("input", reason, "测试暂停时长");
+        page.dispatch("submit", form, "");
+        let restored = click_button(&mut page, "返回");
+        assert_eq!(selected_options(&restored), ["6"]);
+        assert!(requests.writes.borrow().is_empty());
+
+        let earliest = Timestamp::now().timestamp() + 6 * 3_600;
+        page.dispatch("submit", form, "");
+        click_button(&mut page, "确认");
+        let latest = Timestamp::now().timestamp() + 6 * 3_600;
+        let writes = requests.writes.borrow();
+        assert_eq!(writes.len(), 1);
+        let sent: AdminExternalAccessPauseRequest = serde_json::from_str(&writes[0]).unwrap();
+        assert!(sent.paused);
+        assert_eq!(sent.expected_revision, 7);
+        assert_eq!(sent.reason, "测试暂停时长");
+        assert!((earliest..=latest).contains(&sent.expires_at.unwrap().timestamp()));
     }
 
     #[test]
@@ -590,6 +654,72 @@ mod tests {
         let latest: AdminExternalAccessPauseRequest = serde_json::from_str(&writes[3]).unwrap();
         assert_eq!(latest.expected_revision, 8);
         assert_ne!(latest.command_id, first.command_id);
+    }
+
+    #[test]
+    fn wrong_pause_expiry_keeps_the_command_for_verbatim_retry() {
+        const DONE: &str = "数据库已接受；各角色约 5 秒内生效。";
+        let requests = Rc::new(PauseRequests {
+            accept_replay: true,
+            first_reply: Some((
+                200,
+                r#"{"code":"ok","message":"","data":{"accepted":{"name":"external_access_paused","operation":"set","revision":8,"expires_at":null,"value":true,"reason":"演练","entrypoint":"admin","actor_id":"operator"}}}"#,
+            )),
+            ..PauseRequests::new()
+        });
+        let (mut page, form, reason) = mount_card(requests.clone());
+        page.dispatch("input", reason, "演练");
+        page.dispatch("submit", form, "");
+        click_button(&mut page, "确认");
+        assert!(has_live_text(&page, "服务器返回了无效响应。请重新加载后再试。"));
+        assert!(!has_live_text(&page, DONE));
+        assert_eq!(requests.reads.get(), 1);
+
+        click_button(&mut page, "原样重试");
+        click_button(&mut page, "原样重试");
+        let writes = requests.writes.borrow();
+        assert_eq!(writes.len(), 3);
+        assert_eq!(writes[0], writes[1]);
+        assert_eq!(writes[0], writes[2]);
+        let original: AdminExternalAccessPauseRequest = serde_json::from_str(&writes[0]).unwrap();
+        assert!(original.expires_at.is_some());
+        assert!(button(&page, "原样重试").is_none());
+        assert!(has_live_text(&page, DONE));
+        assert_eq!(requests.reads.get(), 2);
+    }
+
+    #[test]
+    fn pause_keeps_unknown_until_a_valid_ledger_conflict() {
+        let requests = Rc::new(PauseRequests {
+            before_settlement: vec![
+                (
+                    409,
+                    r#"{"code":"state_conflict","message":"版本已变化","data":null,"request_id":null}"#,
+                ),
+                (409, r#"{"code":"runtime_switch_conflict","message":"版本已变化","data":null}"#),
+            ],
+            ..PauseRequests::new()
+        });
+        let (mut page, form, reason) = mount_card(requests.clone());
+        page.dispatch("input", reason, "演练");
+        page.dispatch("submit", form, "");
+        click_button(&mut page, "确认");
+        for attempt in 2..=4 {
+            click_button(&mut page, "原样重试");
+            assert_eq!(requests.writes.borrow().len(), attempt);
+            assert_eq!(requests.writes.borrow()[attempt - 1], requests.writes.borrow()[0]);
+            assert_eq!(requests.reads.get(), 1);
+            assert!(button(&page, "原样重试").is_some());
+        }
+        click_button(&mut page, "原样重试");
+        let writes = requests.writes.borrow();
+        assert_eq!(writes.len(), 5);
+        assert!(writes.iter().all(|body| body == &writes[0]));
+        assert!(button(&page, "原样重试").is_none());
+        assert_eq!(requests.reads.get(), 2);
+        requests.finish_refresh();
+        settle_writer(&mut page);
+        assert_eq!(submit_button_disabled(&page, "恢复外部访问…"), Some(false));
     }
 
     #[test]

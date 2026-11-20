@@ -382,13 +382,80 @@ fn AdminAuctionCreateFields(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_sequence;
+    use dioxus::dioxus_core::Mutation;
+    use dioxus::prelude::{dioxus_core, dioxus_signals, rsx, use_hook, use_signal};
+    use gloo_net::http::Method;
+
+    use super::super::editor::tests::{click_button, has_text, mount_writer, writer_form};
+    use super::{AdminAuctionCreateForm, parse_sequence};
+    use crate::api::AdminApiFailure;
+    use crate::surface::pending::use_pending_commands;
+    use crate::surface::realtime::text_attributes;
 
     #[test]
     fn creates_only_positive_json_safe_sequence_numbers() {
         assert_eq!(parse_sequence("9007199254740991"), Some(9_007_199_254_740_991));
         for input in ["0", "-1", "9007199254740992", "1.5", "99999999999999999999"] {
             assert_eq!(parse_sequence(input), None, "{input}");
+        }
+    }
+
+    #[test]
+    fn create_only_marks_the_world_field_for_world_not_found() {
+        const PATH: &str = "/api/v1/admin/auctions";
+        for (status, body, expected) in [
+            (
+                404,
+                r#"{"code":"world_not_found","message":"世界不存在","data":null,"request_id":null}"#,
+                "true",
+            ),
+            (
+                409,
+                r#"{"code":"world_has_active_auction","message":"已有场次","data":null,"request_id":null}"#,
+                "false",
+            ),
+        ] {
+            let (mut page, _) = mount_writer(move || {
+                use_hook(|| AdminApiFailure::stub_write_response(PATH, Method::POST, status, body));
+                let generation = use_signal(|| 0);
+                use_pending_commands(generation, |_| true);
+                let notice = use_signal(|| None);
+                rsx! { AdminAuctionCreateForm { notice } }
+            });
+            let edits = click_button(&mut page, "创建拍卖");
+            let world = edits
+                .iter()
+                .find_map(|edit| match edit {
+                    Mutation::NewEventListener { name, id } if name == "change" => Some(*id),
+                    _ => None,
+                })
+                .expect("业务世界选项");
+            let date_inputs = edits
+                .iter()
+                .filter_map(|edit| match edit {
+                    Mutation::NewEventListener { name, id } if name == "input" => Some(*id),
+                    _ => None,
+                })
+                .skip(1);
+            page.dispatch("change", world, "main");
+            for (input, value) in
+                date_inputs.zip(["2099-04-01T11:00", "2099-04-01T12:00", "2099-04-01T13:00"])
+            {
+                page.dispatch("input", input, value);
+            }
+            let submitted = page.dispatch("submit", writer_form(&edits), "");
+            assert!(has_text(
+                &submitted,
+                if expected == "true" {
+                    "该业务世界已不存在"
+                } else {
+                    "该世界仍有未结束的拍卖"
+                },
+            ));
+            assert_eq!(
+                text_attributes(&submitted, "aria-invalid").find(|(id, _)| *id == world),
+                (expected == "true").then_some((world, "true")),
+            );
         }
     }
 }

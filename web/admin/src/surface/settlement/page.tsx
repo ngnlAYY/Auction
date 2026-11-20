@@ -28,12 +28,12 @@ import {
   type CatalogSelection,
   type DetailLoad,
   generationNumberCell,
+  isEmptyCatalogTail,
   matchingLookup,
   reconcileSettlementCatalog,
   reportForSelection,
   resetDetailState,
   resolveCatalogSelection,
-  type SettlementDetail,
 } from "./page-model";
 import { AdminSettlementPageView, type AdminSettlementViewState } from "./page-view";
 import {
@@ -42,6 +42,11 @@ import {
   type SettlementQuery,
   useSettlementLocationRevision,
 } from "./query";
+import {
+  focusAfterSuccessfulRead,
+  type SettlementRead,
+  type SettlementReadError,
+} from "./read-retry";
 import type { RecoveryConfirmationDraft, RecoveryRead } from "./recovery";
 
 export { resetDetailState };
@@ -110,16 +115,31 @@ function AdminSettlementPage(props: AdminSettlementPageProps): JSX.Element {
   const reason = createCell("");
   const actionFeedback = createCell<AdminActionFeedback | null>(null);
   const selectionGeneration = createCell(0);
+  const readScopes: Record<SettlementRead, () => string> = {
+    catalog: () => [worldFilter(), catalogPage(), catalogPageSize()].join(":"),
+    catalogLookup: () => [worldFilter(), requestedSequence()].join(":"),
+    settlement: () => selectedAuctionId(),
+    recovery: () =>
+      [selectedAuctionId(), reloadGenerationNumber(), recoveryReloadGeneration()].join(":"),
+  };
+  const focusReadSuccess = (read: SettlementRead, scope: string): void => {
+    if (scope === untrack(readScopes[read])) {
+      focusAfterSuccessfulRead(read, scope);
+    }
+  };
   // 已提交命令由会话宿主持有；页面销毁后冲突回执不得再推进本页的读取世代。
   let alive = true;
   onCleanup(() => {
     alive = false;
   });
 
-  // 浏览器返回/前进可能只改变 query；按地址恢复筛选并关闭旧报告上的操作上下文。
+  // 同页导航及前进后退按地址恢复筛选，选择变化时关闭旧报告上的操作上下文。
   createEffect(
     () => props.locationRevision(),
     (revision) => {
+      if (revision === appliedLocationRevision.peek()) {
+        return;
+      }
       const query = readSettlementQuery();
       if (!query.ok) {
         return;
@@ -148,14 +168,12 @@ function AdminSettlementPage(props: AdminSettlementPageProps): JSX.Element {
   );
 
   const catalog = createTaskResource(
-    () => {
-      props.reloadGeneration();
-      return {
-        worldId: worldFilter(),
-        page: catalogPage(),
-        pageSize: catalogPageSize(),
-      };
-    },
+    () => ({
+      reload: props.reloadGeneration(),
+      worldId: worldFilter(),
+      page: catalogPage(),
+      pageSize: catalogPageSize(),
+    }),
     async (deps, context): Promise<CatalogLoad> => {
       const result = await fetchAdminSettlementCatalog(
         host,
@@ -165,6 +183,9 @@ function AdminSettlementPage(props: AdminSettlementPageProps): JSX.Element {
         deps.pageSize,
         context.signal,
       );
+      if (result.ok && context.alive() && deps.reload === props.reloadGeneration.peek()) {
+        focusReadSuccess("catalog", [deps.worldId, deps.page, deps.pageSize].join(":"));
+      }
       return {
         worldId: deps.worldId,
         page: deps.page,
@@ -215,6 +236,9 @@ function AdminSettlementPage(props: AdminSettlementPageProps): JSX.Element {
           10,
           context.signal,
         );
+        if (fetched.ok && context.alive() && deps.sequence === untrack(lookupSequence)) {
+          focusReadSuccess("catalogLookup", [deps.worldId, deps.sequence].join(":"));
+        }
         result = fetched.ok ? ok(fetched.value) : err(fetched.error);
       }
       return { worldId: deps.worldId, sequence: deps.sequence, result };
@@ -228,6 +252,12 @@ function AdminSettlementPage(props: AdminSettlementPageProps): JSX.Element {
         result = ok(null);
       } else {
         const fetched = await fetchAdminSettlement(host, deps.auctionId, context.signal);
+        if (fetched.ok && context.alive() && deps.reload === props.reloadGeneration.peek()) {
+          const checked = reportForSelection(untrack(selection), fetched.value);
+          if (checked.ok && checked.value !== null) {
+            focusReadSuccess("settlement", deps.auctionId);
+          }
+        }
         result = fetched.ok ? ok(fetched.value) : err(fetched.error);
       }
       return { auctionId: deps.auctionId, result };
@@ -247,11 +277,15 @@ function AdminSettlementPage(props: AdminSettlementPageProps): JSX.Element {
         result = ok(null);
       } else {
         const fetched = await fetchAdminRecovery(host, deps.auctionId, context.signal);
+        if (fetched.ok && context.alive() && untrack(selection).kind === "matched") {
+          focusReadSuccess("recovery", [deps.auctionId, ...deps.generation].join(":"));
+        }
         result = fetched.ok ? ok(fetched.value) : err(fetched.error);
       }
       return [deps.generation, { auctionId: deps.auctionId, result }] as const;
     },
   );
+  const reads = { catalog, catalogLookup, settlement, recovery };
   const commandGate = usePendingCommandGate();
   const pending = usePendingCommandsWithGate(props.reloadGeneration, commandGate, (entity) => {
     const prefix = "settlement-recovery:";
@@ -288,6 +322,7 @@ function AdminSettlementPage(props: AdminSettlementPageProps): JSX.Element {
       sequence: requestedSequence(),
       lookup: catalogLookup(),
       appliedLocationRevision: appliedLocationRevision(),
+      locationRevision: props.locationRevision,
     }),
     (deps) => {
       const load = deps.catalog;
@@ -297,7 +332,7 @@ function AdminSettlementPage(props: AdminSettlementPageProps): JSX.Element {
       reconcileSettlementCatalog({
         load,
         appliedLocationRevision: deps.appliedLocationRevision,
-        locationRevision: props.locationRevision,
+        locationRevision: deps.locationRevision,
         currentWorld: deps.world,
         currentPage: deps.page,
         currentPageSize: deps.pageSize,
@@ -321,6 +356,7 @@ function AdminSettlementPage(props: AdminSettlementPageProps): JSX.Element {
 
   const currentCatalog = createValueMemo((): CatalogLoad | null => {
     const load = catalog();
+    // 保留同查询的错误，重读期间维持原重试按钮及焦点。
     if (load === undefined) {
       return null;
     }
@@ -334,9 +370,9 @@ function AdminSettlementPage(props: AdminSettlementPageProps): JSX.Element {
     const load = currentCatalog();
     return load?.result.ok ? load.result.value : null;
   });
-  const catalogLookupState = createValueMemo((): CatalogLookupLoad | null =>
-    matchingLookup(catalogLookup() ?? null, worldFilter(), requestedSequence()),
-  );
+  const catalogLookupState = createValueMemo((): CatalogLookupLoad | null => {
+    return matchingLookup(catalogLookup() ?? null, worldFilter(), requestedSequence());
+  });
   const lookupNeeded = createValueMemo((): boolean => {
     const page = catalogData();
     if (page === null || requestedSequence() === null) {
@@ -379,22 +415,27 @@ function AdminSettlementPage(props: AdminSettlementPageProps): JSX.Element {
     }
     return { ...page, auctions: [...page.auctions] };
   });
-  const catalogLoading = createValueMemo(
-    () => currentCatalog() === null || (lookupNeeded() && catalogLookupState() === null),
-  );
-  const catalogError = createValueMemo((): string | null => {
-    const current = currentCatalog();
-    if (current !== null && !current.result.ok) {
-      return adminApiErrorMessage(current.result.error);
-    }
-    if (lookupNeeded()) {
-      const lookup = catalogLookupState();
-      if (lookup !== null && !lookup.result.ok) {
-        return adminApiErrorMessage(lookup.result.error);
-      }
-    }
-    return selection().kind === "contradictory" ? adminApiErrorMessage("invalid_response") : null;
+  const catalogPageForPager = createValueMemo(() => {
+    const page = catalogData();
+    // 空尾页由目录归并处理，避免通用分页器另行纠偏并调用会清除深链接的翻页回调。
+    return page !== null && !isEmptyCatalogTail(page) ? page : null;
   });
+  // 站内导航与前进后退先同步位置版本，旧控件的事件可能早于本页恢复 effect。
+  const catalogPagerIsCurrent = (): boolean =>
+    alive &&
+    typeof window !== "undefined" &&
+    window.location.pathname === "/settlement" &&
+    props.locationRevision.peek() === appliedLocationRevision.peek() &&
+    untrack(catalogPageForPager) !== null;
+  const catalogLoading = (): boolean => {
+    const current = currentCatalog();
+    const lookup = catalogLookupState();
+    return (
+      current === null ||
+      (!current.result.ok && readPending("catalog")) ||
+      (lookupNeeded() && (lookup === null || (!lookup.result.ok && readPending("catalogLookup"))))
+    );
+  };
 
   const currentSettlement = createValueMemo((): DetailLoad<AdminSettlementReport> | null => {
     const load = settlement();
@@ -422,29 +463,47 @@ function AdminSettlementPage(props: AdminSettlementPageProps): JSX.Element {
       ? load
       : null;
   });
-  const detail = createValueMemo((): SettlementDetail => {
-    const entry = selectedEntry();
-    const settlementLoad = currentSettlement();
-    const recoveryLoad = currentRecovery();
-    let detailError: string | null = null;
-    if (entry !== null) {
-      if (settlementLoad !== null && !settlementLoad.result.ok) {
-        detailError = adminApiErrorMessage(settlementLoad.result.error);
-      } else if (recoveryLoad !== null && !recoveryLoad.result.ok) {
-        detailError = adminApiErrorMessage(recoveryLoad.result.error);
-      }
-    }
-    const candidateReport = settlementLoad?.result.ok ? settlementLoad.result.value : null;
-    const checked = reportForSelection(selection(), candidateReport);
-    if (!checked.ok) {
-      return { report: null, error: adminApiErrorMessage(checked.error) };
-    }
-    return { report: checked.value, error: detailError };
+  const checkedReport = createValueMemo(() => {
+    const load = currentSettlement();
+    return reportForSelection(selection(), load?.result.ok ? load.result.value : null);
   });
+  const report = (): AdminSettlementReport | null => {
+    const checked = checkedReport();
+    return checked.ok ? checked.value : null;
+  };
+  const reportAuctionId = (): string | null =>
+    selectedEntry() !== null && selectedAuctionId() !== "" ? selectedAuctionId() : null;
+  const readPending = (read: SettlementRead): boolean => reads[read].state() !== "ready";
+  const errorFor = (read: SettlementRead, result: Result<unknown, string> | undefined) =>
+    result?.ok === false
+      ? { message: adminApiErrorMessage(result.error), scope: readScopes[read]() }
+      : null;
+  const readErrors: Record<SettlementRead, () => SettlementReadError | null> = {
+    catalog: () => errorFor("catalog", currentCatalog()?.result),
+    catalogLookup: () =>
+      lookupNeeded() ? errorFor("catalogLookup", catalogLookupState()?.result) : null,
+    settlement: () =>
+      reportAuctionId() === null
+        ? null
+        : (errorFor("settlement", currentSettlement()?.result) ??
+          errorFor("settlement", checkedReport())),
+    recovery: () =>
+      reportAuctionId() === null ? null : errorFor("recovery", currentRecovery()?.result),
+  };
+  const retryRead = (read: SettlementRead, scope: string): void => {
+    const resource = reads[read];
+    if (
+      alive &&
+      scope === untrack(readScopes[read]) &&
+      untrack(readErrors[read])?.scope === scope &&
+      untrack(resource.state) === "ready"
+    ) {
+      resource.restart();
+    }
+  };
   const recoveryReport = createValueMemo((): AdminRecoveryReport | null => {
-    const report = detail().report;
     const load = currentRecovery();
-    return report !== null && load?.result.ok ? load.result.value : null;
+    return report() !== null && load?.result.ok ? load.result.value : null;
   });
   // 确认框和命令入口都必须由目录与详情的同一条场次事实授权。
   const recoveryDraft = createValueMemo((): RecoveryConfirmationDraft | null => {
@@ -459,12 +518,9 @@ function AdminSettlementPage(props: AdminSettlementPageProps): JSX.Element {
       ? draft
       : null;
   });
-  const detailLoading = createValueMemo(
-    () =>
-      selectedEntry() !== null &&
-      selectedAuctionId() !== "" &&
-      (currentSettlement() === null || currentRecovery() === null),
-  );
+  const detailLoading = (read: "settlement" | "recovery"): boolean =>
+    (read === "settlement" ? currentSettlement() : currentRecovery()) === null ||
+    (readErrors[read]() !== null && readPending(read));
   const reportTitle = (): string => {
     const entry = selectedEntry();
     return entry === null
@@ -490,11 +546,16 @@ function AdminSettlementPage(props: AdminSettlementPageProps): JSX.Element {
     recoveryReloadGeneration,
     pickerCatalog,
     catalogLoading,
-    catalogError,
-    catalogData,
+    contradictoryLink: () => selection().kind === "contradictory",
+    catalogPageForPager,
+    catalogPagerIsCurrent,
     reportTitle,
     detailLoading,
-    detail,
+    reportAuctionId,
+    report,
+    readErrors,
+    readPending,
+    retryRead,
     recoveryReport,
     actionBusy,
     recoveryRead,

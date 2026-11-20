@@ -3,6 +3,10 @@
 //! 字段全部来自服务端安全投影；按钮只按服务端给出的 `allowed_actions` 展示，命令事务仍会锁内
 //! 复核。页面明确区分“已寄出”（邮件发出）、“退回仍在收件箱”、“已领回”与“代管”。
 
+#[cfg(target_arch = "wasm32")]
+use auction_web_shared::a11y::{focus_element_by_id, top_modal};
+#[cfg(target_arch = "wasm32")]
+use auction_web_shared::timer::TimeoutFuture;
 use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText, t};
 use dioxus::prelude::*;
 
@@ -40,6 +44,23 @@ fn ReturnDetailPage(return_id: String) -> Element {
         move |entity| entity == target
     });
     let notice = use_signal(|| None::<AdminActionFeedback>);
+    // 动作区会随详情重读而卸载，还焦任务由保留标题的详情页持有。
+    let restore_focus = use_callback(|()| {
+        #[cfg(target_arch = "wasm32")]
+        spawn(async move {
+            TimeoutFuture::new(0).await;
+            let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+                return;
+            };
+            if document
+                .active_element()
+                .is_none_or(|focus| matches!(focus.local_name().as_str(), "body" | "html"))
+                && top_modal(&document).is_none()
+            {
+                focus_element_by_id("settlement-return-detail-title");
+            }
+        });
+    });
     let detail = use_resource(use_reactive((&return_id,), move |(return_id,)| {
         let generation = refresh();
         async move {
@@ -65,7 +86,7 @@ fn ReturnDetailPage(return_id: String) -> Element {
     rsx! {
         section { class: "admin-settlement-return-detail", aria_labelledby: "settlement-return-detail-title",
             div { class: "admin-settlement-return-detail__head",
-                h1 { id: "settlement-return-detail-title", {t!("settlement-return-detail-title")} }
+                h1 { id: "settlement-return-detail-title", tabindex: "-1", {t!("settlement-return-detail-title")} }
                 Link { to: Route::SettlementReturns {}, class: "admin-settlement-return-detail__back",
                     {t!("settlement-return-detail-back")}
                 }
@@ -129,7 +150,7 @@ fn ReturnDetailPage(return_id: String) -> Element {
                         }
                     }
                     SummarySection { summary: detail.summary.clone() }
-                    ActionSection { detail: detail.clone(), notice, refresh, loaded_generation }
+                    ActionSection { detail: detail.clone(), notice, refresh, loaded_generation, restore_focus }
                     if shows_asset_location(&detail.summary.status) {
                         TakeSection {
                             take: detail.take.clone(),

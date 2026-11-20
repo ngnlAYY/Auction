@@ -6,6 +6,12 @@ mod page;
 mod picker;
 mod presentation;
 mod query;
+mod read_retry;
+mod reads;
 mod recovery;
 mod report;
+mod selection;
 pub(super) use page::page;
+
+#[cfg(test)]
+mod tests;

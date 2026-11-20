@@ -1,9 +1,17 @@
 // 分页与历史导航时，地址、路由快照和已应用查询保持同步。
 
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { writeQueryPairs } from "@auction/web-shared/net/query";
+import { t } from "@auction/web-shared/ui/i18n";
 import { flush } from "solid-js";
 
+import {
+  dispatch,
+  hasClass,
+  mountCompetition,
+  renderedText,
+  waitFor,
+} from "../commands/competition-fixture.test";
 import { updatePublicPageSize } from "../pagination";
 import { readPublicQuery } from "./location";
 import { expectCurrentAddress, mountQueryStates } from "./query-state-fixture.test";
@@ -178,5 +186,117 @@ test.each(["push", "replace"] as const)("路由 %s 只在写入成功后同步�
     expect(mounted.second.state.peek().page).toBe(3);
   } finally {
     mounted.close();
+  }
+});
+
+test("同页重选清除筛选，跨页历史仍恢复世界和列表", () => {
+  const mounted = mountQueryStates("/history?world=isekai&name=Phase+Robe&page=3&page_size=20");
+  const assertQuery = (
+    world: string | null,
+    name: string | null,
+    page: number,
+    firstRow: number,
+  ) => {
+    for (const query of [mounted.first, mounted.second]) {
+      expect(query.state.peek()).toMatchObject({ world, historyName: name, page });
+    }
+    expect(mounted.visibleRows()[0]).toBe(firstRow);
+  };
+  try {
+    assertQuery("isekai", "Phase Robe", 3, 41);
+    mounted.router.push("/history?world=isekai");
+    flush();
+    assertQuery("isekai", null, 1, 1);
+    mounted.router.push("/bidlog?world=main");
+    flush();
+    assertQuery("main", null, 1, 1);
+    mounted.back();
+    assertQuery("isekai", null, 1, 1);
+    mounted.back();
+    assertQuery("isekai", "Phase Robe", 3, 41);
+    mounted.forward();
+    assertQuery("isekai", null, 1, 1);
+  } finally {
+    mounted.close();
+  }
+});
+
+test("冻结旧页长、拒绝新页长并重试时每个 Public 实例只经原有路由解析", () => {
+  const mounted = mountQueryStates("/?page=3&ref=x");
+  const getAll = spyOn(URLSearchParams.prototype, "getAll");
+  const parsedQueries = () => getAll.mock.calls.filter(([key]) => key === "auction").length;
+  try {
+    expect(
+      writeQueryPairs(
+        ["page_size", "movement_page_size"],
+        [
+          ["page_size", "20"],
+          ["movement_page_size", "20"],
+        ],
+        "replace",
+      ),
+    ).toBe(true);
+    flush();
+    expect(parsedQueries()).toBe(2);
+    mounted.failHistoryWrites(true);
+    expect(updatePublicPageSize(mounted.first.state, 50)).toBe(false);
+    flush();
+    expect(parsedQueries()).toBe(2);
+    expect(mounted.location.search).toBe("?page=3&ref=x&page_size=20&movement_page_size=20");
+    for (const query of [mounted.first, mounted.second]) {
+      expect(query.state.peek()).toMatchObject({ page: 3, pageSize: 20 });
+    }
+    expect(mounted.visibleRows()[0]).toBe(41);
+
+    mounted.failHistoryWrites(false);
+    expect(updatePublicPageSize(mounted.first.state, 50)).toBe(true);
+    flush();
+    // 提交者同步读回新地址，两份路由订阅随后各解析一次。
+    expect(parsedQueries()).toBe(5);
+    for (const query of [mounted.first, mounted.second]) {
+      expect(query.state.peek()).toMatchObject({ page: 1, pageSize: 50 });
+    }
+    expect(mounted.visibleRows()).toHaveLength(50);
+    expect(mounted.visibleRows()[0]).toBe(1);
+  } finally {
+    getAll.mockRestore();
+    mounted.close();
+  }
+});
+
+test("点击 Public 侧栏当前页恢复历史价筛选，跨页后退恢复外壳世界", async () => {
+  const original = "/history?world=isekai&name=Phase+Robe&page=3&page_size=20";
+  const page = await mountCompetition("isekai", false, { href: original });
+  const nameInput = () => page.find((node) => node.getAttribute("id") === "public-history-name");
+  const nameValue = () => nameInput()?.attributes.value;
+  const sidebar = () => page.need((node) => hasClass(node, "console-sidebar"));
+  const world = () => renderedText(page.find((node) => hasClass(node, "console-ticker__world")));
+  try {
+    await waitFor(() => nameValue() === "Phase Robe");
+    const currentPage = nameInput();
+    const current = page.need(
+      (node) => node.tag === "a" && node.getAttribute("href") === "/history",
+      sidebar(),
+    );
+    dispatch(current, "Click");
+    await waitFor(() => nameValue() === "");
+    expect(nameInput()).toBe(currentPage);
+    expect(page.location.pathname + page.location.search).toBe("/history");
+
+    page.go("/bidlog?world=isekai");
+    await waitFor(() => world() === ` / ${t("auction-world-isekai")}`);
+    page.go("/status?world=main");
+    await waitFor(() => world() === ` / ${t("auction-world-main")}`);
+    page.back();
+    await waitFor(() => world() === ` / ${t("auction-world-isekai")}`);
+    expect(page.location.pathname).toBe("/bidlog");
+    page.back();
+    await waitFor(() => nameValue() === "");
+    expect(page.location.pathname).toBe("/history");
+    page.back();
+    await waitFor(() => nameValue() === "Phase Robe");
+    expect(page.location.pathname + page.location.search).toBe(original);
+  } finally {
+    page.dispose();
   }
 });

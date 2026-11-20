@@ -27,9 +27,11 @@ import {
   DraftFeedback,
   type DraftRead,
   DraftRefreshButton,
+  type DraftWriteFeedback,
   draftReadIsReady,
   draftReadRetryAfterClose,
   draftReadVersionChanged,
+  observeDraftWrite,
 } from "../editor";
 import { currentTimeMillis } from "../presentation";
 import { type AuctionDrafts, requireAuctionDrafts } from ".";
@@ -44,7 +46,6 @@ import {
   lifecycleActions,
   lifecycleReasonIssueMessage,
   pendingOpenMillis,
-  staleAuctionFailure,
   validateLifecycleReason,
 } from "./model";
 
@@ -231,7 +232,7 @@ export function AdminAuctionActionDialog(props: AdminAuctionActionDialogProps): 
   const host = useAdminSessionHost();
   const focusField = useFocusField();
   const issue = createCell<LifecycleReasonIssue | null>(null);
-  const feedback = createCell<string | null>(null);
+  const feedback = createCell<DraftWriteFeedback | null>(null);
   let alive = true;
   onCleanup(() => {
     alive = false;
@@ -254,9 +255,8 @@ export function AdminAuctionActionDialog(props: AdminAuctionActionDialogProps): 
           if (blocked()) {
             return false;
           }
-          const code = failure();
           return (
-            (code !== null && staleAuctionFailure(code)) ||
+            failure()?.staleWrite === true ||
             draftReadVersionChanged(props.read, target().stateVersion, props.latestVersion)
           );
         });
@@ -374,7 +374,11 @@ export function AdminAuctionActionDialog(props: AdminAuctionActionDialogProps): 
                 <FieldError id={errorId()} message={issueMessage()} />
               </Show>
               <Show when={!blocked()}>
-                <DraftFeedback conflict={conflict()} read={props.read} failure={failure()} />
+                <DraftFeedback
+                  conflict={conflict()}
+                  read={props.read}
+                  failure={failure()?.displayCode ?? null}
+                />
               </Show>
               <div class="admin-shell__dialog-actions">
                 <Show when={!conflict()}>
@@ -422,7 +426,7 @@ function runLifecycleAction(
   host: AdminSessionHost,
   draft: LifecycleDraft,
   reason: string | null,
-  feedback: Cell<string | null>,
+  feedback: Cell<DraftWriteFeedback | null>,
   notice: Cell<AdminAuctionNotice | null>,
   pending: Cell<LifecycleDraft | null>,
   alive: () => boolean,
@@ -435,20 +439,13 @@ function runLifecycleAction(
   return owner.submit(
     `auction:${auctionId}`,
     lifecycleActionLabel(action),
-    async (commandId, signal) => {
-      const result = await executeAdminAuctionLifecycle(
-        host,
-        commandId,
-        auctionId,
-        action,
-        prepare,
-        signal,
-      );
-      if (!signal.aborted) {
-        setIfAlive(feedback, result.ok ? null : result.error, alive);
-      }
-      return result;
-    },
+    (commandId, signal) =>
+      observeDraftWrite(
+        executeAdminAuctionLifecycle(host, commandId, auctionId, action, prepare, signal),
+        "stale_auction_state",
+        feedback,
+        () => alive() && !signal.aborted,
+      ),
     () => {
       setIfAlive(feedback, null, alive);
       // 未决区回执只关闭同一个版本的确认，不能影响另一个场次的草稿。

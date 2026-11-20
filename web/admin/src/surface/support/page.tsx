@@ -13,11 +13,16 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { createEffect, Match, Show, Switch } from "solid-js";
 
-import { fetchPlayerSupport } from "../../api/delivery";
+import {
+  fetchPlayerSupport,
+  MAX_PLAYER_SUPPORT_USER_BYTES,
+  playerSupportUserTooLong,
+} from "../../api/delivery";
 import { trimRustWhitespace } from "../../api/session-time";
 import { useAdminSessionHost } from "../auth/shell";
 import { adminApiErrorMessage } from "../presentation";
 import { type SupportQuery, supportQueryValid, useSupportQueryState } from "../query/support";
+import { FieldError, useFocusField } from "../validation";
 import { bids, deals, deliveries, notifications, obligations, summary } from "./sections";
 
 interface SupportLoad {
@@ -34,6 +39,8 @@ export function page(): JSX.Element {
   const userInput = createCell(queryState.peek().user);
   const referenceInput = createCell(queryState.peek().reference);
   const invalid = createCell(false);
+  const invalidUser = createCell(playerSupportUserTooLong(queryState.peek().user));
+  const focusField = useFocusField();
   // 输入框是提交前草稿；已应用入口变化（提交或前进/后退）时重置为当前值，与地址栏一致。
   createEffect(
     () => queryState(),
@@ -47,6 +54,10 @@ export function page(): JSX.Element {
       if (invalid.peek()) {
         invalid.set(false);
       }
+      const userTooLong = playerSupportUserTooLong(applied.user);
+      if (invalidUser.peek() !== userTooLong) {
+        invalidUser.set(userTooLong);
+      }
     },
   );
 
@@ -54,9 +65,16 @@ export function page(): JSX.Element {
   const submit = (event: SubmitEvent) => {
     event.preventDefault();
     const next: SupportQuery = {
-      user: trimRustWhitespace(userInput()),
-      reference: trimRustWhitespace(referenceInput()),
+      user: trimRustWhitespace(userInput.peek()),
+      reference: trimRustWhitespace(referenceInput.peek()),
     };
+    const userTooLong = playerSupportUserTooLong(next.user);
+    invalidUser.set(userTooLong);
+    if (userTooLong) {
+      invalid.set(false);
+      focusField("support-user");
+      return;
+    }
     if (!supportQueryValid(next)) {
       invalid.set(true);
       return;
@@ -81,11 +99,12 @@ export function page(): JSX.Element {
       return { query: current, result };
     },
   );
-  const loading = createValueMemo(() => resource.state() !== "ready");
   // 结果必须与当前入口一致；地址栏变化后不展示上一轮汇总。
   const current = createValueMemo(() => queryState());
+  const addressUserTooLong = createValueMemo(() => playerSupportUserTooLong(current().user));
+  const loading = createValueMemo(() => !addressUserTooLong() && resource.state() !== "ready");
   const result = createValueMemo((): Result<AdminPlayerSupportBundleResponse, string> | null => {
-    if (loading()) {
+    if (addressUserTooLong() || loading()) {
       return null;
     }
     const entry = resource();
@@ -114,9 +133,24 @@ export function page(): JSX.Element {
         <input
           id="support-user"
           type="text"
-          maxlength="256"
+          aria-invalid={invalidUser() ? "true" : "false"}
+          aria-describedby={invalidUser() ? "support-user-error" : undefined}
           value={userInput()}
-          onInput={(event) => userInput.set(event.currentTarget.value)}
+          onInput={(event) => {
+            const value = event.currentTarget.value;
+            if (invalidUser.peek() && !playerSupportUserTooLong(trimRustWhitespace(value))) {
+              invalidUser.set(false);
+            }
+            userInput.set(value);
+          }}
+        />
+        <FieldError
+          id="support-user-error"
+          message={
+            invalidUser()
+              ? t("admin-field-max-utf8-bytes", { max: MAX_PLAYER_SUPPORT_USER_BYTES })
+              : null
+          }
         />
         <label for="support-reference">{t("support-search-reference")}</label>
         <input
@@ -137,7 +171,7 @@ export function page(): JSX.Element {
         <Match when={result() === null && loading()}>
           <AsyncState kind="loading" title={t("data-loading")} detail="" />
         </Match>
-        <Match when={result() === null}>
+        <Match when={result() === null && !invalidUser() && !addressUserTooLong()}>
           <p class="admin-panel__note">{t("support-idle")}</p>
         </Match>
         <Match when={failed()}>

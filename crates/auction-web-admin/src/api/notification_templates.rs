@@ -4,14 +4,13 @@ use auction_contracts::{
     AdminMailTemplateDto, AdminMailTemplateListResponse, AdminMailTemplateUpdateRequest,
     AdminMailTemplateUpdateResponse, ApiResponse,
 };
-use gloo_net::http::Request;
+use gloo_net::http::Method;
 use uuid::Uuid;
 
+use super::AdminWriteFailure;
 use super::failure::AdminWriteEndpoint;
-use super::{
-    AdminApiFailure, fetch_csrf_token, invalid_request_error, invalid_response_error,
-    response_error, response_failure, send_get, send_request,
-};
+use super::transport::WriteRequest;
+use super::{invalid_request_error, invalid_response_error, response_error, send_get};
 
 /// 单个模板正文的字节上限，与服务端一致。
 const MAX_TEMPLATE_BODY_BYTES: usize = 64 * 1024;
@@ -76,12 +75,12 @@ pub(crate) struct MailTemplateAttempt {
 
 #[cfg(test)]
 type MailTemplateSubmitStub =
-    std::rc::Rc<dyn Fn(&str) -> Result<AdminMailTemplateDto, AdminApiFailure>>;
+    std::rc::Rc<dyn Fn(&str) -> Result<AdminMailTemplateDto, AdminWriteFailure>>;
 
 #[cfg(test)]
 impl MailTemplateAttempt {
     pub(crate) fn stub_submit(
-        submit: impl Fn(&str) -> Result<AdminMailTemplateDto, AdminApiFailure> + 'static,
+        submit: impl Fn(&str) -> Result<AdminMailTemplateDto, AdminWriteFailure> + 'static,
     ) {
         dioxus::prelude::provide_context(std::rc::Rc::new(submit) as MailTemplateSubmitStub);
     }
@@ -107,46 +106,30 @@ fn encode_template_request(
 /// 提交保存或恢复默认；只接受与命令一致的已接受结果。
 pub(crate) async fn submit_mail_template(
     attempt: &MailTemplateAttempt,
-) -> Result<AdminMailTemplateDto, AdminApiFailure> {
+) -> Result<AdminMailTemplateDto, AdminWriteFailure> {
     if attempt.command_id.is_nil()
         || attempt.expected_revision < 0
         || !valid_template_key(&attempt.key)
         || attempt.body.as_deref().is_some_and(str::is_empty)
     {
-        return Err(AdminApiFailure::client("invalid_request"));
+        return Err(AdminWriteFailure::not_sent("invalid_request"));
     }
     let body = encode_template_request(
         attempt.command_id,
         attempt.expected_revision,
         attempt.body.clone(),
     )
-    .map_err(AdminApiFailure::client)?;
+    .map_err(AdminWriteFailure::not_sent)?;
     #[cfg(test)]
     if let Some(submit) = dioxus::prelude::try_consume_context::<MailTemplateSubmitStub>() {
-        return submit(&body)
-            .map_err(|failure| failure.at_write_endpoint(AdminWriteEndpoint::MailTemplate));
+        return submit(&body);
     }
     let url = format!("/api/v1/admin/mail-templates/{}", attempt.key);
-    let csrf_token = fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
-    let response = send_request(|abort_signal| {
-        Request::put(&url)
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .header("Content-Type", "application/json")
-            .body(body)
-            .map_err(invalid_request_error)
-    })
-    .await
-    .map_err(AdminApiFailure::client)?;
-    if !response.ok() {
-        return Err(response_failure(response)
-            .await
-            .at_write_endpoint(AdminWriteEndpoint::MailTemplate));
-    }
-    let payload: ApiResponse<AdminMailTemplateUpdateResponse> = response
-        .json()
-        .await
-        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
+    let response = WriteRequest::new(&url, Method::PUT, AdminWriteEndpoint::MailTemplate)
+        .send_body(&body)
+        .await?;
+    let payload: ApiResponse<AdminMailTemplateUpdateResponse> =
+        response.json().await.map_err(AdminWriteFailure::invalid_response)?;
     let accepted = payload.data.template;
     // 重放返回的是原结果，版本恰好是期望版本加一；正文与“是否自定义”必须与命令一致。
     if !valid_template_entry(&accepted)
@@ -155,7 +138,7 @@ pub(crate) async fn submit_mail_template(
         || accepted.customized != attempt.body.is_some()
         || attempt.body.as_ref().is_some_and(|body| body != &accepted.body)
     {
-        return Err(AdminApiFailure::client(invalid_response_error("mail template update")));
+        return Err(AdminWriteFailure::invalid_response("mail template update"));
     }
     Ok(accepted)
 }

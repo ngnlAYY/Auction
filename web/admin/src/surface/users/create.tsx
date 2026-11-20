@@ -5,10 +5,11 @@ import { createCell } from "@auction/web-shared/reactive/cell";
 import { Dialog } from "@auction/web-shared/ui/components/dialog";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { onCleanup, Show } from "solid-js";
+import { onCleanup, Show, useContext } from "solid-js";
 
-import { adminApiFailureDisplayCode } from "../../api/failure";
 import { createAdminUser, prepareAdminUserCreateOnce } from "../../api/users";
+import { KeyVisibilityContext } from "../auth/key-visibility";
+import type { KeyVisibility } from "../auth/session";
 import { useAdminSessionHost } from "../auth/shell";
 import {
   type CommandDelivery,
@@ -60,6 +61,8 @@ const ADMIN_USER_GENERATED_KEY_REDACTED = "[REDACTED]";
 /** 一次性展示的登录 Key；默认序列化与字符串化都只给出脱敏占位。
  * 明文只能由一次性弹窗经 `reveal()` 显式读取，禁止记录、打印或持久化整个对象。 */
 export interface AdminUserGeneratedKey {
+  /** 来源页只有在交付时的展示版本仍有效时才可自动展开。 */
+  readonly autoOpenRevision: number | null;
   /** 显式读取明文；只允许一次性展示弹窗调用。 */
   reveal(): string;
   /** 会话回执复制必须保留封装；不能用 `structuredClone` 退化成普通对象。 */
@@ -71,15 +74,19 @@ export interface AdminUserGeneratedKey {
 }
 
 /** 把明文收进闭包，实例本身没有可枚举或可检查的明文字段。 */
-function adminUserGeneratedKey(plaintext: string): AdminUserGeneratedKey {
+function adminUserGeneratedKey(
+  plaintext: string,
+  autoOpenRevision: number | null,
+): AdminUserGeneratedKey {
   const generated: AdminUserGeneratedKey = {
+    autoOpenRevision,
     reveal: () => plaintext,
-    copy: () => adminUserGeneratedKey(plaintext),
+    copy: () => adminUserGeneratedKey(plaintext, autoOpenRevision),
     toJSON: () => ADMIN_USER_GENERATED_KEY_REDACTED,
     toString: () => ADMIN_USER_GENERATED_KEY_REDACTED,
   };
   // 方法不枚举，控制台展开对象时也看不到明文或内部方法。
-  for (const name of ["reveal", "copy", "toJSON", "toString"] as const) {
+  for (const name of ["autoOpenRevision", "reveal", "copy", "toJSON", "toString"] as const) {
     Object.defineProperty(generated, name, { enumerable: false });
   }
   return Object.freeze(generated);
@@ -89,9 +96,14 @@ function adminUserGeneratedKey(plaintext: string): AdminUserGeneratedKey {
 export function adminUserGeneratedKeyDelivery(
   key: string | null,
   reported: boolean,
+  visibility: KeyVisibility | null = null,
 ): CommandDelivery {
   if (key !== null) {
-    return { kind: "receipt", receipt: { kind: "generated-key", key: adminUserGeneratedKey(key) } };
+    const revision = visibility !== null && !visibility.hidden ? visibility.revision : null;
+    return {
+      kind: "receipt",
+      receipt: { kind: "generated-key", key: adminUserGeneratedKey(key, revision) },
+    };
   }
   return commandDeliveryReported(reported, () => null);
 }
@@ -102,7 +114,9 @@ function finishCreate(
   sourceAlive: boolean,
   open: Cell<boolean>,
   notice: Cell<string | null>,
+  keyVisibility: () => KeyVisibility,
 ): CommandDelivery {
+  const visibility = sourceAlive && generatedKey !== null ? keyVisibility() : null;
   // open/notice 由用户页持有；来源页卸载后 sourceAlive 为 false，回执留给会话接管。
   if (sourceAlive) {
     setIfAlive(open, false, () => true);
@@ -110,6 +124,7 @@ function finishCreate(
   return adminUserGeneratedKeyDelivery(
     generatedKey,
     sourceAlive && trySetIfAlive(notice, username, () => true),
+    visibility,
   );
 }
 
@@ -127,6 +142,7 @@ export function AdminUserCreateForm(props: AdminUserCreateFormProps): JSX.Elemen
   const manualKey = createCell("");
   const pending = requirePendingCommands();
   const host = useAdminSessionHost();
+  const keyVisibility = useContext(KeyVisibilityContext);
   const focusField = useFocusField();
   const feedback = createCell<AdminActionFeedback | null>(null);
   const fieldErrors = createCell<UserFieldErrors>(EMPTY_USER_FIELD_ERRORS);
@@ -194,6 +210,7 @@ export function AdminUserCreateForm(props: AdminUserCreateFormProps): JSX.Elemen
                 sourceAlive,
                 props.open,
                 props.notice,
+                keyVisibility,
               ),
             (code) => {
               if (code === "user_conflict" && alive) {
@@ -202,11 +219,7 @@ export function AdminUserCreateForm(props: AdminUserCreateFormProps): JSX.Elemen
                   username: "username_conflict",
                 }));
               }
-              setIfAlive(
-                feedback,
-                { kind: "error", code: adminApiFailureDisplayCode(code) },
-                feedbackAlive,
-              );
+              setIfAlive(feedback, { kind: "error", code }, feedbackAlive);
             },
           );
           if (submitted) {

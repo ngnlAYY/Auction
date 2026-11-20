@@ -17,6 +17,7 @@ import { createEffect, For, Show, untrack } from "solid-js";
 import { useAdminSessionHost } from "../../auth/shell";
 import { adminWorldLabel } from "../../presentation";
 import { useFocusField } from "../../validation";
+import { deliveryReasonError } from "../labels";
 import { latestSendAttempt, selectableEvidence } from "./evidence";
 import { PreviewPanel, runPreview, submitProof } from "./preview";
 import {
@@ -32,7 +33,7 @@ import {
   sentProofReviewClear,
   sentProofReviewDefault,
 } from "./state";
-import { missingObservedIds, validReason } from "./validation";
+import { missingObservedIds } from "./validation";
 
 /** 证据种类译文；未知种类原样显示。 */
 export function evidenceKindLabel(kind: string): string {
@@ -90,12 +91,13 @@ export function SentProofDialog(props: {
     return outcome.error.issue;
   });
   const fence = createValueMemo(() => detail().delivery.fencing_version);
+  const reasonError = createValueMemo(() => deliveryReasonError(current().reason));
   const canConfirm = createValueMemo(() => {
     const outcome = reviewState().outcome;
     return (
       outcome?.ok &&
       reviewedSentProofCanConfirm(outcome.value, detail().delivery.id, fence()) &&
-      validReason(current().reason)
+      reasonError() === null
     );
   });
   const blocked = createValueMemo(() => props.blocked === true);
@@ -410,11 +412,20 @@ export function SentProofDialog(props: {
           rows="3"
           required
           disabled={disabled()}
+          aria-invalid={reasonError() === null ? "false" : "true"}
+          aria-describedby={reasonError() === null ? undefined : "delivery-sent-reason-error"}
           value={current().reason}
           onInput={(event) => {
             draft.update((next) => ({ ...next, reason: event.currentTarget.value }));
           }}
         />
+        <Show when={reasonError()}>
+          {(error) => (
+            <p id="delivery-sent-reason-error" class="action-feedback action-feedback--error">
+              {error()}
+            </p>
+          )}
+        </Show>
         <p class="admin-panel__note">{t("delivery-sent-proof-note")}</p>
         <div class="admin-shell__dialog-actions">
           <button

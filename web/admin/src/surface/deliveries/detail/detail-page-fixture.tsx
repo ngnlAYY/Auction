@@ -1,9 +1,11 @@
 // 同一个会话中把已存在的列表命令来源与投递详情一起挂载。
 
 import { err } from "@auction/web-shared/result";
+import { RouteOutlet } from "@auction/web-shared/router";
 import type { JSX } from "@solidjs/web";
-import { adminApiFailureFromHttpBody } from "../../../api/failure";
+import { writeFailureFromReply } from "../../../api/api-request-fixture";
 import { createCommandReload, usePendingCommands } from "../../pending/sources";
+import { ADMIN_PAGES } from "../../router";
 import { deliveryCommandEntity } from "..";
 import { detailPage } from ".";
 
@@ -18,14 +20,15 @@ export function DetailWithListCommand(props: {
       <button
         type="button"
         onClick={() => {
-          const failure = adminApiFailureFromHttpBody(
-            503,
-            '{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}',
-          );
+          const failure = () =>
+            writeFailureFromReply(
+              503,
+              '{"code":"storage_unavailable","message":"暂不可用","data":null,"request_id":null}',
+            );
           const submitted = list.submit(
             deliveryCommandEntity(props.id),
             "列表处置",
-            async () => err(failure.code),
+            async () => err(await failure()),
             () => {},
             () => {},
           );
@@ -37,4 +40,9 @@ export function DetailWithListCommand(props: {
       {detailPage(props.id)}
     </>
   );
+}
+
+/** 详情书签经实际 Admin 路由表加载，认证与 DOM 沿用投递夹具。 */
+export function DeliveryRouteFixture(): JSX.Element {
+  return <RouteOutlet pages={ADMIN_PAGES} notFound={null} />;
 }

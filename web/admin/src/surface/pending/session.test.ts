@@ -3,7 +3,8 @@
 import { expect, test } from "bun:test";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { createComponent, createRoot, flush } from "solid-js";
-import { adminApiFailureFromHttpBody } from "../../api/failure";
+import { writeFailureFromReply } from "../../api/api-request-fixture";
+import type { AdminWriteFailure } from "../../api/failure";
 import type { PreparedJsonCommand } from "../../api/transport";
 import { loadRenderModule } from "../../solid-render-fixture.test";
 import { cleanupScope } from "../../test-scope-fixture";
@@ -16,7 +17,7 @@ import {
   installTestDocument,
   type TestElement,
 } from "../solid-dom-fixture";
-import { settlePending } from "./pending-command-fixture";
+import { settlePending, waitForAttempt } from "./pending-command-fixture";
 import { createSessionHost, type SessionHostFixture } from "./session-fixture";
 import type { SessionPageRequests } from "./session-page-fixture";
 import { type CommandSource, liveSource } from "./sources";
@@ -28,11 +29,11 @@ const { SessionPage } = await loadRenderModule<typeof import("./session-page-fix
 const SOURCE_ENTITY = "alert:fixture";
 const SUBMIT = "发送测试命令";
 const NAVIGATE = "切换测试路由";
-function failure(status: number, code: string): string {
-  return adminApiFailureFromHttpBody(
+function failure(status: number, code: string): Promise<AdminWriteFailure> {
+  return writeFailureFromReply(
     status,
     JSON.stringify({ code, message: "请求失败", data: null, request_id: null }),
-  ).code;
+  );
 }
 
 function deferred<T>(): {
@@ -49,7 +50,7 @@ function deferred<T>(): {
 interface MountOptions {
   readonly delayedWrite?: boolean;
   readonly delayedKey?: boolean;
-  readonly replies: readonly Result<void, string>[];
+  readonly replies: readonly Result<void, AdminWriteFailure>[];
   readonly gatedDestination?: boolean;
 }
 
@@ -61,8 +62,8 @@ interface MountedSession {
   readonly keySourceAlive: readonly boolean[];
   delivered(): number;
   source(): CommandSource;
-  completeWrite(value: Result<void, string>): void;
-  completeKey(value: Result<string, string>): void;
+  completeWrite(value: Result<void, AdminWriteFailure>): void;
+  completeKey(value: Result<string, AdminWriteFailure>): void;
   settle(): Promise<void>;
   dispose(): void;
 }
@@ -81,8 +82,10 @@ function mountSession(options: MountOptions): MountedSession {
     const submissions: [string, boolean][] = [];
     const keySourceAlive: boolean[] = [];
     const replies = [...options.replies];
-    const delayedWrite = options.delayedWrite === true ? deferred<Result<void, string>>() : null;
-    const delayedKey = options.delayedKey === true ? deferred<Result<string, string>>() : null;
+    const delayedWrite =
+      options.delayedWrite === true ? deferred<Result<void, AdminWriteFailure>>() : null;
+    const delayedKey =
+      options.delayedKey === true ? deferred<Result<string, AdminWriteFailure>>() : null;
     let delivered = 0;
     let keyInFlight = false;
 
@@ -233,7 +236,7 @@ test("在途命令跨导航后由外壳用相同字节重试", async () => {
     expect(page.host.host.sources.peek()).toEqual([]);
     expect(liveSource(page.host.host, new WeakRef(source))).toBeNull();
 
-    page.completeWrite(err(failure(503, "storage_unavailable")));
+    page.completeWrite(err(await failure(503, "storage_unavailable")));
     await page.settle();
     expect(hasText(page.tree, "结果未知的操作")).toBe(true);
     expect(buttonByTextOrNull(page.tree, "原样重试")).not.toBeNull();
@@ -255,8 +258,54 @@ test("在途命令跨导航后由外壳用相同字节重试", async () => {
   }
 });
 
+test("来源页卸载后外壳接收一条原命令的重放拒绝", async () => {
+  const page = mountSession({
+    replies: [
+      err(await failure(503, "storage_unavailable")),
+      err(await failure(409, "alert_stale")),
+    ],
+  });
+  try {
+    const { host } = page.host;
+    const source = page.source();
+    const waitForWrite = () =>
+      waitForAttempt(() =>
+        host.entries().some((entry) => entry.identity.entity === SOURCE_ENTITY && entry.busy),
+      );
+
+    press(page.tree, SUBMIT);
+    await waitForWrite();
+    expect(host.entries.peek()).toHaveLength(1);
+    const pending = host.entries.peek()[0];
+    if (pending === undefined) throw new Error("未登记告警命令");
+    const { commandId } = pending.identity;
+    expect(pending.unknown).toBe(true);
+    expect(host.notices.peek()).toEqual([]);
+
+    press(page.tree, NAVIGATE);
+    expect(buttonByTextOrNull(page.tree, SUBMIT)).toBeNull();
+    expect(liveSource(host, new WeakRef(source))).toBeNull();
+    press(page.tree, "原样重试");
+    await waitForWrite();
+
+    expect(host.entries.peek()).toEqual([]);
+    expect(source.rejections.peek()).toEqual([]);
+    expect(host.notices.peek()).toEqual([
+      {
+        identity: { entity: SOURCE_ENTITY, action: "测试静默", commandId },
+        result: err("alert_stale"),
+        keySource: null,
+      },
+    ]);
+    expect(page.writes).toHaveLength(2);
+    expect(page.writes[1]).toBe(page.writes[0]);
+  } finally {
+    page.dispose();
+  }
+});
+
 test("放弃未知命令不会再次发送", async () => {
-  const page = mountSession({ replies: [err(failure(503, "storage_unavailable"))] });
+  const page = mountSession({ replies: [err(await failure(503, "storage_unavailable"))] });
   try {
     press(page.tree, SUBMIT);
     await page.settle();
@@ -284,7 +333,7 @@ test("放弃未知命令不会再次发送", async () => {
 });
 
 test("已了结命令刷新仍挂载的来源页且不投递外壳回执", async () => {
-  const page = mountSession({ replies: [ok(undefined), err(failure(409, "alert_stale"))] });
+  const page = mountSession({ replies: [ok(undefined), err(await failure(409, "alert_stale"))] });
   try {
     const source = page.source();
     press(page.tree, SUBMIT);
@@ -333,7 +382,7 @@ test("已卸载命令既不占用也不释放另一页的一次性结果门禁",
 test("来源卸载后外壳立即接管未知命令的重试与生成 Key", async () => {
   const key = "已生成的测试 Key";
   const page = mountSession({
-    replies: [err(failure(503, "storage_unavailable")), ok(undefined)],
+    replies: [err(await failure(503, "storage_unavailable")), ok(undefined)],
   });
   try {
     press(page.tree, SUBMIT);

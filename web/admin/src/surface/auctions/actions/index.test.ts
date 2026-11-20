@@ -7,6 +7,8 @@ import {
   commandId,
   DIALOG_TITLE_CLOSE,
   editField,
+  present,
+  settleEditor,
   submitForm,
   takeWrite,
 } from "../editor-fixture.test";
@@ -80,6 +82,34 @@ test("stale_schedule_closes_and_reopens_with_the_latest_schedule", () =>
     }
   }));
 
+test("wrong_status_schedule_conflict_waits_for_a_verified_retry", () =>
+  withUtc(() =>
+    withAuctionActions(async (context) => {
+      const { page, reads } = context;
+      const { id, form } = await openAuction(context, SCHEDULE, END, "2099-04-01T13:00");
+      await editField(page.field(id), EDITED_END);
+      page.reply(
+        422,
+        '{"code":"stale_auction_state","message":"版本已变化","data":null,"request_id":null}',
+      );
+      await submitForm(form);
+      const first = takeWrite(page);
+      assertScheduleBody(first, 7, "11:00:00", "12:00:00", "14:17:00");
+      expect(context.occupied()).toBe(true);
+      expect(reads.started()).toBe(1);
+      expect(page.text()).not.toContain("这条记录已被其他操作更新，本次修改没有生效。");
+      const retry = present(page.retry(commandId(first)), "原命令的重试按钮");
+      expect(retry.hasAttribute("disabled")).toBe(false);
+
+      page.conflict("stale_auction_state");
+      retry.click();
+      await settleEditor();
+      expect(takeWrite(page)).toEqual(first);
+      assertAuctionConflict(context, id, EDITED_END, SAVE_SCHEDULE);
+      expect(reads.started()).toBe(2);
+    }),
+  ));
+
 function assertCancelBody(request: CapturedWrite, version: number, reason: string): void {
   const id = commandId(request);
   expect(request).toEqual({
@@ -88,6 +118,73 @@ function assertCancelBody(request: CapturedWrite, version: number, reason: strin
     body: `{"command_id":"${id}","expected_state_version":${version},"reason":"${reason}"}`,
   });
 }
+
+test("wrong_status_lifecycle_conflict_waits_for_a_verified_retry", () =>
+  withAuctionActions(async (context) => {
+    const { page, reads } = context;
+    const { id, form } = await openAuction(context, CANCEL, REASON, "");
+    await editField(page.field(id), EDITED_REASON);
+    page.reply(
+      422,
+      '{"code":"stale_auction_state","message":"版本已变化","data":null,"request_id":null}',
+    );
+    await submitForm(form);
+    const first = takeWrite(page);
+    assertCancelBody(first, 7, EDITED_REASON);
+    expect(context.occupied()).toBe(true);
+    expect(reads.started()).toBe(1);
+    expect(page.text()).not.toContain("这条记录已被其他操作更新，本次修改没有生效。");
+    const retry = present(page.retry(commandId(first)), "原命令的重试按钮");
+    expect(retry.hasAttribute("disabled")).toBe(false);
+
+    page.conflict("stale_auction_state");
+    retry.click();
+    await settleEditor();
+    expect(takeWrite(page)).toEqual(first);
+    assertAuctionConflict(context, id, EDITED_REASON, CONFIRM_CANCEL);
+    expect(reads.started()).toBe(2);
+  }));
+
+test("lifecycle_ignores_another_auctions_receipt_and_retries_the_original_command", () =>
+  withAuctionActions(async (context) => {
+    const { page, reads, drafts } = context;
+    const { id, form } = await openAuction(context, CANCEL, REASON, "");
+    await editField(page.field(id), EDITED_REASON);
+    const { scheduled_ends_at: _end, ...auction } = auctionWire();
+    const cancelled = {
+      ...auction,
+      status: "cancelled",
+      state_version: 8,
+      cancelled_at: "2026-11-01T00:00:00Z",
+      cancelled_by: "operator",
+      cancelled_reason: EDITED_REASON,
+    };
+    for (const id of ["20f99cb5-7b75-4853-bc49-9c71df78381d", AUCTION_ID]) {
+      page.reply(
+        200,
+        JSON.stringify({
+          code: "ok",
+          message: "操作成功",
+          request_id: null,
+          data: { auction: { ...cancelled, id } },
+        }),
+      );
+    }
+    await submitForm(form);
+    const first = takeWrite(page);
+    assertCancelBody(first, 7, EDITED_REASON);
+    expect(context.occupied()).toBe(true);
+    expect(reads.started()).toBe(1);
+    expect(drafts.auctionId()).toBe(AUCTION_ID);
+    const retry = present(page.retry(commandId(first)), "原命令的重试按钮");
+    expect(retry.hasAttribute("disabled")).toBe(false);
+    retry.click();
+    await settleEditor();
+    expect(takeWrite(page)).toEqual(first);
+    expect(context.occupied()).toBe(false);
+    expect(drafts.auctionId()).toBeNull();
+    expect(reads.started()).toBe(2);
+  }));
 
 test("stale_lifecycle_confirmation_closes_and_reopens_with_a_blank_reason", async () => {
   for (const closeLabel of [DIALOG_TITLE_CLOSE, CLOSE_CONFLICT]) {

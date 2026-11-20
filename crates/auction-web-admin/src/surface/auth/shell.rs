@@ -10,7 +10,7 @@ use dioxus::prelude::*;
 use super::activity::LOGOUT_BUTTON_CLASS;
 use super::login::AdminReadinessStatus;
 use super::navigation;
-use crate::api::{AdminReadinessState, AdminSession};
+use crate::api::{AdminReadinessState, AdminSession, AdminSessionWriteReview};
 use crate::surface::admin_api_error_message;
 use crate::surface::pending::{PendingCommandNotices, use_pending_command_host};
 use crate::surface::router::Route;
@@ -19,11 +19,13 @@ use crate::surface::router::Route;
 #[component]
 pub(crate) fn AdminAuthenticatedShell(
     session: AdminSession,
+    write_review: AdminSessionWriteReview,
     readiness: AdminReadinessState,
     readiness_refresh: Signal<u64>,
     session_confirmed: bool,
     redirecting: bool,
     logging_out: bool,
+    #[props(default)] logout_recovery: Option<Element>,
     logout_error: Option<String>,
     on_logout: EventHandler<()>,
     on_recheck: EventHandler<()>,
@@ -31,6 +33,7 @@ pub(crate) fn AdminAuthenticatedShell(
     // 已确认会话供 `api::transport::fetch_csrf_token` 核对 actor 与 CSRF 未被其他标签页替换；
     // 缺少该 context 时全部写入都会失败关闭。
     use_context_provider(|| session.clone());
+    use_context_provider(|| write_review);
     let command_host = use_pending_command_host();
     super::super::config::use_config_draft();
     super::super::rules::use_rules_draft();
@@ -98,19 +101,23 @@ pub(crate) fn AdminAuthenticatedShell(
                         catalog: &crate::surface::ADMIN_LOCALE_CATALOG,
                     }
                     {theme_picker}
-                    button {
-                        class: LOGOUT_BUTTON_CLASS,
-                        r#type: "button",
-                        disabled: logging_out,
-                        onclick: move |_| on_logout.call(()),
-                        {t!("admin-logout")}
+                    if logout_recovery.is_none() {
+                        button {
+                            class: LOGOUT_BUTTON_CLASS,
+                            r#type: "button",
+                            disabled: logging_out,
+                            onclick: move |_| on_logout.call(()),
+                            {t!("admin-logout")}
+                        }
                     }
                 }
             }
             if let Some(code) = logout_error {
                 p { class: "admin-shell__banner", role: "alert", {admin_api_error_message(&code)} }
             }
-            if !logging_out && !session_confirmed {
+            if let Some(recovery) = logout_recovery {
+                {recovery}
+            } else if !logging_out && !session_confirmed {
                 p { class: "admin-shell__banner", role: "alert",
                     {t!("admin-session-recheck-blocked")}
                     button {
@@ -169,6 +176,28 @@ pub(crate) fn AdminAuthenticatedShell(
     }
 }
 
+/// 只读退出复核期间可用的两个明确选择。
+#[component]
+pub(super) fn LogoutRecovery(
+    busy: bool,
+    on_continue: EventHandler<()>,
+    on_stay: EventHandler<()>,
+) -> Element {
+    rsx! {
+        div { class: "admin-shell__banner",
+            p { role: "alert", {t!("admin-logout-unconfirmed")} }
+            button {
+                r#type: "button", disabled: busy,
+                onclick: move |_| on_continue.call(()), {t!("admin-logout-continue")}
+            }
+            button {
+                r#type: "button", disabled: busy,
+                onclick: move |_| on_stay.call(()), {t!("admin-logout-stay")}
+            }
+        }
+    }
+}
+
 fn refresh_after_navigation(
     route: Route,
     mut refresh_route: Signal<Route>,
@@ -188,12 +217,15 @@ fn refresh_after_navigation(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     use dioxus::prelude::*;
 
-    use super::refresh_after_navigation;
+    use super::{LogoutRecovery, refresh_after_navigation};
+    use crate::surface::auctions::draft_page_tests::{
+        button, click_button, has_live_text, init_i18n, mount_writer,
+    };
     use crate::surface::router::Route;
 
     #[test]
@@ -202,6 +234,45 @@ mod tests {
         let mut dom = VirtualDom::new_with_props(record_route_refreshes, Rc::clone(&counters));
         dom.rebuild_in_place();
         assert_eq!(counters.take(), [(0, 0), (1, 1), (1, 1)]);
+    }
+
+    #[test]
+    fn logout_recovery_exposes_only_explicit_choices_and_disables_them_while_busy() {
+        let choices = Rc::new(Cell::new((0, 0)));
+        let (mut page, _) = mount_writer({
+            let choices = choices.clone();
+            move || {
+                init_i18n();
+                let mut busy = use_signal(|| true);
+                let stay = choices.clone();
+                let continue_logout = choices.clone();
+                rsx! {
+                    button { onclick: move |_| busy.set(false), {"结束测试复核".to_owned()} }
+                    LogoutRecovery {
+                        busy: busy(),
+                        on_continue: move |_| {
+                            let (continued, stayed) = continue_logout.get();
+                            continue_logout.set((continued + 1, stayed));
+                        },
+                        on_stay: move |_| {
+                            let (continued, stayed) = stay.get();
+                            stay.set((continued, stayed + 1));
+                        },
+                    }
+                }
+            }
+        });
+        assert!(has_live_text(&page, "退出尚未确认，此标签页的写入已关闭。"));
+        assert!(button(&page, "继续退出").unwrap().1);
+        assert!(button(&page, "留在后台").unwrap().1);
+        assert_eq!(choices.get(), (0, 0));
+        click_button(&mut page, "结束测试复核");
+        assert!(!button(&page, "继续退出").unwrap().1);
+        assert!(!button(&page, "留在后台").unwrap().1);
+        click_button(&mut page, "继续退出");
+        assert_eq!(choices.get(), (1, 0));
+        click_button(&mut page, "留在后台");
+        assert_eq!(choices.get(), (1, 1));
     }
 
     fn record_route_refreshes(counters: Rc<RefCell<Vec<(u64, u64)>>>) -> Element {

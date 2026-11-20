@@ -101,7 +101,15 @@ export function AdminSettlementPicker(props: AdminSettlementPickerProps): JSX.El
             fallback={<option value="">{t("admin-settlement-no-periods")}</option>}
           >
             <For each={entries()} keyed={false}>
-              {(entry) => <option value={entry().auctionId}>{periodOptionLabel(entry())}</option>}
+              {(entry) => (
+                // 补查可能在 select 的值已应用之后才把目标场次加入选项。
+                <option
+                  value={entry().auctionId}
+                  selected={entry().auctionId === props.selectedAuctionId()}
+                >
+                  {periodOptionLabel(entry())}
+                </option>
+              )}
             </For>
           </Show>
         </select>
@@ -115,6 +123,7 @@ interface AdminSettlementCatalogPagerProps {
   readonly pageSize: number;
   readonly total: number;
   readonly pagination: AdminPagination;
+  readonly isCurrent: () => boolean;
   readonly worldFilter: Cell<string>;
   readonly requestedSequence: Cell<number | null>;
   readonly selectedAuctionId: Cell<string>;
@@ -136,6 +145,7 @@ export function AdminSettlementCatalogPager(props: AdminSettlementCatalogPagerPr
       pageSize={Math.max(props.pageSize, 1)}
       total={props.total}
       label={t("admin-settlement-auction-pagination")}
+      canChangePageSize={props.isCurrent}
       onSizeReset={() => {
         // 数量只重置目录页；返回 true 让 AdminPager 跳过常规翻页回调，
         // 保持选定场次、两个报告分页及未结束的命令上下文。
@@ -149,6 +159,9 @@ export function AdminSettlementCatalogPager(props: AdminSettlementCatalogPagerPr
         return true;
       }}
       onPageChange={(nextPage) => {
+        if (!props.isCurrent()) {
+          return;
+        }
         props.catalogPage.set(nextPage);
         props.requestedSequence.set(null);
         props.selectedAuctionId.set("");

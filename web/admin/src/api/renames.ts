@@ -18,11 +18,13 @@ import * as v from "valibot";
 
 import { parseRustUuid, rustUuidIsNil } from "./credentials/decode";
 import {
-  adminApiFailureAtWriteEndpoint,
-  adminApiFailureNotSentCode,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   decodeAdminReceipt,
   invalidResponseError,
   responseError,
+  writeNotSent,
+  writeOutcomeUnknown,
 } from "./failure";
 import { validate as validatePagination, validPageEcho, validResponse } from "./pagination";
 import type { AdminSessionHost } from "./session";
@@ -32,7 +34,8 @@ import {
   sendGet,
   sendPreparedJsonWrite,
 } from "./transport";
-import { type AdminUser, decodeUserMutation } from "./users";
+import type { AdminUser } from "./users";
+import { decodeUserMutation, matchesUserMutationTarget } from "./users/decode";
 import { MAX_JSON_SAFE_INTEGER, validAdminTime, validTrimmedText } from "./validation";
 
 /** 改名命令准备阶段读取历史的固定数量；可见列表数量由页面显式传入。 */
@@ -146,6 +149,7 @@ export async function fetchAdminRenames(
 export interface AdminRenameRevertCommand {
   readonly rename_id: string;
   readonly user_id: string;
+  readonly previous_username: string;
   readonly request: AdminRenameRevertRequest;
   readonly prepared: PreparedJsonCommand;
 }
@@ -156,10 +160,11 @@ export async function prepareAdminRenameRevert(
   commandId: string,
   rename: AdminRename,
   signal: AbortSignal,
-): Promise<Result<AdminRenameRevertCommand, string>> {
+): Promise<Result<AdminRenameRevertCommand, AdminWriteNotSent>> {
   const canonicalCommandId = parseRustUuid(commandId);
   const renameId = parseRustUuid(rename.id);
   const userId = parseRustUuid(rename.user_id);
+  const previousUsername = rename.previous_username;
   if (
     canonicalCommandId === null ||
     renameId === null ||
@@ -168,7 +173,7 @@ export async function prepareAdminRenameRevert(
     rustUuidIsNil(renameId) ||
     rustUuidIsNil(userId)
   ) {
-    return err("invalid_request");
+    return err(writeNotSent("invalid_request"));
   }
   const history = await fetchAdminRenames(host, userId, "", 1, TABLE_PAGE_SIZE, signal);
   const expectedStateVersion = prepareRevertVersion(history);
@@ -181,31 +186,34 @@ export async function prepareAdminRenameRevert(
   });
   const prepared = prepareJsonCommand(request);
   if (!prepared.ok) {
-    return err(prepared.error.code);
+    return err(prepared.error);
   }
   return ok(
     Object.freeze({
       rename_id: renameId,
       user_id: userId,
+      previous_username: previousUsername,
       request,
       prepared: prepared.value,
     }),
   );
 }
 
-function prepareRevertVersion(history: Result<AdminRenamePage, string>): Result<number, string> {
+function prepareRevertVersion(
+  history: Result<AdminRenamePage, string>,
+): Result<number, AdminWriteNotSent> {
   // 此阶段只有读取；写入尚未发出。准备成功后冻结版本，重试必须沿用同一命令 ID 与请求体。
   if (!history.ok) {
-    return err(adminApiFailureNotSentCode(history.error));
+    return err(writeNotSent(history.error));
   }
   // 每行的版本来自同一次事务中 JOIN 的当前用户；任一改名行都能提供该用户的版本。
   const first = history.value.renames[0];
   if (first === undefined) {
-    return err(adminApiFailureNotSentCode("invalid_response"));
+    return err(writeNotSent("invalid_response"));
   }
   const version = first.user_state_version;
   if (version <= 0 || !history.value.renames.every((row) => row.user_state_version === version)) {
-    return err(adminApiFailureNotSentCode("invalid_response"));
+    return err(writeNotSent("invalid_response"));
   }
   return ok(version);
 }
@@ -215,17 +223,20 @@ export async function revertAdminRename(
   host: AdminSessionHost,
   command: AdminRenameRevertCommand,
   signal: AbortSignal,
-): Promise<Result<AdminUser, string>> {
+): Promise<Result<AdminUser, AdminWriteFailure>> {
   const expectedStateVersion = command.request.expected_state_version;
   const response = await sendPreparedJsonWrite(
     host,
-    `/api/v1/admin/renames/${command.rename_id}/revert`,
-    "POST",
+    {
+      url: `/api/v1/admin/renames/${command.rename_id}/revert`,
+      method: "POST",
+      endpoint: "rename-revert",
+    },
     command.prepared,
     signal,
   );
   if (!response.ok) {
-    return err(adminApiFailureAtWriteEndpoint(response.error, "rename-revert").code);
+    return err(response.error);
   }
   const decoded = await decodeUserMutation(host, response.value, false, signal);
   if (!decoded.ok) {
@@ -233,11 +244,10 @@ export async function revertAdminRename(
   }
   const user = decoded.value.user;
   if (
-    user.id !== command.user_id ||
-    user.state_version !==
-      (expectedStateVersion < MAX_JSON_SAFE_INTEGER ? expectedStateVersion + 1 : null)
+    user.username !== command.previous_username ||
+    !matchesUserMutationTarget(user, command.user_id, expectedStateVersion)
   ) {
-    return err("invalid_response");
+    return err(writeOutcomeUnknown(invalidResponseError("rename_revert_receipt")));
   }
   return ok(user);
 }

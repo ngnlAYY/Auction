@@ -7,20 +7,19 @@ import { createTaskScope, type TaskScope } from "@auction/web-shared/reactive/ta
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { createContext, onCleanup, useContext } from "solid-js";
 
-import {
-  adminApiFailureDefiniteRejection,
-  adminApiFailureDisplayCode,
-  adminApiFailureRejectionAfterReplayCheck,
-} from "../../api/failure";
+import { type AdminWriteFailure, writeOutcomeUnknown } from "../../api/failure";
 import { type AdminSessionHost, adminSessionWritesAllowed } from "../../api/session";
 import type { AdminUserGeneratedKey } from "../users/create";
-import { advanceCommandReload, type CommandSource, liveSource, reloadsFor } from "./sources";
-
-/** 一次尝试的交付函数：页面已展示结果时报告已交付，否则返回仍需会话保留的内容。 */
-type CommandDeliver = (sourceAlive: boolean) => CommandDelivery;
+import {
+  type CommandDeliver,
+  completeCommand,
+  copyCommandReceipt,
+  freezeNotices,
+} from "./completion";
+import { type CommandSource, liveSource } from "./sources";
 
 /** 一次尝试的异步结果；成功时携带交付回调。 */
-type CommandAttempt = Promise<Result<CommandDeliver, string>>;
+type CommandAttempt = Promise<Result<CommandDeliver, AdminWriteFailure>>;
 
 /** 冻结的命令工厂；重试只复用首次确认的 UUID、负载与成功回调。 */
 type CommandFactory = (commandId: string, signal: AbortSignal) => CommandAttempt;
@@ -34,7 +33,7 @@ type CommandFactory = (commandId: string, signal: AbortSignal) => CommandAttempt
 export type CommandOperation<T> = (
   commandId: string,
   signal: AbortSignal,
-) => Promise<Result<T, string>>;
+) => Promise<Result<T, AdminWriteFailure>>;
 
 /** 会话实体上的稳定命令标识；同一实体的未了结命令阻止新意图。 */
 export interface CommandIdentity {
@@ -79,33 +78,6 @@ export function commandDeliveryReported(
   return delivered ? { kind: "delivered" } : { kind: "receipt", receipt: receipt() };
 }
 
-/** 回执入库时复制并冻结；文本回执也不能与调用方共用对象。 */
-function copyCommandReceipt(receipt: CommandReceipt): CommandReceipt {
-  if (receipt.kind === "generated-key") {
-    return Object.freeze({
-      kind: "generated-key" as const,
-      key: receipt.key.copy(),
-    });
-  }
-  return Object.freeze({ kind: "text" as const, text: receipt.text });
-}
-
-/** 回执结果与通知一起冻结，读取方拿到的内部值不可再改写。 */
-function freezeCommandNotice(
-  identity: CommandIdentity,
-  result: Result<CommandReceipt | null, string>,
-  keySource: WeakRef<CommandSource> | null,
-): CommandNotice {
-  const frozenResult: Result<CommandReceipt | null, string> = result.ok
-    ? Object.freeze({ ok: true as const, value: result.value })
-    : Object.freeze({ ok: false as const, error: result.error });
-  return Object.freeze({ identity, result: frozenResult, keySource });
-}
-
-function freezeNotices(notices: readonly CommandNotice[]): readonly CommandNotice[] {
-  return Object.freeze([...notices]);
-}
-
 const EMPTY_PENDING_COMMANDS: readonly PendingCommand[] = Object.freeze([]);
 const EMPTY_COMMAND_NOTICES: readonly CommandNotice[] = Object.freeze([]);
 const EMPTY_COMMAND_SOURCES: readonly WeakRef<CommandSource>[] = Object.freeze([]);
@@ -113,10 +85,6 @@ const EMPTY_COMMAND_SOURCES: readonly WeakRef<CommandSource>[] = Object.freeze([
 function sourceRegistered(host: PendingCommandHost, source: CommandSource): boolean {
   // 共享 Cell 没有 `try_peek`；来源页注销与组件销毁同步，以注册表判断是否仍可提交。
   return host.sources.peek().some((registration) => registration.deref() === source);
-}
-
-function pushCommandNotice(host: PendingCommandHost, notice: CommandNotice): void {
-  host.notices.update((notices) => freezeNotices([...notices, notice]));
 }
 
 /** 唯一的会话宿主；条目与回执只驻留在当前认证外壳。 */
@@ -496,7 +464,7 @@ function retryPendingCommand(host: PendingCommandHost, commandId: string): Comma
       if (!context.alive()) {
         return;
       }
-      let result: Result<CommandDeliver, string>;
+      let result: Result<CommandDeliver, AdminWriteFailure>;
       try {
         result = await factory(commandId, context.signal);
       } catch {
@@ -506,7 +474,7 @@ function retryPendingCommand(host: PendingCommandHost, commandId: string): Comma
         // 操作接口用 Result 表达完成结果；异常拒绝是程序错误，不能当成明确拒绝。
         // 异常原文可能含秘密，不进入日志；保留原 ID 与工厂，按结果未知收尾，
         // 让操作员可以原样重试或放弃，页面仍保持就绪。
-        completeCommand(host, commandId, err("network_error"));
+        completeCommand(host, commandId, err(writeOutcomeUnknown("network_error")));
         return;
       }
       if (!context.alive()) {
@@ -525,123 +493,11 @@ function retryPendingCommand(host: PendingCommandHost, commandId: string): Comma
   return "started";
 }
 
-/** 反馈回调的异常不能改变已经判定的命令结果，也不能把异常原文交给全局错误钩子。 */
-function reportCommandFailure(entry: PendingCommand, code: string): void {
-  try {
-    entry.onFailure(code);
-  } catch {
-    // 页面反馈失败只影响展示；命令仍按已判定的结果保留或了结。
-  }
-}
-
-function completeCommand(
-  host: PendingCommandHost,
-  commandId: string,
-  result: Result<CommandDeliver, string>,
-): void {
-  if (!host.alive()) {
-    return;
-  }
-  const current = host.entries.peek();
-  const index = current.findIndex((entry) => entry.identity.commandId === commandId);
-  const entry = index < 0 ? undefined : current[index];
-  if (entry === undefined) {
-    return;
-  }
-  // 只有经本 ID 的账本核对的拒绝才能清除较早的未知。其余未知保留原 UUID 与负载。
-  if (!result.ok) {
-    const code = result.error;
-    if (
-      !adminApiFailureDefiniteRejection(code) ||
-      (entry.unknown && !adminApiFailureRejectionAfterReplayCheck(code))
-    ) {
-      const display = adminApiFailureDisplayCode(code);
-      host.entries.set(
-        current.map((candidate, candidateIndex) =>
-          candidateIndex === index
-            ? { ...candidate, busy: false, unknown: true, error: display }
-            : candidate,
-        ),
-      );
-      const source = liveSource(host, entry.source);
-      if (source !== null) {
-        reportCommandFailure(entry, display);
-      }
-      return;
-    }
-  }
-  host.entries.set(current.filter((_, candidateIndex) => candidateIndex !== index));
-  const source = liveSource(host, entry.source);
-  const reloads = reloadsFor(host, entry.identity.entity);
-  if (result.ok) {
-    let delivery: CommandDelivery;
-    try {
-      delivery = result.value(source !== null);
-    } catch {
-      // 页面成功反馈抛错不改变命令已经成功的结论，也不能让异常原文进入全局错误钩子。
-      // 来源仍挂载时按已交付处理；外壳接管时保留一条无 Key 的成功回执，继续推进读取世代。
-      delivery = source !== null ? { kind: "delivered" } : { kind: "receipt", receipt: null };
-    }
-    // 交付回调可能同步销毁认证宿主；清理过的宿主不能再写回执或占用门禁。
-    if (!host.alive()) {
-      return;
-    }
-    if (delivery.kind === "receipt") {
-      // 已展示的 Key 随会话保留到确认。来源页卸载只解除本页门禁，外壳接管交付。
-      // 回调也可能注销来源页；写入前重新查找，仍存活才把回执留给该页面。
-      const currentSource = liveSource(host, entry.source);
-      const receipt = delivery.receipt === null ? null : copyCommandReceipt(delivery.receipt);
-      let keySource: WeakRef<CommandSource> | null = null;
-      if (receipt !== null && receipt.kind === "generated-key") {
-        const gate = currentSource === null ? null : currentSource.gate;
-        if (gate !== null) {
-          gate.holdResult();
-          // 自定义门禁可以在 holdResult() 里同步销毁宿主；此时不能把 Key 写回旧宿主。
-          if (!host.alive()) {
-            return;
-          }
-          // 门禁也可能注销来源页；登记已失效时改由认证外壳接管回执。
-          keySource = liveSource(host, entry.source) === null ? null : entry.source;
-        }
-      }
-      pushCommandNotice(host, freezeCommandNotice(entry.identity, ok(receipt), keySource));
-    }
-  } else {
-    const code = adminApiFailureDisplayCode(result.error);
-    if (source !== null) {
-      reportCommandFailure(entry, code);
-      // 拒绝回调也可能同步销毁宿主或注销来源页。宿主已销毁就结束交付；
-      // 仅来源页卸载时，拒绝原因改由外壳持有，仍存活的旧页面不能继续接收。
-      if (!host.alive()) {
-        return;
-      }
-      const currentSource = liveSource(host, entry.source);
-      if (currentSource !== null) {
-        currentSource.rejections.update((notices) =>
-          freezeNotices([...notices, freezeCommandNotice(entry.identity, err(code), null)]),
-        );
-      } else {
-        pushCommandNotice(host, freezeCommandNotice(entry.identity, err(code), null));
-      }
-    } else {
-      pushCommandNotice(host, freezeCommandNotice(entry.identity, err(code), null));
-    }
-  }
-  // 同一轮已有回调推进的世代无需再次推进。新挂载且正在显示同一实体的视图也收到失效通知。
-  // 不能只看登记表，否则父级持有、仅登记子组件卸载时会漏掉这次刷新；反过来，
-  // 读取状态自身的作用域已销毁时也不能再推进（AK4b 在快照里提供这个存活判定）。
-  for (const { reload, previous, alive } of reloads) {
-    if (host.alive() && alive() && reload.peek() === previous) {
-      advanceCommandReload(reload);
-    }
-  }
-}
-
 function abandonPendingCommand(host: PendingCommandHost, commandId: string): boolean {
-  if (!host.alive() || !adminSessionWritesAllowed(host.sessionHost)) {
+  if (!host.alive()) {
     return false;
   }
-  // 放弃仅移除本地未知记录，已发出的命令仍可能生效。
+  // 放弃只释放本地记录和负载。服务器仍可能执行已发出的命令。
   const current = host.entries.peek();
   const index = current.findIndex(
     (entry) => entry.identity.commandId === commandId && !entry.busy && entry.unknown,
@@ -685,9 +541,4 @@ export function trySetIfAlive<T>(signal: Cell<T>, value: T, alive: () => boolean
   }
   signal.set(value);
   return true;
-}
-
-/** 只认能排除本次命令效果的拒绝码；不据此推断较早的尝试。 */
-export function definiteRejection(code: string): boolean {
-  return adminApiFailureDefiniteRejection(code);
 }

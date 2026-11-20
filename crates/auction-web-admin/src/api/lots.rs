@@ -9,6 +9,7 @@ use auction_contracts::{
 use gloo_net::http::Method;
 use uuid::Uuid;
 
+use super::AdminWriteFailure;
 use super::auctions::{decode_auction, send_auction_edit};
 use super::{
     MAX_JSON_SAFE_INTEGER, invalid_response_error, response_error, send_get, valid_admin_time,
@@ -100,7 +101,7 @@ pub(crate) async fn update_admin_lot(
     expected_state_version: i64,
     action: AdminLotUpdateAction,
     start_price: Option<i64>,
-) -> Result<AdminLot, String> {
+) -> Result<AdminLot, AdminWriteFailure> {
     let url = format!("/api/v1/admin/lots/{lot_id}");
     let command = AdminLotUpdateRequest {
         command_id,
@@ -110,9 +111,16 @@ pub(crate) async fn update_admin_lot(
     };
     let payload: ApiResponse<AdminLotUpdateResponse> =
         send_auction_edit(Method::PATCH, &url, &command).await?;
-    let lot = decode_lot(payload.data.lot).map_err(invalid_response_error)?;
+    decode_lot_update_receipt(payload, &lot_id)
+}
+
+fn decode_lot_update_receipt(
+    payload: ApiResponse<AdminLotUpdateResponse>,
+    lot_id: &str,
+) -> Result<AdminLot, AdminWriteFailure> {
+    let lot = decode_lot(payload.data.lot).map_err(AdminWriteFailure::invalid_response)?;
     if lot.id != lot_id || lot.state_version <= 0 {
-        return Err("invalid_response".to_owned());
+        return Err(AdminWriteFailure::outcome_unknown("invalid_response"));
     }
     Ok(lot)
 }
@@ -196,6 +204,24 @@ fn valid_optional_uuid(value: Option<&str>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn lot_update_receipt_delivers_only_the_matching_lot() {
+        use super::{
+            AdminLotUpdateResponse, AdminWriteFailure, ApiResponse, decode_lot_update_receipt,
+        };
+        use crate::api::contract_fixtures::{admin_fixture, decode};
+
+        let mut payload: ApiResponse<AdminLotUpdateResponse> =
+            decode(admin_fixture!("lot-update-command"), "/data/lot", "state_version");
+        let lot_id = "00000000-0000-4000-8000-000000000023";
+        assert_eq!(decode_lot_update_receipt(payload.clone(), lot_id).unwrap(), payload.data.lot);
+
+        payload.data.lot.id = "00000000-0000-4000-8000-000000000024".to_owned();
+        assert_eq!(
+            decode_lot_update_receipt(payload, lot_id).unwrap_err(),
+            AdminWriteFailure::outcome_unknown("invalid_response")
+        );
+    }
 
     #[test]
     fn lot_contract_fixtures() {

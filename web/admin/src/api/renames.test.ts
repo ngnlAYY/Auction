@@ -3,7 +3,11 @@
 import { expect, spyOn, test } from "bun:test";
 import { err } from "@auction/web-shared/result";
 import { createAdminRequestHarness } from "./api-request-fixture";
-import { adminApiFailureDefiniteRejection, adminApiFailureDisplayCode } from "./failure";
+import {
+  adminApiFailureDefiniteRejection,
+  adminWriteFailureDisplayCode,
+  classifyAdminWriteFailure,
+} from "./failure";
 import { fetchAdminRenames, prepareAdminRenameRevert } from "./renames";
 import { adminFixtureText, mustSucceed, withoutFixtureField } from "./t10-contract-fixture.test";
 
@@ -102,9 +106,9 @@ async function prepareWithBody(body: string) {
 
 function expectUnsent(result: Awaited<ReturnType<typeof prepareAdminRenameRevert>>, code: string) {
   if (result.ok) throw new Error("回滚准备应拒绝");
-  expect(result.error).toBe(`not_sent:${code}`);
-  expect(adminApiFailureDefiniteRejection(result.error)).toBe(true);
-  expect(adminApiFailureDisplayCode(result.error)).toBe(code);
+  expect(result.error).toEqual({ kind: "not-sent", code });
+  expect(classifyAdminWriteFailure(result.error)).toBe("this_attempt");
+  expect(adminWriteFailureDisplayCode(result.error)).toBe(code);
 }
 
 test("rename_preparation_requires_a_consistent_version_and_marks_failures_unsent", async () => {

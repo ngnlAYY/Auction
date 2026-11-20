@@ -54,11 +54,6 @@ fn valid_sender_uid(value: &str) -> Option<String> {
     Some(trimmed.to_owned())
 }
 
-pub(super) fn valid_reason(value: &str) -> bool {
-    let trimmed = value.trim();
-    !trimmed.is_empty() && trimmed.len() <= 2048 && !trimmed.chars().any(char::is_control)
-}
-
 fn parse_amount(value: &str) -> Option<i64> {
     let parsed = value.trim().parse::<i64>().ok()?;
     (0..=MAX_JSON_SAFE_INTEGER).contains(&parsed).then_some(parsed)

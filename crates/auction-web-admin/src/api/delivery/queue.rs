@@ -5,16 +5,17 @@
 use auction_contracts::{
     AdminDeliveryCommandRequest, AdminDeliveryCommandResponse, AdminDeliveryListResponse,
 };
-use gloo_net::http::Request;
+use gloo_net::http::Method;
 use uuid::Uuid;
 
+use super::super::AdminWriteFailure;
+use super::super::transport::WriteRequest;
 use super::DELIVERY_PROJECTION_INCLUDE;
 use super::decode::{
     StrictDeliveryEnvelope, decode_delivery_command, decode_delivery_list, parse_delivery_time,
 };
 use crate::api::{
-    AdminApiFailure, Delivery, DeliveryPage, fetch_csrf_token, invalid_request_error,
-    invalid_response_error, pagination, response_error, response_failure, send_get, send_request,
+    Delivery, DeliveryPage, invalid_response_error, pagination, response_error, send_get,
     valid_uuid,
 };
 
@@ -151,7 +152,7 @@ pub(crate) async fn execute_delivery(
     expected_fencing_version: i64,
     external_reference: Option<String>,
     failure_code: Option<String>,
-) -> Result<Delivery, AdminApiFailure> {
+) -> Result<Delivery, AdminWriteFailure> {
     let command = AdminDeliveryCommandRequest {
         command_id,
         expected_fencing_version,
@@ -160,23 +161,9 @@ pub(crate) async fn execute_delivery(
         failure_code,
     };
     let url = format!("/api/v1/admin/deliveries/{delivery_id}/{}", action.path());
-    let csrf_token = fetch_csrf_token().await.map_err(AdminApiFailure::client)?;
-    let response = send_request(|abort_signal| {
-        Request::post(&url)
-            .abort_signal(abort_signal)
-            .header("x-csrf-token", &csrf_token)
-            .json(&command)
-            .map_err(invalid_request_error)
-    })
-    .await
-    .map_err(AdminApiFailure::client)?;
-    if !response.ok() {
-        return Err(response_failure(response).await);
-    }
-    let payload: StrictDeliveryEnvelope<AdminDeliveryCommandResponse> = response
-        .json()
-        .await
-        .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
+    let response = WriteRequest::general(&url, Method::POST).send_json(&command).await?;
+    let payload: StrictDeliveryEnvelope<AdminDeliveryCommandResponse> =
+        response.json().await.map_err(AdminWriteFailure::invalid_response)?;
     decode_delivery_command(payload, &delivery_id, action, expected_fencing_version)
-        .map_err(|_| AdminApiFailure::client(invalid_response_error("delivery_result")))
+        .map_err(|()| AdminWriteFailure::invalid_response("delivery_result"))
 }

@@ -13,11 +13,13 @@ import { err, ok, type Result } from "@auction/web-shared/result";
 
 import { parseRustUuid, rustUuidIsNil } from "./credentials/decode";
 import {
-  type AdminApiFailure,
-  adminApiFailureClient,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   decodeAdminReceipt,
   invalidResponseError,
   responseError,
+  writeNotSent,
+  writeOutcomeUnknown,
 } from "./failure";
 import type { AdminSessionHost } from "./session";
 import { trimRustWhitespace } from "./session-time";
@@ -427,7 +429,7 @@ export interface PreparedExternalAccessPause {
  */
 export function prepareExternalAccessPauseOnce(
   attempt: ExternalAccessPauseAttempt,
-): (commandId: string) => Result<PreparedExternalAccessPause, AdminApiFailure> {
+): (commandId: string) => Result<PreparedExternalAccessPause, AdminWriteNotSent> {
   // Rust 的 `Option<Timestamp>` 反序列化会校验并规范化为 UTC 文本；这里在冻结时完成同一转换。
   const expiresAt = canonicalExternalAccessPauseExpiry(attempt.expiresAt);
   const validExpiresAt = attempt.expiresAt === null || expiresAt !== null;
@@ -461,7 +463,7 @@ export function prepareExternalAccessPauseOnce(
       frozen.paused !== (frozen.expiresAt !== null) ||
       !validExternalAccessPauseReason(reason)
     ) {
-      return err(adminApiFailureClient("invalid_request"));
+      return err(writeNotSent("invalid_request"));
     }
     const prepared = prepare(commandId);
     if (!prepared.ok) {
@@ -476,11 +478,14 @@ export async function submitExternalAccessPause(
   host: AdminSessionHost,
   prepared: PreparedExternalAccessPause,
   signal: AbortSignal,
-): Promise<Result<RuntimeSwitchIntentDto, AdminApiFailure>> {
+): Promise<Result<RuntimeSwitchIntentDto, AdminWriteFailure>> {
   const response = await sendPreparedJsonWrite(
     host,
-    "/api/v1/admin/runtime-switches/external-access-paused",
-    "POST",
+    {
+      url: "/api/v1/admin/runtime-switches/external-access-paused",
+      method: "POST",
+      endpoint: "general",
+    },
     prepared.body,
     signal,
   );
@@ -493,16 +498,26 @@ export async function submitExternalAccessPause(
     EXTERNAL_ACCESS_PAUSE_RECEIPT_FIELD_POLICY,
   );
   if (!payload.ok) {
-    return err(adminApiFailureClient(payload.error));
+    return err(writeOutcomeUnknown(payload.error));
   }
   const accepted = payload.value.data.accepted;
-  const expectedOperation = prepared.attempt.paused ? "set" : "clear";
+  const attempt = prepared.attempt;
+  const expectedOperation = attempt.paused ? "set" : "clear";
+  const expiryMatches =
+    attempt.expiresAt === null
+      ? accepted.expires_at === null
+      : canonicalExternalAccessPauseExpiry(accepted.expires_at) === attempt.expiresAt;
+  // 账本重放也沿用接受时的修订与期限。错配保留未决命令供原样重试。
   if (
     accepted.name !== "external_access_paused" ||
     accepted.operation !== expectedOperation ||
-    accepted.revision < 1
+    accepted.revision !== attempt.expectedRevision + 1 ||
+    !expiryMatches ||
+    accepted.value !== (attempt.paused ? true : null) ||
+    accepted.reason !== trimRustWhitespace(attempt.reason) ||
+    accepted.entrypoint !== "admin"
   ) {
-    return err(adminApiFailureClient(invalidResponseError("external access pause")));
+    return err(writeOutcomeUnknown(invalidResponseError("external access pause")));
   }
   return ok(accepted);
 }

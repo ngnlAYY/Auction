@@ -47,12 +47,16 @@ function AdminAuctionLotsPage(props: { readonly auctionId: string }): JSX.Elemen
   const queryState = query.state;
   const requestedPage = createValueMemo(() => queryState().page);
   const reloadGeneration = createCommandReload(0n);
+  let intakeEntity: string | null = null;
+  const deferredIntakeEntities = new Set<string>();
   const pagination = useAdminPagination("lots", ["page_size"], 100, 100_000);
+  const pageSize = pagination.sizeSignal();
   const draft = createCell<LotEdit | null>(null);
   const notice = createCell<LotUpdateNotice | null>(null);
   let alive = true;
   onCleanup(() => {
     alive = false;
+    deferredIntakeEntities.clear();
   });
   const pageAlive = () => alive;
   const editedLot = createValueMemo(() => {
@@ -65,12 +69,30 @@ function AdminAuctionLotsPage(props: { readonly auctionId: string }): JSX.Elemen
     reloadGeneration,
     editing,
     () => [props.auctionId, requestedPage()] as const,
-    (request: readonly [string, bigint], size: number, signal: AbortSignal) => {
+    async (request: readonly [string, bigint], size: number, signal: AbortSignal) => {
       const page = request[1];
       if (page > BigInt(Number.MAX_SAFE_INTEGER)) {
-        return Promise.resolve(err("admin_pagination_bounds"));
+        return err("admin_pagination_bounds");
       }
-      return fetchAdminLots(host, request[0], Number(page), size, signal);
+      const generation = reloadGeneration.peek();
+      const result = await fetchAdminLots(host, request[0], Number(page), size, signal);
+      if (
+        alive &&
+        !signal.aborted &&
+        result.ok &&
+        queryState.peek().page === page &&
+        pageSize.peek() === size &&
+        reloadGeneration.peek() === generation
+      ) {
+        intakeEntity = `intake:${result.value.auction.world_id}`;
+        const shouldReload = deferredIntakeEntities.has(intakeEntity);
+        deferredIntakeEntities.clear();
+        if (shouldReload) {
+          // 交付快照前推进世代，确保录入前的快照不能用于编辑。
+          advanceCommandReload(reloadGeneration);
+        }
+      }
+      return result;
     },
   );
   const visibleLots = createValueMemo(() => {
@@ -81,6 +103,20 @@ function AdminAuctionLotsPage(props: { readonly auctionId: string }): JSX.Elemen
     return current.value;
   });
   const pending = usePendingCommands(reloadGeneration, (entity) => {
+    if (!alive) {
+      return false;
+    }
+    if (entity === `auction:${untrack(() => props.auctionId)}`) {
+      return true;
+    }
+    if (entity.startsWith("intake:")) {
+      if (intakeEntity !== null) {
+        return entity === intakeEntity;
+      }
+      // 世界由当前有效读取确认，先保留这次失效通知以便补读。
+      deferredIntakeEntities.add(entity);
+      return false;
+    }
     const lotId = entity.startsWith("lot:") ? entity.slice("lot:".length) : null;
     if (lotId === null) {
       return false;

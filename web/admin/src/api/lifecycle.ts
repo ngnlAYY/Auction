@@ -10,12 +10,12 @@ import {
 import type { AdminAuctionLifecycleRequest } from "@auction/contracts/dto/admin/commands";
 import { apiResponseSchema } from "@auction/contracts/dto/response";
 import { err, ok, type Result, unreachable } from "@auction/web-shared/result";
-
 import {
   type AdminAuctionCommandPreparation,
   decodeAuctionCommandResponse,
   sendAuctionEdit,
 } from "./auctions";
+import { type AdminWriteFailure, writeOutcomeUnknown } from "./failure";
 import type { AdminSessionHost } from "./session";
 import { prepareJsonCommandOnce } from "./transport";
 
@@ -52,10 +52,10 @@ export async function executeAdminAuctionLifecycle(
   action: AdminAuctionLifecycleAction,
   prepare: AdminAuctionCommandPreparation,
   signal: AbortSignal,
-): Promise<Result<AdminAuctionLifecycleResult, string>> {
+): Promise<Result<AdminAuctionLifecycleResult, AdminWriteFailure>> {
   const prepared = prepare(commandId);
   if (!prepared.ok) {
-    return err(prepared.error.code);
+    return err(prepared.error);
   }
   const url = `/api/v1/admin/auctions/${auctionId}/${lifecycleActionPath(action)}`;
   const payload = await sendAuctionEdit(
@@ -72,10 +72,10 @@ export async function executeAdminAuctionLifecycle(
   }
   const auction = decodeAuctionCommandResponse(payload.value);
   if (!auction.ok) {
-    return err(auction.error);
+    return err(writeOutcomeUnknown(auction.error));
   }
   if (auction.value.id !== auctionId) {
-    return err("invalid_response");
+    return err(writeOutcomeUnknown("invalid_response"));
   }
   return ok({ auction: auction.value });
 }

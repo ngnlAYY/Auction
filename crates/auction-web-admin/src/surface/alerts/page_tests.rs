@@ -10,9 +10,15 @@ use dioxus_i18n::prelude::try_use_init_i18n_from_bundle;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::api::{AdminApiFailure, AdminSessionWritePermission};
+use crate::api::{
+    AdminApiFailure, AdminSessionWritePermission, AdminWriteFailure, acknowledge_admin_alert,
+    silence_admin_alert,
+};
 use crate::surface::ADMIN_LOCALE_CATALOG;
-use crate::surface::pending::{PendingCommandNotices, use_pending_command_host};
+use crate::surface::auctions::draft_page_tests::{button, click_button, mount_writer};
+use crate::surface::pending::{
+    PendingCommandNotices, PendingCommandPanel, use_pending_command_host, use_pending_commands,
+};
 use crate::surface::test_events::{dispatch_click_event, dispatch_form_event};
 
 const N: i64 = 2;
@@ -383,4 +389,79 @@ fn reason_announcement_survives_empty_filter_until_the_draft_is_corrected() {
     assert_eq!(updated_text(&edits, "备注过长"), 2);
     let edits = page.event("blur", reason, "");
     assert_eq!(updated_text(&edits, "备注过长"), 0);
+}
+
+fn check_preflight_stale(action: &'static str) {
+    let requests = Rc::new(Requests::default());
+    let attempts = Rc::new(Cell::new(0));
+    let (mut page, _) = mount_writer({
+        let requests = requests.clone();
+        let attempts = attempts.clone();
+        move || {
+            let requests = requests.clone();
+            use_hook(move || {
+                AdminApiFailure::stub_alert_responses(move |url, body| requests.reply(url, body));
+            });
+            let entity = format!("alert:{ALERT_ID}");
+            let reload = use_signal(|| 0_u64);
+            let owner = use_pending_commands(reload, |entity| entity.starts_with("alert:"));
+            let attempts = attempts.clone();
+            let label = "处置告警";
+            rsx! {
+                PendingCommandPanel { owner }
+                button {
+                    disabled: owner.contains(&entity),
+                    onclick: move |_| {
+                        let attempts = attempts.clone();
+                        owner.submit(entity.clone(), label.into(),
+                            move |command_id| {
+                                let attempt = attempts.get() + 1;
+                                attempts.set(attempt);
+                                async move {
+                                    if attempt == 2 {
+                                        // 告警写响应替身在 CSRF 复核之前截获 POST；从只读失败边界交给宿主。
+                                        let before_write = AdminApiFailure::from_http_body(409, STALE);
+                                        return Err(AdminWriteFailure::not_sent(before_write.code));
+                                    }
+                                    if action == "acknowledge" {
+                                        acknowledge_admin_alert(command_id, ALERT_ID, N, "原始备注").await
+                                    } else {
+                                        silence_admin_alert(command_id, ALERT_ID, N, 3_600, "原始备注").await
+                                    }
+                                }
+                            },
+                            |_| panic!("冲突流程不应交付成功回执"),
+                            |_| (),
+                        );
+                    },
+                    "{label}"
+                }
+            }
+        }
+    });
+    click_button(&mut page, "处置告警");
+    click_button(&mut page, "原样重试");
+    assert_eq!(attempts.get(), 2);
+    assert_eq!(requests.writes.borrow().len(), 1);
+    assert!(button(&page, "关闭已拒绝操作").is_none());
+    assert!(button(&page, "处置告警").unwrap().1);
+
+    click_button(&mut page, "原样重试");
+    assert_eq!(attempts.get(), 3);
+    assert!(button(&page, "关闭已拒绝操作").is_some());
+    assert!(!button(&page, "处置告警").unwrap().1);
+    let writes = requests.writes.borrow();
+    assert_eq!(writes.len(), 2);
+    assert_eq!(writes[0], writes[1]);
+    assert_eq!(writes[0].0, format!("/api/v1/admin/alerts/{ALERT_ID}/{action}"));
+}
+
+#[test]
+fn acknowledge_preflight_stale_retains_the_unknown_command() {
+    check_preflight_stale("acknowledge");
+}
+
+#[test]
+fn silence_preflight_stale_retains_the_unknown_command() {
+    check_preflight_stale("silence");
 }

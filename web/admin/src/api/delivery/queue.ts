@@ -14,11 +14,12 @@ import { utf8ByteLength } from "@auction/web-shared/text";
 import { validUuid } from "@auction/web-shared/ui/validation";
 
 import {
-  type AdminApiFailure,
-  adminApiFailureClient,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   decodeAdminReceipt,
   invalidResponseError,
   responseError,
+  writeOutcomeUnknown,
 } from "../failure";
 import { validate as validatePagination } from "../pagination";
 import type { AdminSessionHost } from "../session";
@@ -95,7 +96,7 @@ export interface DeliveryCommandSnapshot {
 /** 已冻结输入的命令准备函数；同一个 `command_id` 的重试返回同一份正文。 */
 export type DeliveryCommandPreparation = ((
   commandId: string,
-) => Result<PreparedJsonCommand, AdminApiFailure>) & {
+) => Result<PreparedJsonCommand, AdminWriteNotSent>) & {
   readonly snapshot: DeliveryCommandSnapshot;
 };
 
@@ -277,14 +278,19 @@ export async function executeDelivery(
   preparation: DeliveryCommandPreparation,
   commandId: string,
   signal: AbortSignal,
-): Promise<Result<Delivery, AdminApiFailure>> {
+): Promise<Result<Delivery, AdminWriteFailure>> {
   const prepared = preparation(commandId);
   if (!prepared.ok) {
     return err(prepared.error);
   }
   const { deliveryId, action, expectedFencingVersion } = preparation.snapshot;
   const url = `/api/v1/admin/deliveries/${deliveryId}/${deliveryActionPath(action)}`;
-  const response = await sendPreparedJsonWrite(host, url, "POST", prepared.value, signal);
+  const response = await sendPreparedJsonWrite(
+    host,
+    { url, method: "POST", endpoint: "general" },
+    prepared.value,
+    signal,
+  );
   if (!response.ok) {
     return err(response.error);
   }
@@ -294,11 +300,11 @@ export async function executeDelivery(
     ADMIN_DELIVERY_DECISION_FIELD_POLICY,
   );
   if (!payload.ok) {
-    return err(adminApiFailureClient(payload.error));
+    return err(writeOutcomeUnknown(payload.error));
   }
   const decoded = decodeDeliveryCommand(payload.value, deliveryId, action, expectedFencingVersion);
   if (!decoded.ok) {
-    return err(adminApiFailureClient(invalidResponseError("delivery_result")));
+    return err(writeOutcomeUnknown(invalidResponseError("delivery_result")));
   }
   return ok(decoded.value);
 }

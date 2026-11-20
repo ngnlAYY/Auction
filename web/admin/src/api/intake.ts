@@ -15,11 +15,13 @@ import { err, ok, type Result } from "@auction/web-shared/result";
 import { compareText } from "@auction/web-shared/text";
 
 import {
-  type AdminApiFailure,
-  adminApiFailureClient,
+  type AdminWriteFailure,
+  type AdminWriteNotSent,
   decodeAdminReceipt,
   invalidRequestError,
   invalidResponseError,
+  writeNotSent,
+  writeOutcomeUnknown,
 } from "./failure";
 import type { AdminSessionHost } from "./session";
 import {
@@ -35,7 +37,7 @@ export type AdminIntakeResult = AdminIntakeResponse;
 /** 未决命令执行体复用的正文工厂；同一 `command_id` 的重试只会得到同一份文本。 */
 export type AdminIntakePreparation = (
   commandId: string,
-) => Result<PreparedJsonCommand, AdminApiFailure>;
+) => Result<PreparedJsonCommand, AdminWriteNotSent>;
 
 const I32_MAX = 2_147_483_647;
 const I32_MIN = -2_147_483_648;
@@ -84,7 +86,7 @@ export function prepareAdminIntakeOnce(
     const parsed = parseCanonicalEquipment(equipmentJson);
     if (!parsed.ok) {
       const code = parsed.error;
-      return () => err(adminApiFailureClient(code));
+      return () => err(writeNotSent(code));
     }
     equipment = parsed.value;
   }
@@ -113,15 +115,20 @@ export async function addAdminIntake(
   playerId: string,
   prepare: AdminIntakePreparation,
   signal: AbortSignal,
-): Promise<Result<AdminIntakeResult, string>> {
+): Promise<Result<AdminIntakeResult, AdminWriteFailure>> {
   const prepared = prepare(commandId);
   if (!prepared.ok) {
-    return err(prepared.error.code);
+    return err(prepared.error);
   }
   const url = `/api/v1/admin/worlds/${worldId}/auction-intake/items`;
-  const response = await sendPreparedJsonWrite(host, url, "POST", prepared.value, signal);
+  const response = await sendPreparedJsonWrite(
+    host,
+    { url, method: "POST", endpoint: "general" },
+    prepared.value,
+    signal,
+  );
   if (!response.ok) {
-    return err(response.error.code);
+    return err(response.error);
   }
   const payload = decodeAdminReceipt(
     response.value,
@@ -129,17 +136,17 @@ export async function addAdminIntake(
     ADMIN_INTAKE_RESPONSE_FIELD_POLICY,
   );
   if (!payload.ok) {
-    return err(payload.error);
+    return err(writeOutcomeUnknown(payload.error));
   }
   const result = decodeIntakeResult(payload.value.data);
   if (!result.ok) {
-    return err(invalidResponseError(result.error));
+    return err(writeOutcomeUnknown(invalidResponseError(result.error)));
   }
   if (
     result.value.start_price !== startPrice ||
     result.value.seller_player_id !== rustTrim(playerId)
   ) {
-    return err("invalid_response");
+    return err(writeOutcomeUnknown("invalid_response"));
   }
   return ok(result.value);
 }

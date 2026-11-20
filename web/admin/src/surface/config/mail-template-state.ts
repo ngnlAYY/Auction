@@ -3,10 +3,10 @@
 import type { AdminMailTemplateDto } from "@auction/contracts/dto/admin/mail-templates";
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import type { TaskResource } from "@auction/web-shared/reactive/resource";
-import { err, ok, type Result } from "@auction/web-shared/result";
+import { err, type Result } from "@auction/web-shared/result";
 import { t } from "@auction/web-shared/ui/i18n";
 import { onCleanup } from "solid-js";
-
+import { writeOutcomeUnknown } from "../../api/failure";
 import {
   type MailTemplateAttempt,
   type MailTemplateBodyProblem,
@@ -197,14 +197,14 @@ export function useTemplateEditState(
           }
           const prepared = prepare(commandId);
           if (!prepared.ok) {
-            return err(prepared.error.code);
+            return prepared;
           }
           try {
             const result = await submitMailTemplate(host, prepared.value, signal);
-            return result.ok ? ok(result.value) : err(result.error.code);
+            return result;
           } catch {
             // 异常原文可能含秘密，按结果未知交给未决命令宿主。
-            return err("network_error");
+            return err(writeOutcomeUnknown("network_error"));
           }
         },
         (template, sourceAlive) => {

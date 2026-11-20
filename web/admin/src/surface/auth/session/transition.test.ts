@@ -2,6 +2,7 @@
 
 import { expect, test } from "bun:test";
 
+import { expectReplacementRequiresDiscovery } from "./boundary-fixture.test";
 import { stateView } from "./index";
 import {
   apply,
@@ -190,6 +191,8 @@ test("late_logout_cookie_removal_keeps_new_login_closed_after_broadcast：迟到
   const old = sessionFixture("old-cookie", 900);
   const next = sessionFixture("new-cookie", 60);
   const [tabA, logoutEffects] = apply(old, authenticated(old), { kind: "logout_clicked" });
+  const logout = logoutTicket(logoutEffects);
+  const [sent] = apply(old, tabA, { kind: "logout_sending", ticket: logout });
   let tabB = loggedOut();
   const login = startLogin(tabB);
   if (login === null) throw new Error("应开始登录");
@@ -204,10 +207,10 @@ test("late_logout_cookie_removal_keeps_new_login_closed_after_broadcast：迟到
 
   // 浏览器在收到 DELETE 响应时已清除同名 Cookie，外壳只能按当前 Cookie 复核。
   const [, endedEffects] = step(
-    tabA,
+    sent,
     {
       kind: "logout_finished",
-      ticket: logoutTicket(logoutEffects),
+      ticket: logout,
       cookie: old.cookie,
       outcome: { kind: "succeeded" },
     },
@@ -243,7 +246,8 @@ test("late_old_401_does_not_end_another_tabs_new_login：迟到的旧 401 不结
   const next = sessionFixture("new-cookie", 60);
   const [tabA, effects] = apply(old, authenticated(old), { kind: "logout_clicked" });
   const logout = logoutTicket(effects);
-  const [pending, readEffects] = apply(old, tabA, {
+  const [sent] = apply(old, tabA, { kind: "logout_sending", ticket: logout });
+  const [pending, readEffects] = apply(old, sent, {
     kind: "logout_finished",
     ticket: logout,
     cookie: old.cookie,
@@ -270,13 +274,13 @@ test("late_old_401_does_not_end_another_tabs_new_login：迟到的旧 401 不结
     outcome: { kind: "unauthenticated" },
   });
   expect(countNotices(lateEffects)).toBe(0);
-  expect(stateView(verified).session).toBeNull();
+  expect(stateView(verified).session).toBe(old.session);
+  expect(stateView(verified).epoch).toBe(stateView(tabA).epoch);
+  expect(stateView(verified).keyVisibility.hidden).toBe(true);
   expect(stateView(verified).canWrite).toBe(false);
   expect(stateView(confirmed).canWrite).toBe(true);
   expect(stateView(confirmed).session).toBe(next.session);
-  const [restored] = apply(next, verified, readOk(next, readTicket(lateEffects)));
-  expect(stateView(restored).canWrite).toBe(true);
-  expect(stateView(restored).session).toBe(next.session);
+  expectReplacementRequiresDiscovery(next, verified, readTicket(lateEffects));
 
   // 固定通知可能在新登录后才送达。接收方须先隐藏，再凭当前代际恢复一棵新宿主。
   const epoch = stateView(confirmed).epoch;
@@ -297,13 +301,14 @@ test("broadcast_then_old_get_success_cannot_interrupt_delete_success：广播后
   const [loggingOut, logoutEffects] = apply(current, checking, { kind: "logout_clicked" });
   const logout = logoutTicket(logoutEffects);
   expect(logoutEffects.some((effect) => effect.kind === "cancel_read")).toBe(true);
-  const [hidden, broadcastEffects] = apply(current, loggingOut, { kind: "broadcast" });
-  expect(stateView(hidden).loggingOut).toBe(true);
-  expect(stateView(hidden).canWrite).toBe(false);
-  expect(stateView(hidden).session).toBeNull();
+  const [sent] = apply(current, loggingOut, { kind: "logout_sending", ticket: logout });
+  const [retained, broadcastEffects] = apply(current, sent, { kind: "broadcast" });
+  expect(stateView(retained).loggingOut).toBe(true);
+  expect(stateView(retained).canWrite).toBe(false);
+  expect(stateView(retained).session).toBeNull();
   expect(broadcastEffects).toHaveLength(0);
 
-  const [afterOldRead, oldEffects] = apply(current, hidden, readOk(current, oldCheck));
+  const [afterOldRead, oldEffects] = apply(current, retained, readOk(current, oldCheck));
   expect(stateView(afterOldRead).loggingOut).toBe(true);
   expect(stateView(afterOldRead).canWrite).toBe(false);
   expect(oldEffects).toHaveLength(0);
@@ -315,7 +320,7 @@ test("broadcast_then_old_get_success_cannot_interrupt_delete_success：广播后
     outcome: { kind: "succeeded" },
   } as const;
   const [ended, endedEffects] = step(afterOldRead, succeeded, { kind: "missing" }, NOW);
-  expect(countNotices(endedEffects)).toBe(1);
+  expect(countNotices(endedEffects)).toBe(0);
   expect(stateView(ended).canWrite).toBe(false);
   expect(stateView(ended).loggingOut).toBe(false);
   const check = readTicket(endedEffects);
@@ -562,27 +567,30 @@ test("stale_successful_logout_only_checks_the_replacement_cookie：迟到注销�
   const [loggingOut, logoutEffects] = apply(previous, authenticated(previous), {
     kind: "logout_clicked",
   });
-  const [stale, effects] = apply(current, loggingOut, {
+  const ticket = logoutTicket(logoutEffects);
+  const [sent] = apply(previous, loggingOut, { kind: "logout_sending", ticket });
+  const [stale, effects] = apply(current, sent, {
     kind: "logout_finished",
-    ticket: logoutTicket(logoutEffects),
+    ticket,
     cookie: previous.cookie,
     outcome: { kind: "succeeded" },
   });
   expect(countNotices(effects)).toBe(0);
-  expect(stateView(stale).session).toBeNull();
+  expect(stateView(stale).session).toBe(previous.session);
+  expect(stateView(stale).keyVisibility.hidden).toBe(true);
   expect(stateView(stale).canWrite).toBe(false);
-  const [confirmed] = apply(current, stale, readOk(current, readTicket(effects)));
-  expect(stateView(confirmed).session).toBe(current.session);
+  expectReplacementRequiresDiscovery(current, stale, readTicket(effects));
 });
 
 test("request_dispatched_after_cookie_change_only_rereads_current_cookie：Cookie 变化后派发的请求只重读当前 Cookie", () => {
   const previous = sessionFixture("old-cookie", 900);
   const current = sessionFixture("new-cookie", 900);
   const [checking, checkEffects] = apply(previous, authenticated(previous), { kind: "visible" });
-  const [stale, effects] = apply(current, checking, readOk(current, readTicket(checkEffects)));
-  expect(stateView(stale).session).toBeNull();
-  expect(stateView(stale).canWrite).toBe(false);
-  expect(countNotices(effects)).toBe(0);
-  const [confirmed] = apply(current, stale, readOk(current, readTicket(effects)));
-  expect(stateView(confirmed).session).toBe(current.session);
+  const ticket = readTicket(checkEffects);
+  const [sending, sendingEffects] = apply(current, checking, { kind: "read_sending", ticket });
+  expect(sendingEffects.filter((effect) => effect.kind === "read")).toHaveLength(0);
+  expect(stateView(sending).session).toBe(previous.session);
+  expect(stateView(sending).keyVisibility.hidden).toBe(true);
+  expect(stateView(sending).canWrite).toBe(false);
+  expectReplacementRequiresDiscovery(current, sending, ticket);
 });
