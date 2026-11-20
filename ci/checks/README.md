@@ -4,6 +4,24 @@
 
 [ci/checks/check.sh](check.sh) 是本地与 CI 的共同入口。`all` 包含仓库契约、MSRV 与工具链版本一致、公开仓库脱敏、目录布局、配置示例、systemd 模板、翻译键、装备诊断闭集、源码计数棘轮、审计写入失败分类、模块层级、Markdown 链接、迁移兼容登记、已发布迁移不可变、Web 输入依赖闭包和 Web 回调属性检查。`web` 项（`bun run typecheck`、`bun run lint` 与 `web/` 包边界）不在 `all`/`rust` 组内，由 `mise run verify` 末尾显式运行；运行前先 `mise run web-prepare` 安装 `web/node_modules`。`web-dependency-audit` 需要联网读取公告库，同样不并入 `all` 与 `mise run verify`。入口与构型见 [ci/README.md#静态门禁cicheckschecksh](../README.md#静态门禁cicheckschecksh)。`mise run verify` 等价于 `bash ci/checks/check.sh all fmt check dependency-versions lint wasm rustdoc web`：先运行 `all`，再依次执行格式、宿主默认 feature 编译、依赖版本、宿主全 feature Clippy、Public/Admin 两组 wasm32 Clippy、rustdoc 与 `web/` 静态检查，不运行行为测试。
 
+## 热字段镜像
+
+```bash
+bash ci/checks/check.sh hot-fields
+bash ci/checks/hot-fields-test.sh
+```
+
+应用层 `crates/auction-application/src/ports/admin/runtime_config/hot.rs` 的 `WORKER_HOT_FIELD_PATHS` 是热字段闭集。Rust Admin 的 `crates/auction-web-admin/src/surface/config/hot_fields.rs` 与 Solid Admin 的 `web/admin/src/surface/config/hot-fields.ts` 各自复制一份，检查先去掉注释，再逐个读取数组元素。三张表必须逐项同序，首个差异报告文件和项序号，展开项及其他无法核对的表达式报告文件、行号和列号。独立自测覆盖带注释的正例、TypeScript 增删、换序、改名、注释掉一项、展开项与非字面量，以及 Rust 镜像和应用层的漂移。
+
+## 装备诊断闭集
+
+```bash
+bash ci/checks/check.sh equipment-contract
+bash ci/checks/equipment-contract-test.sh
+```
+
+装备解析诊断原因由应用层闭集、迁移中的 SQL 约束与 Admin 两套实现共同维护。Rust Admin 解码 `crates/auction-web-admin/src/api/mail.rs`，Solid Admin 解码 `web/admin/src/api/mail-response.ts`；两边的诊断说明分别在 `crates/auction-web-admin/src/surface/mail/messages.rs` 与 `web/admin/src/surface/mail/messages.ts`，并共同引用 `crates/auction-web-admin/i18n` 中五种语言的译文键。门禁分别在两个 `parse/protocol_drift` 解码分支提取原因字符串并核对闭集，以原因码为键逐项比较两套文案映射，再检查五种语言的译文。独立自测覆盖 TypeScript 解码和文案缺项、两个原因互换译文键与单种语言缺失译文。
+
 ## 公开仓库脱敏
 
 ```bash
@@ -47,7 +65,7 @@ bash ci/checks/check.sh web-build-inputs
 bash ci/checks/web-build-inputs-test.sh
 ```
 
-`web-build-inputs` 从 `cargo metadata --format-version 1 --no-deps --locked --offline` 的结果读取依赖声明，以 `auction-web-public`、`auction-web-admin` 与 `auction-web-shared` 为入口，递归收集指向工作区成员的路径依赖。目标条件、可选 feature、构建和测试依赖的声明都计入。检查将闭包与两种 Web 指纹共用的清单比较，分别列出缺少与多出的依赖目录。清单不一致时退出 1。两种 Web 指纹经 `path_fingerprint` 计算，并用 `--exclude-dir web/node_modules --exclude-dir web/.tmp` 排除安装与临时目录；缺省 `path_fingerprint` 仍包含这些目录。相关实现见 [ci/checks/web-build-inputs.pl](web-build-inputs.pl) 与 [ci/release/build-identity.sh](../release/build-identity.sh)。
+`web-build-inputs` 从 `cargo metadata --format-version 1 --no-deps --locked --offline` 的结果读取依赖声明，以 `auction-web-public`、`auction-web-admin` 与 `auction-web-shared` 为入口，递归收集指向工作区成员的路径依赖。目标条件、可选 feature、构建和测试依赖的声明都计入。Dioxus 路径的 `web_inputs_fingerprint` 与 `web_build_identity` 共用一份清单，检查比较闭包与该清单，列出缺少与多出的依赖目录，有差异时退出 1。Solid 的 Web 与原生输入指纹覆盖 `web/**`，经 `--exclude-dir web/node_modules --exclude-dir web/.tmp` 排除安装与临时目录，TypeScript 的依赖方向由 [Web 包边界](#web-包边界) 检查。相关实现见 [ci/checks/web-build-inputs.pl](web-build-inputs.pl) 与 [ci/release/build-identity.sh](../release/build-identity.sh)。
 
 Cargo 只需读取工作区清单，下载缓存为空时也可运行，因此该门禁纳入 `all`。独立的回归脚本使用临时工作区验证传递依赖、指纹、复用和构建结束复核。
 
@@ -57,7 +75,7 @@ Cargo 只需读取工作区清单，下载缓存为空时也可运行，因此�
 bash ci/checks/web-payload-test.sh
 ```
 
-自测在临时目录验证[发布清单门禁](../release/build-identity.sh)接受普通文件和压缩副本，拒绝源码映射、点文件和点目录下的文件，并检查失败时的文件路径诊断；Solid 用例还覆盖入口引用闭包、入口标签的闭集语法（固定属性顺序与同行闭合、单引号/无引号/注释/禁用标签拒绝）、唯一的图标链接与带指纹 favicon、首屏 JS 计量、体积预算键与失败诊断。
+自测在临时目录验证[发布清单门禁](../release/build-identity.sh)接受普通文件和压缩副本，拒绝源码映射、点文件和点目录下的文件，并检查失败时的文件路径诊断；Solid 用例同时构造 Public 与 Admin payload，覆盖入口引用闭包、入口标签的闭集语法（固定属性顺序与同行闭合、单引号/无引号/注释/禁用标签拒绝）、唯一的图标链接与带指纹 favicon、首屏 JS 计量、两端体积预算键与失败诊断。
 
 ## Web 双栈构建入口
 
@@ -65,7 +83,7 @@ bash ci/checks/web-payload-test.sh
 bash ci/checks/web-bundle-test.sh
 ```
 
-自测覆盖 `ci/release/web-bundle.sh` 的双栈分支：从 Public 开始请求时，只要 Admin 被标成 Solid 也在清理任何稳定目录之前失败，Public 与 Admin 的哨兵都保持不变；`web/node_modules` 缺失、准备凭据缺失/摘要不符/bun 版本不符、`node_modules/.bin/vite` 缺失时分别失败并提示 `mise run web-prepare`，凭据相符的正例通过；缺省与显式 `dioxus` 得到相同回执并通过替身 `dx` 走原 `bundle` 路径；Solid 回执记录 `profile=solid-release` 与 `stack=solid`；稳定目录用精确目标整体替换；brotli 的枚举、临时清单、`stat`、压缩与副本写入失败都会传播；`ci/release/release.sh` 的构建类入口只在由 tag 触发的 CI 运行中选择 Solid 时拒绝，本地与分支上的手动候选构建可用，只读入口仍可运行。
+自测用替身 mise 验证双端 Solid 且 `RUSTC_WRAPPER=sccache` 时固定包装器路径及 daemon 身份，并核对双端 Dioxus 与两种混合组合的工具集合和顺序。另覆盖 `ci/release/web-bundle.sh` 的双栈分支：Public 与 Admin 都接受 Dioxus/Solid，未知 surface 与技术栈仍失败；从 Public 开始请求时，只要 Admin 的组合被构建入口拒绝也在清理任何稳定目录之前失败，两端哨兵都保持不变；`web/node_modules` 缺失、准备凭据缺失/摘要不符/bun 版本不符、`node_modules/.bin/vite` 缺失时分别失败并提示 `mise run web-prepare`，凭据相符的正例通过；缺省与显式 `dioxus` 得到相同回执并通过替身 `dx` 走原 `bundle` 路径；Solid 回执记录两端 `stack=solid`、两端 web-solid feature 与 `profile=solid-release`；稳定目录用精确目标整体替换，Public 或 Admin 任一端的稳定 payload 缺失或摘要变化都会触发两端重建；brotli 的枚举、临时清单、`stat`、压缩与副本写入失败都会传播；`ci/release/release.sh` 的构建类入口只在由 tag 触发的 CI 运行中选择 Solid 时拒绝，本地与分支上的手动候选构建可用，只读入口仍可运行。
 
 ## Web 回调属性
 
@@ -95,7 +113,7 @@ bash ci/checks/web-boundaries-test.sh
 
 `web/` 之外的资产按归属放行：`crates/auction-web-shared/{assets,style}` 四个包都可引用，`crates/auction-web-public/{assets,i18n}` 只给 `public`，`crates/auction-web-admin/{assets,i18n}` 只给 `admin`。普通 `.css` 可直接引用；其他资产须带 `?raw` 或 `?url`，查询参数不改变目标路径的归属。Rust 源码、TypeScript 模块和 `web/` 之外的测试夹具不能借查询参数绕过。受检源码目录里出现任何符号链接（文件或目录）都以退出码 2 失败；判定通过的相对路径或别名目标如果在磁盘上存在，其 `realpath` 必须等于规范化后的词法路径，经过符号链接按越界（退出码 1）报告。
 
-动态导入只接受字符串字面量或无插值模板字面量；带插值或非字面量参数报错（无法静态判定）。唯一例外是 [web/tooling/boundary-rules.ts](../../web/tooling/boundary-rules.ts) 的 `VIRTUAL_MODULE_TEST_FILES` 点名的几个测试夹具里的非字面量 `import()`（Bun 测试插件的虚拟模块）；新增同类夹具要把完整路径加进这张清单；其他文件的非字面量 `import()` 与所有非字面量 `require()` 都报错，调用目标外面套任意层括号不影响 `require()` 识别。新增同类夹具必须修改检查器里的点名清单。读取 `web/admin/src` 不存在时只豁免这一个已知的尚未并入情况；其他源码目录读取失败、`package.json`/tsconfig 解析失败、配置不一致、实现模块加载失败或扫描结果为空都以退出码 2 失败。退出码 1 仅表示发现越界导入。`ci/checks/web-boundaries-test.sh` 用临时仓库覆盖允许、拒绝与退出码 2 用例；启用 TypeScript 解析器的整体用例在能运行解析器的环境中执行。
+动态导入只接受字符串字面量或无插值模板字面量；带插值或非字面量参数报错（无法静态判定）。唯一例外是 [web/tooling/boundary-rules.ts](../../web/tooling/boundary-rules.ts) 的 `VIRTUAL_MODULE_TEST_FILES` 点名的几个测试夹具里的非字面量 `import()`（Bun 测试插件的虚拟模块）；新增同类夹具要把完整路径加进这张清单；其他文件的非字面量 `import()` 与所有非字面量 `require()` 都报错，调用目标外面套任意层括号不影响 `require()` 识别。新增同类夹具必须修改检查器里的点名清单。`web/admin/src` 已并入包边界检查；检查器仍对旧检出保留该目录缺失时的兼容分支，当前仓库中四个包的源码都必须存在。其他源码目录读取失败、`package.json`/tsconfig 解析失败、配置不一致、实现模块加载失败或扫描结果为空都以退出码 2 失败。退出码 1 仅表示发现越界导入。`ci/checks/web-boundaries-test.sh` 用临时仓库覆盖允许、拒绝与退出码 2 用例；启用 TypeScript 解析器的整体用例在能运行解析器的环境中执行。
 
 ## 译文门禁（i18n）
 
@@ -104,7 +122,7 @@ bash ci/checks/check.sh i18n
 bash ci/checks/i18n-test.sh
 ```
 
-逐个 surface 读取 `crates/auction-web-<surface>/i18n` 的五个 `.ftl`，再对 Rust 与 `web/` 两套实现运行下列检查。只有 `web/admin/src` 允许暂不存在；其余源码目录缺失、读取失败或没有受支持的源文件都以带目录名的诊断终止。三项源码检查共用一份先枚举、逐条核对 `rg` 退出码的清单，`web/shared/src` 与 `crates/auction-web-shared/src` 始终参与。
+逐个 surface 读取 `crates/auction-web-<surface>/i18n` 的五个 `.ftl`，再对 Rust 与 `web/` 两套实现运行下列检查。`web/admin/src` 已并入检查；检查器仍对旧检出保留该目录缺失时的兼容分支，当前仓库中 Public、Admin 与共享层的源码目录都必须存在。其余源码目录缺失、读取失败或没有受支持的源文件都以带目录名的诊断终止。三项源码检查共用一份先枚举、逐条核对 `rg` 退出码的清单，`web/shared/src` 与 `crates/auction-web-shared/src` 始终参与。
 
 - 缺键：[`i18n-referenced-keys.pl`](i18n-referenced-keys.pl) 要求字面量键调用 `t!("…")` 与 `t("…")`（单引号、双引号或无插值模板字面量）指向当前 surface 的键。TypeScript 先从词法上去掉注释，跳过字符串与模板字面量的正文；模板插值 `${…}` 里的代码仍继续扫描，再提取调用。`t` 可以来自导入、解构或函数参数。非字面量键与 Rust 的现口径一样跳过，由闭集映射与字符串字面量可达性兜底。共享层的测试夹具含有不属于任何 surface 的假键，因此共享层以 `--skip-tests` 调用：跳过 `*.test.ts(x)`、独立的 Rust `tests.rs` / `tests/` 测试模块，并只去掉 Rust 文件里顶层 `#[cfg(test)] mod … { … }` 自身的范围，保留模块之后的代码与原始行号；surface 自身的测试源码仍全部扫描。
 - 未引用键：[`i18n-unused-keys.pl`](i18n-unused-keys.pl) 要求 `en.ftl` 的每个键在同一 surface 的 Rust 或 TypeScript 源码字符串字面量中可达；两套实现任一处引用即可，设置表单的 `{id}-help` 拼接规则照旧。

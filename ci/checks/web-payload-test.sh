@@ -59,14 +59,19 @@ make_dioxus_payload() {
 }
 
 make_solid_payload() {
-	local stable_root=$1
+	local surface=$1 stable_root=$2 title
 	local root="$stable_root/public"
+	case "$surface" in
+	public) title='Auction 公开站点' ;;
+	admin) title='Auction 管理站点' ;;
+	*) return 2 ;;
+	esac
 	mkdir -p "$root/assets"
 	printf '%s\n' \
 		'<!doctype html>' \
 		'<html><head>' \
 		'<link rel="icon" href="/favicon.ico">' \
-		'<title>Auction 公开站点</title>' \
+		"<title>$title</title>" \
 		'<script data-cfasync="false" type="module" crossorigin src="/assets/index-B2UikXgQ.js"></script>' \
 		'<link rel="modulepreload" crossorigin href="/assets/rolldown-runtime-DK3Fl9T5.js">' \
 		'<link rel="stylesheet" crossorigin href="/assets/index-ZX7NKpK-.css">' \
@@ -76,22 +81,22 @@ make_solid_payload() {
 	printf 'extra css\n' >"$root/assets/extra-ABCDEFGH.css"
 	printf 'css\n' >"$root/assets/index-ZX7NKpK-.css"
 	printf '<svg></svg>\n' >"$root/assets/favicon-YZabcdef.svg"
-	write_payload_marker "$root" "$stable_root" public solid-release
+	write_payload_marker "$root" "$stable_root" "$surface" solid-release
 }
 
 # Solid 用例必须在独立的 source 里切换技术栈；外层仍保持缺省 Dioxus。
 solid_verify() {
-	local stable_root=$1
+	local surface=$1 stable_root=$2
 	(
 		export AUCTION_WEB_STACK=solid
 		source "$repository_root/ci/release/build-identity.sh"
-		verify_web_payload public "$stable_root"
+		verify_web_payload "$surface" "$stable_root"
 	)
 }
 
 expect_solid_failure() {
-	local stable_root=$1 expected=$2 diagnostic
-	if diagnostic=$(solid_verify "$stable_root" 2>&1 >/dev/null); then
+	local stable_root=${1:-} expected=${2:-}
+	if diagnostic=$(solid_verify public "$stable_root" 2>&1 >/dev/null); then
 		fail "Solid payload 应被拒绝：$expected"
 	fi
 	[[ "$diagnostic" == *"$expected"* ]] || fail "Solid 诊断缺少「$expected」：$diagnostic"
@@ -173,8 +178,8 @@ fi
 [[ $(<"$fixture/diagnostic") == *'制品标记无效'* ]] || fail 'Dioxus 错误 profile 缺少诊断'
 
 solid_root="$fixture/solid"
-make_solid_payload "$solid_root"
-solid_verify "$solid_root" >/dev/null || fail 'Solid payload 正例应通过'
+make_solid_payload public "$solid_root"
+solid_verify public "$solid_root" >/dev/null || fail 'Solid payload 正例应通过'
 solid_references=$(
 	export AUCTION_WEB_STACK=solid
 	source "$repository_root/ci/release/build-identity.sh"
@@ -289,7 +294,7 @@ no_preload="$fixture/solid-no-preload"
 cp -a "$solid_root" "$no_preload"
 sed -i '/rel="modulepreload"/d' "$no_preload/public/index.html"
 write_payload_marker "$no_preload/public" "$no_preload" public solid-release
-solid_verify "$no_preload" >/dev/null || fail '合法的零条 modulepreload 应通过'
+solid_verify public "$no_preload" >/dev/null || fail '合法的零条 modulepreload 应通过'
 
 unfingerprinted_asset="$fixture/solid-unfingerprinted"
 cp -a "$solid_root" "$unfingerprinted_asset"
@@ -469,7 +474,7 @@ if (
 	export AUCTION_WEB_STACK=solid
 	source "$repository_root/ci/release/build-identity.sh"
 	web_inputs_fingerprint() { printf 'a%.0s' {1..64}; }
-	web_stack_marker() { printf 'public=solid\nadmin=dioxus\n'; }
+	web_stack_marker() { printf 'public=solid\nadmin=solid\n'; }
 	sha256sum() { return 1; }
 	web_build_identity
 ) >"$fixture/out" 2>"$fixture/diagnostic"; then
@@ -481,7 +486,7 @@ if (
 	export AUCTION_WEB_STACK=solid
 	source "$repository_root/ci/release/build-identity.sh"
 	web_inputs_fingerprint() { printf 'a%.0s' {1..64}; }
-	web_stack_marker() { printf 'public=solid\nadmin=dioxus\n'; }
+	web_stack_marker() { printf 'public=solid\nadmin=solid\n'; }
 	sha256sum() { printf '%s\n' not-a-sha256; }
 	web_build_identity
 ) >"$fixture/out" 2>"$fixture/diagnostic"; then
@@ -492,18 +497,22 @@ fi
 (
 	export AUCTION_WEB_STACK=solid
 	source "$repository_root/ci/release/build-identity.sh"
-	[[ $(web_surface_stack public) == solid && $(web_surface_stack admin) == dioxus ]] ||
-		fail 'solid 应只切换已支持的 public'
+	[[ $(web_surface_stack public) == solid && $(web_surface_stack admin) == solid ]] ||
+		fail 'solid 应同时切换 Public 与 Admin'
 	[[ $(web_surface_root public "$repository_root") == "$repository_root/target/web/public" ]] ||
 		fail 'Solid public 目录应为 target/web/public'
-	[[ $(web_surface_root admin "$repository_root") == "$repository_root/target/dx/build/auction-web-admin/web" ]] ||
-		fail '过渡期 admin 目录应保持 Dioxus'
+	[[ $(web_surface_root admin "$repository_root") == "$repository_root/target/web/admin" ]] ||
+		fail 'Solid admin 目录应为 target/web/admin'
 	[[ " ${build_tool_names[*]} " == *' bun '* ]] || fail 'Solid 工具闭集应包含 bun'
 	[[ ${build_tool_providers[bun]-} == bun ]] || fail 'Solid 工具提供者应登记 bun'
 	selection=$(print_web_stack_selection)
-	[[ "$selection" == *'public=solid'* && "$selection" == *'admin=dioxus'* ]] ||
+	[[ "$selection" == *'public=solid'* && "$selection" == *'admin=solid'* ]] ||
 		fail '构建入口应打印两端实际技术栈'
 )
+
+admin_solid_root="$fixture/solid-admin"
+make_solid_payload admin "$admin_solid_root"
+solid_verify admin "$admin_solid_root" >/dev/null || fail 'Admin Solid payload 正例应通过'
 
 solid_sizes=$(
 	export AUCTION_WEB_STACK=solid
@@ -517,18 +526,37 @@ expected_initial_js=$((
 ))
 [[ "$initial_js_bytes" == "$expected_initial_js" ]] || fail 'Solid 首屏 JS 应包含入口与 modulepreload'
 
+admin_solid_sizes=$(
+	export AUCTION_WEB_STACK=solid
+	source "$repository_root/ci/release/build-identity.sh"
+	web_payload_sizes admin "$admin_solid_root"
+)
+read -r admin_initial_js_bytes admin_payload_bytes <<<"$admin_solid_sizes"
+[[ "$admin_initial_js_bytes" =~ ^[0-9]+$ && "$admin_payload_bytes" =~ ^[0-9]+$ ]] ||
+	fail 'Admin Solid 体积测量应返回两个数字'
+
 printf '%s\n' \
 	'schema=auction-web-size-budget/1' \
 	'warn_growth_basis_points=500' \
 	"solid_public_payload_baseline_bytes=$payload_bytes" \
 	"solid_public_payload_max_bytes=$payload_bytes" \
 	"solid_public_initial_js_baseline_bytes=$initial_js_bytes" \
-	"solid_public_initial_js_max_bytes=$initial_js_bytes" >"$fixture/solid-budget"
+	"solid_public_initial_js_max_bytes=$initial_js_bytes" \
+	"solid_admin_payload_baseline_bytes=$admin_payload_bytes" \
+	"solid_admin_payload_max_bytes=$admin_payload_bytes" \
+	"solid_admin_initial_js_baseline_bytes=$admin_initial_js_bytes" \
+	"solid_admin_initial_js_max_bytes=$admin_initial_js_bytes" >"$fixture/solid-budget"
 (
 	export AUCTION_WEB_STACK=solid
 	source "$repository_root/ci/release/build-identity.sh"
 	verify_web_size_budget public "$solid_root" "$fixture/solid-budget"
 ) || fail 'Solid 体积预算正例应通过'
+
+(
+	export AUCTION_WEB_STACK=solid
+	source "$repository_root/ci/release/build-identity.sh"
+	verify_web_size_budget admin "$admin_solid_root" "$fixture/solid-budget"
+) || fail 'Admin Solid 体积预算正例应通过'
 
 sed '/^solid_public_initial_js_baseline_bytes=/d' "$fixture/solid-budget" >"$fixture/solid-budget-missing"
 if (

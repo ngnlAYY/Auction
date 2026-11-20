@@ -877,6 +877,26 @@ mod tests {
         assert!(!exact.headers().contains_key(header::LINK));
     }
 
+    /// Admin 的 Solid 入口与 Public 共用同一份预加载转写规则，不能按 surface 写死 Dioxus。
+    #[tokio::test]
+    async fn admin_entry_aliases_use_solid_modulepreload() {
+        let solid = admin_app::<SolidAssets>(WebScriptPolicy::Solid);
+        let response = solid.clone().oneshot(request("/", None)).await.expect("admin solid entry");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-cache");
+        assert_eq!(
+            response.headers()[header::LINK],
+            concat!(
+                "</assets/index-B2UikXgQ.js>; rel=modulepreload; crossorigin, ",
+                "</assets/rolldown-runtime-DK3Fl9T5.js>; rel=modulepreload; crossorigin, ",
+                "</assets/index-ZX7NKpK-.css>; rel=preload; as=style; crossorigin",
+            )
+        );
+        let exact = solid.oneshot(request("/index.html", None)).await.expect("admin solid index");
+        assert_eq!(exact.status(), StatusCode::OK);
+        assert!(!exact.headers().contains_key(header::LINK));
+    }
+
     /// Dioxus 必须保持旧的 `<link>` 逐条转写：同一 URL 的不同 `as` 都保留，入口脚本不参与。
     #[tokio::test]
     async fn dioxus_entry_links_keep_the_legacy_link_semantics() {

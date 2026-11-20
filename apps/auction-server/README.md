@@ -4,7 +4,7 @@
 
 单文件合并部署：一个可执行文件、一个 systemd unit，在本机以子进程监管 Worker、Admin、Public 三个角色。适合单主机、小规模部署；分体部署（三个 unit + `auction-cli service` 编排）见[ops/README.md](../../ops/README.md)。两种方式不能同时用于同一套配置。
 
-发布构建需要内嵌 feature（发布脚本的 single 变体：`mise run build-single`）。`AUCTION_WEB_STACK=solid` 时 Public 用 Solid、Admin 仍用 Dioxus，合并服务按 `web-embed,web-solid-public` 构建；正式发行仍只产出 Rust 版页面。
+发布构建需要内嵌 feature（发布脚本的 single 变体：`mise run build-single`）。`AUCTION_WEB_STACK=solid` 时 Public 与 Admin 都用 Solid，合并服务按 `web-embed,web-solid-public,web-solid-admin` 构建；正式发行仍只产出 Rust 版页面。
 
 ## feature
 
@@ -12,8 +12,8 @@
 | --- | --- |
 | （都不启用） | 只提供 API；不内嵌页面，首次设置被拒绝 |
 | `web-embed` | Public 与 Admin 都内嵌 Dioxus 版页面（发布脚本的 single 变体） |
-| `web-solid-public` | 只把 Public 切到 Solid 版；Admin 仍为 Dioxus（蕴含 `web-embed`） |
-| `web-solid-admin` | 只把 Admin 与首次设置切到 Solid 版；Public 仍为 Dioxus（蕴含 `web-embed`） |
+| `web-solid-public` | 只把 Public 切到 Solid 版（蕴含 `web-embed`）；只启用它时 Admin 仍是 Dioxus，与 `web-solid-admin` 同启时两端都用 Solid |
+| `web-solid-admin` | 只把 Admin 与首次设置切到 Solid 版（蕴含 `web-embed`）；只启用它时 Public 仍是 Dioxus，与 `web-solid-public` 同启时两端都用 Solid |
 
 合并服务里两个 surface 可以不同技术栈，两个 `web-solid-*` feature 也可同时启用。
 

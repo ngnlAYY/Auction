@@ -5,7 +5,7 @@
 use auction_http::WebScriptPolicy;
 use rust_embed::Embed;
 
-/// 启用 `web-solid` 时读取的 Admin 产物目录；Admin 的 Solid 产物目前还没有构建入口。
+/// 启用 `web-solid` 时读取由 `web-bundle.sh admin` / `bun run build:admin` 写入的 Admin 产物目录。
 #[cfg(feature = "web-solid")]
 #[derive(Embed)]
 #[folder = "../../target/web/admin/public"]

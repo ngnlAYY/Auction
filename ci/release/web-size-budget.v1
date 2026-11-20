@@ -24,3 +24,10 @@ admin_wasm_baseline_bytes=4520796
 admin_wasm_max_bytes=4750000
 admin_payload_baseline_bytes=5294901
 admin_payload_max_bytes=5560000
+# 2026-11-19：Admin 的 Solid 实现接入构建后，在收口的工作树上实跑
+# `AUCTION_WEB_STACK=solid mise run web-build`，按 `web_payload_sizes admin target/web/admin` 实测加入。
+# Admin 目前是单个入口模块（没有按路由分块），initial_js 即整份入口脚本。上限保持在基线约 +5%。
+solid_admin_initial_js_baseline_bytes=1180043
+solid_admin_initial_js_max_bytes=1240000
+solid_admin_payload_baseline_bytes=1935094
+solid_admin_payload_max_bytes=2032000

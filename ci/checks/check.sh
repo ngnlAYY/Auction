@@ -467,8 +467,8 @@ check_i18n() {
 	root=${AUCTION_I18N_ROOT:-$PWD}
 	expected_locales=$(printf '%s\n' en.ftl ja.ftl ko.ftl zh-CN.ftl zh-TW.ftl)
 
-	# 源码清单只枚举一次；三项检查与两套实现都复用它。`web/admin/src` 尚未创建时允许缺失，
-	# 其余目录缺失、读取失败或意外为空都终止。
+	# 源码清单只枚举一次；三项检查与两套实现都复用它。`web/admin/src` 已并入检查，当前仓库必须存在；
+	# 检查器仍对旧检出保留缺失时的兼容分支，其余目录缺失、读取失败或意外为空都终止。
 	i18n_enumerate_files public_surface "Public " "$root/crates/auction-web-public/src" "$root/web/public/src" || return 1
 	if [[ -e "$root/web/admin/src" ]]; then
 		if [[ ! -d "$root/web/admin/src" ]]; then
@@ -653,31 +653,10 @@ check_module_docs() {
 	fi
 }
 
-# Admin 参数页不能依赖后端 crate，只能镜像应用层的热字段闭集；两张表必须逐项同序，
+# Admin 的两套实现都不能依赖后端 crate，只能镜像应用层的热字段闭集；三张表必须逐项同序，
 # 否则参数页会把需要重启的字段标成“立即生效”，或反过来。
 check_hot_fields() {
-	local owner=crates/auction-application/src/ports/admin/runtime_config/hot.rs
-	local mirror=crates/auction-web-admin/src/surface/config/hot_fields.rs
-	local owner_paths mirror_paths
-	owner_paths=$(hot_field_paths WORKER_HOT_FIELD_PATHS "$owner")
-	mirror_paths=$(hot_field_paths HOT_FIELDS "$mirror")
-	if [[ -z "$owner_paths" || -z "$mirror_paths" ]]; then
-		printf '%s\n' "无法从 $owner 或 $mirror 读取热字段表" >&2
-		return 1
-	fi
-	if ! diff <(printf '%s\n' "$owner_paths") <(printf '%s\n' "$mirror_paths") >&2; then
-		printf '%s\n' "热字段表不一致：$owner（<）与 $mirror（>）必须逐项同序" >&2
-		return 1
-	fi
-}
-
-# 输出常量数组内的字符串字面量，每行一个；数组以行首 ]; 结束。
-hot_field_paths() {
-	awk -v name="$1" '
-		$0 ~ "const " name ": " { inside = 1; next }
-		inside && /^\];/ { exit }
-		inside && match($0, /"[^"]+"/) { print substr($0, RSTART, RLENGTH) }
-	' "$2"
+	perl ci/checks/hot-fields.pl
 }
 
 # src 的 #[path] 由计数棘轮（all:#[path]，基线 0）覆盖；tests 不在棘轮范围内，这里单独兜底。

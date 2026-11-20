@@ -176,7 +176,7 @@ description = "本地启动 Public，内嵌页面走 PostgreSQL；页面按 AUCT
 run = "bash ci/release/release.sh run-web public"
 
 [tasks.run-admin]
-description = "本地启动 Admin，内嵌页面走 PostgreSQL；过渡期 Admin 仍为 Dioxus，按实际技术栈选择 feature 与构建号"
+description = "本地启动 Admin，内嵌页面走 PostgreSQL；按 AUCTION_WEB_STACK 选择 Dioxus 或 Solid，Solid 使用当前页面构建号"
 run = "bash ci/release/release.sh run-web admin"
 
 [tasks.run-worker]

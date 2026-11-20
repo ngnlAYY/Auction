@@ -2,7 +2,7 @@
 
 [docs/README.md](../../docs/README.md) · [crates/auction-web-admin/DESIGN.md](DESIGN.md) · [docs/contracts/routes.md](../../docs/contracts/routes.md) · [apps/auction-admin-api/README.md](../../apps/auction-admin-api/README.md)
 
-管理后台：Dioxus 0.7 客户端渲染（CSR）WASM 应用，由 `auction-admin-api` 的 `web-embed` 构建内嵌并同源提供。与公开站点是相互独立的 surface：独立的组件树、路由、样式与译文，不复用 Public 组件，也不导入存储、配置或凭据访问代码。界面默认简体中文。`web-solid` 虽已提供 Admin 的装配能力，但目前没有 Admin 的 Solid 实现，过渡期 Admin 仍只用本 crate。
+管理后台的 Rust 默认实现：Dioxus 0.7 客户端渲染（CSR）WASM 应用，由 `auction-admin-api` 的 `web-embed` 构建内嵌并同源提供。另有 `web/admin` 的 TypeScript + SolidJS 实现，由 `web-solid` 内嵌；两套实现共用样式与译文，但各有独立的组件树与路由。与公开站点也是相互独立的 surface：不复用 Public 组件，也不导入存储、配置或凭据访问代码。界面默认简体中文。
 
 ## 登录与会话
 

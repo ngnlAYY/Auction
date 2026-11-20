@@ -50,7 +50,7 @@ mise run verify      # 运行某个入口
 
 发布入口（`ci/release/release.sh`、`ci/release/web-bundle.sh`）经 [ci/release/build-identity.sh](../release/build-identity.sh) 选择工具：
 
-- 用 `mise which` 解析 `dx`、`wasm-bindgen`、`wasm-opt`、`esbuild` 与 `sccache` 的绝对路径，并要求结果位于该工具自己的 mise 安装目录下（`mise where`）；固定版本没有安装时直接失败，不接受 `PATH` 或 Cargo bin 目录里的同名程序。
+- 用 `mise which` 解析原生 Rust 编译工具 `sccache`。有 Dioxus 页面就解析 `dx`、`wasm-bindgen`、`wasm-opt`、`esbuild`，有 Solid 页面就解析 `bun`。每个路径都必须位于 `mise where` 返回的对应安装目录下。固定版本缺失时直接失败。
 - 把这些路径放到 `PATH` 前部并设置 `NO_DOWNLOADS=1`，`dx` 不会在构建时自行下载工具；同时把 `DX_HOME` 指到 `target/dx-home`，`dx` 因此不会改用它在用户目录里缓存过的旧工具，也不读取用户级 `dx` 设置。
 - 这些二进制的 SHA-256 构成工具身份，参与构建环境指纹；`mise.lock` 参与构建输入指纹。同版本工具重装后字节变化也会让已有制品失效。
 - `sccache` 只在环境变量显式设置 `RUSTC_WRAPPER=sccache` 时启用，并换成 mise 安装的版本；Cargo 配置文件里的包装器一律清空。

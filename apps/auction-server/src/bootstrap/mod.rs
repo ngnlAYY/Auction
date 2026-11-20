@@ -282,6 +282,60 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "web-solid-admin")]
+    #[tokio::test]
+    #[ignore = "需要已构建的 Admin 入口与回环套接字权限"]
+    async fn combined_setup_serves_the_selected_admin_web_stack() {
+        use std::{io::ErrorKind, path::Path, time::Duration};
+
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpStream,
+            time::{sleep, timeout},
+        };
+
+        let index =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/web/admin/public/index.html");
+        let expected = fs::read(index).expect("请先构建所选技术栈的 Admin 入口");
+        let temp = StartupDirectory::new();
+        let output = temp.0.join("config");
+        let mut cli = Cli::parse_from(["auction-server"]);
+        cli.setup_listen =
+            std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+        let request = async {
+            let address = cli.setup_listen;
+            let mut stream = loop {
+                match TcpStream::connect(address).await {
+                    Ok(stream) => break stream,
+                    Err(error) if error.kind() == ErrorKind::ConnectionRefused => {
+                        sleep(Duration::from_millis(10)).await;
+                    }
+                    Err(error) => panic!("无法连接首次设置监听器：{error}"),
+                }
+            };
+            let request =
+                format!("GET /setup HTTP/1.1\r\nhost: {address}\r\nconnection: close\r\n\r\n");
+            stream.write_all(request.as_bytes()).await.unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).await.unwrap();
+            response
+        };
+        let response = tokio::select! {
+            biased;
+            result = super::setup(&cli, &output) => {
+                panic!("首次设置提前退出，错误：{:?}", result.err())
+            }
+            response = timeout(Duration::from_secs(5), request) => response.expect("读取设置页超时"),
+        };
+        let (headers, body) = response.split_once("\r\n\r\n").unwrap();
+        assert!(headers.starts_with("HTTP/1.1 200 "), "{headers}");
+        assert_eq!(body.as_bytes(), expected);
+        assert!(
+            headers.contains("\r\ncontent-security-policy: default-src 'self'; script-src 'self';"),
+            "{headers}"
+        );
+    }
+
     #[tokio::test]
     async fn rejects_database_changed_after_setup_confirmation() {
         let calls = Cell::new(0);

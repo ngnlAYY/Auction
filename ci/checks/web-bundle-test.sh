@@ -18,11 +18,59 @@ fail() {
 fixture=$(mktemp -d)
 trap 'rm -rf -- "$fixture"' EXIT
 
-# 函数级闭集：当前只有 Public 可以切到 Solid，Admin 仍只接受 Dioxus。
+# 比较有序工具名与提供方，防止混合构建漏工具，或改变缺省 Dioxus 指纹的输入顺序。
+assert_build_tools() {
+	local expected=$1 name actual=''
+	# 数组由上面的 source 加载。
+	# shellcheck disable=SC2154
+	for name in "${build_tool_names[@]}"; do
+		actual+="$name=${build_tool_providers[$name]-}"$'\n'
+	done
+	[[ "$actual" == "$expected"$'\n' && ${#build_tool_providers[@]} -eq ${#build_tool_names[@]} ]] ||
+		fail "发布工具集合不正确：$actual"
+}
+
+dioxus_tools=$'dx=cargo:dioxus-cli\nesbuild=http:esbuild\nsccache=sccache\nwasm-bindgen=github:wasm-bindgen/wasm-bindgen\nwasm-opt=github:WebAssembly/binaryen'
+assert_build_tools "$dioxus_tools"
+for solid_surface in public admin; do
+	sed "s/^web_solid_surfaces=.*/web_solid_surfaces=($solid_surface)/" \
+		ci/release/build-identity.sh >"$fixture/build-identity-$solid_surface.sh"
+	(
+		export AUCTION_WEB_STACK=solid
+		# shellcheck source=ci/release/build-identity.sh
+		source "$fixture/build-identity-$solid_surface.sh"
+		[[ $(web_surface_stack "$solid_surface") == solid ]] || fail "$solid_surface 应使用 Solid"
+		[[ $(web_stack_marker) != $'public=solid\nadmin=solid' ]] || fail '另一端应使用 Dioxus'
+		assert_build_tools "$dioxus_tools"$'\nbun=bun'
+	)
+done
+
+# 替身只提供纯 Solid 候选工作流安装的页面工具与 Rust 包装器。
+mkdir -p "$fixture"/tools/{bun,sccache}/bin
+printf '#!/usr/bin/env bash\nprintf "bun fixture\\n"\n' >"$fixture/tools/bun/bin/bun"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$fixture/tools/sccache/bin/sccache"
+chmod +x "$fixture/tools/"*/bin/*
+(
+	export AUCTION_WEB_STACK=solid RUSTC_WRAPPER=sccache
+	source ci/release/build-identity.sh
+	mise() {
+		case "$*" in
+		'where bun' | 'where sccache') printf '%s/tools/%s\n' "$fixture" "$2" ;;
+		'which bun' | 'which sccache') printf '%s/tools/%s/bin/%s\n' "$fixture" "$2" "$2" ;;
+		*) return 1 ;;
+		esac
+	}
+	assert_build_tools $'sccache=sccache\nbun=bun'
+	configure_build_tools || fail '纯 Solid 应能使用 mise 的 sccache'
+	[[ "$RUSTC_WRAPPER" == "$fixture/tools/sccache/bin/sccache" && -n ${SCCACHE_SERVER_UDS-} ]] ||
+		fail '纯 Solid 未固定 sccache 路径及 daemon 身份'
+)
+
+# 函数级闭集：两端都可以切换 Dioxus 与 Solid，未知 surface 或技术栈仍被拒绝。
 web_bundle_stack_supported public dioxus || fail 'public/dioxus 应受支持'
 web_bundle_stack_supported public solid || fail 'public/solid 应受支持'
 web_bundle_stack_supported admin dioxus || fail 'admin/dioxus 应受支持'
-if web_bundle_stack_supported admin solid; then fail 'admin/solid 在当前批次应被拒绝'; fi
+web_bundle_stack_supported admin solid || fail 'admin/solid 应受支持'
 if web_bundle_stack_supported public other; then fail '未知技术栈应被拒绝'; fi
 
 # 发布 feature 由逐 surface 的实际组合得出；缺省必须与原有常量逐字符相同。
@@ -36,14 +84,14 @@ solid_features=$(AUCTION_WEB_STACK=solid bash -c 'source "$1/ci/release/build-id
 	web_cargo_features public-api
 	web_cargo_features admin-api
 	web_cargo_features server' _ "$repository_root")
-[[ "$solid_features" == $'auction-public-api/web-solid\nauction-admin-api/web-embed\nauction-server/web-embed,auction-server/web-solid-public' ]] ||
+[[ "$solid_features" == $'auction-public-api/web-solid\nauction-admin-api/web-solid\nauction-server/web-embed,auction-server/web-solid-public,auction-server/web-solid-admin' ]] ||
 	fail "solid 组合的 cargo feature 不正确：$solid_features"
 [[ $(bash ci/release/release.sh web-feature public) == web-embed &&
 	$(bash ci/release/release.sh web-feature admin) == web-embed ]] ||
 	fail '缺省运行任务应选择 web-embed'
 [[ $(AUCTION_WEB_STACK=solid bash ci/release/release.sh web-feature public) == web-solid &&
-	$(AUCTION_WEB_STACK=solid bash ci/release/release.sh web-feature admin) == web-embed ]] ||
-	fail 'solid 运行任务应让 Public 用 web-solid、Admin 用 web-embed'
+	$(AUCTION_WEB_STACK=solid bash ci/release/release.sh web-feature admin) == web-solid ]] ||
+	fail 'solid 运行任务应让 Public 与 Admin 都用 web-solid'
 
 # 原生制品的输入指纹必须随实际技术栈变化；缺省不扫描 web/，Solid 加入 web/ 与栈标记。
 default_inputs=$(bash -c 'source "$1/ci/release/build-identity.sh"; build_inputs_fingerprint' _ "$repository_root") ||
@@ -245,10 +293,11 @@ sed "s|$explicit_fixture|<fixture>|g" "$explicit_fixture/calls.log" >"$fixture/e
 cmp -s "$fixture/default-calls" "$fixture/explicit-calls" ||
 	fail '缺省与显式 dioxus 的 dx 调用应完全一致'
 
-# 让身份层把 Admin 也标成 Solid，验证 web-bundle 自己仍在清理前拒绝。
+# 身份层把两端都标成 Solid，但让构建入口的闭集拒绝 admin:solid，验证它在清理前失败。
 unsupported=$fixture/unsupported
 make_bundle_fixture "$unsupported"
-printf '%s\n' 'web_solid_surfaces+=(admin)' >>"$unsupported/ci/release/build-identity.sh"
+sed -i 's/public:dioxus | public:solid | admin:dioxus | admin:solid/public:dioxus | public:solid | admin:dioxus/' \
+	"$unsupported/ci/release/web-bundle.sh"
 for surface in public admin; do
 	mkdir -p "$unsupported/target/web/$surface" \
 		"$unsupported/target/dx/build/auction-web-$surface/web"
@@ -263,7 +312,7 @@ if diagnostic=$(
 				bash "$unsupported/ci/release/web-bundle.sh" public
 	) 2>&1
 ); then
-	fail '从 public 开始遇到尚未支持的 admin=solid 应失败'
+	fail '从 public 开始遇到构建入口拒绝的 admin=solid 应失败'
 fi
 [[ "$diagnostic" == *'尚未支持的 Web 技术栈组合：admin=solid'* ]] ||
 	fail "未支持组合的诊断不明确：$diagnostic"
@@ -576,28 +625,21 @@ run_release_fixture "$reuse" solid "$reuse/solid.out" || fail 'Solid 候选构�
 [[ $(wc -l <"$reuse/calls.log") -eq 2 ]] || fail '技术栈变化后应重新编译'
 info="$reuse/target/dist/artifacts/embedded/BUILD-INFO"
 grep -qx 'web_stack_public=solid' "$info" || fail 'Solid 回执未记录 Public 技术栈'
-grep -qx 'web_stack_admin=dioxus' "$info" || fail 'Solid 回执未记录 Admin 技术栈'
-grep -qx 'features=auction-public-api/web-solid,auction-admin-api/web-embed' "$info" ||
+grep -qx 'web_stack_admin=solid' "$info" || fail 'Solid 回执未记录 Admin 技术栈'
+grep -qx 'features=auction-public-api/web-solid,auction-admin-api/web-solid' "$info" ||
 	fail 'Solid 回执未记录实际 feature'
 
-# 混合组合重建稳定页面后，原生回执仍匹配也不能复用；两端当前 payload 必须与制品一致。
+# 当前技术栈的稳定页面被改写成另一摘要后，原生回执仍匹配也不能复用；两端当前 payload 必须与制品一致。
 mixed=$fixture/reuse-mixed
 make_reuse_release_fixture "$mixed"
 run_release_fixture "$mixed" default "$mixed/default.out" || fail '混合场景的缺省构建应成功'
 [[ $(wc -l <"$mixed/web-bundle.log") -eq 2 ]] || fail '缺省构建应生成两端页面'
-(
-	cd "$mixed"
-	export AUCTION_WEB_STACK=solid
-	FIXTURE_ROOT=$mixed WEB_BUNDLE_CALL_LOG="$mixed/web-bundle.log" \
-		PATH="$mixed/bin:$PATH" bash ci/release/web-bundle.sh public
-	FIXTURE_ROOT=$mixed WEB_BUNDLE_CALL_LOG="$mixed/web-bundle.log" \
-		PATH="$mixed/bin:$PATH" bash ci/release/web-bundle.sh admin
-)
-[[ $(wc -l <"$mixed/web-bundle.log") -eq 4 ]] || fail 'Solid web-build 应重写两端稳定页面'
+printf '%064d\n' 6 >"$mixed/target/dx/build/auction-web-public/web/PAYLOAD-SHA256"
+printf '%064d\n' 7 >"$mixed/target/dx/build/auction-web-admin/web/PAYLOAD-SHA256"
 run_release_fixture "$mixed" default "$mixed/mixed-after.out" || fail '混合页面后的缺省构建应成功'
 [[ $(<"$mixed/mixed-after.out") != *'复用'* ]] || fail '混合页面摘要与制品不一致时不得复用'
 [[ $(wc -l <"$mixed/calls.log") -eq 2 ]] || fail '混合页面不一致时应重新编译'
-[[ $(wc -l <"$mixed/web-bundle.log") -eq 6 ]] || fail '混合页面不一致时应重新生成两端页面'
+[[ $(wc -l <"$mixed/web-bundle.log") -eq 4 ]] || fail '混合页面不一致时应重新生成两端页面'
 
 # 只恢复原生制品、没有稳定页面目录时同样不能复用。
 missing=$fixture/reuse-missing
@@ -622,6 +664,20 @@ run_release_fixture "$missing_solid" solid "$missing_solid/missing-after.out" ||
 	fail 'Solid 稳定 Public 页面缺失时缺少重建诊断'
 [[ $(wc -l <"$missing_solid/calls.log") -eq 2 ]] || fail 'Solid 稳定页面缺失时应重新编译'
 [[ $(wc -l <"$missing_solid/web-bundle.log") -eq 4 ]] || fail 'Solid 稳定页面缺失时应重新生成两端页面'
+
+# Solid 的稳定 Admin 目录（target/web/admin）缺失时同样不能复用。
+missing_solid_admin=$fixture/reuse-missing-solid-admin
+make_reuse_release_fixture "$missing_solid_admin"
+run_release_fixture "$missing_solid_admin" solid "$missing_solid_admin/default.out" ||
+	fail 'Solid Admin 缺失页面场景的首次构建应成功'
+rm -rf "$missing_solid_admin/target/web/admin"
+run_release_fixture "$missing_solid_admin" solid "$missing_solid_admin/missing-after.out" ||
+	fail 'Solid Admin 缺失页面后的构建应成功'
+[[ $(<"$missing_solid_admin/missing-after.out") != *'复用'* ]] || fail 'Solid 稳定 Admin 页面缺失时不得复用'
+[[ $(<"$missing_solid_admin/missing-after.out") == *'当前 Admin 页面 payload 缺失或无效'* ]] ||
+	fail 'Solid 稳定 Admin 页面缺失时缺少重建诊断'
+[[ $(wc -l <"$missing_solid_admin/calls.log") -eq 2 ]] || fail 'Solid Admin 页面缺失时应重新编译'
+[[ $(wc -l <"$missing_solid_admin/web-bundle.log") -eq 4 ]] || fail 'Solid Admin 页面缺失时应重新生成两端页面'
 
 # 运行任务先取 feature，非法开关不能把缺值传给 cargo；Solid 还要注入页面构建号。
 run_fixture() {

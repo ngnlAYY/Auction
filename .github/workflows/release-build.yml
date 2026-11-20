@@ -47,14 +47,19 @@ jobs:
           public_stack=$(web_surface_stack public)
           admin_stack=$(web_surface_stack admin)
           stack_id="public-${public_stack}_admin-${admin_stack}"
+          tools='rust,sccache'
+          if web_stack_uses_dioxus; then
+            tools+=",cargo:dioxus-cli,github:wasm-bindgen/wasm-bindgen,github:WebAssembly/binaryen,http:esbuild"
+          fi
+          if web_stack_uses_solid; then
+            tools+=',bun'
+          fi
           if web_stack_uses_solid; then
             uses_solid=true
             suffix=-solid
-            tools='rust,sccache,cargo:dioxus-cli,github:wasm-bindgen/wasm-bindgen,github:WebAssembly/binaryen,http:esbuild,bun'
           else
             uses_solid=false
             suffix=
-            tools='rust,sccache,cargo:dioxus-cli,github:wasm-bindgen/wasm-bindgen,github:WebAssembly/binaryen,http:esbuild'
           fi
           if [[ ${GITHUB_REF_TYPE:-} == tag ]] && web_stack_uses_solid; then
             printf 'Solid 的候选构建请在分支上触发；正式发行只产出 Rust 版页面。\n' >&2

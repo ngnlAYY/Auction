@@ -3,7 +3,7 @@
 HentaiVerse 装备拍卖服务：后端与默认前端用 Rust 实现，玩家在网站或 E-Hentai 论坛出价，通过游戏内 MoogleMail 寄售装备、注册账号、付款与收货；运营人员在管理后台处理场次、凭据、投递与结算。
 
 - **后端**：三个可独立部署的进程——Public API、Admin API、Worker——加运维命令行 `auction-cli`；也可用 `auction-server` 单文件合并运行。
-- **前端**：默认是 Public 与 Admin 两个 Dioxus 0.7 CSR（WASM）单页应用，内嵌在对应后端二进制中同源提供；五种界面语言。`web/` 下另有 TypeScript + SolidJS 实现（目前只有 Public），由 `AUCTION_WEB_STACK=solid` 选择、`web-solid` 内嵌；正式发布仍只产出 Rust 版，见 [web/README.md](web/README.md)。
+- **前端**：默认是 Public 与 Admin 两个 Dioxus 0.7 CSR（WASM）单页应用，内嵌在对应后端二进制中同源提供；五种界面语言。`web/` 下另有 Public 与 Admin 的 TypeScript + SolidJS 实现，由 `AUCTION_WEB_STACK=solid` 选择、各自的 `web-solid` 内嵌；正式发布仍只产出 Rust 版，见 [web/README.md](web/README.md)。
 - **存储**：PostgreSQL 18 是唯一事实来源。
 - **平台**：原生程序仅支持 Linux x86_64。
 
@@ -54,7 +54,7 @@ mise run test-db             # 显式 PG18 集成测试（隔离数据库与角�
 mise run web-prepare         # 安装 web/ 的 bun 依赖（Solid 构建或 web 门禁前执行）
 mise run web-test            # web/ 的行为测试
 mise run web-build           # 构建默认的 Dioxus 页面 payload（工具见 ci/tools/README.md）
-AUCTION_WEB_STACK=solid mise run web-build  # 构建 Solid Public 页面 payload
+AUCTION_WEB_STACK=solid mise run web-build  # 构建 Solid Public/Admin 页面 payload
 mise run web-size            # 只核对两端 Web payload 体积预算（不构建，见 ci/README.md）
 mise run run-public          # 按 AUCTION_WEB_STACK（缺省 dioxus）选择内嵌页面启动；run-worker 不内嵌页面
 mise run db-migrate <配置目录>

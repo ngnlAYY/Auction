@@ -415,6 +415,8 @@ mod tests {
     const SOLID_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' \
                              'unsafe-inline'; object-src 'none'; base-uri 'self'; \
                              form-action 'self'; frame-ancestors 'none'";
+    const SETUP_PAGE_REQUEST: &str =
+        "GET /setup HTTP/1.1\r\nhost: 127.0.0.1:8091\r\nconnection: close\r\n\r\n";
     const TARGET_MISMATCH_RESPONSE: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../auction-contracts/tests/fixtures/admin/setup-confirm-target-mismatch.json"
@@ -532,23 +534,11 @@ mod tests {
         });
         client.write_all(request.as_bytes()).await.expect("setup request write");
 
-        let response = tokio::time::timeout(Duration::from_secs(1), async {
-            let mut response = Vec::new();
-            let mut buffer = [0; 1024];
-            loop {
-                let length = client.read(&mut buffer).await.expect("setup response read");
-                if length == 0 {
-                    break;
-                }
-                response.extend_from_slice(&buffer[..length]);
-                if response.windows(4).any(|window| window == b"\r\n\r\n") {
-                    break;
-                }
-            }
-            response
-        })
-        .await
-        .expect("setup response timeout");
+        let mut response = Vec::new();
+        tokio::time::timeout(Duration::from_secs(1), client.read_to_end(&mut response))
+            .await
+            .expect("setup response timeout")
+            .expect("setup response read");
         server.abort();
         String::from_utf8(response).expect("utf-8 setup response")
     }
@@ -607,24 +597,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn setup_router_serves_solid_assets_without_cache_and_with_modulepreload() {
-        let request = "GET /setup HTTP/1.1\r\nhost: 127.0.0.1:8091\r\nconnection: close\r\n\r\n";
-        let solid =
-            raw_setup_response::<SolidSetupAssets>(setup_state(), WebScriptPolicy::Solid, request)
-                .await;
-        assert_eq!(response_status(&solid), StatusCode::OK.as_u16());
-        let link = response_header(&solid, "link").expect("Solid 入口必须声明 modulepreload");
-        assert!(
-            link.contains("</assets/index-B2UikXgQ.js>; rel=modulepreload; crossorigin"),
-            "{link}"
+    async fn setup_router_serves_the_solid_entry_with_its_security_and_preload_headers() {
+        let response = raw_setup_response::<SolidSetupAssets>(
+            setup_state(),
+            WebScriptPolicy::Solid,
+            SETUP_PAGE_REQUEST,
+        )
+        .await;
+        assert_eq!(response_status(&response), StatusCode::OK.as_u16());
+        let (_, body) = response.split_once("\r\n\r\n").expect("设置页响应必须包含正文");
+        assert_eq!(body.as_bytes(), SOLID_INDEX);
+        assert_eq!(response_header(&response, "content-security-policy"), Some(SOLID_CSP));
+        assert_eq!(response_header(&response, "cache-control"), Some("no-store"));
+        assert_eq!(
+            response_header(&response, "link"),
+            Some(concat!(
+                "</assets/index-B2UikXgQ.js>; rel=modulepreload; crossorigin, ",
+                "</assets/rolldown-runtime-DK3Fl9T5.js>; rel=modulepreload; crossorigin, ",
+                "</assets/index-ZX7NKpK-.css>; rel=preload; as=style; crossorigin",
+            ))
         );
-        assert!(
-            link.contains("</assets/rolldown-runtime-DK3Fl9T5.js>; rel=modulepreload; crossorigin"),
-            "{link}"
-        );
-        // 首次设置的所有响应都由门禁出口改为 no-store，静态资源也不能被边缘或浏览器复用。
-        assert_eq!(response_header(&solid, "cache-control"), Some("no-store"));
+    }
 
+    #[tokio::test]
+    async fn setup_router_disables_asset_caching_and_keeps_dioxus_preload_semantics() {
         let asset_request = "GET /assets/index-B2UikXgQ.js HTTP/1.1\r\nhost: 127.0.0.1:8091\r\nconnection: close\r\n\r\n";
         let asset = raw_setup_response::<SolidSetupAssets>(
             setup_state(),
@@ -637,9 +633,12 @@ mod tests {
             assert_eq!(response_header(&asset, header), Some("no-store"), "{header}");
         }
 
-        let dioxus =
-            raw_setup_response::<SolidSetupAssets>(setup_state(), WebScriptPolicy::Dioxus, request)
-                .await;
+        let dioxus = raw_setup_response::<SolidSetupAssets>(
+            setup_state(),
+            WebScriptPolicy::Dioxus,
+            SETUP_PAGE_REQUEST,
+        )
+        .await;
         assert_eq!(response_status(&dioxus), StatusCode::OK.as_u16());
         // Dioxus 策略只转写 `<link>`，同一份入口文档据此只能得到样式表预加载。
         assert_eq!(

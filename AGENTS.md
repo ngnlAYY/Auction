@@ -21,7 +21,7 @@
 - `apps/` 下五个可部署程序：`auction-public-api`（Public 竞价站点）、`auction-admin-api`（Admin 后台与分体部署首次设置）、`auction-worker`（生命周期、结算履约、MoogleMail、论坛、告警等全部后台任务）、`auction-cli`（配置检查、部署编排、迁移、备份恢复与业务运维），以及可选的 `auction-server`（单主机上以子进程监管前三个角色）。
 - 工具与命令入口由 [mise](https://mise.jdx.dev) 管理：版本在 `mise.toml`、校验和在 `mise.lock`，一律取上游原始版本，不携带补丁；命令入口是 `mise run <任务>`。清单见[ci/tools/README.md](ci/tools/README.md)。
 - Rust 工作区，语言版次（edition）为 2024——这是 Rust 的版次编号，不是年份：工具链固定为 1.100.0（`rust-toolchain.toml`，mise 读取该文件），MSRV（`Cargo.toml` 的 `rust-version`）等于工具链版本，不为更旧的 Rust 保留兼容，新稳定的语言特性与标准库接口可以直接使用（`rust-version` 门禁核对两处一致）。后端用 axum 与 sqlx；前端默认是两个 Dioxus 0.7 CSR 单页应用，编译到 `wasm32-unknown-unknown`，由后端以 `web-embed` 内嵌；同一内嵌能力加 `web-solid` 时改嵌 Solid 产物。
-- 页面另有一套 TypeScript 7 + SolidJS 2.0 实现，放在 `web/`（bun 管理依赖），目前只有 Public，已通过 `web-solid` 接入内嵌。构建由 `AUCTION_WEB_STACK` 选择技术栈：未设置或 `dioxus` 使用 Rust 版，过渡期 `solid` 只把 Public 切到 Solid、Admin 仍用 Dioxus；正式发布与部署仍只有 Rust 版，Solid 只用于本地与分支上的手动候选构建。
+- 页面另有一套 TypeScript 7 + SolidJS 2.0 实现，放在 `web/`（bun 管理依赖），Public 与 Admin 都已通过各自的 `web-solid` 接入内嵌。构建由 `AUCTION_WEB_STACK` 选择技术栈：未设置或 `dioxus` 两端都使用 Rust 版，`solid` 两端都使用 Solid 版；正式发布与部署仍只有 Rust 版，Solid 只用于本地与分支上的手动候选构建。
 - 原生程序只支持 Linux x86_64，装配根在其他平台编译期报错；通用制品不使用 `target-cpu=native`。
 - PostgreSQL 18 是唯一数据库后端与唯一事实来源，没有独立缓存进程。未配置数据库时进程以运行期骨架模式启动，相关接口返回“能力不可用”；不存在“无数据库”的编译形态。
 - 普通启动从不隐式迁移。迁移只经 `auction-cli db migrate`、`auction-cli service start/restart`（停机门禁后）与合并部署首次初始化（网页明确确认后的专用空库）执行。
@@ -122,7 +122,7 @@
 
 - Public/Admin 各有一套独立的 Dioxus CSR SPA，作为默认实现，各自拥有路由、译文与资源。不启用 SSR、hydration 或 fullstack；Rust 实现不引入 JavaScript 框架、TypeScript 或 npm 运行时依赖，`dx` 构建时使用的 esbuild 是唯一例外。
 - `web/` 是第二套实现（TypeScript + SolidJS，同样是纯客户端渲染），规则以[web/README.md](web/README.md)为准，运行期依赖限于该文件列出的几项。两套实现共用样式表（`crates/auction-web-shared/style`、各 surface 的 `assets/`）与译文（`i18n/*.ftl`）：改这些共用文件会同时影响两套实现，改完两边都要核对。Solid 版与 Rust 版有意不同的地方逐项登记在 web/README.md 的差异表里，没有登记的行为应保持一致。
-- 技术栈开关只有 `ci/release/build-identity.sh` 一个解析点：`AUCTION_WEB_STACK` 取 `dioxus`（缺省）或 `solid`，换算成每个 surface 的实际技术栈与 `web-embed`/`web-solid` feature，构建、运行、体积预算与发布回执都复用它。当前只有 Public 支持 Solid；非法取值在加载身份脚本时失败。
+- 技术栈开关只有 `ci/release/build-identity.sh` 一个解析点：`AUCTION_WEB_STACK` 取 `dioxus`（缺省）或 `solid`，按已支持 Solid 的 surface 清单换算成每端的实际技术栈与 `web-embed`/`web-solid` feature，构建、运行、体积预算与发布回执都复用它。Public 与 Admin 都支持 Solid；非法取值在加载身份脚本时失败。
 - `mise run web-build` 用 `dx bundle` 以 `wasm-release` profile 构建默认的 Dioxus 产物，复制到稳定目录后由后端 `web-embed` 内嵌；Solid 产物由 `AUCTION_WEB_STACK=solid` 构建，由 `web-solid` 内嵌。未构建时后端仍可编译，页面路由返回 503。只有显式内嵌 feature（`web-embed` 或 `web-solid`）才内嵌资源，两者都未启用时使用固定空资源目录；Public 二进制不得包含 Admin 资源，反之亦然。
 - 正式发行（`v<版本>` tag）只产出 Rust 版页面：CI 的 tag 运行不传 `web_stack`，发布脚本在 `GITHUB_ACTIONS=true` 且 `GITHUB_REF_TYPE=tag` 时拒绝任一端为 Solid；在 tag 上手动触发候选构建并选择 `solid` 也会在安装工具前失败，候选构建请在分支上触发。分支上的手动候选构建可选择 `solid`，候选包不可部署。
 - 浏览器只消费 `auction-contracts` DTO；改变状态的动作携带 `command_id`，结果未知时只允许原样重试。不在浏览器重建业务状态机。

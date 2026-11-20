@@ -2,9 +2,8 @@
 # release.sh 与 web-bundle.sh 共用的函数库，在仓库根目录 source：工具选择、构建身份指纹、
 # BUILD-INFO 读取及 Web payload 门禁。调用方自行决定何时冻结身份，两个入口对同一源码给出同一指纹。
 
-# 已支持 Solid 的 surface：选择 solid 时只有这些 surface 换用 TypeScript 产物，其余仍是 Dioxus。
-# Admin 的 Solid 版完成后才把它加入这里。
-web_solid_surfaces=(public)
+# 已支持 Solid 的 surface：选择 solid 时这些 surface 换用 TypeScript 产物，其余仍是 Dioxus。
+web_solid_surfaces=(public admin)
 
 # 技术栈开关只在这里解析一次；其余函数与后续消费点一律经 web_surface_stack 取逐 surface 的实际组合。
 web_stack_selection=${AUCTION_WEB_STACK-dioxus}
@@ -73,7 +72,8 @@ web_stack_marker() {
 }
 
 # 发布工具的闭集：二进制名与提供它的 mise 工具。全部由 mise 按 mise.toml 的固定版本安装，
-# 下载校验和记录在 mise.lock。工具集合取两端实际技术栈的并集：Solid 用 bun，Dioxus 用其余工具。
+# 下载校验和记录在 mise.lock。原生 Rust 编译始终登记 sccache；页面工具按两端实际技术栈取并集。
+# 有 Dioxus 时沿用原有工具顺序，保持工具身份的输入顺序。
 build_dioxus_tool_names=(dx esbuild sccache wasm-bindgen wasm-opt)
 web_solid_tool_names=(bun)
 build_tool_names=()
@@ -90,6 +90,9 @@ if web_stack_uses_dioxus; then
 	for name in "${build_dioxus_tool_names[@]}"; do
 		build_tool_providers[$name]=${build_dioxus_tool_providers[$name]}
 	done
+else
+	build_tool_names+=(sccache)
+	build_tool_providers[sccache]=${build_dioxus_tool_providers[sccache]}
 fi
 if web_stack_uses_solid; then
 	build_tool_names+=("${web_solid_tool_names[@]}")
@@ -175,7 +178,7 @@ configure_build_tools() {
 	done
 	export PATH="$tools_path$PATH" NO_DOWNLOADS=1
 	# dx 会优先使用自己数据目录里缓存过的 wasm-opt 与 esbuild，也会读取那里的用户级设置；把数据目录
-	# 指到 target 下的专用目录，让它只能取上面的固定版本。过渡期仍有 Dioxus surface 时都要这样做。
+	# 指到 target 下的专用目录，让它只能取上面的固定版本。仍有 Dioxus surface 时都要这样做。
 	if web_stack_uses_dioxus; then
 		export DX_HOME="$PWD/target/dx-home"
 	fi

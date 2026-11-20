@@ -67,7 +67,7 @@ auction-domain（纯领域规则）
 | [crates/auction-time/README.md](../crates/auction-time/README.md) | 基础类型 | 各层与两个 Dioxus 前端共用的 UTC 时刻、时长、文本格式与本地墙上时间换算（可编译到 wasm32） |
 | [crates/auction-web-shared/README.md](../crates/auction-web-shared/README.md) | 前端 | 两个 Dioxus 前端共用的浏览器机制、组件与设计 token；共享样式与设计地基也供 `web/` 使用 |
 | [crates/auction-web-public/README.md](../crates/auction-web-public/README.md) / [crates/auction-web-admin/README.md](../crates/auction-web-admin/README.md) | 前端 | 公开站点 / 管理后台（Dioxus 0.7 CSR） |
-| [web/README.md](../web/README.md) | 前端 | 公开站点的第二套实现（TypeScript 7 + SolidJS 2.0，纯客户端渲染）；目前只有 Public |
+| [web/README.md](../web/README.md) | 前端 | Public 与 Admin 的第二套实现（TypeScript 7 + SolidJS 2.0，纯客户端渲染） |
 | [crates/auction-test-support/README.md](../crates/auction-test-support/README.md) | 测试 | 只进 `dev-dependencies` 的 MoogleMail 与论坛回环替身，回放脱敏的真实页面 |
 
 ### 共享 helper 归属

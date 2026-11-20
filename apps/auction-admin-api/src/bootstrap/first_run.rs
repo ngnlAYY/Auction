@@ -114,3 +114,75 @@ pub(super) async fn run(options: SetupOptions) -> anyhow::Result<()> {
         bail!("首次设置需要启用 web-embed 的 PostgreSQL 发布构建");
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "web-embed")]
+mod tests {
+    use std::{fs, io::ErrorKind, path::Path, time::Duration};
+
+    use auction_setup::FirstRunPolicy;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpStream,
+        time::{sleep, timeout},
+    };
+
+    use super::{SetupOptions, run};
+
+    #[tokio::test]
+    #[ignore = "需要已构建的 Admin 入口与空闲的回环端口 8091"]
+    async fn split_setup_serves_the_selected_admin_web_stack() -> anyhow::Result<()> {
+        let (directory, script_src) = if cfg!(feature = "web-solid") {
+            ("target/web/admin/public", "script-src 'self'")
+        } else {
+            (
+                "target/dx/build/auction-web-admin/web/public",
+                "script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'",
+            )
+        };
+        let index =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(directory).join("index.html");
+        let expected = fs::read(index).expect("请先构建所选技术栈的 Admin 入口");
+        let options = SetupOptions {
+            output_dir: std::env::temp_dir().join(uuid::Uuid::new_v4().to_string()),
+            control_group: "auction".to_owned(),
+            control_uid: 1000,
+        };
+        let address = FirstRunPolicy::default().listen;
+        let request = async {
+            let mut stream = loop {
+                match TcpStream::connect(address).await {
+                    Ok(stream) => break stream,
+                    Err(error) if error.kind() == ErrorKind::ConnectionRefused => {
+                        sleep(Duration::from_millis(10)).await;
+                    }
+                    Err(error) => panic!("无法连接首次设置监听器：{error}"),
+                }
+            };
+            let request =
+                format!("GET /setup HTTP/1.1\r\nhost: {address}\r\nconnection: close\r\n\r\n");
+            stream.write_all(request.as_bytes()).await.unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).await.unwrap();
+            response
+        };
+        let response = tokio::select! {
+            biased;
+            result = run(options) => {
+                result?;
+                anyhow::bail!("首次设置在响应前退出");
+            }
+            response = timeout(Duration::from_secs(5), request) => response.expect("读取设置页超时"),
+        };
+        let (headers, body) = response.split_once("\r\n\r\n").unwrap();
+        assert!(headers.starts_with("HTTP/1.1 200 "), "{headers}");
+        assert_eq!(body.as_bytes(), expected);
+        assert!(
+            headers.contains(&format!(
+                "\r\ncontent-security-policy: default-src 'self'; {script_src};"
+            )),
+            "{headers}"
+        );
+        Ok(())
+    }
+}

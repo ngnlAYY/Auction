@@ -35,11 +35,10 @@ web_build_inputs_unchanged() {
 		"$current_build_id" == "$AUCTION_BUILD_ID" ]]
 }
 
-# 当前批次的闭集：Public 可以切换 Solid，Admin 只有 Dioxus；未来在脚本支持 Admin 前
-# 即使身份层先放开了它，这里也必须在任何清理或构建之前失败。
+# 两端都支持 Dioxus 与 Solid；未知 surface 或技术栈必须在任何清理或构建之前失败。
 web_bundle_stack_supported() {
 	case "$1:$2" in
-	public:dioxus | public:solid | admin:dioxus) return 0 ;;
+	public:dioxus | public:solid | admin:dioxus | admin:solid) return 0 ;;
 	*) return 1 ;;
 	esac
 }

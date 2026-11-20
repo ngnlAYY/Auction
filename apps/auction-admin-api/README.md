@@ -10,7 +10,7 @@
 | --- | --- |
 | （都不启用） | 只提供 API；不内嵌 Admin 页面，首次设置入口不可用 |
 | `web-embed` | 内嵌 Dioxus 版 Admin 页面产物，首次设置也依赖它 |
-| `web-solid` | 内嵌 Solid 版 `target/web/admin/public` 的产物（蕴含 `web-embed`），首次设置页随 Admin 一起切换；目前尚无 Admin 的 Solid 产物，未构建时页面路由返回 503 |
+| `web-solid` | 内嵌 Solid 版 `target/web/admin/public` 的产物（蕴含 `web-embed`），首次设置页随 Admin 一起切换；未构建时页面路由返回 503 |
 
 ## 启动模式
 
@@ -23,7 +23,7 @@
 
 首次设置需要 `web-embed` 构建，流程见[crates/auction-setup/README.md](../../crates/auction-setup/README.md)；其他参数一律拒绝。`ops/config/admin.toml` 与 `auction-config/admin.toml` 是相对工作目录的运行配置位置，仓库模板位于 [ops/config/examples](../../ops/config/examples)。
 
-本地运行可用 `mise run run-admin`：缺省使用 `web-embed`（Dioxus），过渡期 `AUCTION_WEB_STACK=solid` 也仍为 Admin 选择 Dioxus；任务按实际技术栈选择 feature，Solid surface 会注入页面构建号。
+本地运行可用 `mise run run-admin`：缺省使用 `web-embed`（Dioxus），`AUCTION_WEB_STACK=solid` 改为 `web-solid`；任务按实际技术栈选择 feature，Solid surface 会注入页面构建号。
 
 ## 正常启动
 

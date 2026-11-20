@@ -1,6 +1,6 @@
 # web — 浏览器应用工作区
 
-Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编码规则。两个应用都是纯客户端渲染的单页应用，用 SolidJS 2.0 编写，由 Vite 打包；目前只有 Public 的产物经后端以 `web-solid` 内嵌分发，Admin 仍由 Rust 版提供。
+Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编码规则。两个应用都是纯客户端渲染的单页应用，用 SolidJS 2.0 编写，由 Vite 打包；两端的产物都经后端各自的 `web-solid` 内嵌分发。
 
 本文是 `web/` 下全部代码的规则来源。业务规则、路由与数据契约仍以 [docs/contracts](../docs/contracts) 与 [docs/business-rules.md](../docs/business-rules.md) 为准。
 
@@ -32,8 +32,9 @@ Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编
 | `bun run test` | 单元测试（`bun test`）；测试文件与被测模块同目录，以 `.test.ts` 结尾 |
 | `bun run format` | 按 Biome 规则改写格式并应用安全修复 |
 | `bun run build:public` | 生产构建，产物写入 `target/web/public/public` |
-| `bun run build:admin` | 预留（Admin 的页面入口尚未并入） |
+| `bun run build:admin` | 生产构建，产物写入 `target/web/admin/public` |
 | `bun run dev:public` | 启动 Public 开发服务器；`/favicon.ico` 由仅对 `serve` 生效的插件映射到共享 SVG |
+| `bun run dev:admin` | 启动 Admin 开发服务器；`/favicon.ico` 同样映射到共享 SVG |
 
 包边界由 `web/tooling/check-boundaries.ts` 用 TypeScript 编译器解析语法树检查，规则见上文目录表：`contracts` 不导入其他三个包，`shared` 只可导入 `contracts` 与自身，`public`/`admin` 互不导入且只能再导入 `contracts` 与 `shared`，四个包都不导入 `web/tooling/**`、`web/` 里四个包之外的源码，以及仓库里 `web/` 之外的源码。说明符只接受闭集：相对路径（`./`、`../` 开头，或表示目录入口的 `.`、`..`）（含反斜杠的路径违规）、[`web/tooling/boundary-rules.ts`](tooling/boundary-rules.ts) 中登记的 `@auction/contracts/*` 与 `@auction/web-shared/*` 两个别名、`web/package.json` 的 `dependencies`/`devDependencies` 中登记的第三方包（含子路径），以及测试文件里的 `node:`/`bun:` 内置模块。跨包只能用登记的别名，相对路径跨包同样违规；别名只允许登记在 `web/tsconfig.base.json`，其他 tsconfig 出现 `paths`（包括空对象）或基配置的别名表与检查器不一致时，检查器以退出码 2 失败；`web/package.json` 的 `imports` 只用于核对。
 
@@ -45,11 +46,11 @@ Public 与 Admin 两个浏览器应用的 TypeScript 源码、构建配置与编
 
 生产构建的输入只有仓库源码、样式与译文，根 `Cargo.toml` 的 `workspace.package.version`，以及调用方显式传入的 `AUCTION_BUILD_ID`（取值合法时作为构建号，否则退回工作区版本）。构建不读取 `.env*`：`bunfig.toml` 的 `env = false` 同时关闭外层 `bun run` 与脚本内层 Bun 的自动加载，Vite 配置再以 `envDir: false` 关闭 Vite 自己的加载（Vite 8 中 `envFile: false` 已弃用）；环境文件里的 `AUCTION_BUILD_ID` 与 `VITE_` 变量都不会进入产物。发布入口固定以 `NODE_ENV=production` 调用 Vite，外部同名变量不能改变 `import.meta.env.DEV`。
 
-发布构建经 `ci/release/web-bundle.sh` 选择 Solid 时，会核对 `mise run web-prepare` 留下的 `web/node_modules/.auction-prepared` 凭据（锁文件摘要与 bun 版本），再直接调用本地 `web/node_modules/.bin/vite` 构建到临时目录，校验通过后换入 `target/web/<surface>/public`；该阶段不联网，也不自动安装依赖。首次、锁文件变化或 bun 版本变化后先运行 `mise run web-prepare`。`AUCTION_WEB_STACK=solid` 当前只切换 Public，Admin 仍是 Rust 版；本地构建与分支上的手动候选构建可选择 Solid，正式发行仍只产出 Rust 版，tag 触发的 CI 选择 Solid 会被拒绝。在 tag 上手动触发候选构建并选择 Solid 也会在安装工具前失败，候选构建请在分支上触发。
+发布构建经 `ci/release/web-bundle.sh` 选择 Solid 时，会核对 `mise run web-prepare` 留下的 `web/node_modules/.auction-prepared` 凭据（锁文件摘要与 bun 版本），再直接调用本地 `web/node_modules/.bin/vite` 构建到临时目录，校验通过后换入 `target/web/<surface>/public`；该阶段不联网，也不自动安装依赖。首次、锁文件变化或 bun 版本变化后先运行 `mise run web-prepare`。`AUCTION_WEB_STACK=solid` 把 Public 与 Admin 都切到 Solid；本地构建与分支上的手动候选构建可选择 Solid，正式发行仍只产出 Rust 版，tag 触发的 CI 选择 Solid 会被拒绝。在 tag 上手动触发候选构建并选择 Solid 也会在安装工具前失败，候选构建请在分支上触发。
 
-两套实现长期并存：默认 `AUCTION_WEB_STACK=dioxus` 使用 `web-embed`，选择 `solid` 时 Public 使用 `web-solid`、Admin 仍用 `web-embed`。Solid 候选 Actions artifact 名称带 `-solid`，候选包不可部署；发布构建的体积预算与 Solid 键见 [ci/README.md#web-payload-体积预算](../ci/README.md#web-payload-体积预算)。共享样式与译文的变化会同时影响两套实现，改完两边都要核对。
+两套实现长期并存：默认 `AUCTION_WEB_STACK=dioxus` 使用 `web-embed`，选择 `solid` 时 Public 与 Admin 分别使用各自的 `web-solid`。Solid 候选 Actions artifact 名称带 `-solid`，候选包不可部署；发布构建的体积预算与 Solid 键见 [ci/README.md#web-payload-体积预算](../ci/README.md#web-payload-体积预算)。共享样式与译文的变化会同时影响两套实现，改完两边都要核对。
 
-生产构建校验最终 HTML 恰有一个模块入口脚本，且 `data-cfasync="false"` 位于 `src` 之前。Public 入口以 `?url` 引入[共享 SVG](../crates/auction-web-shared/assets/favicon.svg)，产物因此有唯一的 `assets/favicon-<指纹>.svg`；入口 HTML 的图标链接固定为 `/favicon.ico`，生产由后端映射到该文件，开发服务器则由仅对 `serve` 生效的插件提供同样的映射。发布校验要求入口恰好有一个该图标链接、`assets/` 恰好有一个带指纹的 `favicon-*.svg`，两者缺一即失败。
+生产构建校验最终 HTML 恰有一个模块入口脚本，且 `data-cfasync="false"` 位于 `src` 之前。Public 与 Admin 的入口都必须以 `?url` 引入[共享 SVG](../crates/auction-web-shared/assets/favicon.svg)，产物因此各有一个唯一的 `assets/favicon-<指纹>.svg`；入口 HTML 的图标链接固定为 `/favicon.ico`，生产由后端映射到该文件，开发服务器则由仅对 `serve` 生效的插件提供同样的映射。发布校验要求入口恰好有一个该图标链接、`assets/` 恰好有一个带指纹的 `favicon-*.svg`，两者缺一即失败。
 
 ## 文件与命名
 
@@ -209,7 +210,7 @@ export function Blacklist(): JSX.Element {
 | `BTreeMap<String, T>`、`HashMap<String, T>` | `stringMap(T)` | `Readonly<Record<string, T>>` |
 | `serde_json::Value` | `jsonValue` | `unknown` |
 
-整数默认必须在 JavaScript 安全整数范围内。唯一例外是只用于展示的非负 `i64` 纳秒时长，目前用于 Public 补偿逐件明细、补偿流水 DTO 的 `leader_held_nanos`。`displayDurationNanos` 接受有限的非负整数 `number`，上界为 `2^63`（`i64::MAX` 解析后会舍入到该值）。展示精度差异见下方差异表。金额、计数、版本、身份、分页、排序和其他判定继续使用各自的原语。
+整数默认必须在 JavaScript 安全整数范围内。唯一例外是只用于展示的非负 `i64` 纳秒时长，目前用于 Public 补偿逐件明细、补偿流水 DTO 与 Admin 结算报告的 `leader_held_nanos`。`displayDurationNanos` 接受有限的非负整数 `number`，上界为 `2^63`（`i64::MAX` 解析后会舍入到该值）。展示精度差异见下方差异表。金额、计数、版本、身份、分页、排序和其他判定继续使用各自的原语。
 
 映射字段不用 `v.record`：它会接受数组，并丢弃 `__proto__`、`constructor` 等键名。
 
@@ -226,7 +227,15 @@ export function Blacklist(): JSX.Element {
 
   | 位置 | 差别 |
   | --- | --- |
-  | `web/contracts/src/wire/index.ts`、Public 补偿逐件明细 | 超过 `2^53` 纳秒（约 104 天）的展示时长在 Solid 版是近似值，整分钟前 1–2 纳秒的值可能舍入并显示为下一分钟。Rust 版按整数精确截断。 |
+  | `web/contracts/src/wire/index.ts`、Public 补偿逐件明细、Admin 结算报告 | 超过 `2^53` 纳秒（约 104 天）的展示时长在 Solid 版是近似值，整分钟前 1–2 纳秒的值可能舍入并显示为下一分钟（例如 `9071999999999999` 纳秒显示为 `105d 00h 00m`，Rust 版是 `104d 23h 59m`）。Rust 版按整数精确截断。 |
+  | `web/admin/src/surface/lots/presentation.ts`、`surface/audit/table.tsx`、`surface/returns/labels.ts`、`surface/config/runtime-switches-values.ts` | Admin 展示自由 JSON（拍品的装备属性、审计 `metadata`、退件事件 `details`、运行时开关的值）时，数字按 JavaScript 数值的写法显示：`1.0` 显示为 `1`，超出双精度的长小数与大整数可能与 Rust 版的显示不同；拿得到响应原文的装备属性保留原文写法。只影响显示，不参与任何判定 |
+  | `web/admin/src/api/realtime/replay.ts` | 实时事件重放的表单在提交前拒绝任意层的重复键，以及无法原样往返的数字写法（`1.0`、`1e3`、`-0`、双精度表示不了的大整数），草稿保留供修正。Rust 版把这些输入交给服务端解析 |
+  | `web/admin/src/api/intake.ts`、`surface/intake/validation.ts` | 手工录入的装备 JSON：同名属性重复出现时只校验最后一次出现的值（Rust 版逐次解码，前一次非法即在发送前拒绝；发出的正文两版都只含最后一个值）。属性的 `base` 为负零时，浏览器没有 `JSON.rawJSON` 则按 `0` 发送，有则与 Rust 版一样发送 `-0.0` |
+  | `web/admin/src/surface/setup/host.ts` | 首次设置对数据库主机与站点 Origin 的预检使用浏览器的 URL 与 IDNA 实现，个别国际化域名的接受范围与 Rust 版的 `url` 库不同（例如预先拒绝 `xn---bcher-4ya.example`）。最终校验以后端为准 |
+  | `web/admin/src/surface/index.tsx`、`surface/auth/redirect.ts` | 直接打开带片段的后台地址（如 `/#dashboard-deliveries-title`），或未登录时打开后完成登录：Solid 版在目标挂载后滚到片段指向的位置，Rust 版保留片段但停在页首。登录回跳的 `return` 地址在 Solid 版会被规范化（去掉尾斜杠与裸 `?`） |
+  | `web/admin/src/surface/realtime/filters.tsx` | 无效书签的错误提示里回显原始参数时，未分配码点是否转义取决于浏览器的 Unicode 版本（Rust 版取决于工具链的 Unicode 版本），同一条书签在两版的提示文字可能不同 |
+  | Admin 的文本输入 | 输入里未配对的代理项（畸形 UTF-16，键盘输入与正常粘贴不会产生）：Rust 版读入时替换为 U+FFFD，Solid 版原样序列化，请求可能被服务端以 400 拒绝。首次设置表单例外，提交前同样替换 |
+  | `web/admin/src/surface/config/form/fields.tsx`、`surface/config/runtime-switches.tsx` | 运行配置的下拉框（监听方式、排期星期等）与暂停时长下拉框在 Solid 版始终显示当前值。Rust 版首次打开配置页、或取消暂停确认之后，下拉框可能显示第一项而草稿仍是原值——这是 Rust 版的显示缺陷（待修），不是有意差异 |
   | `web/public/src/styles/mobile-topbar.css` | 手机顶栏改为两行应用栏：第一行是当前场次与所在世界，第二行是状态标签与倒计时（放不下时截断）；不显示品牌名，语言与主题移到设置页，顶栏没有任何切换器；菜单与刷新是无边框图标 |
   | `web/public/src/styles/round-pages.css` | 出价记录与履约进度的场次区：场次下拉框就是场次标题；手机上去掉卡片，下拉框与搜索框共两行。历史成交价的主筛选行少了世界一列 |
   | `web/public/src/styles/mobile-catalog-filters.css` | 手机上看板筛选区排成带标签的三行（分组按钮、窄等级输入框与复选项、类型下拉框与列设置）；列设置面板改为整宽多列网格 |
