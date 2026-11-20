@@ -7,82 +7,162 @@ use serde::Serializer;
 use serde::de::Error;
 use uuid::Uuid;
 
-pub(in crate::dto) const SAFE_INTEGER_MAX: i64 = 9_007_199_254_740_991;
+pub(super) const SAFE_INTEGER_MAX: i64 = 9_007_199_254_740_991;
 pub(super) const PRICE_MAX: i64 = 1_000_000_000;
 pub(super) const FEE_BPS_MAX: i64 = 9_999;
 
-// Serde 的结构体默认也接受位置数组。用 MapAccess 保留重复键与原始数值形态，
-// 再交给派生解码检查闭集；经 Value 中转会丢掉重复键。
+// 用 MapAccess 拒绝位置数组并保留重复键与原始数值形态。两个方向共用校验，
+// 直接构造 Rust DTO 也不能绕过响应投影的不变量。
 macro_rules! json_object {
     (
-        ($($serde_options:tt)*)
+        ($($options:tt)*)
         $(#[$attr:meta])*
-        pub $kind:ident $name:ident $(<$item:ident>)? { $($body:tt)* }
-        $(=> $validate:ident)?
-    ) => {
-        $(#[$attr])*
-        #[derive(serde::Serialize)]
-        #[serde($($serde_options)*)]
-        pub $kind $name $(<$item>)? { $($body)* }
-
-        impl<'de $(, $item: serde::Deserialize<'de>)?> serde::Deserialize<'de>
-            for $name $(<$item>)?
-        {
-            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                type Dto $(<$item>)? = $name $(<$item>)?;
-
-                #[derive(serde::Deserialize)]
-                #[serde(remote = "Dto", deny_unknown_fields, $($serde_options)*)]
-                $kind Wire $(<$item>)? { $($body)* }
-
-                struct ObjectVisitor<T>(std::marker::PhantomData<T>);
-
-                impl<'de $(, $item: serde::Deserialize<'de>)?> serde::de::Visitor<'de>
-                    for ObjectVisitor<$name $(<$item>)?>
-                {
-                    type Value = $name $(<$item>)?;
-
-                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                        formatter.write_str("寄售 JSON 对象")
-                    }
-
-                    fn visit_map<M: serde::de::MapAccess<'de>>(
-                        self, map: M,
-                    ) -> Result<Self::Value, M::Error> {
-                        let value = Wire::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
-                        $(value.$validate::<M::Error>()?;)?
-                        Ok(value)
-                    }
-                }
-
-                deserializer.deserialize_map(ObjectVisitor(std::marker::PhantomData))
-            }
+        pub struct $name:ident $(<$item:ident>)? {
+            $($(#[$field_attr:meta])* pub $field:ident: $ty:ty,)*
         }
+        $(=> $validate:ident $($direction:ident)?)?
+    ) => {
+        json_object!(@impl ($($options)*) ($(#[$attr])*) struct $name $(<$item>)?
+            { $(pub $field: $ty,)* }
+            { $($(#[$field_attr])* pub $field: $ty,)* }
+            $(=> $validate $($direction)?)?
+        );
+    };
+    (
+        ($($options:tt)*)
+        $(#[$attr:meta])*
+        pub enum $name:ident {
+            $($(#[$variant_attr:meta])* $variant:ident {
+                $($(#[$field_attr:meta])* $field:ident: $ty:ty),* $(,)?
+            },)*
+        }
+        $(=> $validate:ident $($direction:ident)?)?
+    ) => {
+        json_object!(@impl ($($options)*) ($(#[$attr])*) enum $name
+            { $($(#[$variant_attr])* $variant { $($field: $ty,)* },)* }
+            { $($variant { $($(#[$field_attr])* $field: $ty,)* },)* }
+            $(=> $validate $($direction)?)?
+        );
+    };
+    (
+        @impl ($($options:tt)*) ($($attrs:tt)*) $kind:ident $name:ident $(<$item:ident>)?
+        { $($public_body:tt)* }
+        { $($wire_body:tt)* }
+        $(=> $validate:ident $($direction:ident)?)?
+    ) => {
+        $($attrs)*
+        pub $kind $name $(<$item>)? { $($public_body)* }
+
+        const _: () = {
+            type Dto $(<$item>)? = $name $(<$item>)?;
+
+            #[derive(serde::Deserialize, serde::Serialize)]
+            #[serde(remote = "Dto", deny_unknown_fields, $($options)*)]
+            $kind Wire $(<$item>)? { $($wire_body)* }
+
+            impl$(<$item: serde::Serialize>)? serde::Serialize for $name $(<$item>)? {
+                fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    $(json_object!(@validate_output self, $validate $($direction)?);)?
+                    Wire::serialize(self, serializer)
+                }
+            }
+
+            impl<'de $(, $item: serde::Deserialize<'de>)?> serde::Deserialize<'de>
+                for $name $(<$item>)?
+            {
+                fn deserialize<D: serde::Deserializer<'de>>(
+                    deserializer: D,
+                ) -> Result<Self, D::Error> {
+                    struct ObjectVisitor<T>(std::marker::PhantomData<T>);
+
+                    impl<'de $(, $item: serde::Deserialize<'de>)?> serde::de::Visitor<'de>
+                        for ObjectVisitor<$name $(<$item>)?>
+                    {
+                        type Value = $name $(<$item>)?;
+
+                        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                            formatter.write_str("寄售 JSON 对象")
+                        }
+
+                        fn visit_map<M: serde::de::MapAccess<'de>>(
+                            self, map: M,
+                        ) -> Result<Self::Value, M::Error> {
+                            let value = Wire::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
+                            $(value.$validate().map_err(serde::de::Error::custom)?;)?
+                            Ok(value)
+                        }
+                    }
+
+                    deserializer.deserialize_map(ObjectVisitor(std::marker::PhantomData))
+                }
+            }
+        };
+    };
+    (@validate_output $object:ident, $validate:ident decode_only) => {};
+    (@validate_output $object:ident, $validate:ident) => {
+        $object.$validate().map_err(serde::ser::Error::custom)?;
     };
 }
 
 pub(in crate::dto) use json_object;
 
-pub(in crate::dto) fn integer<'de, const MIN: i64, const MAX: i64, D: Deserializer<'de>>(
+// 单元枚举的派生解码也接受外部标记对象。显式从字符串映射稳定的闭集码。
+macro_rules! string_enum {
+    ($(#[$attr:meta])* pub enum $name:ident {
+        $($(#[$variant_attr:meta])* $variant:ident => $code:literal,)*
+    }) => {
+        $(#[$attr])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+        pub enum $name {
+            $($(#[$variant_attr])* #[serde(rename = $code)] $variant,)*
+        }
+
+        impl<'de> serde::Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                struct StringVisitor;
+
+                impl serde::de::Visitor<'_> for StringVisitor {
+                    type Value = $name;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        formatter.write_str("寄售闭集字符串")
+                    }
+
+                    fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                        match value {
+                            $($code => Ok($name::$variant),)*
+                            _ => Err(E::custom("未知的寄售字符串值")),
+                        }
+                    }
+                }
+
+                deserializer.deserialize_str(StringVisitor)
+            }
+        }
+    };
+}
+
+pub(super) use string_enum;
+
+pub(super) fn integer<'de, const MIN: i64, const MAX: i64, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<i64, D::Error> {
-    let value = i64::deserialize(deserializer)?;
+    checked_integer::<MIN, MAX>(i64::deserialize(deserializer)?).map_err(D::Error::custom)
+}
+
+pub(super) fn serialize_integer<const MIN: i64, const MAX: i64, S: Serializer>(
+    value: &i64,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer
+        .serialize_i64(checked_integer::<MIN, MAX>(*value).map_err(serde::ser::Error::custom)?)
+}
+
+fn checked_integer<const MIN: i64, const MAX: i64>(value: i64) -> Result<i64, &'static str> {
     if (MIN..=MAX).contains(&value) {
         return Ok(value);
     }
-    Err(D::Error::custom("寄售整数超出契约范围"))
-}
-
-pub(super) fn optional_integer<'de, const MIN: i64, const MAX: i64, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<i64>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(transparent)]
-    struct Bounded<const MIN: i64, const MAX: i64>(
-        #[serde(deserialize_with = "integer::<MIN, MAX, _>")] i64,
-    );
-
-    Option::<Bounded<MIN, MAX>>::deserialize(deserializer).map(|value| value.map(|value| value.0))
+    Err("寄售整数超出契约范围")
 }
 
 pub(in crate::dto) fn uuid<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Uuid, D::Error> {
@@ -162,22 +242,28 @@ pub(super) fn serialize_unavailable<S: Serializer>(
 pub(in crate::dto) fn text<'de, const MAX: usize, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<String, D::Error> {
-    checked_text::<MAX, D::Error>(String::deserialize(deserializer)?)
+    let value = String::deserialize(deserializer)?;
+    checked_text::<MAX>(&value).map_err(D::Error::custom)?;
+    Ok(value)
 }
 
 pub(in crate::dto) fn optional_text<'de, const MAX: usize, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<String>, D::Error> {
-    Option::<String>::deserialize(deserializer)?.map(checked_text::<MAX, D::Error>).transpose()
+    let value = Option::<String>::deserialize(deserializer)?;
+    if let Some(text) = &value {
+        checked_text::<MAX>(text).map_err(D::Error::custom)?;
+    }
+    Ok(value)
 }
 
-fn checked_text<const MAX: usize, E: Error>(text: String) -> Result<String, E> {
+pub(in crate::dto) fn checked_text<const MAX: usize>(text: &str) -> Result<(), &'static str> {
     if !text.is_empty()
         && text.len() <= MAX
         && text == text.trim()
         && !text.chars().any(char::is_control)
     {
-        return Ok(text);
+        return Ok(());
     }
-    Err(E::custom("寄售文本必须为规范单行且在字节上限内"))
+    Err("寄售文本必须为规范单行且在字节上限内")
 }

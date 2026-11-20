@@ -3,15 +3,16 @@
 use auction_time::Timestamp;
 use serde::Deserialize;
 use serde::Deserializer;
-use serde::Serialize;
 use serde::de::Error;
 use uuid::Uuid;
 
 use crate::MAX_PUBLIC_PAGE_SIZE;
+use crate::dto::public::consignment::scalar::ListingFeeBps;
+use crate::dto::public::consignment::scalar::ListingPrice;
+use crate::dto::public::consignment::scalar::ListingVersion;
 use crate::dto::public::consignment::states::ListingMode;
 use crate::dto::public::consignment::states::ListingWorld;
 use crate::dto::public::consignment::states::PublicListingState;
-use crate::dto::public::consignment::wire::FEE_BPS_MAX;
 use crate::dto::public::consignment::wire::PRICE_MAX;
 use crate::dto::public::consignment::wire::SAFE_INTEGER_MAX;
 use crate::dto::public::consignment::wire::equipment_id;
@@ -19,6 +20,7 @@ use crate::dto::public::consignment::wire::integer;
 use crate::dto::public::consignment::wire::json_object;
 use crate::dto::public::consignment::wire::optional_text;
 use crate::dto::public::consignment::wire::serialize_unavailable;
+use crate::dto::public::consignment::wire::string_enum;
 use crate::dto::public::consignment::wire::text;
 use crate::dto::public::consignment::wire::timestamp;
 use crate::dto::public::consignment::wire::unavailable;
@@ -39,24 +41,24 @@ json_object! {
         pub accepts_mail: bool,
         #[serde(deserialize_with = "unavailable", serialize_with = "serialize_unavailable")]
         pub purchasable: bool,
-        #[serde(deserialize_with = "integer::<0, FEE_BPS_MAX, _>")]
-        pub fee_bps: i64,
-        #[serde(deserialize_with = "integer::<1, 1, _>")]
+        pub fee_bps: ListingFeeBps,
         pub min_price: i64,
-        #[serde(deserialize_with = "integer::<PRICE_MAX, PRICE_MAX, _>")]
         pub max_price: i64,
     } => validate
 }
 
 impl ConsignmentStatus {
-    fn validate<E: Error>(&self) -> Result<(), E> {
+    fn validate(&self) -> Result<(), &'static str> {
+        if self.min_price != 1 || self.max_price != PRICE_MAX {
+            return Err("寄售登记价格上下限须为协议常量");
+        }
         if self.registration_ready && !self.enabled {
-            return Err(E::custom("寄售关闭时不可登记"));
+            return Err("寄售关闭时不可登记");
         }
         if !self.registration_ready
             && !(self.registration_modes.is_empty() && self.registration_worlds.is_empty())
         {
-            return Err(E::custom("登记未就绪时不得提供可登记模式和世界"));
+            return Err("登记未就绪时不得提供可登记模式和世界");
         }
         Ok(())
     }
@@ -74,13 +76,13 @@ json_object! {
         pub page: i64,
         #[serde(deserialize_with = "integer::<1, MAX_PUBLIC_PAGE_SIZE, _>")]
         pub page_size: i64,
-    } => validate
+    } => validate decode_only
 }
 
 impl<T> ListingPage<T> {
-    fn validate<E: Error>(&self) -> Result<(), E> {
+    fn validate(&self) -> Result<(), &'static str> {
         if (self.page - 1) > MAX_PAGE_OFFSET / self.page_size {
-            return Err(E::custom("寄售分页行偏移超出上限"));
+            return Err("寄售分页行偏移超出上限");
         }
         Ok(())
     }
@@ -93,8 +95,7 @@ json_object! {
     pub struct ListingSummary {
         #[serde(deserialize_with = "uuid")]
         pub listing_id: Uuid,
-        #[serde(deserialize_with = "integer::<1, SAFE_INTEGER_MAX, _>")]
-        pub version: i64,
+        pub version: ListingVersion,
         pub mode: ListingMode,
         pub state: PublicListingState,
         pub world_id: ListingWorld,
@@ -105,8 +106,7 @@ json_object! {
         #[serde(deserialize_with = "text::<128, _>")]
         pub category: String,
         pub level: EquipmentLevel,
-        #[serde(deserialize_with = "integer::<1, PRICE_MAX, _>")]
-        pub price: i64,
+        pub price: ListingPrice,
         pub seller_name: String,
         #[serde(deserialize_with = "timestamp")]
         pub updated_at: Timestamp,
@@ -114,6 +114,22 @@ json_object! {
         pub expires_at: Timestamp,
         #[serde(deserialize_with = "unavailable", serialize_with = "serialize_unavailable")]
         pub purchasable: bool,
+    } => validate
+}
+
+impl ListingSummary {
+    fn validate(&self) -> Result<(), &'static str> {
+        if !matches!(
+            (self.mode, self.state),
+            (ListingMode::Direct, PublicListingState::Displayed)
+                | (ListingMode::Consigned, PublicListingState::AwaitingDeposit)
+        ) {
+            return Err("公开挂单的模式与状态不一致");
+        }
+        if matches!(self.level, EquipmentLevel::Soulbound {}) {
+            return Err("公开挂单不得展示灵魂绑定装备");
+        }
+        Ok(())
     }
 }
 
@@ -124,6 +140,12 @@ json_object! {
     pub struct ListingDetail {
         pub summary: ListingSummary,
         pub equipment: EquipmentView,
+    } => validate
+}
+
+impl ListingDetail {
+    fn validate(&self) -> Result<(), &'static str> {
+        self.equipment.validate_tradeable()
     }
 }
 
@@ -144,12 +166,12 @@ json_object! {
     }
 }
 
-/// 白名单快照的固定来源标记。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-pub enum EquipmentViewSource {
-    /// 第三方装备信息的第一版安全投影。
-    #[serde(rename = "hvdata-equip-v1")]
-    HvDataEquipV1,
+string_enum! {
+    /// 白名单快照的固定来源标记。
+    pub enum EquipmentViewSource {
+        /// 第三方装备信息的第一版安全投影。
+        HvDataEquipV1 => "hvdata-equip-v1",
+    }
 }
 
 json_object! {
@@ -173,9 +195,16 @@ json_object! {
 }
 
 impl EquipmentView {
-    fn validate<E: Error>(&self) -> Result<(), E> {
+    pub(super) fn validate_tradeable(&self) -> Result<(), &'static str> {
+        if !self.tradeable {
+            return Err("已发布挂单的装备必须可交易");
+        }
+        self.validate()
+    }
+
+    fn validate(&self) -> Result<(), &'static str> {
         if matches!(self.level, EquipmentLevel::Soulbound {}) && self.tradeable {
-            return Err(E::custom("灵魂绑定装备不可交易"));
+            return Err("灵魂绑定装备不可交易");
         }
         Ok(())
     }

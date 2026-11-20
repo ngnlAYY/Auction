@@ -1,24 +1,25 @@
 //! 本人挂单的持久状态、有效状态和带判别键的展示投影。
 
 use auction_time::Timestamp;
-use serde::de::Error;
 use uuid::Uuid;
 
 use crate::deserialize_required_option;
 use crate::dto::public::consignment::catalog::EquipmentView;
+use crate::dto::public::consignment::scalar::ListingFeeBps;
+use crate::dto::public::consignment::scalar::ListingPrice;
+use crate::dto::public::consignment::scalar::ListingPricingVersion;
+use crate::dto::public::consignment::scalar::ListingVersion;
 use crate::dto::public::consignment::states::ListingAction;
 use crate::dto::public::consignment::states::ListingMode;
 use crate::dto::public::consignment::states::ListingReason;
 use crate::dto::public::consignment::states::ListingState;
 use crate::dto::public::consignment::states::ListingWorld;
 use crate::dto::public::consignment::states::LookupReason;
-use crate::dto::public::consignment::wire::FEE_BPS_MAX;
-use crate::dto::public::consignment::wire::PRICE_MAX;
-use crate::dto::public::consignment::wire::SAFE_INTEGER_MAX;
 use crate::dto::public::consignment::wire::equipment_id;
 use crate::dto::public::consignment::wire::integer;
 use crate::dto::public::consignment::wire::json_object;
 use crate::dto::public::consignment::wire::optional_timestamp;
+use crate::dto::public::consignment::wire::serialize_integer;
 use crate::dto::public::consignment::wire::serialize_unavailable;
 use crate::dto::public::consignment::wire::timestamp;
 use crate::dto::public::consignment::wire::unavailable;
@@ -31,9 +32,15 @@ json_object! {
     /// 仅含安全状态的解析进度，不携带工作租约或实例标识。
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct LookupProgress {
-        #[serde(deserialize_with = "integer::<0, MAX_LOOKUP_ATTEMPTS, _>")]
+        #[serde(
+            deserialize_with = "integer::<0, MAX_LOOKUP_ATTEMPTS, _>",
+            serialize_with = "serialize_integer::<0, MAX_LOOKUP_ATTEMPTS, _>"
+        )]
         pub attempts: i64,
-        #[serde(deserialize_with = "integer::<MAX_LOOKUP_ATTEMPTS, MAX_LOOKUP_ATTEMPTS, _>")]
+        #[serde(
+            deserialize_with = "integer::<MAX_LOOKUP_ATTEMPTS, MAX_LOOKUP_ATTEMPTS, _>",
+            serialize_with = "serialize_integer::<MAX_LOOKUP_ATTEMPTS, MAX_LOOKUP_ATTEMPTS, _>"
+        )]
         pub max_attempts: i64,
         #[serde(deserialize_with = "optional_timestamp")]
         pub next_attempt_at: Option<Timestamp>,
@@ -80,6 +87,43 @@ json_object! {
             #[serde(deserialize_with = "deserialize_required_option")]
             equipment: Option<EquipmentView>,
         },
+    } => validate
+}
+
+impl ListingView {
+    fn state_and_reason(&self) -> (ListingState, Option<ListingReason>) {
+        match self {
+            Self::Resolving { .. } => (ListingState::Resolving, None),
+            Self::Displayed { .. } => (ListingState::Displayed, None),
+            Self::AwaitingDeposit { .. } => (ListingState::AwaitingDeposit, None),
+            Self::Ineligible { reason, .. } | Self::LookupFailed { reason, .. } => {
+                (ListingState::Rejected, Some(*reason))
+            }
+            Self::Closed { reason, .. } => (ListingState::Closed, Some(*reason)),
+            Self::Expired { reason, .. } => (ListingState::Expired, Some(*reason)),
+        }
+    }
+
+    fn validate(&self) -> Result<(), &'static str> {
+        let (state, reason) = self.state_and_reason();
+        if reason.is_some_and(|reason| reason.terminal_state() != state) {
+            return Err("寄售原因与视图终态不一致");
+        }
+        match self {
+            Self::LookupFailed { reason, .. } if reason.rejected_with_snapshot() => {
+                Err("该拒挂原因必须使用带快照的视图")
+            }
+            Self::Ineligible { reason, equipment }
+                if !reason.rejected_with_snapshot()
+                    || equipment.tradeable == (*reason == ListingReason::NotTradeable) =>
+            {
+                Err("拒挂原因与装备快照不一致")
+            }
+            Self::Displayed { equipment } | Self::AwaitingDeposit { equipment, .. } => {
+                equipment.validate_tradeable()
+            }
+            _ => Ok(()),
+        }
     }
 }
 
@@ -90,21 +134,15 @@ json_object! {
     pub struct OwnedListing {
         #[serde(deserialize_with = "uuid")]
         pub listing_id: Uuid,
-        #[serde(deserialize_with = "integer::<1, SAFE_INTEGER_MAX, _>")]
-        pub version: i64,
+        pub version: ListingVersion,
         pub world_id: ListingWorld,
         #[serde(deserialize_with = "equipment_id")]
         pub external_equipment_id: String,
         pub mode: ListingMode,
-        #[serde(deserialize_with = "integer::<1, PRICE_MAX, _>")]
-        pub price: i64,
-        #[serde(deserialize_with = "integer::<1, 1, _>")]
-        pub pricing_version: i64,
-        #[serde(deserialize_with = "integer::<0, FEE_BPS_MAX, _>")]
-        pub fee_bps: i64,
-        #[serde(deserialize_with = "integer::<0, PRICE_MAX, _>")]
+        pub price: ListingPrice,
+        pub pricing_version: ListingPricingVersion,
+        pub fee_bps: ListingFeeBps,
         pub estimated_fee: i64,
-        #[serde(deserialize_with = "integer::<1, PRICE_MAX, _>")]
         pub estimated_seller_amount: i64,
         #[serde(deserialize_with = "timestamp")]
         pub created_at: Timestamp,
@@ -122,23 +160,40 @@ json_object! {
 }
 
 impl OwnedListing {
-    fn validate<E: Error>(&self) -> Result<(), E> {
-        // 不变量 6：先核对有效态投影，再让客户端使用允许动作；持久态可以比有效态滞后。
-        let (state, reason) = match &self.view {
-            ListingView::Resolving { .. } => (ListingState::Resolving, None),
-            ListingView::Displayed { .. } => (ListingState::Displayed, None),
-            ListingView::AwaitingDeposit { .. } => (ListingState::AwaitingDeposit, None),
-            ListingView::Ineligible { reason, .. } | ListingView::LookupFailed { reason, .. } => {
-                (ListingState::Rejected, Some(*reason))
-            }
-            ListingView::Closed { reason, .. } => (ListingState::Closed, Some(*reason)),
-            ListingView::Expired { reason, .. } => (ListingState::Expired, Some(*reason)),
-        };
-        if (self.effective_state, self.effective_reason) != (state, reason) {
-            return Err(E::custom("寄售视图与有效状态或原因不一致"));
+    fn validate(&self) -> Result<(), &'static str> {
+        // 不变量 6：有效态可以先看到强制终结，但不能复活或跳过已提交的发布。
+        let (state, reason) = self.view.state_and_reason();
+        if (self.effective_state, self.effective_reason) != (state, reason)
+            || !self.stored_state.matches_mode(self.mode)
+            || !state.matches_mode(self.mode)
+        {
+            return Err("寄售视图、状态、原因或模式不一致");
         }
-        if reason.is_some() && !self.allowed_actions.is_empty() {
-            return Err(E::custom("已终结的挂单不得提供卖家操作"));
+        if self.stored_state != state
+            && !(self.stored_state.is_active()
+                && (reason.is_some_and(ListingReason::is_forced_closure)
+                    || (state == ListingState::Expired
+                        && reason == self.stored_state.expiry_reason())))
+        {
+            return Err("寄售持久状态与有效状态不一致");
+        }
+        if !state.is_active() && !self.allowed_actions.is_empty() {
+            return Err("已终结的挂单不得提供卖家操作");
+        }
+        self.validate_quote()
+    }
+
+    fn validate_quote(&self) -> Result<(), &'static str> {
+        let price = self.price.get();
+        let fee_bps = self.fee_bps.get();
+        if self.mode == ListingMode::Direct && (fee_bps != 0 || self.estimated_fee != 0) {
+            return Err("非寄售挂单的费率与手续费必须为零");
+        }
+        // 不变量 6、10：领域 quote_v1 负责计算。这里只核对线上报价的取整和金额守恒。
+        if self.estimated_fee != price * fee_bps / 10_000
+            || self.estimated_seller_amount != price - self.estimated_fee
+        {
+            return Err("寄售预计手续费或卖家到手金额与冻结报价不一致");
         }
         Ok(())
     }
