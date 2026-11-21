@@ -2177,6 +2177,16 @@ async fn postgres_alert_console_lists_each_status_with_active_and_resolved_signa
             .await;
     let resolved =
         insert_console_signal(&store, 3, ("service_degraded", "public", "process"), false, 1).await;
+    let historical_silence = sqlx::query_scalar::<_, Timestamp>(
+        "UPDATE public.operations_alert_signals
+         SET silenced_until = resolved_at + interval '1 hour'
+         WHERE fingerprint = $1
+         RETURNING silenced_until",
+    )
+    .bind(resolved.as_slice())
+    .fetch_one(store.postgres_pool())
+    .await
+    .expect("复现旧版告警解除时保留的静默截止时间");
     let list = |filter, source, page, page_size| {
         store.list_alerts(
             OperationsAlertConsoleQuery { filter, source, page, page_size },
@@ -2196,6 +2206,7 @@ async fn postgres_alert_console_lists_each_status_with_active_and_resolved_signa
     assert_eq!((history.total, history.active_total, history.resolved_total), (1, 2, 1));
     assert_eq!(fingerprints(&history), [resolved]);
     assert!(history.entries.iter().all(|entry| !entry.active && entry.next_notify_at.is_none()));
+    assert_eq!(history.entries[0].silenced_until, Some(historical_silence));
 
     let all = list(OperationsAlertFilter::All, None, 1, 10).await.expect("全部视图");
     assert_eq!((all.total, all.active_total, all.resolved_total), (3, 2, 1));

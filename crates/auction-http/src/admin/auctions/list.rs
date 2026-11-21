@@ -161,7 +161,8 @@ mod tests {
                     id: command.auction_id,
                     sequence: command.sequence,
                     world_id: command.world_id,
-                    scheduled_end_at: Some(command.scheduled_end_at),
+                    preview_scheduled_at: command.preview_scheduled_at,
+                    scheduled_open_at: command.scheduled_open_at,
                     ..draft_auction()
                 };
                 Ok(AdminAuctionSummary {

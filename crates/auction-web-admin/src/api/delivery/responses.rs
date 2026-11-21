@@ -152,7 +152,6 @@ pub(super) fn valid_attempt(value: &auction_contracts::AdminDeliveryAttemptRespo
                 && value.cod.is_some()
                 && value.body_digest.is_some()
                 && value.external_mail_id.is_none()
-                && value.bound_sent_mail_id.is_none()
         }
         "take" => {
             value.external_mail_id.is_some()

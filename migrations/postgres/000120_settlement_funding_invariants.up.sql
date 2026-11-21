@@ -421,7 +421,28 @@ AS $function$
           AND settlement.buyer_amount = obligation.amount
     )
 $function$;
+
+CREATE FUNCTION public.settlement_record_opening_credit_valid_000120(
+    opening_uid text, opening_credit_id uuid
+)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SET search_path = pg_catalog, public
+AS $function$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.settlement_funding_allocations AS allocation
+        JOIN public.settlement_funding_accounts AS account ON account.uid = allocation.uid
+        WHERE allocation.id = opening_credit_id AND allocation.uid = opening_uid
+          AND account.accounting_mode = 'record_only'
+          AND allocation.purpose = 'quarantine'
+          AND allocation.lot_id IS NULL AND allocation.obligation_id IS NULL
+    )
+$function$;
+
 -- 000047 允许拆分合法来源；总发行不超额，returned_delivery 必须恰有一笔完整 return。
+-- 旧版开账分录的摘要是命令摘要；按同一命令与 quarantine 用途核对历史发行。
 DO $block$
 BEGIN
     IF EXISTS (
@@ -436,6 +457,15 @@ BEGIN
                 COALESCE(bool_or(entry.kind = 'issue'), false)
                 AND NOT (
                     source.kind IN ('reconciliation', 'collected_payment')
+                    OR (
+                        source.kind = 'record_opening'
+                        AND COALESCE(bool_and(
+                            entry.command_id = source.source_key
+                            AND public.settlement_record_opening_credit_valid_000120(
+                                source.uid, entry.credit_id
+                            )
+                        ) FILTER (WHERE entry.kind = 'issue' AND source.kind = 'record_opening'), false)
+                    )
                     OR (
                         source.kind = 'record_carrier'
                         AND public.settlement_record_carrier_source_valid_000120(source.id, false)
@@ -500,6 +530,7 @@ AS $function$
 DECLARE
     source_uid text;
     source_kind text;
+    source_key uuid;
     source_amount bigint;
     source_proof_digest bytea;
     already_issued numeric;
@@ -507,8 +538,8 @@ BEGIN
     IF NEW.kind NOT IN ('issue', 'return') THEN
         RETURN NEW;
     END IF;
-    SELECT source.uid, source.kind, source.amount, source.proof_digest
-    INTO source_uid, source_kind, source_amount, source_proof_digest
+    SELECT source.uid, source.kind, source.source_key, source.amount, source.proof_digest
+    INTO source_uid, source_kind, source_key, source_amount, source_proof_digest
     FROM public.settlement_funding_sources AS source
     WHERE source.id = NEW.source_id
     FOR UPDATE;
@@ -522,6 +553,10 @@ BEGIN
            (source_kind = 'record_carrier'
             AND NEW.amount = 1
             AND public.settlement_record_carrier_source_valid_000120(NEW.source_id, true))
+           OR (source_kind = 'record_opening'
+               AND NEW.command_id = source_key
+               AND NEW.proof_digest = source_proof_digest
+               AND public.settlement_record_opening_credit_valid_000120(NEW.uid, NEW.credit_id))
            OR (
                source_kind IN (
                    'record_internal_purchase',

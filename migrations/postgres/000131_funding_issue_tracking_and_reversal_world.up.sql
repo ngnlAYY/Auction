@@ -100,6 +100,7 @@ AS $function$
 DECLARE
     source_uid text;
     source_kind text;
+    source_key uuid;
     source_amount bigint;
     source_proof_digest bytea;
     counted_source uuid;
@@ -107,8 +108,8 @@ BEGIN
     IF NEW.kind NOT IN ('issue', 'return') THEN
         RETURN NEW;
     END IF;
-    SELECT source.uid, source.kind, source.amount, source.proof_digest
-    INTO source_uid, source_kind, source_amount, source_proof_digest
+    SELECT source.uid, source.kind, source.source_key, source.amount, source.proof_digest
+    INTO source_uid, source_kind, source_key, source_amount, source_proof_digest
     FROM public.settlement_funding_sources AS source
     WHERE source.id = NEW.source_id
     FOR UPDATE;
@@ -122,6 +123,10 @@ BEGIN
            (source_kind = 'record_carrier'
             AND NEW.amount = 1
             AND public.settlement_record_carrier_source_valid_000120(NEW.source_id, true))
+           OR (source_kind = 'record_opening'
+               AND NEW.command_id = source_key
+               AND NEW.proof_digest = source_proof_digest
+               AND public.settlement_record_opening_credit_valid_000120(NEW.uid, NEW.credit_id))
            OR (
                source_kind IN (
                    'record_internal_purchase',
