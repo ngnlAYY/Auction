@@ -118,6 +118,29 @@ fn accepts_complete_detail() {
     assert_eq!(decoded.attempts.len(), 1);
 }
 
+#[test]
+fn delivery_detail_accepts_bound_send_mail_id_and_rejects_invalid_id() {
+    for (mail_id, valid) in [("7000001", true), ("7000001x", false)] {
+        let mut data = detail();
+        data.attempts[0].bound_sent_mail_id = Some(mail_id.to_owned());
+        let decoded = decode_detail(StrictDeliveryEnvelope {
+            code: "ok".to_owned(),
+            message: "loaded".to_owned(),
+            data,
+        });
+        if valid {
+            assert_eq!(
+                decoded.expect("已绑定 Sent 的 Send 详情可读").attempts[0]
+                    .bound_sent_mail_id
+                    .as_deref(),
+                Some(mail_id)
+            );
+        } else {
+            assert!(decoded.is_err(), "拒绝无效的 Sent MID");
+        }
+    }
+}
+
 /// 对应 storage 的 `retired_player_notification` 夹具与投稿回执退役投影。
 fn retired_before_send(origin_kind: &str, reason_code: &str, failure_code: &str) -> Value {
     json!({

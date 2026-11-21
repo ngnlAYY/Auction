@@ -206,7 +206,7 @@ Worker 心跳的 `details.worker_cold_config` 为 `{"version":1,"sha256":"<64 �
 
 - `000118` 要求代理授权当前投影与连续追加转换一致，realtime 竞价来源与真实命令绑定，并在提交时校验终态拍卖与 lot 的关系；现存 recovery 重挂来源经 recovery 行、命令账本或 Worker 审计和事件载荷预检证明，原 realtime 事件不改写，`origin_command_id` 外键保持 `NOT VALID` 以约束未来写入。
 - `000119` 对入站邮件展示快照的 JSON 数字、整数范围与载荷大小做数据库层检查。
-- `000120` 在冻结发行额度与 `returned_delivery` 唯一完整返还之外，约束 record-only 的 `record_internal_purchase`、`record_operator_equipment_loss` 与 `record_compensation`：buyer/compensation 金额须匹配同 UID、付款义务、lot 与冻结 B/C/S/T；设备损失来源须匹配损失事实，收款后的补偿来源须匹配 persisted receipt 及其 collected_payment 来源；所有发行只能进入相同 UID/lot/seller_payout 对应的 seller allocation。历史预检允许后续 disposition 移为 retained/refund，但当前 issue 只接受 seller disposition 与可用 seller allocation。另校验 legacy seller claim 与付款/前置义务及 lot 对应、补偿池冲正金额与结算事实相等。
+- `000120` 在冻结发行额度与 `returned_delivery` 唯一完整返还之外，约束 record-only 来源。`record_opening` 以开账命令绑定同 UID 的 `quarantine` 用途，登记旧责任。`record_internal_purchase`、`record_operator_equipment_loss` 与 `record_compensation` 的金额须匹配同 UID、付款义务、lot 与冻结 B/C/S/T。设备损失来源须匹配损失事实，收款后的补偿来源须匹配持久化收款回执及其 `collected_payment` 来源。这三种来源的发行进入对应的 seller allocation。历史预检允许后续 disposition 移为 retained/refund，当前 issue 只接受 seller disposition 与可用 seller allocation。迁移也校验 legacy seller claim 与付款或前置义务及 lot 的对应关系，以及补偿池冲正与结算金额的一致性。
 - `000121` 检查早鸟日期确为 Gregorian 日历日期、冻结恢复策略数字保持 JSON number 类型，并要求 runtime switch `expire` 指向同名、当前且已到期的 `set` 事实。
 - `000122` 在迁移与恢复后统一运行账号权限：拒绝继承 DDL/写权限、公开写授权、运行账号对象所有权与旧授权函数的额外执行权，并为所有可创建 public 对象的角色设置默认 ACL。
 - `000123` 把恢复后 quarantine 与 delivery 当前 fence/状态推进同事务绑定，按各退件截止区间逐一归属可能外达的 Send；退件 action 的状态推进保持版本单调且身份字段不变，并只修复唯一可证明的历史案件。

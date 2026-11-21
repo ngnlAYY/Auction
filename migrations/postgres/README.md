@@ -172,7 +172,7 @@ VALUES (76, 'breaking');
 | 000117 | 资金分录新增 `(uid,id)` 复合唯一键与分录复合外键，阻止 debit/credit/source 跨 UID 归属；延迟约束触发器把结算退件 action 绑定到来源、身份、prepare/activate 命令、世界、Take 操作及外部 MID 均匹配的唯一 delivery，已绑定后不可换代或删除；新增唯一性、外键和触发器限制旧程序可能的写入，登记 breaking |
 | 000118 | 代理转换历史连续性与当前投影、realtime 来源完整性和终态拍卖/lot 跨行一致性；历史 recovery 重挂来源按命令账本或 Worker 审计证明并保留，`origin_command_id` 的 `auction_commands` 外键仅强制后续写入；依赖 000079 的命名 CHECK 基线缺失时失败关闭，登记 breaking |
 | 000119 | 入站邮件展示快照 CHECK 安全校验 JSON 数值类型、整型范围与载荷大小，不以窄化 cast 引发范围异常；登记 breaking |
-| 000120 | 资金 issue/return 总额不得超源；record-only 来源必须绑定同 UID、付款义务、lot、冻结拆分及 seller payout allocation；历史预检核对 equipment loss、collected receipt 与冲正。资金分录只追加，UPDATE/DELETE/TRUNCATE 均由触发器拒绝，issue 来源额度不能经行改写绕过；登记 breaking |
+| 000120 | 资金 issue/return 总额不得超源。只记账开账来源发行绑定同 UID 的开账命令与 quarantine allocation，其余 seller 来源绑定同 UID、付款义务、lot、冻结拆分及 seller payout allocation。历史预检核对 equipment loss、collected receipt 与冲正。资金分录只追加，UPDATE/DELETE/TRUNCATE 均由触发器拒绝。登记 breaking |
 | 000121 | 早鸟排期日期使用 Gregorian 日历校验，冻结恢复策略要求 JSON 数值类型，runtime switch expire 只能引用同名、当前且已到期的 set 事实；登记 breaking |
 | 000122 | 运行账号权限重建覆盖所有数据库对象 ownership、继承角色、PUBLIC 写权限、各对象创建者默认 ACL 与旧 SECURITY DEFINER 函数授权；保留 webhook INSERT/UPDATE、撤销 DELETE，并将 funding entries 限为 INSERT；登记 breaking |
 | 000123 | 外部 Sent quarantine 与 delivery 当前 fence 及状态转换同事务绑定；000112 关账 Send/退件逐一按时间区间归属；修复可唯一证明的 000114 earliest backfill，并约束退件 action 生命周期；登记 breaking |

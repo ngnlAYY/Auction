@@ -361,3 +361,93 @@ async fn postgres_migration_131_backfills_and_atomically_caps_split_funding_issu
     runtime_pool.close().await;
     maintenance_pool.close().await;
 }
+
+#[tokio::test]
+async fn postgres_migration_131_preserves_record_opening_quarantine_issues() {
+    let database = support::TestDatabase::create_empty().await.expect("创建未迁移测试库");
+    let owner = database.maintenance_store().await.expect("连接测试库 owner");
+    let pool = owner.postgres_pool();
+    postgres_migrate_to(pool, 116).await.expect("迁移到发布基线");
+
+    let uid = "910002";
+    let quarantine = Uuid::new_v4();
+    let proprietary = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO public.settlement_funding_accounts (uid, accounting_mode, status, state_version)
+         VALUES ($1, 'record_only', 'ready', 1)",
+    )
+    .bind(uid)
+    .execute(pool)
+    .await
+    .expect("写入只记账账户");
+    sqlx::query(
+        "INSERT INTO public.settlement_funding_allocations (id, uid, purpose, amount)
+         VALUES ($1, $3, 'quarantine', 40), ($2, $3, 'proprietary', 0)",
+    )
+    .bind(quarantine)
+    .bind(proprietary)
+    .bind(uid)
+    .execute(pool)
+    .await
+    .expect("写入开账用途余额");
+    let create_source = |source_id, command_id, amount| {
+        sqlx::query(
+            "INSERT INTO public.settlement_funding_sources
+                (id, uid, kind, source_key, amount, proof_digest)
+             VALUES ($1, $2, 'record_opening', $3, $4, decode(repeat('31', 32), 'hex'))",
+        )
+        .bind(source_id)
+        .bind(uid)
+        .bind(command_id)
+        .bind(amount)
+    };
+    let issue = |source_id, command_id, credit_id, amount, digest: [u8; 32]| {
+        sqlx::query(
+            "INSERT INTO public.settlement_funding_entries
+                (id, command_id, uid, credit_id, source_id, amount, kind, proof_digest)
+             VALUES ($1, $2, $3, $4, $5, $6, 'issue', $7)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(command_id)
+        .bind(uid)
+        .bind(credit_id)
+        .bind(source_id)
+        .bind(amount)
+        .bind(digest.to_vec())
+    };
+    let historical_source = Uuid::new_v4();
+    let historical_command = Uuid::new_v4();
+    create_source(historical_source, historical_command, 40_i64)
+        .execute(pool)
+        .await
+        .expect("写入历史开账来源");
+    issue(historical_source, historical_command, quarantine, 40_i64, [0x32; 32])
+        .execute(pool)
+        .await
+        .expect("写入保留旧命令摘要的开账分录");
+    postgres_migrate_to(pool, 131).await.expect("非零历史开账可升级到 131");
+
+    let runtime = database.store().await.expect("连接运行账号");
+    let runtime_pool = runtime.postgres_pool();
+    let source = Uuid::new_v4();
+    let command = Uuid::new_v4();
+    create_source(source, command, 60).execute(runtime_pool).await.expect("写入新开账来源");
+    assert!(
+        issue(source, command, proprietary, 1, [0x31; 32]).execute(runtime_pool).await.is_err()
+    );
+    issue(source, command, quarantine, 60, [0x31; 32])
+        .execute(runtime_pool)
+        .await
+        .expect("新开账仍可记录非零隔离责任");
+    assert!(issue(source, command, quarantine, 1, [0x31; 32]).execute(runtime_pool).await.is_err());
+    let issued: Vec<i64> = sqlx::query_scalar(
+        "SELECT issued_amount FROM public.settlement_funding_sources WHERE uid = $1 ORDER BY amount",
+    )
+    .bind(uid)
+    .fetch_all(runtime_pool)
+    .await
+    .expect("读取历史回填与新发行的累计额度");
+    assert_eq!(issued, [40, 60]);
+    runtime_pool.close().await;
+    pool.close().await;
+}

@@ -115,7 +115,7 @@ pub struct OperationsAlertConsoleEntry {
     /// 当前活动周期内最近一次操作者确认；signal 恢复后再次出现时由存储层清空。
     pub acknowledged_at: Option<Timestamp>,
     pub acknowledged_by: Option<String>,
-    /// 当前活动周期内最近一次静默到期时间；到期后字段仍保留到下一个周期。
+    /// 最近一次静默到期时间。旧版告警解除后可能仍保留该字段。
     pub silenced_until: Option<Timestamp>,
 }
 
@@ -143,7 +143,6 @@ impl OperationsAlertConsoleEntry {
             || self.acknowledged_by.as_ref().is_some_and(|actor| !valid_alert_actor(actor))
             || self.acknowledged_at.is_some() != self.acknowledged_by.is_some()
             || self.acknowledged_at.is_some_and(|value| value.timestamp_nanos_opt().is_none())
-            || (!self.active && self.silenced_until.is_some())
             || (self.active == self.resolved_at.is_some())
             || (self.active && self.next_notify_at.is_none())
             || (!self.active && self.next_notify_at.is_some())
