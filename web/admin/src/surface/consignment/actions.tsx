@@ -32,6 +32,9 @@ export function DelistAction(props: {
     reason.set("");
     error.set(null);
   };
+  // 未决时只能原样重试。运营二次确认放弃后可提交新命令，由服务端按版本仲裁；
+  // 同版本至多一次下架生效，另一条命令收到 stale_version 或 listing_not_active。
+  // Admin 无寄售回执查询入口，整页重载会丢失内存未决记录；此时重读详情，再按当前版本提交。
   const canSubmit = (): boolean =>
     props.currentRead() &&
     props.record.can_delist &&

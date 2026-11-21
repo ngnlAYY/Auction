@@ -74,10 +74,13 @@ export function prepareAdminDelist(
     if (!is(AdminDelistListingSchema, request)) return err(writeNotSent("invalid_listing_request"));
     const prepared = prepare(commandId);
     if (!prepared.ok) return prepared;
-    // 尚未登记寄售拒绝码的宿主会保留未决，不能凭未经裁定的 HTTP 码发新命令。
     const sent = await sendPreparedJsonWrite(
       host,
-      { url: `${LISTINGS_URL}/${listingId}/delist`, method: "POST", endpoint: "general" },
+      {
+        url: `${LISTINGS_URL}/${listingId}/delist`,
+        method: "POST",
+        endpoint: "consignment-delist",
+      },
       prepared.value,
       signal,
     );

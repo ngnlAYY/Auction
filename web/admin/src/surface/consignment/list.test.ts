@@ -7,7 +7,15 @@ import { loadRenderModule } from "../../solid-render-fixture.test";
 import { ADMIN_ROUTES, consignmentListingPage, consignmentPage } from "../router/route";
 import { requireElement, withAdminTree } from "../settlement/settlement-tree-fixture.test";
 import { settle } from "../solid-dom-fixture";
-import { adminListing, DETAIL_PAGE, LISTING_ID, LISTINGS, SELLER_ID, success } from "./fixtures";
+import {
+  adminListing,
+  CONSIGNED_QUOTE,
+  DETAIL_PAGE,
+  LISTING_ID,
+  LISTINGS,
+  SELLER_ID,
+  success,
+} from "./fixtures";
 
 function loadList() {
   return loadRenderModule<typeof import("./list")>(`${import.meta.dir}/list.tsx`, "page");
@@ -148,6 +156,34 @@ test("重复筛选或无效的卖家书签失败关闭", async () => {
       expect(requests).toEqual([]);
     });
   }
+});
+
+test("模式列逐行区分非寄售与寄售", async () => {
+  const { page } = await loadList();
+  await withAdminTree("/consignment?page_size=20", async (tree) => {
+    const items = [
+      adminListing({ external_equipment_id: "42" }),
+      adminListing({
+        ...CONSIGNED_QUOTE,
+        listing_id: "10000000-0000-4000-8000-000000000004",
+        external_equipment_id: "43",
+      }),
+    ];
+    tree.requests.installFetch([success({ items, total: 2, page: 1, page_size: 20 })]);
+    tree.mount(page);
+    await settle();
+    const rows = tree.elements((node) => node.tag === "tr" && node.querySelector("a") !== null);
+    expect(
+      rows.map((row) => [
+        row.querySelector("a")?.textContent,
+        row.querySelectorAll("td").find((cell) => cell.getAttribute("data-label") === "挂单模式")
+          ?.textContent,
+      ]),
+    ).toEqual([
+      ["42", "非寄售"],
+      ["43", "寄售"],
+    ]);
+  });
 });
 
 test("列表与详情可直接匹配，认证后的详情高亮一口价入口", async () => {

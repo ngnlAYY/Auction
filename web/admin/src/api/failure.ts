@@ -37,6 +37,7 @@ function adminWriteEndpointParse(label: string): AdminWriteEndpoint | null {
     case "rules-publish":
     case "about-publish":
     case "mail-template":
+    case "consignment-delist":
       return label;
     default:
       return null;
@@ -136,9 +137,14 @@ interface AdminApiErrorResponse {
   readonly request_id: string | null;
 }
 
-/** HTTP 错误解码结果，只保留状态和通过信封校验的协议码。 */
+/** HTTP 错误解码结果，只保留状态、协议码及错误数据是否为空。 */
 export type DecodedAdminHttpFailure =
-  | { readonly kind: "valid-envelope"; readonly status: number; readonly protocolCode: string }
+  | {
+      readonly kind: "valid-envelope";
+      readonly status: number;
+      readonly protocolCode: string;
+      readonly hasData: boolean;
+    }
   | { readonly kind: "invalid-envelope"; readonly status: number };
 
 /** 业务请求发出前的客户端失败：没有 HTTP 状态。 */
@@ -175,7 +181,12 @@ function decodeHttpFailure(status: number, body: string): DecodedAdminHttpFailur
   if (envelope === null) {
     return invalidHttpBody(status);
   }
-  return { kind: "valid-envelope", status, protocolCode: envelope.code };
+  return {
+    kind: "valid-envelope",
+    status,
+    protocolCode: envelope.code,
+    hasData: envelope.data !== null,
+  };
 }
 
 /** 是否冲突（HTTP 409）。 */
@@ -372,12 +383,16 @@ export function decodeResponseFailure(
   response: TransportResponse,
   signal: AbortSignal,
   host: AdminSessionHost,
+  requireNullData = false,
 ): DecodedAdminHttpFailure | null {
   // 任务已取消或宿主已注销时 Rust 的 future 已被丢弃：不读正文，也不交付失效证据。
   if (signal.aborted || !adminSessionHostLive(host)) {
     return null;
   }
   const failure = decodeResponseHttpFailure(response);
+  if (requireNullData && failure.kind === "valid-envelope" && failure.hasData) {
+    return invalidHttpBody(response.status);
+  }
   // 读取正文期间不会让出事件循环；这里仍按同一取消信号收口副作用来源。
   if (
     !signal.aborted &&

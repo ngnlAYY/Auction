@@ -12,7 +12,11 @@ import {
 import { prepareAdminDelist } from "../../api/consignment/delist";
 import { fetchAdminListing } from "../../api/consignment/detail";
 import { fetchAdminListings } from "../../api/consignment/list";
-import { adminWriteFailureDisplayCode, observedResponseStatus } from "../../api/failure";
+import {
+  adminWriteFailureDisplayCode,
+  classifyAdminWriteFailure,
+  observedResponseStatus,
+} from "../../api/failure";
 import { registerAdminSessionHost } from "../../api/session";
 import {
   adminDetail,
@@ -253,20 +257,24 @@ test("下架经真实 CSRF 守卫发送并拒绝错命令、错版本与伪成�
   }
 });
 
-test("下架保留各 HTTP 错误码与状态，503 outcome_unknown 进入未知分支", async () => {
+test("下架保留 HTTP 错误码与状态，按专用白名单区分本次拒绝、已核对重放和未知", async () => {
   const harness = createAdminRequestHarness();
   try {
     harness.installBrowserRequest();
     const { host } = harness.registerHost();
     const outcomes = [
-      [404, "listing_not_found"],
-      [409, "stale_version"],
-      [409, "listing_not_active"],
-      [409, "command_id_conflict"],
-      [400, "invalid_reason"],
-      [403, "csrf_invalid"],
-      [503, "consignment_unavailable"],
-      [503, "outcome_unknown"],
+      [404, "listing_not_found", "replay_checked"],
+      [409, "stale_version", "replay_checked"],
+      [409, "listing_not_active", "replay_checked"],
+      [409, "command_id_conflict", "replay_checked"],
+      [400, "invalid_reason", "this_attempt"],
+      [401, "unauthenticated", "this_attempt"],
+      [403, "origin_forbidden", "this_attempt"],
+      [403, "csrf_invalid", "this_attempt"],
+      [429, "rate_limited", "this_attempt"],
+      [409, "conflict", "unknown"],
+      [503, "consignment_unavailable", "unknown"],
+      [503, "outcome_unknown", "unknown"],
     ] as const;
     const requests = harness.installFetch(
       outcomes.flatMap(([status, code]) => [
@@ -274,7 +282,7 @@ test("下架保留各 HTTP 错误码与状态，503 outcome_unknown 进入未知
         failure(status, code),
       ]),
     );
-    for (const [status, code] of outcomes) {
+    for (const [status, code, scope] of outcomes) {
       const result = await prepareAdminDelist(
         host,
         LISTING_ID,
@@ -284,6 +292,7 @@ test("下架保留各 HTTP 错误码与状态，503 outcome_unknown 进入未知
       if (result.ok) throw new Error("错误应答被当作写成功");
       expect(observedResponseStatus(result.error)).toBe(status);
       expect(adminWriteFailureDisplayCode(result.error)).toBe(code);
+      expect(classifyAdminWriteFailure(result.error)).toBe(scope);
       expect(result.error.kind).toBe(
         code === "outcome_unknown" ? "outcome-unknown" : "verified-http",
       );

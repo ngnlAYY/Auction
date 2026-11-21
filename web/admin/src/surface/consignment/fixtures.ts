@@ -35,6 +35,14 @@ export const SNAPSHOT: EquipmentView = {
   observed_at: "2026-11-18T00:30:00Z",
 };
 
+/** 标价 1,001 的寄售报价样本。 */
+export const CONSIGNED_QUOTE = {
+  mode: "consigned",
+  fee_bps: 500,
+  estimated_fee: 50,
+  estimated_seller_amount: 951,
+} as const;
+
 /** 缺省为无快照的在途解析，支持传入服务端的其他合法投影。 */
 export function adminListing(
   listing: Partial<OwnedListing> = {},
