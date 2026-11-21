@@ -191,6 +191,26 @@ fn register_checks_policy_and_redacts_command() {
 }
 
 #[test]
+fn register_passes_mismatched_expected_fee_to_store() {
+    let receipt = ListingRegistered::new(LISTING_ID, price(101)).unwrap();
+    let cases = [(ListingMode::Direct, 615_u16), (ListingMode::Consigned, 500)];
+    for (mode, expected_fee_bps) in cases {
+        let fixture = RegistrationFixture::new();
+        fixture.url_ok();
+        // 让替身按首次登记策略核对实际收到的费率。
+        fixture.store.0.register.reply(Ok(ListingCommandOutcome::Accepted(receipt)));
+        let result = run(fixture.service(true, true).register(
+            &seller(),
+            RegisterListingInput { mode, expected_fee_bps: i64::from(expected_fee_bps), ..input() },
+        ));
+        let [call] = fixture.store.0.register.take_calls().try_into().unwrap();
+        assert_eq!(call.mode, mode);
+        assert_eq!(call.expected_fee_bps.value(), expected_fee_bps, "{mode:?}");
+        assert_eq!(result.map_err(|error| error.api_error().unwrap()), Err((409, "fee_changed")));
+    }
+}
+
+#[test]
 fn register_unsupported_artifact_closes_first_admission_in_store() {
     let fixture = RegistrationFixture::new();
     let receipt = ListingRegistered::new(LISTING_ID, price(101)).unwrap();
