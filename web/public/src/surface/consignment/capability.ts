@@ -1,6 +1,6 @@
 // 导航、公开页与登记页共用的寄售能力读取。
 
-import type { ConsignmentStatus } from "@auction/contracts/dto/public/consignment/catalog";
+import type { ConsignmentStatus } from "@auction/contracts/dto/public/consignment/status";
 import { createTaskResource, type TaskResource } from "@auction/web-shared/reactive/resource";
 import { createRoot, onCleanup, runWithOwner } from "solid-js";
 

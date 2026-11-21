@@ -1,16 +1,15 @@
-// 寄售模式、世界、状态、原因与卖家动作的线协议闭集。
+// 寄售状态、原因与卖家动作的线协议闭集。
 
 import * as v from "valibot";
 
-/** 挂单创建时选定的不可变模式。 */
-export const ListingModeSchema = v.picklist(["direct", "consigned"]);
-/** 页面可选的挂单模式。 */
-export type ListingMode = v.InferOutput<typeof ListingModeSchema>;
+import type { ListingMode } from "./listing-options";
 
-/** 寄售装备所属的两个世界。 */
-export const ListingWorldSchema = v.picklist(["main", "isekai"]);
-/** 寄售装备所属世界。 */
-export type ListingWorld = v.InferOutput<typeof ListingWorldSchema>;
+export {
+  type ListingMode,
+  ListingModeSchema,
+  type ListingWorld,
+  ListingWorldSchema,
+} from "./listing-options";
 
 /** 公开目录只承载已经核验的挂单。 */
 export const PublicListingStateSchema = v.picklist(["displayed", "awaiting_deposit"]);

@@ -1,8 +1,6 @@
 // Public 寄售契约入口，供目录、本人读写与未决命令查询使用。
 
 export {
-  type ConsignmentStatus,
-  ConsignmentStatusSchema,
   type EquipmentLevel,
   type EquipmentStat,
   type EquipmentStatGroup,
@@ -47,3 +45,4 @@ export type {
   LookupReason,
   PublicListingState,
 } from "./states";
+export { type ConsignmentStatus, ConsignmentStatusSchema } from "./status";

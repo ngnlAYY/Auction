@@ -3,7 +3,7 @@
 import {
   type ConsignmentStatus,
   ConsignmentStatusSchema,
-} from "@auction/contracts/dto/public/consignment/catalog";
+} from "@auction/contracts/dto/public/consignment/status";
 import { apiResponseSchema } from "@auction/contracts/dto/response";
 import { decode, requiredNullable, struct } from "@auction/contracts/wire";
 import { sendRequestObserved, type TransportError } from "@auction/web-shared/net/transport";

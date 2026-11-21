@@ -2,20 +2,17 @@
 
 import * as v from "valibot";
 
-import { integer, unsignedInteger } from "../../../wire";
+import { integer } from "../../../wire";
 import { timestamp } from "../../../wire/timestamp";
+import { LISTING_PRICE_MAX } from "./listing-options";
 
-/** 寄售标价上限，以 main Credits 计。 */
-export const LISTING_PRICE_MAX = 1_000_000_000;
+export { LISTING_PRICE_MAX, ListingFeeBpsSchema } from "./listing-options";
 
 /** 不变量 6：只接受协议范围内的整数标价。 */
 export const ListingPriceSchema = v.pipe(integer, v.minValue(1), v.maxValue(LISTING_PRICE_MAX));
 
 /** 已提交的挂单版本从 1 开始，必须能由浏览器精确表示。 */
 export const ListingVersionSchema = v.pipe(integer, v.minValue(1));
-
-/** 不变量 6、10：冻结费率以整数万分比传递。 */
-export const ListingFeeBpsSchema = v.pipe(unsignedInteger, v.maxValue(9_999));
 
 /** 统一使用协议规定的小写、带连字符的非零 UUID。 */
 export const ConsignmentUuidSchema = v.pipe(
