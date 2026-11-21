@@ -107,19 +107,34 @@ export const ADMIN_SETTLEMENT_RETURN_BLOCKERS = [
   "observation_required",
 ] as const;
 
-/** Take 结果未知的原因闭集（详情 `take_unknown_reason`）：前五项是邮箱维护在原 Take 会话里的
- * 观察，后四项由持久事实推出；只有 `assets_claimable` 允许再次领回。 */
-export const ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS = [
+/** 邮箱维护在原 Take 会话里能持久化为 `take_observed` 的原因。 */
+const TAKE_OBSERVATIONS = [
   "assets_claimable",
   "assets_unclaimable",
   "assets_changed",
   "mail_missing",
   "receipt_unproven",
+] as const;
+
+/** Take 结果未知的原因闭集。除原会话观察外，其余原因由持久事实推出。 */
+export const ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS = [
+  ...TAKE_OBSERVATIONS,
   "session_changed",
   "take_unverifiable",
   "disposition_conflict",
   "awaiting_observation",
 ] as const;
+
+/** 领回动作转结果未知时持久化在 `take_unknown.details` 中的失败码。 */
+const TAKE_FAILURE_CODES = [
+  "settlement_return_take_conflict",
+  "settlement_return_take_unknown",
+  "settlement_return_take_not_started",
+  "settlement_return_take_failed",
+  "mail_disposition_conflict",
+] as const;
+
+const SWEEP_RETRIES = v.pipe(uint8, v.maxValue(8));
 
 /** 资产当前位置闭集；与资产对账使用同一组名称，互斥且不重复计数。 */
 export const ADMIN_SETTLEMENT_RETURN_ASSET_LOCATIONS = [
@@ -227,7 +242,7 @@ export const AdminSettlementReturnEventResponseSchema = v.pipe(
     details: jsonValue,
   }),
   v.check(
-    (event) => validEventDetailsShape(event.event_kind, event.details),
+    (event) => validSettlementReturnEventDetails(event.event_kind, event.details),
     "invalid settlement return event details",
   ),
 );
@@ -357,7 +372,8 @@ export type AdminSettlementReturnCommandResponse = v.InferOutput<
   typeof AdminSettlementReturnCommandResponseSchema
 >;
 
-function validEventDetailsShape(kind: string, details: unknown): boolean {
+/** 校验持久化案件事件的闭集细节，与 Admin HTTP 的事件投影一致。 */
+export function validSettlementReturnEventDetails(kind: string, details: unknown): boolean {
   if (typeof details !== "object" || details === null || Array.isArray(details)) return false;
   const value = details as Record<string, unknown>;
   const keys = Object.keys(value).sort().join(",");
@@ -422,7 +438,7 @@ function validEventDetailsShape(kind: string, details: unknown): boolean {
           stringValue(value.reason) &&
           ((matches("delivery_id,reason,requeued,restarts") && positiveInteger(value.restarts)) ||
             (matches("delivery_id,reason,requeued,sweep_retries") &&
-              positiveInteger(value.sweep_retries))))
+              v.safeParse(SWEEP_RETRIES, value.sweep_retries).success)))
       );
     case "take_proven":
       return matches("dispatch_no,next,proof")
@@ -437,16 +453,15 @@ function validEventDetailsShape(kind: string, details: unknown): boolean {
       return (
         matches("delivery_id,failure_code") &&
         (value.delivery_id === null || uuidValue(value.delivery_id)) &&
-        stringValue(value.failure_code)
+        v.safeParse(v.picklist(TAKE_FAILURE_CODES), value.failure_code).success
       );
     case "take_observed":
       return (
         matches("delivery_id,fencing_version,observation,sweep_retries") &&
         uuidValue(value.delivery_id) &&
         positiveInteger(value.fencing_version) &&
-        positiveInteger(value.sweep_retries) &&
-        v.safeParse(v.picklist(ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS), value.observation)
-          .success
+        v.safeParse(SWEEP_RETRIES, value.sweep_retries).success &&
+        v.safeParse(v.picklist(TAKE_OBSERVATIONS), value.observation).success
       );
     case "resend_authorized":
       return matches("dispatch_no") && positiveInteger(value.dispatch_no);

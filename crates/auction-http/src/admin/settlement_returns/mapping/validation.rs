@@ -94,8 +94,10 @@ pub(super) fn valid_event_details(kind: AdminSettlementReturnEventKind, details:
                     string(value, "failure_code"),
                     Some(
                         "settlement_return_take_conflict"
+                            | "settlement_return_take_unknown"
                             | "settlement_return_take_not_started"
                             | "settlement_return_take_failed"
+                            | "mail_disposition_conflict"
                     )
                 ) && nullable_uuid_field(value, "delivery_id")
             })

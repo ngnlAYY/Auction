@@ -810,6 +810,65 @@ mod tests {
         assert!(map_detail(migrated, CASE).is_none());
     }
 
+    #[test]
+    fn take_unknown_history_accepts_persisted_failures_and_observations() {
+        let mut unknown = detail();
+        let delivery_id = Uuid::from_u128(6);
+        let at = unknown.summary.updated_at;
+        unknown.summary.status = SettlementReturnCaseStatus::TakeUnknown;
+        unknown.summary.asset_location = SettlementReturnAssetLocation::LocationUnknown;
+        unknown.summary.case_version = 4;
+        unknown.take_unknown_reason = Some(SettlementReturnTakeUnknownReason::MailMissing);
+        let failure = json!({
+            "failure_code": "settlement_return_take_unknown",
+            "delivery_id": delivery_id,
+        });
+        let observation = json!({
+            "observation": "mail_missing",
+            "delivery_id": delivery_id,
+            "fencing_version": 2,
+            "sweep_retries": 0,
+        });
+        for (case_version, event_kind, details) in
+            [(3, "take_unknown", failure.clone()), (4, "take_observed", observation.clone())]
+        {
+            unknown.events.push(SettlementReturnEvent {
+                case_version,
+                event_kind: event_kind.to_owned(),
+                occurred_at: at,
+                actor_id: None,
+                command_id: None,
+                details,
+            });
+        }
+        let mapped = map_detail(unknown.clone(), CASE).expect("持久化 Take 结果未知与首次观察");
+        assert_eq!(mapped.events[2].details, failure);
+        assert_eq!(mapped.events[3].details, observation);
+
+        for retries in [json!(-1), json!(9), json!(0.0), json!(1.5), json!("0")] {
+            let mut malformed = unknown.clone();
+            malformed.events[3].details["sweep_retries"] = retries;
+            assert!(map_detail(malformed, CASE).is_none());
+        }
+        let mut malformed = unknown.clone();
+        malformed.events[3].details["observation"] = json!("awaiting_observation");
+        assert!(map_detail(malformed, CASE).is_none());
+
+        unknown.events[3].details["sweep_retries"] = json!(8);
+        assert!(map_detail(unknown.clone(), CASE).is_some());
+
+        unknown.events.pop();
+        unknown.summary.case_version = 3;
+        unknown.take_unknown_reason = Some(SettlementReturnTakeUnknownReason::DispositionConflict);
+        let conflict = json!({"failure_code": "mail_disposition_conflict", "delivery_id": null});
+        unknown.events[2].details = conflict.clone();
+        let mapped = map_detail(unknown.clone(), CASE).expect("激活前处置冲突");
+        assert_eq!(mapped.events[2].details, conflict);
+
+        unknown.events[2].details["failure_code"] = json!("take_receipt_unproven");
+        assert!(map_detail(unknown, CASE).is_none());
+    }
+
     /// 核验能力不可用只随待重新核验的案件输出；其他状态带这个标记是投影不一致，失败关闭。
     #[test]
     fn recheck_unavailable_only_maps_for_recheck_pending() {

@@ -205,9 +205,13 @@ async fn race(
         .fetch_one(pool)
         .await
         .expect("读取最新事件");
+        let expected_details = serde_json::json!({
+            "failure_code": "mail_disposition_conflict",
+            "delivery_id": null,
+        });
         assert_eq!(
-            (kind.as_str(), details["failure_code"].as_str()),
-            ("take_unknown", Some("mail_disposition_conflict")),
+            (kind.as_str(), details),
+            ("take_unknown", expected_details),
             "冲突原因记在案件事件里（{label}）"
         );
         assert_eq!(
