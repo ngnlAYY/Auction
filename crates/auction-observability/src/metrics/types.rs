@@ -174,11 +174,17 @@ pub enum WorkerLoop {
     OperationsAlertReconcile,
     /// 卖方汇总与换季提醒的玩家通知扫描。
     PlayerNotifications,
+    /// 一口价挂单的装备解析。
+    ConsignmentResolve,
+    /// 一口价挂单的清退补扫和租约回收。
+    ConsignmentMaintenance,
+    /// 一口价挂单的登记准入心跳。
+    ConsignmentReadiness,
 }
 
 impl WorkerLoop {
     /// 初始化固定循环的零值序列，不接收运行时 label。
-    pub(super) const ALL: [Self; 16] = [
+    pub(super) const ALL: [Self; 19] = [
         Self::MailMain,
         Self::MailIsekai,
         Self::MailMaintenanceMain,
@@ -195,6 +201,9 @@ impl WorkerLoop {
         Self::OperationsAlertDispatch,
         Self::OperationsAlertReconcile,
         Self::PlayerNotifications,
+        Self::ConsignmentResolve,
+        Self::ConsignmentMaintenance,
+        Self::ConsignmentReadiness,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -215,6 +224,9 @@ impl WorkerLoop {
             Self::OperationsAlertDispatch => "operations-alert-dispatch",
             Self::OperationsAlertReconcile => "operations-alert-reconcile",
             Self::PlayerNotifications => "player-notifications",
+            Self::ConsignmentResolve => "consignment-resolve",
+            Self::ConsignmentMaintenance => "consignment-maintenance",
+            Self::ConsignmentReadiness => "consignment-readiness",
         }
     }
 }

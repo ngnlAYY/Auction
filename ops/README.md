@@ -437,6 +437,7 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 | --- | --- |
 | 更换外部 Cookie | Admin “Cookie 池”录入新凭据并停用旧凭据（每种 kind 同时只能一个 active），或 `auction-cli credential import`；然后重启 Worker（分体部署用 `service restart`） |
 | 轮换装备数据密钥 | 停机窗口内演练、重封并核对三处来源，见[装备数据密钥轮换](#装备数据密钥轮换) |
+| 停用或恢复一口价挂单 | 停止旧写入角色，调整共用配置后按顺序重启，见[一口价挂单的停用与恢复](#一口价挂单的停用与恢复) |
 | 暂停/恢复收件 | Admin 仪表盘或“收件审核”页；恢复轮询不绕过场次冻结的赛季收件门禁，见[docs/business-rules.md#赛季早鸟期auctionscheduleearly_bird](../docs/business-rules.md#赛季早鸟期auctionscheduleearly_bird) |
 | 结果未知的投递 | Admin “投递队列”按动作与证据人工对账；主动 Send 禁止仅凭外部引用人工确认成功，须由冻结的精确 Sent 证明恢复。未找到 Sent 不证明未发送 |
 | 恢复确认 | Admin “结算报表”中确认 `reclaimed` / `cancelled` / `equipment_recovered`；付款截止与跨赛季重列限制见[4 恢复付款超时与拒收](../docs/guide/settlement.md#4-恢复付款超时与拒收)。确认返回 `recovery_send_unattributed`，或 Worker 自动重寄/退回卖家以报表阻断码 `recovery_evidence_mismatch` 停下且有审计 `recovery.send_attribution_blocked`，表示退件不能唯一归属到原投递的一次发送（可能有另一封邮件仍在对方手里）：报表的证据列显示具体原因（`send_attribution_blocker`）。Worker 每 10 分钟按持久事实复核一次，Sent 恢复为每一次可能外达的发送补上远端 MID、且与已消费的退件一一对应时自动解除（审计 `recovery.send_attribution_released`，`rule=sent_mid`）并继续推进；仍不成立时按投递详情的冻结发送尝试与 Sent 人工核对，系统不提供绕过的确认入口。原付款投递在退件之前被重新排队而停在待发时不再阻断，收口时由恢复流程终结为 `failed/recovery_superseded`（投递台只在扩展投影中列出）或由自动重寄接替 |
@@ -448,6 +449,12 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 | Bot 资金账户 | `auction-cli funds preview` 可在线只读执行；开户或现金对账写入前须先停止 Worker，见[docs/guide/settlement.md#bot-内部履约与资金账户](../docs/guide/settlement.md#bot-内部履约与资金账户) |
 | 导出邮件诊断证据 | `auction-cli mail export-evidence <evidence-id> --output <文件>` |
 | 数据保留与清理 | `auction-cli db inventory` 只统计不授权删除；`db retention-dry-run` 按政策 v2 写 run id 回执；执行用 `db retention-purge --dry-run-receipt <回执> --approve <family>=<token> --execute --confirm 'PURGE <库名>' --receipt <回执>`，只删运行态族、逐族令牌绑定演练计数并追加 `auction.retention.purge` 审计，审计/资金/业务事实与有效会话永不删除 |
+
+### 一口价挂单的停用与恢复
+
+1. 停止旧 Public、Admin、Worker 写入角色，合并部署则停止 `auction-server`。在三角色共用的 `common.toml` 设置 `[consignment] enabled = false`。保持原数据库目标，分体部署先启动 Worker 并确认就绪，再启动 Admin 与 Public。
+2. Worker 在领单和宣布就绪以前同步停用。由开转关会增加一次持久代次、关闭准入并清除登记心跳。重复以关闭配置重启会沿用该代次。旧代活动挂单立即有效关闭，在途结果失去提交资格，补扫随后提交清退并退休登记信封。数据库不可用、同步结果未确认或 Worker 以无数据库骨架启动时，保留停用配置，待原数据库恢复后完成同步。
+3. 恢复只在当前制品允许的环境执行。仍须先停旧写角色，再切换共用配置、先启动 Worker。开启会沿用停用后的代次，旧挂单须重新登记。登记事务要求 Worker 有效心跳和 Public 本地封装、重放比较能力。应以登记就绪状态确认准入。配置及预览限制见[寄售服务配置](config/README.md#寄售服务)。密钥更换见[装备数据密钥轮换](#装备数据密钥轮换)。
 
 ### 装备数据密钥轮换
 

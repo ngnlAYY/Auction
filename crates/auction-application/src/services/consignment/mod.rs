@@ -6,6 +6,7 @@ mod manage;
 mod register;
 mod resolve;
 
+pub use encoding::{auto_close_command, lookup_reap_exhausted_identity};
 pub use maintenance::{ListingMaintenanceProgress, ListingMaintenanceService};
 pub use manage::ManageListingService;
 pub use register::{RegisterListingInput, RegisterListingService};

@@ -9,7 +9,7 @@ use std::{
 };
 
 use anyhow::{Context, bail};
-use auction_config::{AppConfig, HttpListenMode};
+use auction_config::{AppConfig, CONSIGNMENT_COMPLETE, HttpListenMode, consignment_activation};
 use auction_process::{CONTROL_READY_PATH, HTTP_READY_PATH, ReadinessTarget};
 
 use super::{cli::ChildRole, filesystem};
@@ -47,6 +47,7 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
         regular(&path, false)?;
         let config =
             AppConfig::load_from_path(role.config_role(), &path).context("加载部署角色配置失败")?;
+        validate_consignment_artifact(config.consignment.enabled())?;
         for path in [config.common_config_path.as_deref(), config.runtime_config_path.as_deref()]
             .into_iter()
             .flatten()
@@ -178,6 +179,17 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
     Ok(plans)
 }
 
+fn validate_consignment_artifact(enabled: bool) -> anyhow::Result<()> {
+    consignment_activation(
+        enabled,
+        CONSIGNMENT_COMPLETE,
+        cfg!(feature = "consignment-dev-preview"),
+        cfg!(debug_assertions),
+    )
+    .context("合并装配的一口价挂单配置无效")?;
+    Ok(())
+}
+
 fn regular(path: &Path, secret: bool) -> anyhow::Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.is_file()
@@ -270,4 +282,23 @@ fn same_retired_keys(
             .collect::<Vec<_>>()
     };
     identity(left) == identity(right)
+}
+
+#[cfg(test)]
+mod consignment_tests {
+    use super::validate_consignment_artifact;
+
+    #[test]
+    fn supervisor_checks_consignment_before_spawning_roles() {
+        assert!(validate_consignment_artifact(false).is_ok());
+        let result = validate_consignment_artifact(true);
+        if cfg!(all(feature = "consignment-dev-preview", debug_assertions)) {
+            assert!(result.is_ok());
+        } else {
+            assert!(
+                format!("{:#}", result.unwrap_err())
+                    .contains("consignment-dev-preview 的本地调试构建")
+            );
+        }
+    }
 }

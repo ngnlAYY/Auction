@@ -9,7 +9,9 @@ use auction_application::settlement::{
     SettlementCommandPort, SettlementFulfillmentCommandPort, SettlementFulfillmentEvidenceReader,
     SettlementFulfillmentStore, SettlementWorkStore,
 };
-use auction_config::{AppConfig, Role};
+use auction_config::{
+    AppConfig, CONSIGNMENT_COMPLETE, ConsignmentActivation, Role, consignment_activation,
+};
 use auction_observability::{ProcessMetrics, TracingConfig, TracingRuntime};
 use auction_process::{TaskGuard, TerminationSignals};
 use auction_time::Timestamp;
@@ -61,6 +63,7 @@ pub async fn run_from_path(path: std::path::PathBuf) -> anyhow::Result<()> {
 }
 
 async fn run_config(config: AppConfig) -> anyhow::Result<()> {
+    consignment_startup(config.consignment.enabled(), config.database_url().is_some())?;
     let mut signals = TerminationSignals::subscribe().context("订阅 Worker 终止信号失败")?;
     let tracing_config = tracing_config(&config.tracing);
     let telemetry = auction_observability::init_with_config(
@@ -80,6 +83,20 @@ async fn run_config(config: AppConfig) -> anyhow::Result<()> {
         auction_observability::shutdown_tracing("worker", telemetry, &mut signals).await;
     }
     result
+}
+
+fn consignment_startup(enabled: bool, has_database: bool) -> anyhow::Result<ConsignmentActivation> {
+    let activation = consignment_activation(
+        enabled,
+        CONSIGNMENT_COMPLETE,
+        cfg!(feature = "consignment-dev-preview"),
+        cfg!(debug_assertions),
+    )
+    .context("Worker 的一口价挂单配置无效")?;
+    if activation == ConsignmentActivation::Enabled && !has_database {
+        anyhow::bail!("启用一口价挂单的 Worker 必须配置 PostgreSQL database_url");
+    }
+    Ok(activation)
 }
 
 async fn run_service(
@@ -196,5 +213,25 @@ fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
         max_export_batch_size: settings.max_export_batch_size as usize,
         sample_ratio: f64::from(settings.sample_ratio_ppm) / 1_000_000.0,
         shutdown_timeout: std::time::Duration::from_secs(settings.shutdown_timeout_seconds),
+    }
+}
+
+#[cfg(test)]
+mod consignment_tests {
+    use auction_config::ConsignmentActivation;
+
+    use super::consignment_startup;
+
+    #[test]
+    fn consignment_startup_requires_capable_artifact_and_database() {
+        assert_eq!(consignment_startup(false, false).unwrap(), ConsignmentActivation::Disabled);
+        if cfg!(all(feature = "consignment-dev-preview", debug_assertions)) {
+            assert_eq!(consignment_startup(true, true).unwrap(), ConsignmentActivation::Enabled);
+            let error = consignment_startup(true, false).unwrap_err();
+            assert!(error.to_string().contains("必须配置 PostgreSQL"));
+        } else {
+            let error = consignment_startup(true, true).unwrap_err();
+            assert!(format!("{error:#}").contains("consignment-dev-preview 的本地调试构建"));
+        }
     }
 }

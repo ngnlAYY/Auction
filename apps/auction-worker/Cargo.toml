@@ -6,6 +6,10 @@ rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
 
+[features]
+# 可选：只用于本地调试构建开启未完成的一口价挂单；发布构建即使误带也拒开。
+consignment-dev-preview = []
+
 [dependencies]
 anyhow.workspace = true
 auction-application.workspace = true

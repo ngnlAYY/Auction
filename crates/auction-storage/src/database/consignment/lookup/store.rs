@@ -21,6 +21,7 @@ use super::{admission, claim, lease, reclaim};
 use crate::database::DatabaseStore;
 use crate::database::backend::{retry_conflicts, set_read_only_limits};
 use crate::database::consignment::commands::errors::WriteError;
+use crate::database::consignment::eligibility::predicates::listing_sql;
 
 /// 用应用层提供的规范命令构造器为存储回收准备终结身份。
 pub(super) struct ReapCommands {
@@ -36,6 +37,26 @@ struct ConsignmentLookupStore {
 }
 
 impl DatabaseStore {
+    /// 检查是否有持久活动挂单，供启动同步后的停用 Worker 决定是否补扫。
+    pub async fn has_active_consignment_listings(&self) -> Result<bool, ConsignmentError> {
+        let result: Result<bool, sqlx::Error> = async {
+            let mut tx = self.pool().begin_read_snapshot().await?;
+            set_read_only_limits(&mut tx).await.map_err(|(_, error)| error)?;
+            // 不变量 5、6：使用活动部分索引，旧代已有效关闭但还未落库的挂单也算存量。
+            let has_stock = sqlx::query_scalar(concat!(
+                "SELECT EXISTS (SELECT 1 FROM public.consignment_listings l WHERE ",
+                listing_sql!(stored_active),
+                ")",
+            ))
+            .fetch_one(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            Ok(has_stock)
+        }
+        .await;
+        result.map_err(|error| WriteError::from(error).into_application())
+    }
+
     /// 装配解析工作端口，回收的两个规范命令构造器由应用层提供。
     pub fn consignment_lookup(
         &self,
@@ -133,8 +154,7 @@ impl LookupWorkStore for ConsignmentLookupStore {
 
 impl ListingMaintenance for DatabaseStore {
     fn scan_candidates(&self) -> ConsignmentFuture<'_, ListingMaintenancePage> {
-        // 2R 接入公平补扫前，失败关闭，避免把缺少扫描能力报告成没有存量。
-        Box::pin(async { Err(ConsignmentError::Unavailable) })
+        Box::pin(self.scan_consignment_candidates())
     }
 
     fn sync_admission(&self, enabled: bool) -> ConsignmentFuture<'_, ListingAdmission> {

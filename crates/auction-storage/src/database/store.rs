@@ -306,8 +306,8 @@ impl DatabaseStore {
         Ok(())
     }
 
-    /// 以只读查询确认连接可用且已应用当前二进制的全部迁移。
-    async fn check_database_readiness(&self) -> Result<(), ApplicationError> {
+    /// 按迁移兼容策略检查数据库与 schema，供只依赖此证明的能力心跳使用。
+    pub async fn check_database_readiness(&self) -> Result<(), ApplicationError> {
         migrations::check_postgres_readiness(self).await
     }
 }

@@ -147,7 +147,8 @@ pub(super) fn lookup_command_identity(
     (CommandId::from_uuid(command_id), input.request_hash())
 }
 
-pub(super) fn auto_close_command(candidate: AutoCloseCandidate) -> AutoCloseListingCommand {
+/// 从挂单及数据库复核的证据派生补扫与到期回收共用的稳定命令。
+pub fn auto_close_command(candidate: AutoCloseCandidate) -> AutoCloseListingCommand {
     let mut input = ListingCommandEncoding::new(ListingOperation::AutoClose);
     input.bytes(candidate.listing_id.as_bytes());
     let reason = match candidate.evidence {
@@ -183,4 +184,17 @@ pub(super) fn auto_close_command(candidate: AutoCloseCandidate) -> AutoCloseList
         command_id: CommandId::from_uuid(command_id),
         candidate,
     }
+}
+
+/// 为耗尽回收派生稳定命令身份。不变量 1、5：同一工作代次与围栏重放同一结果，
+/// 并与同围栏的来源观察使用独立命名空间。
+pub fn lookup_reap_exhausted_identity(fence: LookupFence) -> (CommandId, RequestHash) {
+    let mut input = ListingCommandEncoding::new(ListingOperation::ApplyLookup);
+    input.text("reap_exhausted");
+    input.bytes(fence.work_id().as_bytes());
+    input.bytes(fence.listing_id().as_bytes());
+    input.bytes(&fence.generation().to_be_bytes());
+    input.bytes(&fence.fence().to_be_bytes());
+    let command_id = Uuid::new_v5(&fence.work_id(), &input.0);
+    (CommandId::from_uuid(command_id), input.request_hash())
 }

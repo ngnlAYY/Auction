@@ -9,8 +9,9 @@ use auction_application::consignment::{
     ListingMaintenanceService, LookupWorkStore, ResolveListingService,
 };
 use auction_application::core::Clock;
+use auction_application::core::diagnostics::SafeErrorKind;
 use auction_domain::valid_text;
-use auction_observability::WorkerResult;
+use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult};
 use tokio::sync::{Notify, watch};
 use tokio::time::Instant;
 
@@ -29,6 +30,27 @@ pub enum ConsignmentLoop {
     Maintenance,
     /// 持久准入就绪心跳。
     Readiness,
+}
+
+pub(crate) fn observe_worker_iteration(
+    metrics: &dyn WorkerRecorder,
+    kind: ConsignmentLoop,
+    result: WorkerResult,
+    duration: Duration,
+    failed: u32,
+) {
+    let loop_kind = match kind {
+        ConsignmentLoop::Resolve => WorkerLoop::ConsignmentResolve,
+        ConsignmentLoop::Maintenance => WorkerLoop::ConsignmentMaintenance,
+        ConsignmentLoop::Readiness => WorkerLoop::ConsignmentReadiness,
+    };
+    metrics.observe_iteration(loop_kind, result, duration);
+    for _ in 0..failed {
+        metrics.observe_unpersisted_error(
+            WorkerLoop::ConsignmentMaintenance,
+            SafeErrorKind::CONSIGNMENT_AUTO_CLOSE_FAILED,
+        );
+    }
 }
 
 /// 本次心跳检查的能力，检查失败或未知的项为 false。
@@ -79,7 +101,6 @@ pub struct ConsignmentWorker {
 
 impl ConsignmentWorker {
     /// 监听或宣告就绪前调用。关闭时仅当存量探针证实有清退工作才返回维护任务。
-    #[allow(dead_code, reason = "持久 Worker 装配由集成人接入")]
     pub async fn prepare(
         enabled: bool,
         artifact_capable: bool,
@@ -108,7 +129,6 @@ impl ConsignmentWorker {
 
     /// 在现有 Worker 任务组或任务守卫下运行。发送 drain 后等待本任务，沿用进程共享排空期限。
     /// 指标回调依次接收循环、结果、耗时和本页清退失败数。非维护页迭代的失败数为零。
-    #[allow(dead_code, reason = "持久 Worker 任务注册由集成人接入")]
     pub async fn run(
         self,
         drain: watch::Receiver<bool>,

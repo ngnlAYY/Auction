@@ -8,7 +8,7 @@
 
 `AUCTION_CONFIG_FILE=/etc/auction/worker.toml auction-worker`（本地开发 `cargo run --locked -p auction-worker`，优先读 `ops/config/worker.toml`；仓库模板在 [ops/config/examples/worker.toml](../../ops/config/examples/worker.toml)）。
 
-装配顺序：加载配置与日志/tracing/指标并订阅信号 → 未配置数据库时若启用了 MoogleMail、论坛、告警邮件或告警 Webhook 则拒绝启动，否则骨架运行 → 连接数据库并按 `[worker.mooglemail.send_intervals]` 配置发送间隔 → 装配生命周期、慢速代理、论坛与邮件轮询 → 实际装载外部凭据时以 PostgreSQL session advisory lock 取得该凭据种类的唯一 owner（每秒检查，失效即排空并非零退出）→ 启用 `[worker.control]` 时绑定 socket、发布心跳并启动全部循环。
+加载角色配置后先检查一口价挂单的制品能力和所需的数据库配置。通过后初始化日志、指标和信号，再连接数据库。启用了 MoogleMail、论坛、告警邮件或告警 Webhook 时也须配置数据库，否则按配置运行骨架。持久装配先同步一口价挂单的准入代次，再装配生命周期、慢速代理、论坛与邮件轮询。实际装载外部凭据时，以 PostgreSQL session advisory lock 取得该种凭据的唯一 owner（每秒检查，失效即排空并非零退出）。完成后才绑定已启用的 Worker control、发布进程心跳并启动持久任务。
 
 MoogleMail 默认 `poll_isolation_enabled = true`：每个世界独立运行收件与维护，维护按自己的日程先 `sweep` 再按最小间隔观察完整 Read Mail；省略维护日程时跟随 Admin 接管后的收件日程，两世界用启动时冻结的相位平移。该 TOML 值是在线开关 `mooglemail_poll_isolation_enabled` 的基线（`auction-cli switch set` 切换，clear 回落）；切换在下一轮或下一次维护门复读后生效，不重写 `mail_poll_state.next_poll_at`。见[ops/config/README.md#mooglemail-收件与维护](../../ops/config/README.md#mooglemail-收件与维护)。
 
@@ -20,6 +20,7 @@ MoogleMail 默认 `poll_isolation_enabled = true`：每个世界独立运行收�
 | 论坛同步、回帖与装备 PM | `[worker.forum] enabled = true`（默认关闭） | `equipment_data_key` 与论坛凭据；装备 PM 不依赖 MoogleMail 开关 |
 | 运维告警 | `[worker.operations_alert]`：`scan_enabled`（默认 true，只写告警台）、`notify_enabled`（默认 false，MoogleMail 告警邮件）、`webhook_enabled`（默认 false，独立 Webhook）；见[ops/config/README.md#worker](../../ops/config/README.md#worker) | 扫描只需数据库；邮件通知需收件人，告警世界必须在已启用的 MoogleMail 世界内；Webhook 需 `operations_alert_webhook_url` |
 | 邮件诊断归档 | `[worker.mooglemail.diagnostics]`（默认启用） | `credential_data_key`，否则用 `equipment_data_key` 作加密父密钥 |
+| 一口价挂单解析 | 共用 `[consignment] enabled = true`（默认关闭） | PostgreSQL、装备域当前数据密钥及按需保留的旧钥、固定装备来源。本阶段仅带 `consignment-dev-preview` 的调试制品可开启 |
 
 诊断归档目录默认在 Worker 配置文件旁的 `mail-diagnostics/`，按保留天数（默认 7）与总字节上限（默认 256 MiB）清理；用 `auction-cli mail export-evidence` 离线导出。周排期与早鸟期分别由 `[auction.schedule] enabled`、`[auction.schedule.early_bird] enabled` 控制，默认关闭。关闭邮件或论坛不会停用生命周期、慢速代理与结算；外部履约缺证据时保持等待，不能当作已完成。凭据不是逐项回退：配置完整的 `credential_data_key` 时只读数据库 active 凭据，未配置时邮件用 `keyenv_file` 或敏感配置 `mooglemail_cookie`、论坛用 `ehentai_cookie`。需要联合账号身份证据的流程还依赖论坛目标资料读取端口（仅论坛启用时装配）。
 
@@ -28,6 +29,12 @@ MoogleMail 默认 `poll_isolation_enabled = true`：每个世界独立运行收�
 `[worker.control]` 默认关闭；启用后 Worker 在 Unix socket（默认 `/run/hv-auction/worker/control.sock`，组 `auction-worker-control`）上提供 HTTP/JSON 控制面，连接按 `SO_PEERCRED` 检查 `allowed_peer_uids`/`allowed_peer_gids`。路径、方法与就绪判定见[docs/contracts/routes.md#worker-controlunix-socket](../../docs/contracts/routes.md#worker-controlunix-socket)，socket 与授权实现见[crates/auction-jobs/README.md#worker-control](../../crates/auction-jobs/README.md#worker-control)。Admin、`auction-cli` 与 `auction-server` 都经该 socket 判断 Worker 状态；Admin 与 CLI 需要的外部只读读取（含 Admin 邮件 Cookie 在线检查）也经它交给 Worker 执行，不在本地直连；邮件凭据检查需要 Worker 启用 MoogleMail 并配置 `credential_data_key`，否则该路由报告能力不可用。
 
 附加指标出口由 `metrics.worker_loopback_listen_address` 选择（示例 `127.0.0.1:19102`），独立于 control socket 上的 `/metrics`；行为见[docs/contracts/routes.md#三角色附加指标出口loopback-tcp](../../docs/contracts/routes.md#三角色附加指标出口loopback-tcp)，字段校验见[ops/config/README.md#commontoml](../../ops/config/README.md#commontoml)。
+
+## 一口价挂单
+
+启用时，解析循环按数据库全局许可领单，空闲时至多等 5 秒，复用 Worker 的外部访问暂停与共享排空。固定来源读取的字节上限和本次领取的硬截止由 `[consignment]` 提供。维护循环每 30 秒补扫活动挂单，逐单核实碰撞、资格、停用或到期事实，并在开启时回收过期的解析租约。准入同步失败即启动失败。关闭时只在发现待清退存量后启动维护。
+
+登记准入心跳每 10 秒重新核对数据库及 schema，并依赖已装配的开封器、装备密钥环与来源端口。核对通过后续期至数据库时刻后 30 秒。指标固定循环名为 `consignment-resolve`、`consignment-maintenance`、`consignment-readiness`。各循环共用持久任务的监督与停止预算。见[一口价挂单的停用与恢复](../../ops/README.md#一口价挂单的停用与恢复)。
 
 ## 退出
 

@@ -24,6 +24,8 @@ tokio = { workspace = true, features = ["process"] }
 [features]
 # 可选：都不启用时只提供 API，不内嵌任何页面资源。
 default = []
+# 可选：把本地寄售预览能力转发给同一可执行文件内的 Worker 角色；发布构建仍拒绝开启。
+consignment-dev-preview = ["auction-worker/consignment-dev-preview"]
 # 可选：Public 与 Admin 都内嵌 Dioxus 版页面（默认技术栈）。
 web-embed = ["auction-public-api/web-embed", "auction-admin-api/web-embed"]
 # 可选：只把 Public 切到 Solid 版；Admin 由 `web-embed` 或 `web-solid-admin` 决定，两端可以不同。

@@ -1,5 +1,6 @@
 //! 验证启动、停机、维护和持久就绪心跳的生命周期。
 
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -7,14 +8,103 @@ use auction_application::consignment::{
     ConsignmentError, ListingAutoCloseEffect, ListingCommandOutcome, ListingLookupEffect,
     ListingMaintenanceService, ListingWorkerReadiness, LookupAbandonment, LookupTransientReason,
 };
-use auction_observability::WorkerResult;
-use tokio::sync::watch;
+use auction_application::core::diagnostics::SafeErrorKind;
+use auction_observability::{WorkerLoop, WorkerResult};
+use tokio::sync::{oneshot, watch};
 use tokio::time::{Instant, timeout};
 
 use super::fixture::{
     ClaimStep, EPOCH, Fixture, Running, advance_ms, candidate, page, settle, time,
 };
-use crate::worker::consignment::{ConsignmentDependencies, ConsignmentLoop, ConsignmentWorker};
+use crate::WorkerError;
+use crate::worker::consignment::{
+    ConsignmentDependencies, ConsignmentLoop, ConsignmentWorker, observe_worker_iteration,
+};
+use crate::worker::runtime::test_fixture::{PausedClock, RecordingMetrics, worker};
+
+#[tokio::test(start_paused = true)]
+async fn persistent_runner_supervises_consignment_and_awaits_its_drain() {
+    let fixture = Fixture::new();
+    fixture.work.steps.lock().unwrap().extend([ClaimStep::Claim, ClaimStep::Claim]);
+    fixture.equipment.gate.blocked.store(true, Ordering::Relaxed);
+    fixture.work.abandon_gate.blocked.store(true, Ordering::Relaxed);
+    let consignment = fixture.prepare(true, async { Ok(false) }).await.unwrap();
+    let mut worker = worker(Arc::new(PausedClock::new(time(0))));
+    let metrics = Arc::new(RecordingMetrics::default());
+    worker.metrics = metrics.clone();
+    let control = worker.control.clone();
+    let (stop, stop_requested) = oneshot::channel();
+    let runner = tokio::spawn(worker.run_with_consignment_until_shutdown(consignment, async {
+        stop_requested.await.unwrap();
+    }));
+    settle().await;
+
+    assert!(control.is_ready());
+    assert!(fixture.equipment.gate.active.load(Ordering::Relaxed));
+    assert_eq!(fixture.work.ready.lock().unwrap().len(), 1);
+    assert!(
+        metrics.iterations().contains(&(WorkerLoop::ConsignmentReadiness, WorkerResult::Success))
+    );
+    assert!(
+        metrics.iterations().contains(&(WorkerLoop::ConsignmentMaintenance, WorkerResult::Success))
+    );
+
+    stop.send(()).unwrap();
+    settle().await;
+    assert!(control.is_draining());
+    assert_eq!(*fixture.work.abandons.lock().unwrap(), [LookupAbandonment::MayBeInFlight]);
+    assert!(fixture.work.abandon_gate.active.load(Ordering::Relaxed));
+    assert!(!runner.is_finished());
+
+    fixture.work.abandon_gate.resume.notify_one();
+    runner.await.unwrap().unwrap();
+    assert_eq!(fixture.work.claims.lock().unwrap().len(), 1);
+    assert!(
+        metrics.iterations().contains(&(WorkerLoop::ConsignmentResolve, WorkerResult::Canceled))
+    );
+}
+
+#[test]
+fn consignment_metrics_count_each_failed_candidate() {
+    let metrics = RecordingMetrics::default();
+    observe_worker_iteration(
+        &metrics,
+        ConsignmentLoop::Maintenance,
+        WorkerResult::Success,
+        Duration::ZERO,
+        0,
+    );
+    assert!(metrics.unpersisted().is_empty());
+    observe_worker_iteration(
+        &metrics,
+        ConsignmentLoop::Maintenance,
+        WorkerResult::Success,
+        Duration::ZERO,
+        2,
+    );
+    assert_eq!(
+        metrics.unpersisted(),
+        [(WorkerLoop::ConsignmentMaintenance, SafeErrorKind::CONSIGNMENT_AUTO_CLOSE_FAILED); 2],
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn persistent_runner_drains_when_consignment_task_panics() {
+    let fixture = Fixture::new();
+    // 未给观察提交设置回执，替身在该边界 panic。
+    fixture.work.steps.lock().unwrap().push_back(ClaimStep::Claim);
+    let consignment = fixture.prepare(true, async { Ok(false) }).await.unwrap();
+    let worker = worker(Arc::new(PausedClock::new(time(0))));
+    let control = worker.control.clone();
+    let result = timeout(
+        Duration::from_secs(3),
+        worker.run_with_consignment_until_shutdown(consignment, std::future::pending()),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(result, Err(WorkerError::ConsignmentTaskJoin(error)) if error.is_panic()));
+    assert!(control.is_draining());
+}
 
 #[tokio::test(start_paused = true)]
 async fn failed_startup_sync_stops_before_loops_and_stock_probe() {

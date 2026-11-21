@@ -6,6 +6,9 @@
 pub struct SafeErrorKind(&'static str);
 
 impl SafeErrorKind {
+    /// 寄售补扫候选未取得已确认的清退结果。
+    pub const CONSIGNMENT_AUTO_CLOSE_FAILED: Self = Self("consignment_auto_close_failed");
+
     /// 其他 HTTP 5xx 响应；不读取响应正文。
     pub const HTTP_SERVER_ERROR: Self = Self("http_server_error");
 

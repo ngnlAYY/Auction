@@ -27,7 +27,9 @@ use crate::ports::consignment::{
     LookupRetryAfter, LookupTransientReason, StoredListingDecision, UnrecordedListingRejection,
 };
 use crate::ports::core::{Clock, TransactionFuture};
-use crate::services::consignment::encoding::lookup_command_identity;
+use crate::services::consignment::encoding::{
+    lookup_command_identity, lookup_reap_exhausted_identity,
+};
 use crate::services::consignment::tests::{
     FAKE_KEY, LISTING_ID, WORK_ID, identity, price, run, time, version,
 };
@@ -109,6 +111,28 @@ fn request() -> LookupClaimRequest {
 
 fn fence() -> LookupFence {
     LookupFence::new(WORK_ID, LISTING_ID, 1, 2, TOKEN).unwrap()
+}
+
+#[test]
+fn reap_exhausted_identity_is_stable_and_distinct_from_source_observation() {
+    let original = lookup_reap_exhausted_identity(fence());
+    let same_work = LookupFence::new(WORK_ID, LISTING_ID, 1, 2, Uuid::from_u128(48)).unwrap();
+    assert_eq!(lookup_reap_exhausted_identity(same_work), original);
+    assert_eq!(original.0.as_uuid().get_version_num(), 5);
+
+    let observation = LookupObservation::Failed(ListingEquipmentLookupError::SourceUnavailable);
+    let observed = lookup_command_identity(fence(), &observation);
+    assert_ne!(observed.0, original.0);
+    assert_ne!(observed.1, original.1);
+    for other in [
+        LookupFence::new(WORK_ID, LISTING_ID, 2, 2, TOKEN).unwrap(),
+        LookupFence::new(WORK_ID, LISTING_ID, 1, 3, TOKEN).unwrap(),
+        LookupFence::new(Uuid::from_u128(50), LISTING_ID, 1, 2, TOKEN).unwrap(),
+    ] {
+        let next = lookup_reap_exhausted_identity(other);
+        assert_ne!(next.0, original.0);
+        assert_ne!(next.1, original.1);
+    }
 }
 
 fn credential() -> Result<ListingRegistrationSecret, ListingCredentialError> {

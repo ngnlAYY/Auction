@@ -2,7 +2,7 @@
 
 use auction_application::consignment::{
     AutoCloseCandidate, AutoCloseEvidence, AutoCloseListingCommand, ListingAutoCloseEffect,
-    ListingCommandStore,
+    ListingCommandStore, ListingMaintenance,
 };
 use auction_application::core::RequestHash;
 use auction_domain::consignment::ListingReason;
@@ -11,6 +11,46 @@ use auction_time::Duration;
 use uuid::Uuid;
 
 use super::fixture::{Fixture, HISTORY, Listing, SELLER};
+
+#[tokio::test]
+async fn postgres_worker_maintenance_port_finds_a_committed_collision() {
+    let fixture = Fixture::new().await;
+    let listing = Listing::new(&fixture, 601, "42");
+    let baseline = fixture.lot("main", "00042", 1).await;
+    listing.seed(&fixture, true, Some(baseline)).await;
+    fixture.lot("isekai", "42", 3).await;
+
+    let maintenance: &dyn ListingMaintenance = &fixture.store;
+    let page = maintenance.scan_candidates().await.unwrap();
+    assert_eq!(page.scanned, 1);
+    assert!(page.candidates.is_empty());
+
+    let collision = fixture.lot("main", "00000042", 2).await;
+    let page = maintenance.scan_candidates().await.unwrap();
+    assert_eq!(page.scanned, 1);
+    assert_eq!(page.candidates.len(), 1);
+    assert_eq!(page.candidates[0].listing_id, listing.id);
+    assert_eq!(
+        page.candidates[0].evidence,
+        AutoCloseEvidence::AuctionLotCreated(LotId::from_uuid(collision))
+    );
+}
+
+#[tokio::test]
+async fn postgres_worker_stock_probe_includes_unswept_listings_after_disable() {
+    let fixture = Fixture::create(false).await;
+    assert!(!fixture.store.has_active_consignment_listings().await.unwrap());
+
+    let first = fixture.store.sync_admission(true).await.unwrap();
+    Listing::new(&fixture, 601, "42").seed(&fixture, false, None).await;
+    let disabled = fixture.store.sync_admission(false).await.unwrap();
+    assert!(!disabled.admitting);
+    assert_eq!(disabled.service_epoch, first.service_epoch + 1);
+    assert!(fixture.store.has_active_consignment_listings().await.unwrap());
+
+    let repeated = fixture.store.sync_admission(false).await.unwrap();
+    assert_eq!(repeated, disabled);
+}
 
 #[tokio::test]
 async fn postgres_scan_idle_leaves_control_untouched() {

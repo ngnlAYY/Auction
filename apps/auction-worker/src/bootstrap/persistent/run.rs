@@ -33,9 +33,9 @@ use auction_storage::{
 use auction_time::Timestamp;
 use uuid::Uuid;
 
-use super::heartbeat;
 use super::profile::{configure_schedule_runtime, database_profile};
 use super::recovery::{asset_reconciliation_runtime, recovery_health_runtime, recovery_worlds};
+use super::{consignment, heartbeat};
 use crate::bootstrap::control::{
     WorkerRemoteReads, WorkerRuntimeTaskExit, abort_worker_task, bind_worker_control_server,
     join_worker_control_task, join_worker_task, spawn_external_heartbeat, spawn_heartbeat,
@@ -88,6 +88,9 @@ pub(crate) async fn run_worker(
             .with_delivery_send_intervals(config.worker.mooglemail.send_intervals)
             .context("配置投递发送间隔失败")?,
     );
+    let worker_id = format!("auction-worker-{}", Uuid::new_v4());
+    // 不变量 2、5、6：先确认数据库已同步寄售代次，再启动持久任务或宣布 Worker 就绪。
+    let consignment = consignment::prepare(config, &store, &switches, &worker_id).await?;
     let _runtime_switch_task = auction_process::TaskGuard::new(
         auction_jobs::start_runtime_switch_refresh(store.clone(), switches.clone()).await,
     );
@@ -113,7 +116,6 @@ pub(crate) async fn run_worker(
     } else {
         None
     };
-    let worker_id = format!("auction-worker-{}", Uuid::new_v4());
     let schedule: Arc<dyn ScheduledRoundStore> = store.clone();
     let lifecycle_store = Arc::clone(&store);
     let lifecycle: Arc<dyn AuctionLifecycleCommandPort> = Arc::new(
@@ -536,7 +538,7 @@ pub(crate) async fn run_worker(
         let baseline = auction_jobs::WorkerHotBaseline::for_worker(&worker);
         spawn_hot_config_watch(path, hot_config, baseline, Arc::clone(&store))
     });
-    let runner = auction_jobs::run_persistent_with_settlement_until_shutdown(worker, shutdown);
+    let runner = worker.run_with_consignment_until_shutdown(consignment, shutdown);
     tokio::pin!(runner);
     let result = tokio::select! {
         result = &mut runner => result,
