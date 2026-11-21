@@ -77,11 +77,11 @@ fn sweep_advances_persistent_pages_and_preserves_auto_close_identity() {
     )));
     assert_eq!(
         run(service.sweep_page()),
-        Ok(ListingMaintenanceProgress { scanned: 50, processed: 3, has_more: true })
+        Ok(ListingMaintenanceProgress { scanned: 50, processed: 3, failed: 0, has_more: true })
     );
     assert_eq!(
         run(service.sweep_page()),
-        Ok(ListingMaintenanceProgress { scanned: 4, processed: 3, has_more: false })
+        Ok(ListingMaintenanceProgress { scanned: 4, processed: 3, failed: 0, has_more: false })
     );
     let calls = commands.auto_close.take_calls();
     assert_eq!(
@@ -129,7 +129,7 @@ fn sweep_empty_and_invalid_pages_do_not_issue_commands() {
     }));
     assert_eq!(
         run(service.sweep_page()),
-        Ok(ListingMaintenanceProgress { scanned: 0, processed: 0, has_more: false })
+        Ok(ListingMaintenanceProgress { scanned: 0, processed: 0, failed: 0, has_more: false })
     );
     work.scan_candidates.reply(Ok(ListingMaintenancePage {
         scanned: 50,
@@ -138,7 +138,7 @@ fn sweep_empty_and_invalid_pages_do_not_issue_commands() {
     }));
     assert_eq!(
         run(service.sweep_page()),
-        Ok(ListingMaintenanceProgress { scanned: 50, processed: 0, has_more: true })
+        Ok(ListingMaintenanceProgress { scanned: 50, processed: 0, failed: 0, has_more: true })
     );
     work.scan_candidates.reply(Ok(ListingMaintenancePage {
         scanned: 51,
@@ -156,13 +156,14 @@ fn sweep_empty_and_invalid_pages_do_not_issue_commands() {
 }
 
 #[test]
-fn sweep_propagates_scan_commit_and_command_failures_without_retrying() {
+fn sweep_counts_command_failures_and_continues_with_later_listings() {
     let work = Arc::new(FakeLookupWork::default());
     let commands = Arc::new(FakeListingCommands::default());
     let service = ListingMaintenanceService::new(work.clone(), commands.clone());
     let first = candidate(AutoCloseEvidence::ServiceDisabled(2));
-    let second = candidate(AutoCloseEvidence::ServiceDisabled(3));
-    let third = candidate(AutoCloseEvidence::ServiceDisabled(4));
+    let second = AutoCloseCandidate { listing_id: Uuid::from_u128(2), ..first };
+    let third = AutoCloseCandidate { listing_id: Uuid::from_u128(3), ..first };
+    let fourth = AutoCloseCandidate { listing_id: Uuid::from_u128(4), ..first };
     work.scan_candidates.reply(Ok(ListingMaintenancePage {
         scanned: 1,
         candidates: vec![first],
@@ -173,37 +174,38 @@ fn sweep_propagates_scan_commit_and_command_failures_without_retrying() {
         .reply(Ok(ListingCommandOutcome::Accepted(ListingAutoCloseEffect::Unchanged)));
     assert_eq!(
         run(service.sweep_page()),
-        Ok(ListingMaintenanceProgress { scanned: 1, processed: 1, has_more: true })
+        Ok(ListingMaintenanceProgress { scanned: 1, processed: 1, failed: 0, has_more: true })
     );
     work.scan_candidates.reply(Ok(ListingMaintenancePage {
-        scanned: 3,
-        candidates: vec![first, second, third],
+        scanned: 4,
+        candidates: vec![first, second, third, fourth],
         scan_after: None,
     }));
     commands.auto_close.reply(Ok(ListingCommandOutcome::Replayed(
         StoredListingDecision::Accepted(ListingAutoCloseEffect::Unchanged),
     )));
     commands.auto_close.reply(Err(ConsignmentError::OutcomeUnknown));
-    assert_eq!(run(service.sweep_page()), Err(ConsignmentError::OutcomeUnknown));
-    let [prior_page, duplicate, failed] = commands.auto_close.take_calls().try_into().unwrap();
-    assert_eq!(prior_page, duplicate);
-    assert_eq!(failed.candidate, second);
+    commands.auto_close.reply(Ok(ListingCommandOutcome::Rejected(
+        ListingCommandRejection::Unrecorded(UnrecordedListingRejection::CommandIdConflict),
+    )));
+    commands
+        .auto_close
+        .reply(Ok(ListingCommandOutcome::Accepted(ListingAutoCloseEffect::Unchanged)));
+    assert_eq!(
+        run(service.sweep_page()),
+        Ok(ListingMaintenanceProgress { scanned: 4, processed: 2, failed: 2, has_more: false })
+    );
+    let calls = commands.auto_close.take_calls();
+    assert_eq!(
+        calls.iter().map(|call| call.candidate).collect::<Vec<_>>(),
+        [first, first, second, third, fourth]
+    );
+    assert_eq!(calls[0], calls[1]);
 
     work.scan_candidates.reply(Err(ConsignmentError::Unavailable));
     assert_eq!(run(service.sweep_page()), Err(ConsignmentError::Unavailable));
     assert!(commands.auto_close.take_calls().is_empty());
-
-    work.scan_candidates.reply(Ok(ListingMaintenancePage {
-        scanned: 1,
-        candidates: vec![third],
-        scan_after: None,
-    }));
-    commands.auto_close.reply(Ok(ListingCommandOutcome::Rejected(
-        ListingCommandRejection::Unrecorded(UnrecordedListingRejection::CommandIdConflict),
-    )));
-    assert_eq!(run(service.sweep_page()), Err(ConsignmentError::CommandIdConflict));
-    assert_eq!(commands.auto_close.take_calls()[0].candidate, third);
-    assert_eq!(work.scan_candidates.take_calls().len(), 4);
+    assert_eq!(work.scan_candidates.take_calls().len(), 3);
 }
 
 #[test]

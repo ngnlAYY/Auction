@@ -8,7 +8,7 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 
 use super::ConsignmentLoop;
-use super::{error_code, observe_iteration, stopped};
+use super::{error_code, stopped};
 use crate::worker::runtime::wait_until_or_shutdown;
 
 const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
@@ -17,7 +17,7 @@ pub(super) async fn run(
     service: &ListingMaintenanceService,
     work: Option<&dyn LookupWorkStore>,
     mut drain: watch::Receiver<bool>,
-    observe: &(impl Fn(ConsignmentLoop, WorkerResult, Duration) + Sync),
+    observe: &(impl Fn(ConsignmentLoop, WorkerResult, Duration, u32) + Sync),
 ) {
     while !stopped(&drain) {
         if let Some(work) = work {
@@ -29,15 +29,24 @@ pub(super) async fn run(
         }
         while !stopped(&drain) {
             let started_at = Instant::now();
-            let (result, has_more) = match service.sweep_page().await {
-                Ok(page) => (WorkerResult::Success, page.has_more),
+            let (result, has_more, failed) = match service.sweep_page().await {
+                Ok(page) => {
+                    // 不变量 5、8：按持久游标继续翻页，失败项由下一次完整扫描重查。
+                    if page.failed > 0 {
+                        tracing::warn!(
+                            processed = page.processed,
+                            failed = page.failed,
+                            "寄售维护本页存在清退失败"
+                        );
+                    }
+                    (WorkerResult::Success, page.has_more, page.failed)
+                }
                 Err(error) => {
-                    // 不变量 5、8：本页已提交的单保留，持久游标后续回绕时重查失败项。
-                    tracing::warn!(code = error_code(error), "寄售维护本页未全部完成");
-                    (WorkerResult::Error, false)
+                    tracing::warn!(code = error_code(error), "寄售维护候选页无法处理");
+                    (WorkerResult::Error, false, 0)
                 }
             };
-            observe_iteration(observe, ConsignmentLoop::Maintenance, result, started_at);
+            observe(ConsignmentLoop::Maintenance, result, started_at.elapsed(), failed);
             if !has_more {
                 break;
             }

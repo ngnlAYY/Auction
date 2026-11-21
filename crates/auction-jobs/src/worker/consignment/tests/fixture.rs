@@ -103,6 +103,15 @@ impl Fixture {
         enabled: bool,
         closed_has_stock: impl Future<Output = Result<bool, ConsignmentError>>,
     ) -> Result<Option<ConsignmentWorker>, ConsignmentError> {
+        self.prepare_with_capability(enabled, true, closed_has_stock).await
+    }
+
+    pub(super) async fn prepare_with_capability(
+        &self,
+        enabled: bool,
+        artifact_capable: bool,
+        closed_has_stock: impl Future<Output = Result<bool, ConsignmentError>>,
+    ) -> Result<Option<ConsignmentWorker>, ConsignmentError> {
         let paused = self.paused.clone();
         let lookup = enabled.then(|| ConsignmentLookupRuntime {
             service: ResolveListingService::new(
@@ -123,7 +132,7 @@ impl Fixture {
         });
         ConsignmentWorker::prepare(
             enabled,
-            true,
+            artifact_capable,
             ListingMaintenanceService::new(self.scans.clone(), self.commands.clone()),
             lookup,
             closed_has_stock,
@@ -144,7 +153,7 @@ impl Fixture {
 pub(super) struct Running {
     pub drain: watch::Sender<bool>,
     pub tasks: JoinSet<()>,
-    pub observations: Arc<Mutex<Vec<(ConsignmentLoop, WorkerResult)>>>,
+    pub observations: Arc<Mutex<Vec<(ConsignmentLoop, WorkerResult, u32)>>>,
 }
 
 impl Running {
@@ -153,8 +162,8 @@ impl Running {
         let observations = Arc::new(Mutex::new(Vec::new()));
         let recorded = observations.clone();
         let mut tasks = JoinSet::new();
-        tasks.spawn(worker.run(receiver, move |kind, result, _duration| {
-            recorded.lock().unwrap().push((kind, result));
+        tasks.spawn(worker.run(receiver, move |kind, result, _duration, failed| {
+            recorded.lock().unwrap().push((kind, result, failed));
         }));
         Self { drain, tasks, observations }
     }
@@ -361,6 +370,7 @@ pub(super) struct Commands {
     pub apply_gate: Gate,
     pub close:
         Mutex<VecDeque<Result<ListingCommandOutcome<ListingAutoCloseEffect>, ConsignmentError>>>,
+    pub fail_close_listing: Mutex<Option<Uuid>>,
     pub closed: Mutex<Vec<AutoCloseCandidate>>,
     pub close_gate: Gate,
 }
@@ -407,6 +417,9 @@ impl ListingCommandStore for Commands {
         Box::pin(async move {
             self.closed.lock().unwrap().push(command.candidate);
             self.close_gate.wait().await;
+            if *self.fail_close_listing.lock().unwrap() == Some(command.candidate.listing_id) {
+                return Err(ConsignmentError::Unavailable);
+            }
             self.close
                 .lock()
                 .unwrap()
@@ -469,6 +482,7 @@ pub(super) fn candidate(listing: u128) -> AutoCloseCandidate {
 
 pub(super) struct Readiness {
     pub deps: Mutex<ConsignmentDependencies>,
+    pub error: Mutex<Option<ConsignmentError>>,
     pub gate: Gate,
     pub calls: AtomicUsize,
 }
@@ -483,6 +497,7 @@ impl Default for Readiness {
                 current_keyring: true,
                 lookup: true,
             }),
+            error: Mutex::default(),
             gate: Gate::default(),
             calls: AtomicUsize::default(),
         }
@@ -494,6 +509,9 @@ impl ConsignmentReadinessProbe for Readiness {
         Box::pin(async {
             self.calls.fetch_add(1, Ordering::Relaxed);
             self.gate.wait().await;
+            if let Some(error) = *self.error.lock().unwrap() {
+                return Err(error);
+            }
             Ok(*self.deps.lock().unwrap())
         })
     }

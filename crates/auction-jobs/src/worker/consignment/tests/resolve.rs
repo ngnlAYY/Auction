@@ -96,12 +96,19 @@ async fn pause_never_claims_and_resumes_at_the_bounded_reread() {
 }
 
 async fn immediate_retry(
-    observation: ListingCommandOutcome<ListingLookupEffect>,
+    step: Result<ListingCommandOutcome<ListingLookupEffect>, ConsignmentError>,
     expected_result: WorkerResult,
 ) {
     let fixture = Fixture::new();
-    fixture.work.steps.lock().unwrap().push_back(ClaimStep::Claim);
-    fixture.commands.apply.lock().unwrap().push_back(Ok(observation));
+    let submitted = usize::from(step.is_ok());
+    let claim = match step {
+        Ok(observation) => {
+            fixture.commands.apply.lock().unwrap().push_back(Ok(observation));
+            ClaimStep::Claim
+        }
+        Err(error) => ClaimStep::Error(error),
+    };
+    fixture.work.steps.lock().unwrap().push_back(claim);
     let started = Instant::now();
     let running = fixture.start().await;
     settle().await;
@@ -115,8 +122,8 @@ async fn immediate_retry(
         assert_ne!(first.2, second.2);
         assert!(!first.2.is_nil() && !second.2.is_nil());
     }
-    assert_eq!(fixture.equipment.requests.load(Ordering::Relaxed), 1);
-    assert_eq!(fixture.commands.applied.load(Ordering::Relaxed), 1);
+    assert_eq!(fixture.equipment.requests.load(Ordering::Relaxed), submitted);
+    assert_eq!(fixture.commands.applied.load(Ordering::Relaxed), submitted);
     assert_eq!(fixture.work.ready.lock().unwrap()[0].2, ListingWorkerReadiness::Ready);
     assert_eq!(
         running
@@ -124,10 +131,10 @@ async fn immediate_retry(
             .lock()
             .unwrap()
             .iter()
-            .filter(|(kind, _)| *kind == ConsignmentLoop::Resolve)
-            .map(|(_, result)| *result)
+            .filter(|(kind, _, _)| *kind == ConsignmentLoop::Resolve)
+            .map(|(_, result, failed)| (*result, *failed))
             .collect::<Vec<_>>(),
-        [expected_result, WorkerResult::Success]
+        [(expected_result, 0), (WorkerResult::Success, 0)]
     );
     running.finish().await;
 }
@@ -135,10 +142,10 @@ async fn immediate_retry(
 #[tokio::test(start_paused = true)]
 async fn applied_immediately_runs_next_round_without_waiting_for_item_retry() {
     immediate_retry(
-        ListingCommandOutcome::Accepted(ListingLookupEffect::Rescheduled {
+        Ok(ListingCommandOutcome::Accepted(ListingLookupEffect::Rescheduled {
             next_attempt_at: time(300),
             reason: LookupTransientReason::SourceUnavailable,
-        }),
+        })),
         WorkerResult::Success,
     )
     .await;
@@ -146,10 +153,11 @@ async fn applied_immediately_runs_next_round_without_waiting_for_item_retry() {
 
 #[tokio::test(start_paused = true)]
 async fn lost_lease_is_classified_and_immediately_runs_next_round() {
+    immediate_retry(Err(ConsignmentError::LeaseLost), WorkerResult::Canceled).await;
     immediate_retry(
-        ListingCommandOutcome::Rejected(ListingCommandRejection::Unrecorded(
+        Ok(ListingCommandOutcome::Rejected(ListingCommandRejection::Unrecorded(
             UnrecordedListingRejection::LeaseLost,
-        )),
+        ))),
         WorkerResult::Canceled,
     )
     .await;
@@ -158,9 +166,9 @@ async fn lost_lease_is_classified_and_immediately_runs_next_round() {
 #[tokio::test(start_paused = true)]
 async fn committed_close_immediately_runs_next_round() {
     immediate_retry(
-        ListingCommandOutcome::Rejected(ListingCommandRejection::Recorded(
+        Ok(ListingCommandOutcome::Rejected(ListingCommandRejection::Recorded(
             ListingBusinessRejection::ListingNotActive,
-        )),
+        ))),
         WorkerResult::Success,
     )
     .await;

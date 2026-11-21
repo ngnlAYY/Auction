@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use auction_application::consignment::{
     ConsignmentError, ListingAutoCloseEffect, ListingCommandOutcome, ListingLookupEffect,
-    ListingWorkerReadiness, LookupAbandonment, LookupTransientReason,
+    ListingMaintenanceService, ListingWorkerReadiness, LookupAbandonment, LookupTransientReason,
 };
 use auction_observability::WorkerResult;
 use tokio::sync::watch;
@@ -14,7 +14,7 @@ use tokio::time::{Instant, timeout};
 use super::fixture::{
     ClaimStep, EPOCH, Fixture, Running, advance_ms, candidate, page, settle, time,
 };
-use crate::worker::consignment::{ConsignmentDependencies, ConsignmentLoop};
+use crate::worker::consignment::{ConsignmentDependencies, ConsignmentLoop, ConsignmentWorker};
 
 #[tokio::test(start_paused = true)]
 async fn failed_startup_sync_stops_before_loops_and_stock_probe() {
@@ -28,6 +28,29 @@ async fn failed_startup_sync_stops_before_loops_and_stock_probe() {
     assert!(fixture.work.claims.lock().unwrap().is_empty());
     assert!(fixture.scans.scans.lock().unwrap().is_empty());
     assert!(fixture.work.ready.lock().unwrap().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn incapable_artifact_rejects_enabled_startup_without_sync() {
+    let fixture = Fixture::new();
+    let result = fixture
+        .prepare_with_capability(true, false, async {
+            panic!("制品不支持时不应探测存量")
+        })
+        .await;
+    assert_eq!(fixture.scans.syncs.lock().unwrap().as_slice(), &[] as &[bool]);
+    assert!(matches!(result, Err(ConsignmentError::Disabled)));
+
+    let result = ConsignmentWorker::prepare(
+        true,
+        false,
+        ListingMaintenanceService::new(fixture.scans.clone(), fixture.commands.clone()),
+        None,
+        async { panic!("制品不支持时不应探测存量") },
+    )
+    .await;
+    assert!(matches!(result, Err(ConsignmentError::Disabled)));
+    assert!(fixture.scans.syncs.lock().unwrap().is_empty());
 }
 
 #[tokio::test(start_paused = true)]
@@ -52,12 +75,12 @@ async fn disabled_empty_only_syncs_and_checks_stock_once() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn maintenance_follows_pages_yields_on_failure_and_retries_after_wrap() {
+async fn maintenance_follows_pages_after_item_failure() {
     let fixture = Fixture::new();
     let [expiry, collision, ineligible, disabled] = [1, 2, 3, 4].map(candidate);
     fixture.scans.pages.lock().unwrap().extend([
         page(vec![expiry, collision], Some(collision.listing_id)),
-        page(vec![ineligible, disabled], Some(disabled.listing_id)),
+        page(vec![ineligible], Some(ineligible.listing_id)),
         page(vec![disabled], None),
         page(vec![ineligible], None),
     ]);
@@ -69,13 +92,11 @@ async fn maintenance_follows_pages_yields_on_failure_and_retries_after_wrap() {
     let worker = fixture.prepare(false, async { Ok(true) }).await.unwrap().unwrap();
     let running = Running::spawn(worker);
     settle().await;
-    assert_eq!(fixture.scans.scans.lock().unwrap().len(), 2);
-    assert_eq!(*fixture.commands.closed.lock().unwrap(), [expiry, collision, ineligible]);
-    advance_ms(29_999).await;
-    assert_eq!(fixture.scans.scans.lock().unwrap().len(), 2);
-    advance_ms(1).await;
+    assert_eq!(fixture.scans.scans.lock().unwrap().len(), 3);
     assert_eq!(*fixture.commands.closed.lock().unwrap(), [expiry, collision, ineligible, disabled]);
-    advance_ms(30_000).await;
+    advance_ms(29_999).await;
+    assert_eq!(fixture.scans.scans.lock().unwrap().len(), 3);
+    advance_ms(1).await;
     assert_eq!(
         *fixture.commands.closed.lock().unwrap(),
         [expiry, collision, ineligible, disabled, ineligible]
@@ -87,11 +108,38 @@ async fn maintenance_follows_pages_yields_on_failure_and_retries_after_wrap() {
     assert_eq!(
         *running.observations.lock().unwrap(),
         [
-            (ConsignmentLoop::Maintenance, WorkerResult::Success),
-            (ConsignmentLoop::Maintenance, WorkerResult::Error),
-            (ConsignmentLoop::Maintenance, WorkerResult::Success),
-            (ConsignmentLoop::Maintenance, WorkerResult::Success),
+            (ConsignmentLoop::Maintenance, WorkerResult::Success, 0),
+            (ConsignmentLoop::Maintenance, WorkerResult::Success, 1),
+            (ConsignmentLoop::Maintenance, WorkerResult::Success, 0),
+            (ConsignmentLoop::Maintenance, WorkerResult::Success, 0),
         ]
+    );
+    running.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn maintenance_reaches_later_listing_on_every_wrap_despite_persistent_failure() {
+    let fixture = Fixture::new();
+    let [ineligible, disabled] = [3, 4].map(candidate);
+    for _ in 0..3 {
+        fixture.scans.pages.lock().unwrap().push_back(page(vec![ineligible, disabled], None));
+    }
+    *fixture.commands.fail_close_listing.lock().unwrap() = Some(ineligible.listing_id);
+    let worker = fixture.prepare(false, async { Ok(true) }).await.unwrap().unwrap();
+    let running = Running::spawn(worker);
+    settle().await;
+    let first_round = fixture.commands.closed.lock().unwrap().clone();
+    advance_ms(30_000).await;
+    advance_ms(30_000).await;
+    assert_eq!(
+        *fixture.commands.closed.lock().unwrap(),
+        [ineligible, disabled, ineligible, disabled, ineligible, disabled]
+    );
+    assert_eq!(first_round, [ineligible, disabled]);
+    assert_eq!(fixture.scans.scans.lock().unwrap().len(), 3);
+    assert_eq!(
+        *running.observations.lock().unwrap(),
+        [(ConsignmentLoop::Maintenance, WorkerResult::Success, 1); 3]
     );
     running.finish().await;
 }
@@ -116,7 +164,7 @@ async fn already_draining_does_not_start_any_work() {
     let fixture = Fixture::new();
     let worker = fixture.prepare(true, async { Ok(false) }).await.unwrap().unwrap();
     let (_sender, receiver) = watch::channel(true);
-    worker.run(receiver, |_, _, _| panic!("排空后不应开始新一轮")).await;
+    worker.run(receiver, |_, _, _, _| panic!("排空后不应开始新一轮")).await;
     assert!(fixture.work.claims.lock().unwrap().is_empty());
     assert!(fixture.scans.scans.lock().unwrap().is_empty());
     assert_eq!(fixture.work.reaps.load(Ordering::Relaxed), 0);
@@ -253,19 +301,35 @@ async fn heartbeat_needs_every_dependency_and_retries_failed_db_write_at_ten_sec
     assert_eq!(renewals, [1; 5], "分别缺数据库、schema、opener、当前 keyring、lookup");
     assert_eq!(fixture.readiness.calls.load(Ordering::Relaxed), 6);
     *fixture.readiness.deps.lock().unwrap() = all;
-    fixture.work.ready_fails.store(true, Ordering::Relaxed);
+    *fixture.readiness.error.lock().unwrap() = Some(ConsignmentError::Unavailable);
     advance_ms(9_999).await;
     assert_eq!(fixture.work.ready.lock().unwrap().len(), 1);
     advance_ms(1).await;
-    assert_eq!(fixture.work.ready.lock().unwrap().len(), 2);
+    assert_eq!(fixture.readiness.calls.load(Ordering::Relaxed), 7);
+    assert_eq!(fixture.work.ready.lock().unwrap().len(), 1, "探针返回错误时不能续期");
     assert_eq!(
         running
             .observations
             .lock()
             .unwrap()
             .iter()
-            .rfind(|(kind, _)| *kind == ConsignmentLoop::Readiness),
-        Some(&(ConsignmentLoop::Readiness, WorkerResult::Error)),
+            .rfind(|(kind, _, _)| *kind == ConsignmentLoop::Readiness),
+        Some(&(ConsignmentLoop::Readiness, WorkerResult::Error, 0)),
+    );
+    *fixture.readiness.error.lock().unwrap() = None;
+    advance_ms(10_000).await;
+    assert_eq!(fixture.work.ready.lock().unwrap().len(), 2);
+    fixture.work.ready_fails.store(true, Ordering::Relaxed);
+    advance_ms(10_000).await;
+    assert_eq!(fixture.work.ready.lock().unwrap().len(), 3);
+    assert_eq!(
+        running
+            .observations
+            .lock()
+            .unwrap()
+            .iter()
+            .rfind(|(kind, _, _)| *kind == ConsignmentLoop::Readiness),
+        Some(&(ConsignmentLoop::Readiness, WorkerResult::Error, 0)),
     );
     fixture.work.ready_fails.store(false, Ordering::Relaxed);
     advance_ms(10_000).await;
@@ -280,8 +344,9 @@ async fn heartbeat_needs_every_dependency_and_retries_failed_db_write_at_ten_sec
             .collect::<Vec<_>>(),
         [
             (0, EPOCH, ListingWorkerReadiness::Ready),
-            (60, EPOCH, ListingWorkerReadiness::Ready),
             (70, EPOCH, ListingWorkerReadiness::Ready),
+            (80, EPOCH, ListingWorkerReadiness::Ready),
+            (90, EPOCH, ListingWorkerReadiness::Ready),
         ]
     );
     running.finish().await;

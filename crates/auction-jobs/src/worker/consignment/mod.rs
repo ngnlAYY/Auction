@@ -87,7 +87,8 @@ impl ConsignmentWorker {
         lookup: Option<ConsignmentLookupRuntime>,
         closed_has_stock: impl Future<Output = Result<bool, ConsignmentError>>,
     ) -> Result<Option<Self>, ConsignmentError> {
-        let lookup = if enabled {
+        // 由用例拒绝制品不支持的启用请求，无需先确认解析依赖。
+        let lookup = if enabled && artifact_capable {
             Some(
                 lookup
                     .filter(|runtime| valid_text(&runtime.worker_id, 256))
@@ -106,20 +107,22 @@ impl ConsignmentWorker {
     }
 
     /// 在现有 Worker 任务组或任务守卫下运行。发送 drain 后等待本任务，沿用进程共享排空期限。
+    /// 指标回调依次接收循环、结果、耗时和本页清退失败数。非维护页迭代的失败数为零。
     #[allow(dead_code, reason = "持久 Worker 任务注册由集成人接入")]
     pub async fn run(
         self,
         drain: watch::Receiver<bool>,
-        observe: impl Fn(ConsignmentLoop, WorkerResult, Duration) + Send + Sync,
+        observe: impl Fn(ConsignmentLoop, WorkerResult, Duration, u32) + Send + Sync,
     ) {
         let epoch = self.admission.service_epoch;
         let work = self.lookup.as_ref().map(|runtime| runtime.work.as_ref());
         let maintain = maintenance::run(&self.maintenance, work, drain.clone(), &observe);
         if let Some(lookup) = &self.lookup {
+            let observe_lookup = |kind, result, duration| observe(kind, result, duration, 0);
             tokio::join!(
                 maintain,
-                resolve::run(lookup, epoch, drain.clone(), &observe),
-                heartbeat::run(lookup, epoch, drain, &observe),
+                resolve::run(lookup, epoch, drain.clone(), &observe_lookup),
+                heartbeat::run(lookup, epoch, drain, &observe_lookup),
             );
         } else {
             maintain.await;
