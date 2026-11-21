@@ -446,11 +446,8 @@ impl OperationsAlertWebhookEntry {
                     && self.sending_at.is_none()
                     && self.completed_at.is_some()
             }
-            "manual_reconcile" => {
-                self.next_attempt_at.is_none()
-                    && self.sending_at.is_none()
-                    && self.completed_at.is_some()
-            }
+            // 租约过期保留发送时间，显式完成为未知结果时会清除它。
+            "manual_reconcile" => self.next_attempt_at.is_none() && self.completed_at.is_some(),
             _ => false,
         };
         if self.delivery_id.is_nil()
@@ -541,6 +538,37 @@ mod tests {
         assert_eq!(parse_alert_id(&id[..63]), None);
         assert_eq!(parse_alert_id(&"g".repeat(64)), None);
         assert_eq!(parse_alert_id(""), None);
+    }
+
+    #[test]
+    fn webhook_manual_reconcile_allows_optional_sending_time_and_requires_terminal_fields() {
+        let sending = Timestamp::from_timestamp(1_700_000_000, 0).expect("有效时刻");
+        let completed = Timestamp::from_timestamp(1_700_000_120, 0).expect("有效时刻");
+        let entry = OperationsAlertWebhookEntry {
+            delivery_id: Uuid::new_v4(),
+            status: "manual_reconcile".to_owned(),
+            kind: OperationsAlertKind::ServiceMissing,
+            scope: "worker".to_owned(),
+            source: OperationsAlertSource::Process,
+            attempt_count: 1,
+            next_attempt_at: None,
+            sending_at: Some(sending),
+            completed_at: Some(completed),
+            failure_code: Some("outcome_unknown".to_owned()),
+            created_at: sending,
+        };
+        assert_eq!(entry.validate(), Ok(()));
+        let explicit = OperationsAlertWebhookEntry { sending_at: None, ..entry.clone() };
+        assert_eq!(explicit.validate(), Ok(()));
+
+        for invalid in [
+            OperationsAlertWebhookEntry { next_attempt_at: Some(completed), ..entry.clone() },
+            OperationsAlertWebhookEntry { completed_at: None, ..entry.clone() },
+            OperationsAlertWebhookEntry { failure_code: None, ..entry.clone() },
+            OperationsAlertWebhookEntry { sending_at: Some(Timestamp::MAX_UTC), ..entry },
+        ] {
+            assert_eq!(invalid.validate(), Err(OperationsAlertError::StoredResultCorrupt));
+        }
     }
 
     #[test]

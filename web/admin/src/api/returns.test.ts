@@ -306,6 +306,142 @@ test("migrated_return_detail_decodes_event_provenance", async () => {
   }
 });
 
+test("take_history_decodes_persisted_failure_codes_and_zero_sweep_retries", async () => {
+  const { data, firstEvent, secondEvent } = returnDetail();
+  const takeDelivery = "3f8fad5b-d9cb-469f-a165-70867728950e";
+  const unknown = {
+    ...secondEvent,
+    case_version: 3,
+    event_kind: "take_unknown" as const,
+    details: { delivery_id: takeDelivery, failure_code: "settlement_return_take_unknown" },
+  };
+  const observed = {
+    ...secondEvent,
+    case_version: 4,
+    event_kind: "take_observed" as const,
+    details: {
+      delivery_id: takeDelivery,
+      fencing_version: 2,
+      observation: "mail_missing",
+      sweep_retries: 0,
+    },
+  };
+  const response = {
+    ...data,
+    summary: {
+      ...data.summary,
+      case_version: 4,
+      status: "take_unknown",
+      asset_location: "location_unknown",
+      plan: "hold",
+    },
+    events: [firstEvent, secondEvent, unknown, observed],
+    take: {
+      execution_state: "manual_reconcile",
+      delivery_id: takeDelivery,
+      delivery_status: "manual_reconcile",
+      failure_code: "settlement_return_take_unknown",
+      proven_at: null,
+    },
+    take_unknown_reason: "mail_missing",
+  };
+  const body = (payload: unknown) => JSON.stringify({ code: "ok", message: "ok", data: payload });
+  const read = (wireBody: string) =>
+    readAdminFixture(wireBody, `${LIST_PATH}/${CASE}`, (host, signal) =>
+      fetchSettlementReturn(host, CASE, signal),
+    );
+  const detail = requireOk(await read(body(response)));
+  expect(detail.events.slice(2)).toEqual([unknown, observed]);
+
+  const conflict = {
+    ...unknown,
+    details: { delivery_id: null, failure_code: "mail_disposition_conflict" },
+  };
+  const conflictDetail = {
+    ...detail,
+    summary: { ...detail.summary, case_version: 3 },
+    events: [...detail.events.slice(0, 2), conflict],
+    take: {
+      execution_state: "pending",
+      delivery_id: null,
+      delivery_status: null,
+      failure_code: null,
+      proven_at: null,
+    },
+    take_unknown_reason: "disposition_conflict",
+  };
+  expect(requireOk(await read(body(conflictDetail))).events.at(-1)).toEqual(conflict);
+
+  const activated = {
+    ...observed,
+    event_kind: "take_activated" as const,
+    details: {
+      delivery_id: takeDelivery,
+      reason: "take_assets_still_present",
+      requeued: true,
+      sweep_retries: 1,
+    },
+  };
+  const requeued = {
+    ...detail,
+    summary: {
+      ...detail.summary,
+      status: "take_pending" as const,
+      asset_location: "take_in_progress" as const,
+    },
+    take: {
+      ...response.take,
+      execution_state: "enqueued" as const,
+      delivery_status: "pending",
+      failure_code: null,
+    },
+    take_unknown_reason: null,
+  };
+  for (const [history, event] of [
+    [detail, observed],
+    [requeued, activated],
+  ] as const) {
+    const withRetries = (retries: unknown) => ({
+      ...history,
+      events: [
+        ...history.events.slice(0, 3),
+        { ...event, details: { ...event.details, sweep_retries: retries } },
+      ],
+    });
+    for (const retries of [0, 1, 8]) {
+      expect(requireOk(await read(body(withRetries(retries)))).events.at(-1)?.details).toEqual({
+        ...event.details,
+        sweep_retries: retries,
+      });
+    }
+    for (const retries of [-1, 9, 1.5, "0", Number.MAX_SAFE_INTEGER + 1]) {
+      const invalid = withRetries(retries);
+      expect(decode(AdminSettlementReturnDetailResponseSchema, invalid).ok).toBe(false);
+      expect(validDetail(invalid, CASE)).toBe(false);
+      expect((await read(body(invalid))).ok).toBe(false);
+    }
+  }
+  for (const event of [
+    { ...unknown, details: { ...unknown.details, failure_code: "take_receipt_unproven" } },
+    { ...observed, details: { ...observed.details, observation: "awaiting_observation" } },
+  ]) {
+    const invalid = {
+      ...detail,
+      events: detail.events.map((current) =>
+        current.case_version === event.case_version ? event : current,
+      ),
+    };
+    expect(decode(AdminSettlementReturnDetailResponseSchema, invalid).ok).toBe(false);
+    expect(validDetail(invalid, CASE)).toBe(false);
+    expect((await read(body(invalid))).ok).toBe(false);
+  }
+  const zeroRetriesBody = body(response);
+  for (const lexeme of ["0.0", "0e0", "-0"]) {
+    const malformed = zeroRetriesBody.replace('"sweep_retries":0', `"sweep_retries":${lexeme}`);
+    expect((await read(malformed)).ok).toBe(false);
+  }
+});
+
 test("command_result_must_echo_the_request", () => {
   // Rust 的 Uuid::from_u128(7) 用于回执比较，测试的是该层的身份相等条件。
   const commandId = "00000000-0000-0000-0000-000000000007";

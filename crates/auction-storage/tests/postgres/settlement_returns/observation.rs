@@ -151,6 +151,17 @@ async fn postgres_return_take_observation_records_reason_and_alert_scope() {
     )
     .await;
     let case = take.returned.case;
+    assert_eq!(
+        last_event(pool, case).await,
+        (
+            "take_unknown".to_owned(),
+            json!({
+                "failure_code": "settlement_return_take_unknown",
+                "delivery_id": take.take_delivery,
+            }),
+            None,
+        )
+    );
     enable_alerts(&store).await;
     assert_eq!(reason(&store, case).await, Some(Reason::AwaitingObservation));
     scan(&store).await;
@@ -161,12 +172,19 @@ async fn postgres_return_take_observation_records_reason_and_alert_scope() {
     assert_eq!(signal(pool, "settlement_return_quarantined", "auction").await, None);
 
     let before = facts(pool, &take).await;
-    assert!(
-        record(&store, &take, take.fencing_version, &session.binding(), Reason::MailMissing)
-            .await
-            .expect("观察留证必须确定提交"),
-        "首次观察追加事件"
-    );
+    let binding = session.binding();
+    let record_first_observation = || {
+        store.record_return_take_observation(
+            take.take_delivery,
+            take.fencing_version,
+            Reason::MailMissing,
+            0,
+            &take.expectation,
+            &binding,
+        )
+    };
+    let recorded = record_first_observation().await.expect("观察留证必须确定提交");
+    assert!(recorded, "首次观察追加事件");
     let after = facts(pool, &take).await;
     assert_eq!(after.case_version, before.case_version + 1);
     assert_eq!(
@@ -196,13 +214,11 @@ async fn postgres_return_take_observation_records_reason_and_alert_scope() {
             "observation": "mail_missing",
             "delivery_id": take.take_delivery,
             "fencing_version": take.fencing_version,
-            "sweep_retries": 2,
+            "sweep_retries": 0,
         })
     );
     assert!(
-        !record(&store, &take, take.fencing_version, &session.binding(), Reason::MailMissing)
-            .await
-            .expect("重复观察不报错"),
+        !record_first_observation().await.expect("重复观察不报错"),
         "同原因、同 fence 不重复追加"
     );
     assert_eq!(case_version(pool, case).await, after.case_version);
