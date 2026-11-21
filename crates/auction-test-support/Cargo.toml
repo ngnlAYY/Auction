@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 axum.workspace = true
+futures-util.workspace = true
 scraper.workspace = true
 tokio.workspace = true
 url.workspace = true
