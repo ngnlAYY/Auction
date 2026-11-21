@@ -89,7 +89,7 @@ async fn check(
     as_of: Option<Timestamp>,
 ) -> Result<LookupFenceCheck, sqlx::Error> {
     match as_of {
-        Some(at) => check_lookup_fence_at(conn, fence, Some(at)).await,
+        Some(at) => check_lookup_fence_at(conn, fence, at).await,
         None => check_lookup_fence(conn, fence).await,
     }
 }

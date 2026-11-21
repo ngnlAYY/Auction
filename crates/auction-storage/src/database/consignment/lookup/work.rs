@@ -109,14 +109,29 @@ pub(crate) async fn check_lookup_fence(
     conn: &mut PgConnection,
     fence: LookupFence,
 ) -> Result<LookupFenceCheck, sqlx::Error> {
-    check_lookup_fence_at(conn, fence, None).await
+    check_lookup_fence_inner(
+        conn,
+        fence,
+        #[cfg(feature = "test-db")]
+        None,
+    )
+    .await
 }
 
-/// 精确时刻由 PostgreSQL 测试在夹具中指定；正常调用在获取工作锁后采样墙钟。
+/// PostgreSQL 测试专用的精确时刻入口，用于验证截止等号与最终 CAS。
+#[cfg(feature = "test-db")]
 pub(super) async fn check_lookup_fence_at(
     conn: &mut PgConnection,
     fence: LookupFence,
-    as_of: Option<Timestamp>,
+    as_of: Timestamp,
+) -> Result<LookupFenceCheck, sqlx::Error> {
+    check_lookup_fence_inner(conn, fence, Some(as_of)).await
+}
+
+async fn check_lookup_fence_inner(
+    conn: &mut PgConnection,
+    fence: LookupFence,
+    #[cfg(feature = "test-db")] as_of: Option<Timestamp>,
 ) -> Result<LookupFenceCheck, sqlx::Error> {
     let locked: Option<(i64,)> = sqlx::query_as(
         "SELECT generation FROM public.consignment_lookup_work
@@ -131,6 +146,8 @@ pub(super) async fn check_lookup_fence_at(
         return Ok(LookupFenceCheck::MissingOrWrongGeneration);
     }
 
+    #[cfg(not(feature = "test-db"))]
+    let as_of = None::<Timestamp>;
     let attempt: Option<i16> = sqlx::query_scalar(
         "WITH db_clock AS MATERIALIZED (SELECT COALESCE($4, clock_timestamp()) AS at)
          SELECT w.attempt_count
@@ -172,6 +189,8 @@ pub(crate) enum LookupResolution {
 /// 须先终结挂单。SQL CAS 再核墙钟，若返回 Lost 则调用方须回滚整项命令。
 /// 不变量 2、3、5、6：重排、完成、耗尽与释放原许可原子写入；旧租约不写任何一行。
 /// Applied(Some) 为下次解析时刻，Applied(None) 为完成或耗尽。
+/// 第六次 429 仍写冷却，取已有截止、数据库墙钟加两小时、数据库墙钟加封顶六小时的
+/// Retry-After 三者最大值。提示缺失或短于两小时时，本次新增的冷却为两小时。
 #[allow(dead_code, reason = "由后续任务 2D 调用")]
 pub(crate) async fn finish_lookup(
     conn: &mut PgConnection,

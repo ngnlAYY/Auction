@@ -134,7 +134,8 @@ impl Fixture {
 
     async fn control(&self) -> Value {
         sqlx::query_scalar(
-            "SELECT to_jsonb(c) FROM public.consignment_lookup_control c WHERE id = 1",
+            "SELECT to_jsonb(c) || jsonb_build_object('xmin', xmin::text)
+             FROM public.consignment_lookup_control c WHERE id = 1",
         )
         .fetch_one(self.pool())
         .await
@@ -252,6 +253,21 @@ fn timestamp(row: &Value, field: &str) -> Timestamp {
     row[field].as_str().unwrap().parse().unwrap()
 }
 
+async fn assert_deadline_crossed(
+    tx: &mut Transaction<'_, Postgres>,
+    deadline: Timestamp,
+) -> Timestamp {
+    let (started_at, crossed): (Timestamp, bool) = sqlx::query_as(
+        "SELECT transaction_timestamp(), transaction_timestamp() < $1 AND $1 < clock_timestamp()",
+    )
+    .bind(deadline)
+    .fetch_one(&mut **tx)
+    .await
+    .unwrap();
+    assert!(crossed, "截止须严格晚于事务开始、早于数据库墙钟");
+    started_at
+}
+
 fn assert_work_shape(row: &Value, state: &str) {
     assert_eq!(row["state"], state);
     for field in ["lease_owner", "token", "lease_until", "network_deadline"] {
@@ -361,6 +377,21 @@ async fn cancel_expired_releases_only_matching_holder() {
 }
 
 #[tokio::test]
+async fn cancel_keeps_holder_with_same_work_and_fence_but_different_token() {
+    let fixture = Fixture::new().await;
+    fixture.grant(WORK, FAKE_TOKEN, 2, -120.0).await;
+    sqlx::query("UPDATE public.consignment_lookup_control SET holder_token = $1 WHERE id = 1")
+        .bind(OTHER_FAKE_TOKEN)
+        .execute(fixture.pool())
+        .await
+        .unwrap();
+    let before = fixture.control().await;
+    assert_eq!(fixture.cancel(LISTING).await, 1);
+    assert_work_shape(&fixture.work(WORK).await, "cancelled");
+    assert!(before == fixture.control().await, "同工作、同围栏但不同 token 的许可被改动");
+}
+
+#[tokio::test]
 async fn fence_identity_and_no_writes() {
     let fixture = Fixture::new().await;
     fixture.grant(WORK, FAKE_TOKEN, 2, 120.0).await;
@@ -411,6 +442,57 @@ async fn fence_expires_at_equality_and_wall_clock_cas() {
         LookupLeaseUpdate::Lost
     );
     assert!(before == fixture.snapshot().await, "过期提交改动了工作或全局许可");
+}
+
+#[tokio::test]
+async fn fence_check_rejects_work_lease_expired_during_transaction() {
+    let fixture = Fixture::new().await;
+    fixture.grant(WORK, FAKE_TOKEN, 1, 120.0).await;
+    let mut tx = fixture.lock().await;
+    let lease_until: Timestamp = sqlx::query_scalar(
+        "UPDATE public.consignment_lookup_work
+         SET lease_until = transaction_timestamp() + interval '1 microsecond',
+             network_deadline = transaction_timestamp() - interval '5 seconds'
+         WHERE id = $1 RETURNING lease_until",
+    )
+    .bind(WORK)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert_deadline_crossed(&mut tx, lease_until).await;
+    assert_eq!(
+        DatabaseStore::test_lookup_fence(&mut tx, current_fence(), None).await.unwrap(),
+        Some(LookupLeaseUpdate::Lost)
+    );
+    tx.commit().await.unwrap();
+}
+
+#[tokio::test]
+async fn finish_cas_rejects_permit_expired_during_transaction() {
+    let fixture = Fixture::new().await;
+    fixture.grant(WORK, FAKE_TOKEN, 1, 120.0).await;
+    let mut tx = fixture.lock().await;
+    let permit_until: Timestamp = sqlx::query_scalar(
+        "UPDATE public.consignment_lookup_control
+         SET permit_until = transaction_timestamp() + interval '1 microsecond'
+         WHERE id = 1 RETURNING permit_until",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    // 以尚未到期的事务开始时刻核验初检，单独检验最终 CAS 采样墙钟。
+    let started_at = assert_deadline_crossed(&mut tx, permit_until).await;
+    assert_eq!(
+        DatabaseStore::test_lookup_fence(&mut tx, current_fence(), Some(started_at)).await.unwrap(),
+        Some(LookupLeaseUpdate::Applied(1))
+    );
+    assert_eq!(
+        DatabaseStore::test_lookup_finish(&mut tx, current_fence(), Some(started_at), None)
+            .await
+            .unwrap(),
+        LookupLeaseUpdate::Lost
+    );
+    tx.commit().await.unwrap();
 }
 
 #[tokio::test]
@@ -547,16 +629,34 @@ async fn cooldown_preserves_later_persisted_deadline() {
 #[tokio::test]
 async fn exhausted_rate_limit_still_sets_cooldown() {
     let fixture = Fixture::new().await;
-    let (work, permit) = finish_rate_limit(&fixture, 6, None).await;
-    assert_eq!(
-        timestamp(&permit, "cooldown_until"),
-        timestamp(&work, "updated_at") + TimeDelta::hours(2)
-    );
-    let (work, permit) = finish_rate_limit(&fixture, 6, Some(Duration::from_secs(86_400))).await;
-    assert_eq!(
-        timestamp(&permit, "cooldown_until"),
-        timestamp(&work, "updated_at") + TimeDelta::hours(6)
-    );
+    for (hint, hours) in
+        [(None, 2), (Some(Duration::from_hours(1)), 2), (Some(Duration::from_hours(24)), 6)]
+    {
+        let (work, permit) = finish_rate_limit(&fixture, 6, hint).await;
+        assert_eq!(
+            timestamp(&permit, "cooldown_until"),
+            timestamp(&work, "updated_at") + TimeDelta::hours(hours)
+        );
+    }
+}
+
+#[tokio::test]
+async fn admission_rejects_heartbeat_expired_during_transaction() {
+    let fixture = Fixture::new().await;
+    let mut tx = fixture.lock().await;
+    let worker_ready_until: Timestamp = sqlx::query_scalar(
+        "UPDATE public.consignment_lookup_control
+         SET admitting = true, worker_ready_until = transaction_timestamp() + interval '1 microsecond'
+         WHERE id = 1 RETURNING worker_ready_until",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert_deadline_crossed(&mut tx, worker_ready_until).await;
+    let (permit, ready) = DatabaseStore::test_lookup_admission(&mut tx).await.unwrap();
+    assert!(permit.admitting);
+    assert!(!ready, "事务开始时尚有效的心跳已经过期");
+    tx.commit().await.unwrap();
 }
 
 #[tokio::test]
