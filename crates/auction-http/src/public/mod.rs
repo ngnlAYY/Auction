@@ -14,6 +14,7 @@ mod watch_preference;
 pub(crate) mod blacklist;
 pub(crate) mod browser_errors;
 pub(crate) mod compensation;
+pub(crate) mod consignment;
 pub(crate) mod countdown;
 pub(crate) mod forum;
 pub(crate) mod fulfillment;
