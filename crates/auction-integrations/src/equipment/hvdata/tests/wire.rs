@@ -439,6 +439,13 @@ fn hvdata_level_rejects_unconfirmed_or_contradictory_pairs() {
 }
 
 #[test]
+fn hvdata_tradeable_flag_rejects_numeric_one() {
+    let mut document: Value = serde_json::from_slice(MAIN_TRADEABLE).expect("主世界可交易样本");
+    document["is_tradeable"] = json!(1);
+    rejects(as_wire(&document), Reason::SourceSchemaInvalid);
+}
+
+#[test]
 fn hvdata_optional_name_parts_only_allows_seen_nulls() {
     let mut document = fixture();
     document.as_object_mut().expect("对象").remove("name_parts");
@@ -498,6 +505,13 @@ fn hvdata_upgrade_tiers_allows_null_or_array_without_projection() {
 }
 
 #[test]
+fn hvdata_tradeable_upgrade_tiers_rejects_object() {
+    let mut document: Value = serde_json::from_slice(MAIN_TRADEABLE).expect("主世界可交易样本");
+    document["upgrade_tiers"] = json!({});
+    rejects(as_wire(&document), Reason::SourceSchemaInvalid);
+}
+
+#[test]
 fn hvdata_owner_metadata_only_accepts_observed_types_without_projection() {
     let mut document = fixture();
     let null_metadata = snapshot(as_wire(&document)).expect("主世界样本的 null 形态");
@@ -523,6 +537,20 @@ fn hvdata_owner_metadata_only_accepts_observed_types_without_projection() {
         as_wire(&document).replace(r#""source_uid":42425"#, r#""source_uid":4e1"#),
         Reason::SourceSchemaInvalid,
     );
+}
+
+#[test]
+fn hvdata_tradeable_owner_source_uid_rejects_exponents() {
+    let sample = std::str::from_utf8(ISEKAI_TRADEABLE).expect("异世界可交易样本");
+    for token in ["4e1", "4E1"] {
+        let body = sample.replace(r#""source_uid": 42425"#, &format!(r#""source_uid": {token}"#));
+        assert_eq!(
+            decode(StatusCode::OK, body.as_bytes(), "isekai", FIXTURE_EID)
+                .expect_err("来源 UID 指数形式应失败关闭"),
+            Reason::SourceSchemaInvalid.into(),
+            "{token}"
+        );
+    }
 }
 
 #[test]
