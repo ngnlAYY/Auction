@@ -59,14 +59,21 @@ cargo build --locked --release -p auction-cli
 
 ```bash
 auction-cli keys status --strict
-auction-cli keys reencrypt --domain credential                       # 演练，不写库
-auction-cli keys reencrypt --domain credential --apply \
-    --actor ops@example --receipt /var/lib/auction/keys/credential-20261105.json
+auction-cli keys reencrypt --domain equipment                        # 演练，不写库
+auction-cli keys reencrypt --domain equipment --apply \
+    --actor ops@example --receipt /var/lib/auction/keys/equipment-20261105.json
+auction-cli keys status --require-current-equipment                   # 零旧引用并以当前钥逐封复核
 ```
 
-`status` 报告各域当前/旧 key ID、数据库实际引用的 key ID 与 12 个月保留期；`--strict` 在存在未配置 key 引用或过期未重加密的旧 key 时失败。`reencrypt` 只处理 `equipment`、`user_login`、`credential` 三个数据库域（省略 `--domain` 时依次处理）：先解密旧信封、用当前 key 重新封装并重新解密核对，`--apply` 时以旧 key ID 作 CAS 条件写回并追加 `system.data_key_reencrypt` 审计。重复运行是幂等的；`mail_diagnostics` 归档是一次写入的加密文件，不重写。
+`status` 报告各域当前/旧 key ID、数据库实际引用的 key ID 与 12 个月保留期。`--strict` 在存在未配置 key 引用或过期未重加密的旧 key 时失败。`--require-current-equipment` 是独立的只读核对，拒绝旧引用，并使用仅含当前钥的密钥环分页认证装备域的所有活动信封，按来源输出复核计数。
 
-`--apply` 必须同时给出 `--receipt` 与 `--actor`，缺任一项是参数错误（退出码 2）。回执路径（绝对路径、父目录禁止 group/other 写入、文件尚不存在）、操作者（1–128 字节、首尾无空白且不含控制字符，与其他写入命令同一规则，带首尾空白或换行的输入会被拒绝）、`SUDO_USER` 与全部目标域的密钥环都在连接数据库之前核对，任一项无效时不改写任何信封。改写中途失败（扫描、解密、写回或 CAS 冲突）时，已提交的改写仍写入 `outcome=partial` 回执，并为完成的域、已有改写的失败域与写回结果未知（`write` 阶段，即使确认的改写数为 0）的失败域追加审计，再以原错误退出；回执或审计本身写不进去时两段原因一起返回。流程、回执字段与保留期约束见[ops/keys/README.md](../../ops/keys/README.md)。
+`reencrypt` 依次处理 `equipment`、`user_login`、`credential`，也可用 `--domain` 指定。先解密旧信封，用当前钥重新封装并重新开封复核，`--apply` 时才 CAS 写回并追加 `system.data_key_reencrypt` 审计。`mail_diagnostics` 归档维持一次写入。装备域按表和表内主键分页，CAS 核对表、主键、原数据钥标识和 nonce。未更新时重新核对当前行，跳过已退休的登记，认证并发换到目标钥的信封，其他冲突中止。比较钥只重包原材料，登记账本维持原 MAC。
+
+回执格式 `auction-key-reencrypt-receipt-v2` 的 `domains.equipment.sources` 分别记录 `equipment_secrets`、`consignment_registration_secrets`、`consignment_replay_keys` 的 `scanned` 和 `rewritten`，空来源计零。演练和并发跳过的信封不计入 `rewritten`。重封回执、审计和失败信息均隐去密钥标识与信封内容。
+
+旧装备数据钥的在线退休依次要求全域扫描完成、旧引用为零、仅用新钥开封成功和隔离恢复副本验证通过，并遵守历史备份的密钥保管及保留期。执行步骤见[装备数据密钥轮换](../../ops/README.md#装备数据密钥轮换)。
+
+`--apply` 必须同时给出 `--receipt` 与 `--actor`，缺任一项是参数错误（退出码 2）。回执路径（绝对路径、父目录禁止 group/other 写入、文件尚不存在）、操作者（1–128 字节、首尾无空白且不含控制字符，与其他写入命令同一规则，带首尾空白或换行的输入会被拒绝）、`SUDO_USER` 与全部目标域的密钥环都在连接数据库之前核对，任一项无效时不改写任何信封。改写中途失败（扫描、解密、写回或 CAS 冲突）时，已提交的改写仍写入 `outcome=partial` 回执，并为完成的域、已有改写的失败域与写回结果未知（`write` 阶段，即使确认的改写数为 0）的失败域追加审计，再以原错误退出。回执或审计本身写不进去时两段原因一起返回。通用密钥环配置与保留期约束见[ops/keys/README.md](../../ops/keys/README.md)。
 
 ## 配置检查
 

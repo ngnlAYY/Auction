@@ -13,6 +13,7 @@ use crate::keyring::{Keyring, KeyringError};
 use crate::safe_diagnostics;
 use envelope::{OpenError, SealError, SecretPurpose, open_secret, seal_secret};
 
+mod consignment;
 pub(crate) mod envelope;
 
 const DATA_KEY_LENGTH: usize = 32;

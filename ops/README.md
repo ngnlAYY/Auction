@@ -436,6 +436,7 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 | 任务 | 做法 |
 | --- | --- |
 | 更换外部 Cookie | Admin “Cookie 池”录入新凭据并停用旧凭据（每种 kind 同时只能一个 active），或 `auction-cli credential import`；然后重启 Worker（分体部署用 `service restart`） |
+| 轮换装备数据密钥 | 停机窗口内演练、重封并核对三处来源，见[装备数据密钥轮换](#装备数据密钥轮换) |
 | 暂停/恢复收件 | Admin 仪表盘或“收件审核”页；恢复轮询不绕过场次冻结的赛季收件门禁，见[docs/business-rules.md#赛季早鸟期auctionscheduleearly_bird](../docs/business-rules.md#赛季早鸟期auctionscheduleearly_bird) |
 | 结果未知的投递 | Admin “投递队列”按动作与证据人工对账；主动 Send 禁止仅凭外部引用人工确认成功，须由冻结的精确 Sent 证明恢复。未找到 Sent 不证明未发送 |
 | 恢复确认 | Admin “结算报表”中确认 `reclaimed` / `cancelled` / `equipment_recovered`；付款截止与跨赛季重列限制见[4 恢复付款超时与拒收](../docs/guide/settlement.md#4-恢复付款超时与拒收)。确认返回 `recovery_send_unattributed`，或 Worker 自动重寄/退回卖家以报表阻断码 `recovery_evidence_mismatch` 停下且有审计 `recovery.send_attribution_blocked`，表示退件不能唯一归属到原投递的一次发送（可能有另一封邮件仍在对方手里）：报表的证据列显示具体原因（`send_attribution_blocker`）。Worker 每 10 分钟按持久事实复核一次，Sent 恢复为每一次可能外达的发送补上远端 MID、且与已消费的退件一一对应时自动解除（审计 `recovery.send_attribution_released`，`rule=sent_mid`）并继续推进；仍不成立时按投递详情的冻结发送尝试与 Sent 人工核对，系统不提供绕过的确认入口。原付款投递在退件之前被重新排队而停在待发时不再阻断，收口时由恢复流程终结为 `failed/recovery_superseded`（投递台只在扩展投影中列出）或由自动重寄接替 |
@@ -447,6 +448,13 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 | Bot 资金账户 | `auction-cli funds preview` 可在线只读执行；开户或现金对账写入前须先停止 Worker，见[docs/guide/settlement.md#bot-内部履约与资金账户](../docs/guide/settlement.md#bot-内部履约与资金账户) |
 | 导出邮件诊断证据 | `auction-cli mail export-evidence <evidence-id> --output <文件>` |
 | 数据保留与清理 | `auction-cli db inventory` 只统计不授权删除；`db retention-dry-run` 按政策 v2 写 run id 回执；执行用 `db retention-purge --dry-run-receipt <回执> --approve <family>=<token> --execute --confirm 'PURGE <库名>' --receipt <回执>`，只删运行态族、逐族令牌绑定演练计数并追加 `auction.retention.purge` 审计，审计/资金/业务事实与有效会话永不删除 |
+
+### 装备数据密钥轮换
+
+1. 停止旧写入角色，把新钥设为当前写入钥，保留原钥供解密。按[密钥配置与保留期](keys/README.md#轮换步骤)更新角色配置并取可恢复的停机备份。
+2. 先运行 `auction-cli keys reencrypt --domain equipment` 演练，再加 `--apply --actor <操作者> --receipt <绝对路径>` 离线重封。确认回执完成全域扫描，分别检查拍卖装备、活动寄售登记、逻辑重放比较钥的计数。已经退休的登记信封跳过，旧的逻辑比较钥仍服务既有账本。
+3. 执行 `auction-cli keys status --require-current-equipment`。旧引用必须为零，且三处来源的全部活动信封都必须能仅用当前钥开封。收到部分回执或核对失败时，保留原钥并修复后重跑。
+4. 在隔离库恢复备份，按该恢复点所需的历史密钥配置复核开封、登记命令原样重放及改 key 冲突，并检查恢复后的运行角色 ACL。确认历史备份、PITR 和诊断归档所需的旧钥均已安排受控保管。全域扫描、零旧引用、仅用新钥开封和恢复副本验证均通过，且满足[旧密钥保留期](keys/README.md#旧密钥保留期)后，才可从在线密钥环移除原钥。
 
 ### 结算退件处理
 

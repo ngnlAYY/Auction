@@ -52,6 +52,9 @@ pub(crate) enum KeysCommand {
         /// 任一信封引用未知 key，或保留期已过但仍有引用时失败。
         #[arg(long)]
         strict: bool,
+        /// 装备域退休前核对：拒绝旧钥仍被引用，并仅用当前钥逐封开封。
+        #[arg(long, conflicts_with = "strict")]
+        require_current_equipment: bool,
     },
     /// 离线把仍引用旧 key 的信封重加密为当前 key；默认演练，--apply 才写入并追加审计。
     Reencrypt(KeysReencryptArgs),
