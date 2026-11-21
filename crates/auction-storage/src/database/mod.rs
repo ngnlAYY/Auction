@@ -3,6 +3,7 @@
 mod accounts;
 mod admin;
 mod auction;
+mod consignment;
 mod delivery;
 mod mail;
 mod maintenance;
