@@ -5,6 +5,7 @@
 
 mod auction;
 mod bidding;
+pub mod consignment;
 mod delivery;
 pub mod equipment;
 mod errors;
