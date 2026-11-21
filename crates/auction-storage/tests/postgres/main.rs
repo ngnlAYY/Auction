@@ -20,7 +20,6 @@ mod bid_cross_lot;
 mod bid_log_proxies;
 mod collection_cod;
 mod collection_wait;
-mod consignment_key_rotation;
 mod delivery;
 mod disposition_reads;
 mod forum_reply_targets;

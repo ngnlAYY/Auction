@@ -662,7 +662,7 @@ async fn postgres_equipment_rotation_rewrap_preserves_the_retired_logical_key_an
 
 // 这些用例通过真实子进程覆盖参数、分派、写库、回执及退出码。先执行
 // `cargo test --locked -p auction-cli` 生成相同构型的二进制，再以 `-- --ignored`
-// 并按 `consignment_key_rotation::postgres_cli_` 过滤运行。常规 PG 门禁可以独立运行。
+// 并按 `consignment::key_rotation::postgres_cli_` 过滤运行。常规 PG 门禁可以独立运行。
 struct CliFixture {
     directory: PathBuf,
     binary: PathBuf,
