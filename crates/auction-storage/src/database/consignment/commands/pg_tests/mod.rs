@@ -6,10 +6,25 @@ mod locks;
 mod replays;
 mod writes;
 
+use std::env;
+
 use crate::database::DatabaseStore;
+
+fn require_postgres_audit_target() {
+    let executable = env::current_exe()
+        .unwrap_or_else(|error| panic!("无法定位当前 PostgreSQL 集成测试程序：{error}"));
+    assert!(
+        executable
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("postgres_audit-")),
+        "会写入进程级审计健康计数的场景只能在 postgres_audit 测试目标中运行"
+    );
+}
 
 impl DatabaseStore {
     /// 只供 `test-db` 集成入口在已迁移的临时数据库中调用内部寄售场景。
+    /// 会写入进程级审计健康计数的分支须先验证当前测试目标，以保护同进程的就绪检查。
     #[doc(hidden)]
     pub async fn test_consignment_transactions(
         &self,
@@ -32,6 +47,10 @@ impl DatabaseStore {
             "compare_all_fields" => writes::compare_all_fields(self, maintenance).await,
             "atomic_combinations" => writes::atomic_combinations(self, maintenance).await,
             "missing_fact_rejected" => writes::missing_fact_rejected(self, maintenance).await,
+            "audit_failure_rolls_back" => {
+                require_postgres_audit_target();
+                writes::audit_failure_rolls_back(self, maintenance).await
+            }
             "constraint_mapping" => writes::constraint_mapping(self, maintenance).await,
             "error_detail_absent" => diagnostics::verify(self).await,
             "commit_unknown_sqlstate" => diagnostics::commit_unknown_sqlstate(self).await,

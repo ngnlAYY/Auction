@@ -1,8 +1,5 @@
 //! 寄售存储公共底座的 PG18 集成测试入口。
 
-use auction_storage::DatabaseStore;
-
-use super::audit_subprocess::isolated_audit_scenario;
 use crate::support::TestDatabase;
 
 async fn run_scenario(scenario: &str) {
@@ -39,11 +36,13 @@ scenario!(postgres_retry_policy, "retry_policy");
 scenario!(postgres_compare_all_fields, "compare_all_fields");
 scenario!(postgres_atomic_combinations, "atomic_combinations");
 scenario!(postgres_missing_fact_rejected, "missing_fact_rejected");
-isolated_audit_scenario!(
-    postgres_audit_failure_rolls_back,
-    postgres_audit_failure_rolls_back_child,
-    DatabaseStore::audit_failure_rolls_back
-);
+
+#[tokio::test]
+#[should_panic(expected = "会写入进程级审计健康计数的场景只能在 postgres_audit 测试目标中运行")]
+async fn postgres_rejects_audit_failure_scenario() {
+    run_scenario("audit_failure_rolls_back").await;
+}
+
 scenario!(postgres_constraint_mapping, "constraint_mapping");
 scenario!(postgres_error_detail_absent, "error_detail_absent");
 scenario!(postgres_commit_unknown_sqlstate, "commit_unknown_sqlstate");

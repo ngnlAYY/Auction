@@ -106,6 +106,7 @@ run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 cargo test --locked -p auction-storage --features test-db --test postgres -- postgres_
+cargo test --locked -p auction-storage --features test-db --test postgres_audit -- postgres_
 # 源码内的 postgres_ 用例只写连接私有临时表，需要现成的服务器；未提供 URL 时明确跳过。
 if [[ -n "${AUCTION_TEST_DATABASE_URL:-}" ]]; then
   cargo test --locked -p auction-storage --lib -- --ignored postgres_
