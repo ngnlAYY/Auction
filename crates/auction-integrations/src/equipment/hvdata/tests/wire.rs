@@ -18,6 +18,11 @@ use super::super::http::decode_response;
 type Reason = LookupPermanentReason;
 type LookupError = ListingEquipmentLookupError;
 
+const MAIN_TRADEABLE: &[u8] =
+    include_bytes!("../../../../../auction-test-support/src/hvdata/fixtures/main-tradeable.json");
+const ISEKAI_TRADEABLE: &[u8] =
+    include_bytes!("../../../../../auction-test-support/src/hvdata/fixtures/isekai-tradeable.json");
+
 fn fixture() -> Value {
     serde_json::from_slice(EQUIPMENT).expect("脱敏样本 JSON")
 }
@@ -65,6 +70,78 @@ fn hvdata_sample_snapshot_projects_only_verified_fields() {
     let rendered = format!("{snapshot:?} {details:?}");
     assert!(!rendered.contains(FIXTURE_KEY));
     assert!(!rendered.contains(FIXTURE_OWNER));
+}
+
+fn tradeable_sample(
+    body: &[u8],
+    world_id: &str,
+    assigned_level: u32,
+    name: &str,
+) -> ListingLookupSnapshot {
+    let read = decode(StatusCode::OK, body, world_id, FIXTURE_EID).expect("已见可交易样本");
+    assert_eq!(read.identity().world_id(), world_id);
+    assert_eq!(read.identity().external_equipment_id(), FIXTURE_EID);
+    assert_eq!(read.owner_name(), FIXTURE_OWNER);
+    let details = read.details();
+    let label = details.label();
+    assert_eq!(details.observed_at(), Timestamp::UNIX_EPOCH);
+    assert_eq!(label.name, name);
+    assert_eq!(label.category, "One-handed Weapon");
+    assert_eq!(label.level, ListingEquipmentLevel::Assigned(assigned_level));
+    assert!(label.tradeable);
+    assert_eq!(label.alt_name, None);
+
+    let groups = details.stat_groups();
+    assert_eq!(
+        groups.iter().map(|group| group.name.as_str()).collect::<Vec<_>>(),
+        ["Primary Attributes", "Spell Damage", "misc"]
+    );
+    assert_eq!(
+        groups[0].stats.iter().map(|stat| stat.name.as_str()).collect::<Vec<_>>(),
+        ["Agility", "Dexterity", "Strength"]
+    );
+    read
+}
+
+#[test]
+fn hvdata_main_tradeable_sample_projects_assigned_level() {
+    let read =
+        tradeable_sample(MAIN_TRADEABLE, "main", 500, "Legendary Arctic Shortsword of Focus");
+    let groups = read.details().stat_groups();
+    assert_eq!(groups[1].stats.len(), 1);
+    let spell = &groups[1].stats[0];
+    assert_eq!((spell.name.as_str(), spell.value, spell.base), ("Cold", 38.57, Some(0.0)));
+    assert_eq!(
+        groups[2].stats.iter().map(|stat| stat.name.as_str()).collect::<Vec<_>>(),
+        [
+            "Attack Accuracy",
+            "Attack Crit Damage",
+            "Magic Accuracy",
+            "Magic Crit Damage",
+            "Mana Conservation",
+            "Parry"
+        ]
+    );
+    assert_eq!((groups[2].stats[0].value, groups[2].stats[0].base), (297.5, Some(196.0)));
+}
+
+#[test]
+fn hvdata_isekai_tradeable_sample_projects_assigned_level() {
+    let read = tradeable_sample(
+        ISEKAI_TRADEABLE,
+        "isekai",
+        321,
+        "Legendary Tempestuous Shortsword of Balance",
+    );
+    let groups = read.details().stat_groups();
+    assert_eq!(groups[1].stats.len(), 1);
+    let spell = &groups[1].stats[0];
+    assert_eq!((spell.name.as_str(), spell.value, spell.base), ("Wind", 27.58, Some(0.0)));
+    assert_eq!(
+        groups[2].stats.iter().map(|stat| stat.name.as_str()).collect::<Vec<_>>(),
+        ["Attack Accuracy", "Attack Crit Damage", "Parry"]
+    );
+    assert_eq!((groups[2].stats[0].value, groups[2].stats[0].base), (272.9, Some(183.0)));
 }
 
 #[test]
@@ -316,10 +393,33 @@ fn hvdata_rejects_secret_text_even_in_whitelisted_fields() {
 }
 
 #[test]
-fn hvdata_level_only_allows_confirmed_soulbound_pair() {
+fn hvdata_tradeable_level_requires_a_bounded_positive_decimal_token() {
     let mut document = fixture();
-    assert!(snapshot(as_wire(&document)).is_ok());
-    for level in [json!(42), json!("42"), json!("Unassigned"), Value::Null, json!({})] {
+    document["is_tradeable"] = json!(true);
+    let body = as_wire(&document);
+    for (token, expected) in [("1", 1), ("100000", 100_000)] {
+        let read = snapshot(body.replace(r#""Soulbound""#, token)).expect("包含语义边界");
+        assert_eq!(read.details().label().level, ListingEquipmentLevel::Assigned(expected));
+        assert!(read.details().label().tradeable);
+    }
+    for token in ["500.0", "5e2", "0", "-1", "100001", "4294967296"] {
+        assert_eq!(
+            snapshot(body.replace(r#""Soulbound""#, token)).expect_err("不接受此等级 token"),
+            Reason::SourceShapeUnconfirmed.into(),
+            "{token}"
+        );
+    }
+    for token in ["0500", "+500"] {
+        rejects(body.replace(r#""Soulbound""#, token), Reason::SourceSchemaInvalid);
+    }
+}
+
+#[test]
+fn hvdata_level_rejects_unconfirmed_or_contradictory_pairs() {
+    let mut document = fixture();
+    document["level"] = json!(500);
+    rejects(as_wire(&document), Reason::SourceShapeUnconfirmed);
+    for level in [json!("500"), json!("Unassigned"), Value::Null, json!({})] {
         for tradeable in [false, true] {
             document["level"] = level.clone();
             document["is_tradeable"] = json!(tradeable);
@@ -342,12 +442,7 @@ fn hvdata_level_only_allows_confirmed_soulbound_pair() {
 fn hvdata_optional_name_parts_only_allows_seen_nulls() {
     let mut document = fixture();
     document.as_object_mut().expect("对象").remove("name_parts");
-    document.as_object_mut().expect("对象").remove("alt_name");
-    let without_optionals = snapshot(as_wire(&document)).expect("可选字段可以省略");
-    assert!(without_optionals.details().label().alt_name.is_none());
-    document["alt_name"] = Value::Null;
-    rejects(as_wire(&document), Reason::SourceSchemaInvalid);
-    document.as_object_mut().expect("对象").remove("alt_name");
+    assert!(snapshot(as_wire(&document)).is_ok());
     for valid in [
         json!({"armor_type":null, "slot_type":null, "weapon_type":"Fixture"}),
         json!({"prefix":"Fixture", "unknown":[1,2,3]}),
@@ -366,6 +461,83 @@ fn hvdata_optional_name_parts_only_allows_seen_nulls() {
         document["name_parts"] = invalid;
         rejects(as_wire(&document), Reason::SourceSchemaInvalid);
     }
+}
+
+#[test]
+fn hvdata_alias_projects_null_and_absence_to_the_same_snapshot() {
+    let mut document = fixture();
+    document["alt_name"] = json!("测试别名");
+    let named = snapshot(as_wire(&document)).expect("非空规范别名");
+    assert_eq!(named.details().label().alt_name.as_deref(), Some("测试别名"));
+
+    document["alt_name"] = Value::Null;
+    let null_alias = snapshot(as_wire(&document)).expect("已见 null 别名");
+    assert_eq!(null_alias.details().label().alt_name, None);
+    document.as_object_mut().expect("对象").remove("alt_name");
+    assert_eq!(snapshot(as_wire(&document)).expect("可省略别名"), null_alias);
+
+    for invalid in [json!(""), json!(42)] {
+        document["alt_name"] = invalid;
+        rejects(as_wire(&document), Reason::SourceSchemaInvalid);
+    }
+}
+
+#[test]
+fn hvdata_upgrade_tiers_allows_null_or_array_without_projection() {
+    let mut document = fixture();
+    let array = snapshot(as_wire(&document)).expect("魂绑样本的数组");
+    document["upgrade_tiers"] = Value::Null;
+    assert_eq!(snapshot(as_wire(&document)).expect("可交易样本的 null"), array);
+
+    document.as_object_mut().expect("对象").remove("upgrade_tiers");
+    assert_eq!(snapshot(as_wire(&document)).expect("未透传字段可省略"), array);
+    for invalid in [json!({}), json!("tier"), json!(42), json!(true)] {
+        document["upgrade_tiers"] = invalid;
+        rejects(as_wire(&document), Reason::SourceSchemaInvalid);
+    }
+}
+
+#[test]
+fn hvdata_owner_metadata_only_accepts_observed_types_without_projection() {
+    let mut document = fixture();
+    let null_metadata = snapshot(as_wire(&document)).expect("主世界样本的 null 形态");
+    document["owner"]["date"] = json!("2000-01-01T00:00:00Z");
+    document["owner"]["source_name"] = json!("FixtureSourceOwner");
+    document["owner"]["source_uid"] = json!(42425);
+    document["owner"]["source_mob"] = json!("FixtureMonster");
+    let populated = snapshot(as_wire(&document)).expect("异世界样本的非空类型");
+    assert_eq!(populated, null_metadata);
+
+    for (field, invalid) in [
+        ("date", json!(0)),
+        ("source_name", json!([])),
+        ("source_uid", json!("42425")),
+        ("source_uid", json!(42425.0)),
+        ("source_mob", json!({})),
+    ] {
+        let mut mutated = document.clone();
+        mutated["owner"][field] = invalid;
+        rejects(as_wire(&mutated), Reason::SourceSchemaInvalid);
+    }
+    rejects(
+        as_wire(&document).replace(r#""source_uid":42425"#, r#""source_uid":4e1"#),
+        Reason::SourceSchemaInvalid,
+    );
+}
+
+#[test]
+fn hvdata_unprojected_fields_still_obey_structure_guards() {
+    let mut document = fixture();
+    document["upgrade_tiers"] = json!([{"marker":0}]);
+    document["owner"]["extension"] = json!({"nested":0});
+    let valid = as_wire(&document);
+    assert!(snapshot(&valid).is_ok());
+    for field in ["marker", "nested"] {
+        let entry = format!(r#""{field}":0"#);
+        rejects(valid.replace(&entry, &format!("{entry},{entry}")), Reason::SourceSchemaInvalid);
+    }
+    document["upgrade_tiers"] = json!(vec![0; 257]);
+    rejects(as_wire(&document), Reason::SourceTooLarge);
 }
 
 #[test]

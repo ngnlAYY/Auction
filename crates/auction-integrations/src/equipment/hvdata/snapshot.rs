@@ -1,5 +1,7 @@
 //! 固定装备来源的字段校验及白名单投影。
 
+use std::ops::RangeInclusive;
+
 use auction_application::consignment::{
     ListingEquipmentDetails, ListingEquipmentLabel, ListingEquipmentLevel,
     ListingEquipmentLookupError, ListingEquipmentStat, ListingEquipmentStatGroup,
@@ -15,6 +17,9 @@ use super::json::{Object, Value, finite_number};
 type Reason = LookupPermanentReason;
 type LookupError = ListingEquipmentLookupError;
 
+// 沿用本站 Bot 装备页解析（equipment/parser/header.rs）的等级语义范围。
+const ASSIGNED_LEVEL_RANGE: RangeInclusive<u32> = 1..=100_000;
+
 pub(super) fn snapshot(
     object: &Object<'_>,
     identity: &ListingEquipmentIdentity,
@@ -24,14 +29,21 @@ pub(super) fn snapshot(
     validate_identity(object, identity, key)?;
     let owner_name = owner_name(object)?;
     let (level, tradeable) = confirmed_level(object)?;
+    let alt_name = match object.get("alt_name") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(require_text(value)?.to_owned()),
+    };
     let label = ListingEquipmentLabel {
         name: field_text(object, "name")?.to_owned(),
-        alt_name: object.get("alt_name").map(require_text).transpose()?.map(str::to_owned),
+        alt_name,
         category: field_text(object, "category")?.to_owned(),
         level,
         tradeable,
     };
     validate_name_parts(object)?;
+    if !matches!(object.get("upgrade_tiers"), None | Some(Value::Null | Value::Array(_))) {
+        return Err(Reason::SourceSchemaInvalid.into());
+    }
     let details = ListingEquipmentDetails::new(observed_at, label, stat_groups(object)?)?;
     ListingLookupSnapshot::new(identity.clone(), details, owner_name.to_owned(), key)
 }
@@ -89,20 +101,46 @@ fn owner_name<'a>(object: &'a Object<'_>) -> Result<&'a str, Reason> {
             return Err(Reason::SourceSchemaInvalid);
         }
     }
+    // 这些资料只核对已见类型；快照只保留持有人名称。
+    for field in ["date", "source_name", "source_mob"] {
+        if !matches!(owner.get(field), None | Some(Value::Null | Value::Text(_))) {
+            return Err(Reason::SourceSchemaInvalid);
+        }
+    }
+    match owner.get("source_uid") {
+        None | Some(Value::Null) => (),
+        Some(Value::Number(token)) if !token.contains(['.', 'e', 'E']) => (),
+        Some(_) => return Err(Reason::SourceSchemaInvalid),
+    }
     Ok(name)
 }
 
+/// 已证实的等级与可交易性组合。
+///
+/// | `level` | `is_tradeable` | 快照 |
+/// | --- | --- | --- |
+/// | `"Soulbound"` | `false` | `Soulbound`，由上层判定不可挂单 |
+/// | 范围内的正十进制整数字面量 | `true` | `Assigned(n)`，可交易 |
 fn confirmed_level(object: &Object<'_>) -> Result<(ListingEquipmentLevel, bool), Reason> {
     let Some(Value::Bool(tradeable)) = object.get("is_tradeable") else {
         return Err(Reason::SourceSchemaInvalid);
     };
-    // 拿到可交易样本后在此开放对应分支；完整魂绑观察交给用例判定不可挂单。
+    // 不变量 6：矛盾字段失败关闭；未证实的组合保留专用分类。
     match (object.get("level"), tradeable) {
         (Some(Value::Text(level)), false) if level == "Soulbound" => {
             Ok((ListingEquipmentLevel::Soulbound, false))
         }
         (Some(Value::Text(level)), true) if level == "Soulbound" => {
             Err(Reason::SourceSchemaInvalid)
+        }
+        (Some(Value::Number(token)), true) if valid_positive_decimal(token, token.len()) => {
+            let Ok(level) = token.parse::<u32>() else {
+                return Err(Reason::SourceShapeUnconfirmed);
+            };
+            if !ASSIGNED_LEVEL_RANGE.contains(&level) {
+                return Err(Reason::SourceShapeUnconfirmed);
+            }
+            Ok((ListingEquipmentLevel::Assigned(level), true))
         }
         (Some(_), _) => Err(Reason::SourceShapeUnconfirmed),
         (None, _) => Err(Reason::SourceSchemaInvalid),

@@ -1,0 +1,141 @@
+{
+  "name": "Legendary Arctic Shortsword of Focus",
+  "name_parts": {
+    "tier": "Legendary",
+    "prefix": "Arctic",
+    "type": "Shortsword",
+    "armor_type": null,
+    "slot_type": null,
+    "weapon_type": "Shortsword",
+    "suf_art": "of",
+    "suffix": "Focus"
+  },
+  "alt_name": null,
+  "category": "One-handed Weapon",
+  "level": 500,
+  "is_tradeable": true,
+  "weapon_damage": {
+    "Attack Damage": {
+      "type": "Slashing",
+      "value": 1443,
+      "base": 198.0
+    },
+    "strikes": [
+      "Cold"
+    ],
+    "status_effects": [
+      "Burden: 5.2 Interference: 3.6",
+      "Bleeding Wound : 24.7% chance"
+    ]
+  },
+  "stats": {
+    "misc": {
+      "Attack Accuracy": {
+        "value": 297.5,
+        "base": 196.0
+      },
+      "Attack Crit Damage": {
+        "value": 0.23,
+        "base": 187.0
+      },
+      "Parry": {
+        "value": 271.3,
+        "base": 194.0
+      },
+      "Magic Accuracy": {
+        "value": 104.7,
+        "base": 0
+      },
+      "Magic Crit Damage": {
+        "value": 0.15,
+        "base": 0
+      },
+      "Mana Conservation": {
+        "value": 30.92,
+        "base": 0
+      }
+    },
+    "Spell Damage": {
+      "Cold": {
+        "value": 38.57,
+        "base": 0
+      }
+    },
+    "Primary Attributes": {
+      "Strength": {
+        "value": 91.07,
+        "base": 193.0
+      },
+      "Dexterity": {
+        "value": 85.86,
+        "base": 181.0
+      },
+      "Agility": {
+        "value": 94.2,
+        "base": 200.0
+      }
+    }
+  },
+  "upgrade_tiers": null,
+  "owner": {
+    "name": "FixtureOwner",
+    "uid": 42424,
+    "date": null,
+    "source_name": null,
+    "source_uid": null,
+    "source_mob": null
+  },
+  "condition": {
+    "current": 100.0,
+    "max": 100
+  },
+  "potency": {
+    "tier": 0,
+    "current_xp": 0,
+    "max_xp": 1
+  },
+  "calculations": {
+    "fusion": {
+      "average_stat": 192.71428571428572,
+      "max_stat": 200,
+      "total_rem": 51.0,
+      "num_stats": 7,
+      "min_cost": 12762857.142857144,
+      "max_cost": 26195714.285714287
+    },
+    "percentiles": {
+      "weapon_damage": {
+        "Attack Damage": 0.9333333333333333
+      },
+      "misc": {
+        "Attack Accuracy": 0.8666666666666667,
+        "Attack Crit Damage": 0.5666666666666667,
+        "Parry": 0.8
+      },
+      "Spell Damage": {},
+      "Primary Attributes": {
+        "Strength": 0.7666666666666667,
+        "Dexterity": 0.36666666666666664,
+        "Agility": 1.0
+      }
+    },
+    "legendary_percentiles": {
+      "weapon_damage": {
+        "Attack Damage": 0.9333333333333333
+      },
+      "misc": {
+        "Attack Accuracy": 0.8666666666666667,
+        "Attack Crit Damage": 0.5666666666666667,
+        "Parry": 0.8
+      },
+      "Spell Damage": {},
+      "Primary Attributes": {
+        "Strength": 0.7666666666666667,
+        "Dexterity": 0.36666666666666664,
+        "Agility": 1.0
+      }
+    }
+  },
+  "eid": 424242,
+  "key": "decaf00000"
+}
