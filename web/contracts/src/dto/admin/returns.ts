@@ -373,10 +373,11 @@ function validEventDetailsShape(kind: string, details: unknown): boolean {
   switch (kind) {
     case "opened":
       return (
-        matches("dispatch_no,match_state,reason_code") &&
-        (value.dispatch_no === null || positiveInteger(value.dispatch_no)) &&
-        stateValue(value.match_state) &&
-        reasonValue(value.reason_code)
+        (matches("dispatch_no,match_state,reason_code") &&
+          (value.dispatch_no === null || positiveInteger(value.dispatch_no)) &&
+          stateValue(value.match_state) &&
+          reasonValue(value.reason_code)) ||
+        (matches("backfilled") && value.backfilled === true)
       );
     case "acknowledged":
     case "recheck_requested":
@@ -384,12 +385,15 @@ function validEventDetailsShape(kind: string, details: unknown): boolean {
       return matches("");
     case "recheck_rebound":
       return (
-        matches("delivery_id,dispatch_no,match_state,reason_code,verified_version") &&
-        uuidValue(value.delivery_id) &&
-        positiveInteger(value.dispatch_no) &&
-        stateValue(value.match_state) &&
-        reasonValue(value.reason_code) &&
-        positiveInteger(value.verified_version)
+        (matches("delivery_id,dispatch_no,match_state,reason_code,verified_version") &&
+          uuidValue(value.delivery_id) &&
+          positiveInteger(value.dispatch_no) &&
+          stateValue(value.match_state) &&
+          reasonValue(value.reason_code) &&
+          positiveInteger(value.verified_version)) ||
+        (matches("backfill_orphan_ordering_repaired,migration") &&
+          value.migration === 123 &&
+          value.backfill_orphan_ordering_repaired === true)
       );
     case "recheck_unchanged":
       return (

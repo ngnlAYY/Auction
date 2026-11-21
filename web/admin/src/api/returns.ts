@@ -538,10 +538,11 @@ function validEventDetails(kind: string, details: unknown): boolean {
   switch (kind) {
     case "opened":
       return (
-        matches("dispatch_no,match_state,reason_code") &&
-        (details.dispatch_no === null || positive(details.dispatch_no)) &&
-        state(details.match_state) &&
-        reason(details.reason_code)
+        (matches("dispatch_no,match_state,reason_code") &&
+          (details.dispatch_no === null || positive(details.dispatch_no)) &&
+          state(details.match_state) &&
+          reason(details.reason_code)) ||
+        (matches("backfilled") && details.backfilled === true)
       );
     case "acknowledged":
     case "recheck_requested":
@@ -549,12 +550,15 @@ function validEventDetails(kind: string, details: unknown): boolean {
       return matches("");
     case "recheck_rebound":
       return (
-        matches("delivery_id,dispatch_no,match_state,reason_code,verified_version") &&
-        uuid(details.delivery_id) &&
-        positive(details.dispatch_no) &&
-        state(details.match_state) &&
-        reason(details.reason_code) &&
-        positive(details.verified_version)
+        (matches("delivery_id,dispatch_no,match_state,reason_code,verified_version") &&
+          uuid(details.delivery_id) &&
+          positive(details.dispatch_no) &&
+          state(details.match_state) &&
+          reason(details.reason_code) &&
+          positive(details.verified_version)) ||
+        (matches("backfill_orphan_ordering_repaired,migration") &&
+          details.migration === 123 &&
+          details.backfill_orphan_ordering_repaired === true)
       );
     case "recheck_unchanged":
       return (

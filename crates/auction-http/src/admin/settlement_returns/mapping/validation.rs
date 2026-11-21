@@ -10,12 +10,17 @@ use uuid::Uuid;
 pub(super) fn valid_event_details(kind: AdminSettlementReturnEventKind, details: &Value) -> bool {
     use AdminSettlementReturnEventKind as Kind;
     match kind {
-        Kind::Opened => exact_object(details, &["match_state", "reason_code", "dispatch_no"])
-            .is_some_and(|value| {
-                code(value, "match_state", &ADMIN_SETTLEMENT_RETURN_MATCH_STATES)
-                    && code(value, "reason_code", &ADMIN_SETTLEMENT_RETURN_REASONS)
-                    && nullable_positive_integer(value, "dispatch_no")
-            }),
+        Kind::Opened => {
+            // 000114 补建案件时追加的首条事件。
+            exact_object(details, &["backfilled"])
+                .is_some_and(|value| value.get("backfilled") == Some(&Value::Bool(true)))
+                || exact_object(details, &["match_state", "reason_code", "dispatch_no"])
+                    .is_some_and(|value| {
+                        code(value, "match_state", &ADMIN_SETTLEMENT_RETURN_MATCH_STATES)
+                            && code(value, "reason_code", &ADMIN_SETTLEMENT_RETURN_REASONS)
+                            && nullable_positive_integer(value, "dispatch_no")
+                    })
+        }
         Kind::Acknowledged | Kind::RecheckRequested | Kind::Held => {
             exact_object(details, &[]).is_some()
         }
@@ -37,17 +42,26 @@ pub(super) fn valid_event_details(kind: AdminSettlementReturnEventKind, details:
         }
         Kind::ResendAuthorized => exact_object(details, &["dispatch_no"])
             .is_some_and(|value| positive_integer(value, "dispatch_no")),
-        Kind::RecheckRebound => exact_object(
-            details,
-            &["match_state", "reason_code", "delivery_id", "dispatch_no", "verified_version"],
-        )
-        .is_some_and(|value| {
-            code(value, "match_state", &ADMIN_SETTLEMENT_RETURN_MATCH_STATES)
-                && code(value, "reason_code", &ADMIN_SETTLEMENT_RETURN_REASONS)
-                && uuid_field(value, "delivery_id")
-                && positive_integer(value, "dispatch_no")
-                && positive_integer(value, "verified_version")
-        }),
+        Kind::RecheckRebound => {
+            // 000123 修复历史退件绑定时记录的来源。
+            exact_object(details, &["migration", "backfill_orphan_ordering_repaired"]).is_some_and(
+                |value| {
+                    value.get("migration").and_then(Value::as_i64) == Some(123)
+                        && value.get("backfill_orphan_ordering_repaired")
+                            == Some(&Value::Bool(true))
+                },
+            ) || exact_object(
+                details,
+                &["match_state", "reason_code", "delivery_id", "dispatch_no", "verified_version"],
+            )
+            .is_some_and(|value| {
+                code(value, "match_state", &ADMIN_SETTLEMENT_RETURN_MATCH_STATES)
+                    && code(value, "reason_code", &ADMIN_SETTLEMENT_RETURN_REASONS)
+                    && uuid_field(value, "delivery_id")
+                    && positive_integer(value, "dispatch_no")
+                    && positive_integer(value, "verified_version")
+            })
+        }
         Kind::RecheckUnchanged => {
             exact_object(details, &["reason_code"])
                 .is_some_and(|value| string(value, "reason_code") == Some("mail_not_found"))

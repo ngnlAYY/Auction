@@ -10,7 +10,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use auction_application::core::RequestHash;
+use auction_application::core::{ApplicationError, RepositoryError, RequestHash};
 use auction_application::mail::{
     MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation, MailDeliveryOrigin,
     MailNotificationTemplate, season_reminder_mail_id,
@@ -146,4 +146,49 @@ async fn postgres_submission_receipt_does_not_block_the_asset_conflict_gate() {
 
     store.postgres_pool().close().await;
     admin.postgres_pool().close().await;
+}
+
+/// 旧版投递行的摘要未携带正文，但载荷已冻结正文。重放时只接受原封回执。
+#[tokio::test]
+async fn postgres_submission_receipt_replays_legacy_digest_with_exact_body() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let mut command = submission_receipt();
+    let prefix = format!(
+        concat!(
+            r#"{{"command_kind":"mail_delivery","aggregate_id":"{}","#,
+            r#""request":{{"operation":"send","world_id":"main","external_mail_id":"4243","#,
+            r#""recipient":"FixtureSeller","template":"auction_submission_receipt","#,
+            r#""result_code":"accepted","user_key_user_id":null,"attachment_ids":[]"#,
+        ),
+        command.command_id,
+    );
+    let digest = |body: Option<&str>| {
+        let mut request = prefix.clone();
+        if let Some(body) = body {
+            request.push_str(",\"notification_body\":");
+            request.push_str(&serde_json::to_string(body).expect("正文 JSON"));
+        }
+        request.push_str("}}");
+        RequestHash::from_canonical_bytes(request.as_bytes())
+    };
+    let legacy_digest = digest(None);
+    command.request_hash = legacy_digest;
+    let stored = store.enqueue(command.clone()).await.expect("旧版摘要与冻结载荷入队");
+
+    command.request_hash = digest(command.notification_body.as_deref());
+    assert_ne!(command.request_hash, legacy_digest);
+    let current = store.enqueue(command.clone()).await.expect("带正文的新摘要重放旧版回执");
+    assert_eq!(current.delivery_id, stored.delivery_id);
+
+    command.notification_body = Some("Changed submission receipt.".to_owned());
+    command.request_hash = digest(command.notification_body.as_deref());
+    let error = store.enqueue(command).await.expect_err("同一命令的回执正文不能改变");
+    assert!(matches!(
+        error,
+        ApplicationError::Repository(RepositoryError::Failed(message))
+            if message == "MoogleMail delivery 命令摘要冲突"
+    ));
+
+    store.postgres_pool().close().await;
 }

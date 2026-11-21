@@ -388,22 +388,13 @@ web_count_files() (
 	printf '%s\n' "$count"
 )
 
-# 先落盘 find 的字节数清单并检查退出码，再求和；空清单只能由成功的 find 产生。
+# 汇总字节数，只有枚举和求和均成功时才发布结果。
 web_find_sizes_sum() (
-	local root=$1 file total
+	set -o pipefail
+	local root=$1 total
 	shift
-	file=$(mktemp) || {
-		printf '无法创建 Web payload 体积清单：%s\n' "$root" >&2
-		return 1
-	}
-	trap 'rm -f -- "$file"' EXIT
-	# 这里需要的是字节数行而不是文件名清单，不能复用追加 -print0 的 web_write_find。
-	find "$root" "$@" -printf '%s\n' >"$file" || {
+	total=$(find "$root" "$@" -printf '%s\n' | awk '{ total += $1 } END { print total + 0 }') || {
 		printf '无法测量 Web payload 文件大小：%s\n' "$root" >&2
-		return 1
-	}
-	total=$(awk '{ total += $1 } END { print total + 0 }' "$file") || {
-		printf '无法汇总 Web payload 文件大小：%s\n' "$root" >&2
 		return 1
 	}
 	printf '%s\n' "$total"
@@ -439,46 +430,38 @@ web_find_contains() (
 	return 1
 )
 
-# Web 摘要先写入临时清单，再逐步检查 find、sort 与哈希命令的退出状态。
+# Web 摘要在枚举、排序和哈希均成功后才输出，保留 NUL 分隔的文件名。
 web_payload_checksums() (
+	set -o pipefail
 	cd "$1" || {
 		printf '无法进入 Web payload 目录：%s\n' "$1" >&2
 		return 1
 	}
-	local forbidden files sorted forbidden_path
-	forbidden=$(mktemp) || {
-		printf '无法创建 Web payload 禁止文件清单\n' >&2
+	local forbidden_path checksums
+	forbidden_path=$(find . -type f \( -name '*.map' -o -path '*/.*' \) -print -quit) || {
+		printf '无法枚举 Web payload 文件：%s\n' "$1" >&2
 		return 1
 	}
-	files=$(mktemp) || {
-		rm -f -- "$forbidden"
-		printf '无法创建 Web payload 文件清单\n' >&2
-		return 1
-	}
-	sorted=$(mktemp) || {
-		rm -f -- "$forbidden" "$files"
-		printf '无法创建 Web payload 排序清单\n' >&2
-		return 1
-	}
-	trap 'rm -f -- "$forbidden" "$files" "$sorted"' EXIT
-	web_write_find "$forbidden" . -type f \( -name '*.map' -o -path '*/.*' \) -print0 || return 1
-	if [[ -s "$forbidden" ]]; then
-		IFS= read -r -d '' forbidden_path <"$forbidden" || {
-			printf '无法读取 Web payload 禁止文件清单\n' >&2
-			return 1
-		}
+	if [[ -n "$forbidden_path" ]]; then
 		printf 'Web payload 含禁止发布的文件：%q\n' "$forbidden_path" >&2
 		return 1
 	fi
-	web_write_find "$files" . -type f ! -name auction-web-manifest.v1 -print0 || return 1
-	LC_ALL=C sort -z "$files" >"$sorted" || {
-		printf '无法排序 Web payload 文件摘要清单：%s\n' "$1" >&2
-		return 1
-	}
-	xargs -0 -r sha256sum <"$sorted" || {
-		printf '无法生成 Web payload 文件摘要：%s\n' "$1" >&2
-		return 1
-	}
+	checksums=$(
+		find . -type f ! -name auction-web-manifest.v1 -print0 |
+			LC_ALL=C sort -z | xargs -0 -r sha256sum
+		local -a stages=("${PIPESTATUS[@]}")
+		if ((stages[0] != 0)); then
+			printf '无法枚举 Web payload 文件：%s\n' "$1" >&2
+			return 1
+		fi
+		if ((stages[1] != 0 || stages[2] != 0)); then
+			printf '无法排序或生成 Web payload 文件摘要：%s\n' "$1" >&2
+			return 1
+		fi
+	) || return 1
+	if [[ -n "$checksums" ]]; then
+		printf '%s\n' "$checksums"
+	fi
 )
 
 # 入口文档只接受构建实际产出的四种资源标签；任何其他标签或换行写法都失败关闭。

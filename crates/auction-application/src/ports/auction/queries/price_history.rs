@@ -248,7 +248,7 @@ impl PublicPriceHistoryPage {
             let (Some(total), Some(stats)) = (self.total, self.stats.as_ref()) else {
                 return Err("公开价格历史编号页缺少统计");
             };
-            let expected_count = self.limit.min(total.saturating_sub(self.offset));
+            let expected_count = total.saturating_sub(self.offset).clamp(0, self.limit);
             if total < 0
                 || stats.validate().is_err()
                 || stats.count != total
@@ -438,6 +438,21 @@ mod tests {
             median_exact: Some("1000".to_owned()),
         });
         assert!(inconsistent.validate(&request).is_err());
+    }
+
+    #[test]
+    fn numbered_page_accepts_empty_rows_past_the_last_page() {
+        let request = request(None, PublicPriceHistorySort::ClosedDesc, 2, 4);
+        let page = PublicPriceHistoryPage {
+            entries: Vec::new(),
+            total: Some(1),
+            stats: Some(single_stats()),
+            limit: request.limit,
+            offset: request.offset,
+            next_cursor: None,
+            has_more: false,
+        };
+        assert_eq!(page.validate(&request), Ok(()));
     }
 
     #[test]

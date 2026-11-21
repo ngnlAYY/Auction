@@ -280,7 +280,8 @@ async fn load_postgres_proxy_bids(
     if authorization_ids.is_empty() {
         return Ok(bids);
     }
-    // 代理历史按各授权创建转换的 lot state_version 截断，避免时间戳相同或精度折叠时错配竞价。
+    // 创建命令的第 1 条竞价事实记录 lot 版本，落败时这条事实也可能属于另一位出价人。
+    // 旧命令缺少对应事实时，各边界沿用创建时间，保留下界包含、上界排除的历史口径。
     let mut rows = sqlx::query(
         "SELECT
             p.authorization_id,
@@ -296,22 +297,18 @@ async fn load_postgres_proxy_bids(
             COALESCE(l.leader_user_id = b.bidder_user_id AND l.current_price = b.amount, false)::boolean AS leading
          FROM public.bid_proxy_authorizations AS p
          JOIN public.lots AS l ON l.id = p.lot_id
-         CROSS JOIN LATERAL (
-            SELECT min(created_transition.resulting_state_version) AS state_version
-            FROM public.bid_proxy_authorization_transitions AS created_transition
-            WHERE created_transition.authorization_id = p.authorization_id
-              AND created_transition.transition_kind = 'created'
-         ) AS authorization_created
-         CROSS JOIN LATERAL (
-            SELECT min(created_transition.resulting_state_version) AS state_version
-            FROM public.bid_proxy_authorizations AS next_authorization
-            JOIN public.bid_proxy_authorization_transitions AS created_transition
-              ON created_transition.authorization_id = next_authorization.authorization_id
-             AND created_transition.transition_kind = 'created'
-            WHERE next_authorization.lot_id = p.lot_id
-              AND next_authorization.user_id = p.user_id
-              AND next_authorization.usage_number = p.usage_number + 1
-         ) AS next_authorization
+         LEFT JOIN public.bids AS creation_bid
+           ON creation_bid.command_id = p.creation_command_id
+          AND creation_bid.fact_index = 1
+          AND creation_bid.lot_id = p.lot_id
+         LEFT JOIN public.bid_proxy_authorizations AS next_authorization
+           ON next_authorization.lot_id = p.lot_id
+          AND next_authorization.user_id = p.user_id
+          AND next_authorization.usage_number = p.usage_number + 1
+         LEFT JOIN public.bids AS next_creation_bid
+           ON next_creation_bid.command_id = next_authorization.creation_command_id
+          AND next_creation_bid.fact_index = 1
+          AND next_creation_bid.lot_id = p.lot_id
          CROSS JOIN LATERAL (
             SELECT b.id, b.lot_id, b.bidder_user_id, b.amount, b.accepted_state_version,
                    b.fact_index, b.mechanism, b.created_at
@@ -319,8 +316,11 @@ async fn load_postgres_proxy_bids(
             WHERE b.lot_id = p.lot_id
               AND b.bidder_user_id = p.user_id
               AND b.mechanism = 'proxy'
-              AND b.accepted_state_version >= authorization_created.state_version
-              AND (next_authorization.state_version IS NULL OR b.accepted_state_version < next_authorization.state_version)
+              AND COALESCE(b.accepted_state_version >= creation_bid.accepted_state_version,
+                           b.created_at >= p.created_at)
+              AND (next_authorization.authorization_id IS NULL
+                   OR COALESCE(b.accepted_state_version < next_creation_bid.accepted_state_version,
+                               b.created_at < next_authorization.created_at))
             ORDER BY b.accepted_state_version DESC, b.fact_index DESC, b.id DESC
             LIMIT 1
          ) AS b

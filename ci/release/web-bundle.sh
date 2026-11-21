@@ -144,18 +144,20 @@ verify_solid_entry_opt_out() {
 
 # 先把产物写到同目录的临时位置，校验与回执都完成后再换成稳定目录；失败时保留旧 payload。
 install_generated_directory() {
-	local next=$1 current=$2 backup
+	local next=$1 current=$2 backup=''
 	# 调用方在复用判定前已持有 surface 锁；这里不重复获取同一把锁，以免本进程自锁。
-	backup=$(mktemp -d "$(dirname "$current")/.previous.XXXXXX") || return 1
-	rmdir -- "$backup" || return 1
-	if [[ -e "$current" ]]; then
-		mv -T -- "$current" "$backup" || return 1
+	if [[ -e "$current" || -L "$current" ]]; then
+		backup=$(mktemp -d "$current.previous.XXXXXX") || return 1
+		mv -T -- "$current" "$backup/payload" || return 1
 	fi
 	if ! mv -T -- "$next" "$current"; then
-		if [[ -e "$backup" ]]; then mv -T -- "$backup" "$current" || return 1; fi
+		if [[ -n "$backup" ]]; then
+			mv -T -- "$backup/payload" "$current" || return 1
+			rmdir -- "$backup" || return 1
+		fi
 		return 1
 	fi
-	if ! rm -rf -- "$backup"; then
+	if [[ -n "$backup" ]] && ! rm -rf -- "$backup"; then
 		printf 'Web payload 已发布，但旧目录清理失败：%s\n' "$backup" >&2
 	fi
 }
@@ -167,16 +169,17 @@ recover_generated_directory() {
 	shopt -s nullglob
 	previous=("$current".previous.*)
 	shopt -u nullglob
-	if [[ -e "$current" || -L "$current" ]]; then
+	if [[ ! -e "$current" && ! -L "$current" ]]; then
+		for backup in "${previous[@]}"; do
+			# 中断在保存旧目录之前只会留下空容器。
+			[[ -e "$backup/payload" || -L "$backup/payload" ]] || continue
+			mv -T -- "$backup/payload" "$current" || return 1
+			break
+		done
+	fi
 	if ((${#previous[@]})); then
 		rm -rf -- "${previous[@]}"
 	fi
-	return 0
-	fi
-	((${#previous[@]})) || return 0
-	backup=${previous[0]}
-	mv -T -- "$backup" "$current" || return 1
-	for backup in "${previous[@]:1}"; do rm -rf -- "$backup"; done
 }
 
 # 构建期生成高等级 brotli 副本；后端按 Accept-Encoding 协商，Caddy 的即时压缩只作兜底。

@@ -79,7 +79,7 @@ async fn postgres_maintenance_evidence_reports_missing_migration_history_on_empt
 
 #[tokio::test]
 async fn postgres_recovery_preflight_counts_database_local_foreign_objects() {
-    let database = support::TestDatabase::create_empty().await.expect("新建空库");
+    let database = support::TestDatabase::create_empty_isolated().await.expect("新建隔离空库");
     let store = database.maintenance_store().await.expect("以维护账号连接");
     let name = database_name(&store).await;
     store.postgres_pool().close().await;

@@ -781,6 +781,36 @@ mod tests {
         assert!(map_detail(details, CASE).is_none(), "事件细节必须是对象");
     }
 
+    #[test]
+    fn migrated_return_detail_preserves_event_provenance() {
+        let opened = json!({"backfilled": true});
+        let rebound = json!({"migration": 123, "backfill_orphan_ordering_repaired": true});
+        let mut migrated = detail();
+        migrated.events[0].details = opened.clone();
+        migrated.events[1].details = rebound.clone();
+
+        let mapped = map_detail(migrated.clone(), CASE).expect("迁移案件详情");
+        assert_eq!(mapped.events[0].details, opened);
+        assert_eq!(mapped.events[1].details, rebound);
+
+        let mut mixed = rebound;
+        mixed["dispatch_no"] = json!(1);
+        for (index, details) in [
+            (0, json!({"backfilled": false})),
+            (0, json!({"backfilled": true, "dispatch_no": 1})),
+            (1, json!({"migration": 124, "backfill_orphan_ordering_repaired": true})),
+            (1, json!({"migration": "123", "backfill_orphan_ordering_repaired": true})),
+            (1, json!({"migration": 123, "backfill_orphan_ordering_repaired": false})),
+            (1, mixed),
+        ] {
+            let mut malformed = migrated.clone();
+            malformed.events[index].details = details;
+            assert!(map_detail(malformed, CASE).is_none());
+        }
+        migrated.events[1].event_kind = "recheck_unchanged".to_owned();
+        assert!(map_detail(migrated, CASE).is_none());
+    }
+
     /// 核验能力不可用只随待重新核验的案件输出；其他状态带这个标记是投影不一致，失败关闭。
     #[test]
     fn recheck_unavailable_only_maps_for_recheck_pending() {

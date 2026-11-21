@@ -536,6 +536,20 @@ mod tests {
         assert!(!valid_page(&page(vec![closed], 1), &open, 1, 20), "只看未结案时不能有已结案");
     }
 
+    #[test]
+    fn migrated_return_detail_decodes_event_provenance() {
+        let opened = json!({"backfilled": true});
+        let rebound = json!({"migration": 123, "backfill_orphan_ordering_repaired": true});
+        let detail = detail_with(|value| {
+            value["events"][0]["details"] = opened.clone();
+            value["events"][1]["details"] = rebound.clone();
+        });
+
+        assert!(valid_detail(&detail, CASE));
+        assert_eq!(detail.events[0].details, opened);
+        assert_eq!(detail.events[1].details, rebound);
+    }
+
     /// 详情：动作闭集恰好覆盖一次；事件版本递增；首寄没有授权案件、补寄必须有。
     #[test]
     fn detail_requires_partition_order_and_dispatch_shape() {
