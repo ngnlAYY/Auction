@@ -544,6 +544,57 @@ async fn malformed_json_is_rejected_before_field_classification() {
 }
 
 #[tokio::test]
+async fn invalid_unicode_escapes_are_syntax_errors_for_every_mutation() {
+    let backend = Arc::new(Backend::default());
+    let mut incorrect_codes = Vec::new();
+    for enabled in [false, true] {
+        let app = router(setup(enabled, &backend));
+        for (command, key_body, value_body) in [
+            (
+                Command::Register,
+                br#"{"equipment_url":null,"\uD800":0}"#.as_slice(),
+                br#"{"equipment_url":"\uD800"}"#.as_slice(),
+            ),
+            (
+                Command::Reprice,
+                br#"{"price":null,"\uD800":0}"#.as_slice(),
+                br#"{"price":"\uDC00"}"#.as_slice(),
+            ),
+            (
+                Command::Withdraw,
+                br#"{"command_id":null,"\uDC00":0}"#.as_slice(),
+                br#"{"command_id":"\uDC00"}"#.as_slice(),
+            ),
+        ] {
+            for (position, raw) in [("键", key_body), ("值", value_body)] {
+                let mut req = command.request();
+                *req.body_mut() = Body::from(raw);
+                let reply = send(&app, req).await;
+                assert_eq!(reply.status, 400, "{command:?} {position} enabled={enabled}");
+                assert!(reply.body["data"].is_null());
+                if reply.body["code"] != "invalid_listing_request" {
+                    incorrect_codes.push((command, position, enabled, reply.body["code"].clone()));
+                }
+                assert!(backend.take_calls().is_empty());
+            }
+        }
+    }
+    assert!(incorrect_codes.is_empty(), "Unicode 转义分类不符：{incorrect_codes:?}");
+}
+
+#[tokio::test]
+async fn valid_unicode_escapes_preserve_overflowing_price_classification() {
+    let backend = Arc::new(Backend::default());
+    let app = router(setup(true, &backend));
+    let mut req = Command::Reprice.request();
+    *req.body_mut() = Body::from(
+        br#"{"price":1e400,"\uD83D\uDE00":"\\uD800\"","\u0061":"\uD83D\uDE00"}"#.as_slice(),
+    );
+    send(&app, req).await.assert(400, "invalid_price");
+    assert!(backend.take_calls().is_empty());
+}
+
+#[tokio::test]
 async fn valid_price_and_fee_endpoints_reach_the_use_cases_unchanged() {
     for (price, fee_bps) in [(1, 0_u16), (1_000_000_000, 9999)] {
         let backend = Arc::new(Backend::default());

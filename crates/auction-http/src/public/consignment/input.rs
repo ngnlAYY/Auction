@@ -185,15 +185,30 @@ fn decode_write_json<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, Consignment
         return Ok(input);
     }
     let field_error = field_error.get();
-    // DTO 会脱敏并包装字段值的解析错误。用 IgnoredAny 核对完整语法，保留溢出数字的
+    // 不变量 6：DTO 会脱敏并包装字段值的解析错误。先用 IgnoredAny 核对结构，
+    // 再解码所有键和值中的字符串以拒绝孤立代理项。数字只检查语法，保留溢出数字的
     // 字段分类。严格 DTO 始终解码原始对象，继续拒绝重复字段。
     if field_error != invalid
         && let Ok(json) = std::str::from_utf8(bytes)
         && serde_json::from_str::<IgnoredAny>(json).is_ok()
+        && valid_json_strings(bytes)
     {
         return Err(field_error);
     }
     Err(invalid)
+}
+
+fn valid_json_strings(mut bytes: &[u8]) -> bool {
+    while let Some(start) = bytes.iter().position(|&byte| byte == b'"') {
+        let mut string =
+            serde_json::Deserializer::from_slice(&bytes[start..]).into_iter::<String>();
+        if !matches!(string.next(), Some(Ok(_))) {
+            return false;
+        }
+        // 跳过已解码的整个词元，避免把字符串里的转义引号当成下一段的起点。
+        bytes = &bytes[start + string.byte_offset()..];
+    }
+    true
 }
 
 struct WriteObject<'a, T>(&'a Cell<ConsignmentError>, PhantomData<T>);
