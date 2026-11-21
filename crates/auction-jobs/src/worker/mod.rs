@@ -4,6 +4,7 @@
 pub(crate) mod diagnostics;
 
 mod auction;
+pub mod consignment;
 mod forum;
 mod lot_watch_pm;
 mod mail;
