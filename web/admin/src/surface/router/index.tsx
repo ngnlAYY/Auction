@@ -14,6 +14,7 @@ import { createContext, createEffect, For, untrack, useContext } from "solid-js"
 
 import { page as dashboardPage } from "../dashboard";
 import { page as setupPage } from "../setup";
+import { consignmentListingPage, consignmentPage } from "./route";
 
 /** 冷启动地址的路径、查询与片段；查询和片段只保存在当前页面内存。 */
 export interface AdminLocationSuffix {
@@ -238,6 +239,8 @@ export const ADMIN_PAGES: Readonly<Record<string, RoutePage>> = {
     import("../lots/page").then(({ page }) => pageForParam("auction_id", page)),
   ),
   AuctionOverview: pageComponent(AuctionOverview),
+  Consignment: consignmentPage,
+  ConsignmentListing: consignmentListingPage,
   Mails: lazyPage(() => import("../mail/page").then(({ page }) => page)),
   MailOverview: pageComponent(MailOverview),
   Cookies: lazyPage(() => import("../credentials/page").then(({ page }) => page)),
