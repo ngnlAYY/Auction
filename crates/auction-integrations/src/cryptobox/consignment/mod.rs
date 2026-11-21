@@ -52,6 +52,7 @@ impl RegistrationReplayCrypto for EquipmentKeyOpener {
         self.open_replay_key(replay_key_id, wrapped).map(drop)
     }
 
+    /// 这是登记重放比较的协议定义处，改动即破坏已有账本的重放。
     fn registration_mac(
         &self,
         replay_key_id: Uuid,
@@ -121,9 +122,13 @@ impl LogicalReplayKey {
     }
 
     fn hmac_key(&self) -> hmac::Key {
+        // 逻辑钥和开封缓冲由本模块清零；ring 不清零内部填充缓冲及签名状态。
+        // 进程本就常驻可开封该逻辑钥的装备域数据钥，这份短暂副本不增加运行中进程的访问权限。
         hmac::Key::new(hmac::HMAC_SHA256, &self.0)
     }
 
+    /// V1 按世界、装备编号、key、模式、标价、预期费率编码；改动即破坏已有账本的登记重放。
+    /// 文本按 UTF-8 字节加大端 `u32` 长度前缀，整数按各自值类型的大端定长编码。
     fn registration_mac(
         &self,
         input: &RegistrationInput<'_>,

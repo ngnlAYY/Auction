@@ -14,7 +14,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use ring::{aead, hmac};
 use uuid::Uuid;
 
-use super::{LogicalReplayKey, open_replay_key, replay_aad, seal_replay_key};
+use super::{LogicalReplayKey, open_replay_key, replay_aad, seal_replay_key, update_text};
 use crate::cryptobox::known_vectors::EQUIPMENT_KEY;
 use crate::cryptobox::{DataKey, EquipmentKeyOpener, EquipmentKeySealer};
 use crate::keyring::Keyring;
@@ -28,6 +28,30 @@ const TEST_LOGICAL_KEY: [u8; 32] = [
 
 fn ring(domain: DataKeyDomain, key: Arc<DataKey>) -> Arc<Keyring> {
     Arc::new(Keyring::single(domain, key))
+}
+
+#[test]
+fn registration_crypto_debug_omits_data_key_ids_and_fingerprints() {
+    let current = EQUIPMENT_KEY.data_key();
+    let previous = Arc::new(
+        DataKey::from_base64("fake-debug-old", "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=")
+            .expect("假旧数据钥"),
+    );
+    let sealer = EquipmentKeySealer::new(Arc::clone(&current));
+    let keyring =
+        Keyring::new(DataKeyDomain::Equipment, Arc::clone(&current), vec![Arc::clone(&previous)])
+            .expect("测试装备密钥环");
+    let opener = EquipmentKeyOpener::new(Arc::new(keyring));
+    for (kind, output) in [
+        ("EquipmentKeySealer", format!("{sealer:?}")),
+        ("EquipmentKeyOpener", format!("{opener:?}")),
+    ] {
+        assert!(output.starts_with(kind), "应保留类型名");
+        for key in [&current, &previous] {
+            let exposed = (output.contains(key.id()), output.contains(key.fingerprint()));
+            assert_eq!(exposed, (false, false), "{kind} 输出了数据钥 ID 或指纹");
+        }
+    }
 }
 
 fn registration_secret(
@@ -250,6 +274,21 @@ fn registration_mac_matches_rfc4231_and_the_canonical_input_vector() {
     let mut cleared = EquipmentKey::new("abcdef0123").expect("假凭证");
     cleared.clear();
     assert!(logical.registration_mac(&RegistrationInput { key: &cleared, ..value }).is_err());
+}
+
+#[test]
+fn registration_mac_distinguishes_adjacent_text_boundaries() {
+    // 合法的世界、装备 key 与模式限制了输入形状；在文本编码入口单独验证分界。
+    let key = LogicalReplayKey(TEST_LOGICAL_KEY).hmac_key();
+    let sign = |first: &[u8], second: &[u8]| {
+        let mut mac = hmac::Context::with_key(&key);
+        update_text(&mut mac, first).expect("编码首段");
+        update_text(&mut mac, second).expect("编码次段");
+        mac.sign()
+    };
+    let left = sign(b"1", b"23");
+    let right = sign(b"12", b"3");
+    assert!(left.as_ref() != right.as_ref(), "相邻文本的长度前缀必须影响 MAC");
 }
 
 #[test]

@@ -183,11 +183,7 @@ impl EquipmentKeySealer {
 
 impl fmt::Debug for EquipmentKeySealer {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("EquipmentKeySealer")
-            .field("key_id", &self.data_key.id)
-            .field("key_fingerprint", &self.data_key.fingerprint)
-            .finish()
+        formatter.debug_struct("EquipmentKeySealer").finish_non_exhaustive()
     }
 }
 

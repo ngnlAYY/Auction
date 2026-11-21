@@ -1,5 +1,10 @@
 //! 真 PG18 验证装备域跨表轮换、并发围栏与已受理登记的重放。
 
+use std::fs::{self, DirBuilder, OpenOptions};
+use std::io::Write;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,8 +18,8 @@ use auction_integrations::{DataKey, EquipmentKeyOpener, EquipmentKeySealer, Keyr
 use auction_storage::{
     RotatedKeyEnvelope, StoredKeyEnvelope, replace_key_envelope, scan_key_envelopes, stored_key_ids,
 };
-use serde_json::json;
-use sqlx::{PgPool, Row};
+use serde_json::{Value, json};
+use sqlx::{ConnectOptions, PgPool, Row};
 use uuid::Uuid;
 
 use crate::support::TestDatabase;
@@ -22,6 +27,8 @@ use crate::support::fixtures;
 
 const OLD: &str = "fake-rotation-old";
 const CURRENT: &str = "fake-rotation-current";
+const OLD_MATERIAL: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
+const CURRENT_MATERIAL: &str = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
 const SHARED: Uuid = Uuid::from_u128(41);
 const SECOND: Uuid = Uuid::from_u128(42);
 const REGISTRATION_AAD: Uuid = Uuid::from_u128(81);
@@ -29,19 +36,11 @@ const SELLER: Uuid = Uuid::from_u128(91);
 const COMMAND: Uuid = Uuid::from_u128(92);
 
 fn ring(current: &str, include_old: bool) -> Arc<Keyring> {
-    let old = || {
-        Arc::new(
-            DataKey::from_base64(OLD, "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=")
-                .expect("假钥合法"),
-        )
-    };
+    let old = || Arc::new(DataKey::from_base64(OLD, OLD_MATERIAL).expect("假钥合法"));
     if current == OLD {
         return Arc::new(Keyring::single(DataKeyDomain::Equipment, old()));
     }
-    let current = Arc::new(
-        DataKey::from_base64(CURRENT, "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=")
-            .expect("假钥合法"),
-    );
+    let current = Arc::new(DataKey::from_base64(CURRENT, CURRENT_MATERIAL).expect("假钥合法"));
     let previous = include_old.then(old).into_iter().collect();
     Arc::new(Keyring::new(DataKeyDomain::Equipment, current, previous).expect("装备密钥环"))
 }
@@ -510,6 +509,54 @@ async fn equipment_rotation_two_processes_only_one_cas_wins() {
 }
 
 #[tokio::test]
+async fn equipment_rotation_preserves_both_replay_key_roles_and_macs() {
+    let database = TestDatabase::create().await.expect("克隆库");
+    let store = database.store().await.expect("连接临时库");
+    let pool = store.postgres_pool();
+    let old = EquipmentKeyOpener::new(ring(OLD, false));
+    let rotating = EquipmentKeyOpener::new(ring(CURRENT, true));
+    let current_only = EquipmentKeyOpener::new(ring(CURRENT, false));
+    let identity = ListingEquipmentIdentity::new("main", "73").expect("规范装备身份");
+    let key = fake_key();
+    let input = input(&identity, &key);
+    let mut original_macs = Vec::new();
+    for (replay_key_id, write_current) in [(SHARED, true), (SECOND, false)] {
+        let wrapped = old.generate_wrapped(replay_key_id).expect("旧数据钥包装");
+        let mac = old.registration_mac(replay_key_id, &wrapped, &input).expect("轮换前 MAC");
+        seed_replay(pool, replay_key_id, &wrapped, write_current).await;
+        original_macs.push((replay_key_id, mac));
+    }
+
+    let page = scan(pool).await;
+    assert_eq!(page.len(), 2);
+    for row in page {
+        let replay_key_id = row.replay_key_id().expect("比较钥来源");
+        let wrapped = rotating.rewrap(replay_key_id, &wrapped_row(&row)).expect("重包逻辑钥");
+        let result = replace_key_envelope(pool, &row, &rotated_replay(&wrapped)).await;
+        assert!(result.expect("写回包装").was_replaced());
+    }
+
+    let roles: Vec<(Uuid, bool)> =
+        sqlx::query_as("SELECT id, write_current FROM public.consignment_replay_keys ORDER BY id")
+            .fetch_all(pool)
+            .await
+            .expect("读取轮换后所有比较钥角色");
+    assert_eq!(roles, [(SHARED, true), (SECOND, false)]);
+    let page = StoredKeyEnvelope::scan_equipment_for_verification(pool, None, 10)
+        .await
+        .expect("读取实际写回的包装");
+    assert_eq!(page.len(), original_macs.len());
+    for (row, (replay_key_id, original)) in page.iter().zip(original_macs) {
+        assert_eq!(row.replay_key_id(), Some(replay_key_id));
+        let mac = current_only
+            .registration_mac(replay_key_id, &wrapped_row(row), &input)
+            .expect("仅用新数据钥计算轮换后 MAC");
+        assert!(original.matches(&mac), "重包必须保留原 MAC");
+    }
+    pool.close().await;
+}
+
+#[tokio::test]
 async fn equipment_rotation_rewrap_preserves_the_retired_logical_key_and_command_mac() {
     let database = TestDatabase::create().await.expect("克隆库");
     let store = database.store().await.expect("连接临时库");
@@ -610,5 +657,254 @@ async fn equipment_rotation_rewrap_preserves_the_retired_logical_key_and_command
     // PG18 为 ON DELETE RESTRICT 返回独立的 restrict_violation。
     assert_eq!(code.as_deref(), Some("23001"), "引用完整性错误只记录 SQLSTATE");
     owner.postgres_pool().close().await;
+    pool.close().await;
+}
+
+// 这些用例通过真实子进程覆盖参数、分派、写库、回执及退出码。先执行
+// `cargo test --locked -p auction-cli` 生成相同构型的二进制，再以 `-- --ignored`
+// 并按 `consignment_key_rotation::cli_` 过滤运行。常规 PG 门禁可以独立运行。
+struct CliFixture {
+    directory: PathBuf,
+    binary: PathBuf,
+}
+
+impl CliFixture {
+    fn new(pool: &PgPool) -> Self {
+        let executable = std::env::current_exe().expect("查找 PG 测试程序");
+        let profile = executable
+            .ancestors()
+            .find(|path| path.ends_with("build") || path.ends_with("deps"))
+            .and_then(Path::parent)
+            .expect("构建目录");
+        let binary = profile.join("auction-cli");
+        assert!(binary.is_file(), "请先执行 cargo test --locked -p auction-cli");
+        let directory = profile.join(format!("keys-cli-{}", Uuid::new_v4()));
+        DirBuilder::new().mode(0o700).create(&directory).expect("建立独立配置目录");
+        let fixture = Self { directory, binary };
+        fs::write(
+            fixture.directory.join("worker.toml"),
+            "common_file = \"common.toml\"\nsecrets_file = \"secrets.toml\"\n",
+        )
+        .expect("写入 Worker 测试配置");
+        fs::write(fixture.directory.join("common.toml"), "").expect("写入默认公共配置");
+
+        let db = pool.connect_options();
+        let host = db.get_host().parse::<std::net::IpAddr>().expect("夹具必须使用回环地址");
+        assert!(host.is_loopback(), "只允许 CLI 访问回环的夹具库");
+        let uri = db.to_url_lossy();
+        let password = uri.password().expect("夹具运行账号密码");
+        assert!(password.bytes().all(|byte| byte.is_ascii_hexdigit()), "夹具密码应为随机十六进制");
+        let mut secrets = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(fixture.directory.join("secrets.toml"))
+            .expect("创建私有测试配置");
+        write!(
+            secrets,
+            r#"equipment_data_key_id = "{CURRENT}"
+equipment_data_key = "{CURRENT_MATERIAL}"
+[[equipment_previous_data_keys]]
+id = "{OLD}"
+key = "{OLD_MATERIAL}"
+retired_at = "2000-01-01T00:00:00Z"
+[database]
+host = "{host}"
+port = {}
+username = {:?}
+password = "{password}"
+name = {:?}
+"#,
+            db.get_port(),
+            db.get_username(),
+            db.get_database().expect("夹具库名"),
+        )
+        .expect("写入本次夹具库的配置");
+        fixture
+    }
+
+    fn keys(&self, args: &[&str]) -> Output {
+        Command::new(&self.binary)
+            .arg("--config-dir")
+            .arg(&self.directory)
+            .arg("keys")
+            .args(args)
+            .env_remove("SUDO_USER")
+            .output()
+            .expect("运行生产 CLI")
+    }
+
+    fn reencrypt(&self, apply: bool) -> Value {
+        let receipt = self.directory.join("receipt.json");
+        let mut args = vec![
+            "reencrypt",
+            "--domain",
+            "equipment",
+            "--page-size",
+            "1",
+            "--receipt",
+            receipt.to_str().expect("测试回执路径为文本"),
+        ];
+        if apply {
+            args.extend(["--apply", "--actor", "fixture-operator"]);
+        }
+        let output = self.keys(&args);
+        assert_eq!(output.status.code(), Some(0), "重加密命令应成功");
+        let displayed: Value = serde_json::from_slice(&output.stdout).expect("标准输出回执");
+        let bytes = fs::read(receipt).expect("读取落盘回执");
+        let document: Value = serde_json::from_slice(&bytes).expect("落盘回执为 JSON");
+        assert!(displayed == document, "标准输出和落盘回执应一致");
+        assert_eq!(document["applied"], apply);
+        assert_eq!(document["outcome"], "completed");
+        assert!(document["failure"].is_null());
+        assert_eq!(document["domains"]["equipment"]["complete"], true);
+        document
+    }
+
+    fn retirement_check(&self) -> Output {
+        self.keys(&["status", "--require-current-equipment"])
+    }
+}
+
+impl Drop for CliFixture {
+    fn drop(&mut self) {
+        if let Err(error) = fs::remove_dir_all(&self.directory) {
+            eprintln!("清理密钥轮换测试目录失败：{}", error.kind());
+        }
+    }
+}
+
+// 用表的所有列和所有行比较，包含 CAS 更新的时间戳及不应被改动的逻辑钥角色。
+async fn cli_envelope_tables(pool: &PgPool) -> [(&'static str, Vec<Value>); 3] {
+    let mut tables = [
+        ("equipment_secrets", Vec::new()),
+        ("consignment_registration_secrets", Vec::new()),
+        ("consignment_replay_keys", Vec::new()),
+    ];
+    for ((source, rows), pk) in tables.iter_mut().zip(["equipment_id", "listing_id", "id"]) {
+        let query = format!("SELECT to_jsonb(t) FROM public.{source} t ORDER BY {pk}");
+        *rows = sqlx::query_scalar(sqlx::AssertSqlSafe(query))
+            .fetch_all(pool)
+            .await
+            .expect("读取信封整表");
+    }
+    tables
+}
+
+async fn cli_seed_envelopes(pool: &PgPool) {
+    seed_three_sources(pool).await;
+    let old = EquipmentKeyOpener::new(ring(OLD, false));
+    let wrapped = old.generate_wrapped(SECOND).expect("第二个旧包装");
+    seed_replay(pool, SECOND, &wrapped, false).await;
+    let current = EquipmentKeyOpener::new(ring(CURRENT, false));
+    let current_id = Uuid::from_u128(43);
+    let wrapped = current.generate_wrapped(current_id).expect("预先使用当前数据钥的包装");
+    seed_replay(pool, current_id, &wrapped, false).await;
+}
+
+#[tokio::test]
+#[ignore = "需要预先构建 auction-cli 二进制"]
+async fn cli_dry_run_preserves_whole_tables_and_reports_actual_scan() {
+    let database = TestDatabase::create().await.expect("克隆库");
+    let store = database.store().await.expect("连接临时库");
+    let pool = store.postgres_pool();
+    let cli = CliFixture::new(pool);
+    cli_seed_envelopes(pool).await;
+    let before = cli_envelope_tables(pool).await;
+    let receipt = cli.reencrypt(false);
+    let after = cli_envelope_tables(pool).await;
+    let domain = &receipt["domains"]["equipment"];
+    for ((source, original), (_, persisted)) in before.iter().zip(&after) {
+        assert!(original == persisted, "演练改写了 {source} 整表快照");
+        let scanned = original.iter().filter(|row| row["encryption_key_id"] == OLD).count();
+        assert_eq!(domain["sources"][source]["scanned"], scanned, "{source}");
+        assert_eq!(domain["sources"][source]["rewritten"], 0, "{source}");
+    }
+    assert_eq!(domain["scanned"], 4);
+    assert_eq!(domain["rewritten"], 0);
+    pool.close().await;
+}
+
+#[tokio::test]
+#[ignore = "需要预先构建 auction-cli 二进制"]
+async fn cli_apply_reports_changes_in_each_persisted_source() {
+    let database = TestDatabase::create().await.expect("克隆库");
+    let store = database.store().await.expect("连接临时库");
+    let pool = store.postgres_pool();
+    let cli = CliFixture::new(pool);
+    cli_seed_envelopes(pool).await;
+    let before = cli_envelope_tables(pool).await;
+    let receipt = cli.reencrypt(true);
+    let after = cli_envelope_tables(pool).await;
+    let domain = &receipt["domains"]["equipment"];
+    assert_eq!(domain["sources"].as_object().expect("分来源回执").len(), 3);
+    for ((source, original), (_, persisted)) in before.iter().zip(&after) {
+        assert_eq!(original.len(), persisted.len(), "{source} 行数不变");
+        let mut changed = 0;
+        for (old, new) in original.iter().zip(persisted) {
+            if old["encryption_key_id"] == OLD {
+                assert!(new["encryption_key_id"] == CURRENT, "{source} 必须写回当前数据钥");
+                assert!(old["nonce"] != new["nonce"], "{source} 必须重新封装");
+                changed += 1;
+            } else {
+                assert!(old == new, "{source} 已用当前钥的行不变");
+            }
+        }
+        assert!(changed > 0, "{source} 必须有实际写入");
+        assert_eq!(domain["sources"][source]["scanned"], changed, "{source}");
+        assert_eq!(domain["sources"][source]["rewritten"], changed, "{source}");
+    }
+    assert_eq!(domain["scanned"], 4);
+    assert_eq!(domain["rewritten"], 4);
+    pool.close().await;
+}
+
+#[tokio::test]
+#[ignore = "需要预先构建 auction-cli 二进制"]
+async fn cli_retirement_fails_with_a_chinese_reason_when_old_references_remain() {
+    let database = TestDatabase::create().await.expect("克隆库");
+    let store = database.store().await.expect("连接临时库");
+    let pool = store.postgres_pool();
+    let cli = CliFixture::new(pool);
+    seed_three_sources(pool).await;
+    let output = cli.retirement_check();
+    assert_eq!(output.status.code(), Some(5), "有旧引用必须拒绝退休");
+    let reason = String::from_utf8_lossy(&output.stderr);
+    assert!(reason.contains("装备域仍有 3 个信封引用旧钥，请先完成重加密"), "应说明旧引用原因");
+    assert!(output.stdout.is_empty());
+    pool.close().await;
+}
+
+#[tokio::test]
+#[ignore = "需要预先构建 auction-cli 二进制"]
+async fn cli_retirement_opens_replay_wrappers_and_reports_a_chinese_failure() {
+    let database = TestDatabase::create().await.expect("克隆库");
+    let store = database.store().await.expect("连接临时库");
+    let pool = store.postgres_pool();
+    let cli = CliFixture::new(pool);
+    let opener = EquipmentKeyOpener::new(ring(CURRENT, false));
+    let wrapped = opener.generate_wrapped(SHARED).expect("生成可开封包装");
+    seed_replay(pool, SHARED, &wrapped, true).await;
+    let output = cli.retirement_check();
+    assert_eq!(output.status.code(), Some(0), "当前钥能开封时可完成核对");
+    let result: Value = serde_json::from_slice(&output.stdout).expect("退休核对结果");
+    assert_eq!(result["old_references"], 0);
+    assert_eq!(result["verified"]["consignment_replay_keys"], 1);
+
+    let changed = sqlx::query(
+        "UPDATE public.consignment_replay_keys
+         SET wrapped_key = set_byte(wrapped_key, 0, get_byte(wrapped_key, 0) # 1)
+         WHERE id = $1",
+    )
+    .bind(SHARED)
+    .execute(pool)
+    .await
+    .expect("篡改包装但保留当前钥 ID 和包形状");
+    assert_eq!(changed.rows_affected(), 1);
+    let output = cli.retirement_check();
+    assert_eq!(output.status.code(), Some(5), "打不开比较钥包装时必须拒绝退休");
+    let reason = String::from_utf8_lossy(&output.stderr);
+    assert!(reason.contains("consignment_replay_keys 当前钥开封复核失败"), "应说明比较钥开封失败");
+    assert!(output.stdout.is_empty());
     pool.close().await;
 }
