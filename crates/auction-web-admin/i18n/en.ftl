@@ -2149,3 +2149,77 @@ admin-error-settlement-return-resend-limit = Resend limit reached for this case.
 admin-error-settlement-return-obligation-ineligible = The original obligation can no longer be resent (sale voided, already satisfied or ended, the returned dispatch is not current, the kind belongs to recovery, or legacy cash has no funding allocation); only custody or leaving it in the inbox is possible.
 admin-error-settlement-return-send-unresolved = The original dispatch's send outcome is still unknown (its funding is not recorded as spent). Prove the original send through Sent recovery or a manual Sent confirmation before taking it back, resending or closing it in the inbox.
 admin-error-settlement-return-observation-required = Taking again needs the latest observation in the original Take session to show the full frozen assets still on the mail and claimable. Reload the case and wait for mailbox maintenance.
+
+# 一口价挂单 · 管理
+consignment-admin-title = Manage fixed-price listings
+consignment-seller-id = Seller ID
+consignment-stored-state = Stored status
+consignment-effective-state = Effective status
+consignment-collisions = Related auction lots
+consignment-truncated = Only the 50 most recent records are shown.
+consignment-delist = Remove listing
+consignment-delist-reason = Removal reason
+consignment-delist-confirm = Remove this listing?
+consignment-reason-required = Enter a reason for removing the listing.
+
+# 一口价挂单 · 字段
+consignment-mode = Listing mode
+consignment-direct = Direct sale
+consignment-consigned = Consignment
+consignment-world = World
+consignment-eid = Equipment ID
+consignment-price = Asking price (Credits)
+consignment-seller = Seller
+consignment-expires = Expires at
+
+# 一口价挂单 · 操作与进度
+consignment-attempts = Attempts made
+consignment-next-attempt = Next lookup at
+consignment-paused = External lookups are paused.
+
+# 一口价挂单 · 视图
+consignment-resolving = Looking up equipment
+consignment-lookup-failed = Equipment lookup failed
+consignment-ineligible = Equipment lookup complete. Listing not permitted.
+consignment-displayed = Listed
+consignment-awaiting-deposit = Awaiting equipment delivery
+consignment-expired = Expired
+consignment-closed = Closed
+
+# 一口价挂单 · 资格原因
+consignment-not-tradeable = This equipment cannot be traded.
+consignment-owner-missing = The source did not provide a valid owner.
+consignment-owner-mismatch = The current equipment owner does not match the account used to register it.
+consignment-history-owner-mismatch = The last owner verified by this site does not match the person who registered it. This version does not accept equipment transferred outside the site.
+consignment-history-alias-conflict = This site has conflicting records for the same equipment.
+consignment-history-unproven = This site has insufficient proof of delivery or return.
+consignment-equipment-busy = This equipment is already listed or has outstanding auction obligations.
+
+# 一口价挂单 · 解析原因
+consignment-equipment-not-found = The equipment was not found or the access key is incorrect.
+consignment-source-request-rejected = The equipment source rejected the request.
+consignment-source-http-invalid = The equipment source returned an unsupported response.
+consignment-source-schema-invalid = The equipment data has an invalid format.
+consignment-source-shape-unconfirmed = The equipment source returned a field format that has not yet been verified.
+consignment-source-identity-mismatch = The equipment identity returned by the source does not match the request.
+consignment-source-too-large = The equipment data exceeds the read limit.
+consignment-source-unavailable = The equipment source is temporarily unreachable.
+consignment-source-timeout = The equipment lookup timed out.
+consignment-source-rate-limited = The equipment source is rate limiting requests.
+consignment-lookup-exhausted = No lookup attempts remain.
+consignment-credential-unavailable = The credential for reading this equipment is temporarily unavailable.
+
+# 一口价挂单 · 关闭原因
+consignment-auction-lot-created = The equipment entered an auction. You can register it again once its return is confirmed.
+consignment-seller-ineligible = The seller is currently ineligible to list equipment.
+consignment-service-disabled = The service was disabled and the listing was closed.
+consignment-seller-cancelled = The seller cancelled the listing.
+consignment-admin-delisted = An administrator removed the listing.
+consignment-lookup-deadline = The lookup deadline has passed.
+consignment-display-expired = The listing period has ended.
+consignment-deposit-expired = The deadline for sending the equipment has passed.
+
+# 一口价挂单 · 写拒绝
+consignment-stale-version = The listing changed. Reload before confirming.
+consignment-listing-not-active = This listing no longer accepts changes.
+consignment-command-conflict = This command ID was already used for a different request.

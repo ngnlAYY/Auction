@@ -653,3 +653,103 @@ stale-build-notice = 站点已更新。请刷新此页面以载入新版本；�
 stale-build-refresh = 刷新页面
 
 language-switch-failed = 所选语言加载失败，已保持当前语言。
+
+# 一口价挂单 · 导航与标题
+consignment-nav = 一口价挂单
+consignment-catalog = 装备挂单
+consignment-new = 登记装备
+consignment-mine = 我的挂单
+consignment-detail = 挂单详情
+consignment-empty = 没有符合条件的挂单
+
+# 一口价挂单 · 字段
+consignment-mode = 挂单模式
+consignment-direct = 非寄售
+consignment-consigned = 寄售
+consignment-world = 世界
+consignment-equipment-url = 装备链接
+consignment-eid = 装备编号
+consignment-price = 标价（Credits）
+consignment-seller = 卖家
+consignment-fee = 预计手续费
+consignment-net = 卖家预计到手
+consignment-expires = 有效期至
+consignment-category = 装备分类
+consignment-search = 搜索装备名称
+consignment-source-time = 装备信息采集时间
+consignment-state-filter = 挂单状态
+
+# 一口价挂单 · 告知
+consignment-direct-notice = 装备由卖家持有，请在游戏内联系卖家。平台不收款、不担保。
+consignment-deposit-notice = 等待寄来装备，平台尚未代管。
+consignment-mail-unavailable = 当前环境不接收寄售邮件，请勿寄件。
+consignment-source-disclosure = 后台将把世界、装备编号和读取 key 发给 hvdata.gisadan.dev，以核对装备与持有人。
+
+# 一口价挂单 · 操作与进度
+consignment-submit = 提交登记
+consignment-reprice = 修改标价
+consignment-withdraw = 取消挂单
+consignment-withdraw-confirm = 确认取消这条挂单？
+consignment-register-again = 重新登记
+consignment-attempts = 已尝试次数
+consignment-next-attempt = 下次解析时间
+consignment-paused = 外部读取已暂停
+consignment-pending = 正在核实上次提交的结果
+consignment-reenter-url = 请重新输入原装备链接，以原命令重试。
+
+# 一口价挂单 · 视图
+consignment-resolving = 解析中
+consignment-lookup-failed = 解析失败
+consignment-ineligible = 已解析，不可挂单
+consignment-displayed = 已展示
+consignment-awaiting-deposit = 等待寄来装备
+consignment-expired = 已过期
+consignment-closed = 已关闭
+consignment-disabled = 一口价服务已关闭
+consignment-unavailable = 一口价服务暂不可用
+consignment-not-found = 挂单不存在或已停止展示
+
+# 一口价挂单 · 资格原因
+consignment-not-tradeable = 装备不可交易
+consignment-owner-missing = 来源未提供有效持有人
+consignment-owner-mismatch = 装备当前持有人与登记账号不符
+consignment-history-owner-mismatch = 本站最后已证持有人与登记人不符，第一版不接受平台外转手的装备。
+consignment-history-alias-conflict = 本站同件装备的历史记录互相矛盾
+consignment-history-unproven = 本站尚无足够的交付或返还证明
+consignment-equipment-busy = 装备已有挂单或尚有拍卖责任
+
+# 一口价挂单 · 解析原因
+consignment-equipment-not-found = 未找到装备或读取 key 不正确
+consignment-source-request-rejected = 装备来源拒绝了请求
+consignment-source-http-invalid = 装备来源返回了不支持的响应
+consignment-source-schema-invalid = 装备信息格式无效
+consignment-source-shape-unconfirmed = 装备来源返回了尚未确认的字段格式
+consignment-source-identity-mismatch = 来源返回的装备标识与请求不符
+consignment-source-too-large = 装备信息超出读取上限
+consignment-source-unavailable = 暂时无法连接装备来源
+consignment-source-timeout = 读取装备超时
+consignment-source-rate-limited = 装备来源正在限流
+consignment-lookup-exhausted = 解析尝试次数已用完
+consignment-credential-unavailable = 装备读取凭证暂不可用
+
+# 一口价挂单 · 关闭原因
+consignment-auction-lot-created = 装备已进入拍卖；经确认取回后可重新登记。
+consignment-seller-ineligible = 卖家当前不具备挂单资格
+consignment-service-disabled = 服务停用，登记已关闭
+consignment-seller-cancelled = 卖家已取消挂单
+consignment-admin-delisted = 管理员已下架
+consignment-lookup-deadline = 解析期限已到
+consignment-display-expired = 展示期限已到
+consignment-deposit-expired = 待寄期限已到
+
+# 一口价挂单 · 写拒绝
+consignment-already-open = 这件装备已有你的活动登记
+consignment-fee-changed = 费率已变化，请重新确认
+consignment-stale-version = 挂单已变化，请刷新后确认
+consignment-listing-not-active = 挂单已停止接受操作
+consignment-command-conflict = 此命令编号已用于不同请求
+consignment-registration-rate-limited = 本小时登记次数已达上限
+consignment-listing-limit-reached = 活动挂单数已达上限
+consignment-invalid-price = 请输入有效的整数标价
+consignment-invalid-equipment-url = 请输入含规范正十进制编号的装备链接
+consignment-world-unavailable = 该世界暂不接受新登记

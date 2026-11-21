@@ -653,3 +653,103 @@ stale-build-notice = 新しいバージョンが公開されました。この�
 stale-build-refresh = ページを再読み込み
 
 language-switch-failed = 選択した言語を読み込めませんでした。現在の言語を維持します。
+
+# 一口价挂单 · 导航与标题
+consignment-nav = 固定価格の出品
+consignment-catalog = 装備の出品一覧
+consignment-new = 装備を登録
+consignment-mine = 自分の出品
+consignment-detail = 出品詳細
+consignment-empty = 条件に一致する出品はありません。
+
+# 一口价挂单 · 字段
+consignment-mode = 出品方式
+consignment-direct = 直接取引
+consignment-consigned = 委託販売
+consignment-world = ワールド
+consignment-equipment-url = 装備 URL
+consignment-eid = 装備 ID
+consignment-price = 出品価格（Credits）
+consignment-seller = 出品者
+consignment-fee = 手数料の見込み
+consignment-net = 出品者の受取見込額
+consignment-expires = 有効期限
+consignment-category = 装備カテゴリ
+consignment-search = 装備名で検索
+consignment-source-time = 装備情報の取得日時
+consignment-state-filter = 出品状態
+
+# 一口价挂单 · 告知
+consignment-direct-notice = 装備は出品者が所持しています。ゲーム内で出品者に連絡してください。このサイトでは代金の受け取りや取引の保証は行いません。
+consignment-deposit-notice = 装備の送付待ちです。このサイトではまだ装備を預かっていません。
+consignment-mail-unavailable = この環境では委託販売用のメールを受け付けていません。装備を送らないでください。
+consignment-source-disclosure = サーバーは装備と所持者を確認するため、ワールド、装備 ID、読み取りキーを hvdata.gisadan.dev に送信します。
+
+# 一口价挂单 · 操作与进度
+consignment-submit = 登録を送信
+consignment-reprice = 出品価格を変更
+consignment-withdraw = 出品を取り消す
+consignment-withdraw-confirm = この出品を取り消しますか？
+consignment-register-again = もう一度登録
+consignment-attempts = 試行回数
+consignment-next-attempt = 次回の解析日時
+consignment-paused = 外部データの取得を一時停止中
+consignment-pending = 前回の送信結果を確認中
+consignment-reenter-url = 元の装備 URL を再入力して、同じコマンドを再試行してください。
+
+# 一口价挂单 · 视图
+consignment-resolving = 解析中
+consignment-lookup-failed = 解析失敗
+consignment-ineligible = 解析済み・出品不可
+consignment-displayed = 掲載中
+consignment-awaiting-deposit = 装備の送付待ち
+consignment-expired = 期限切れ
+consignment-closed = 終了
+consignment-disabled = 固定価格の出品サービスは停止しています。
+consignment-unavailable = 固定価格の出品サービスを一時的に利用できません。
+consignment-not-found = 出品が存在しないか、掲載が終了しています。
+
+# 一口价挂单 · 资格原因
+consignment-not-tradeable = この装備は取引できません。
+consignment-owner-missing = 取得元から有効な所持者情報が得られませんでした。
+consignment-owner-mismatch = 装備の現在の所持者が登録アカウントと一致しません。
+consignment-history-owner-mismatch = このサイトで最後に確認された所持者が登録者と一致しません。初版ではサイト外で譲渡された装備は受け付けません。
+consignment-history-alias-conflict = 同じ装備の履歴がサイト内で矛盾しています。
+consignment-history-unproven = このサイトには引き渡しまたは返却を確認できる十分な証拠がありません。
+consignment-equipment-busy = 装備はすでに出品されているか、オークションの履行が残っています。
+
+# 一口价挂单 · 解析原因
+consignment-equipment-not-found = 装備が見つからないか、読み取りキーが正しくありません。
+consignment-source-request-rejected = 装備情報の取得元がリクエストを拒否しました。
+consignment-source-http-invalid = 装備情報の取得元から未対応の応答が返されました。
+consignment-source-schema-invalid = 装備情報の形式が無効です。
+consignment-source-shape-unconfirmed = 装備情報の取得元が未確認の項目形式を返しました。
+consignment-source-identity-mismatch = 取得元が返した装備の識別情報がリクエストと一致しません。
+consignment-source-too-large = 装備情報が読み取り上限を超えています。
+consignment-source-unavailable = 装備情報の取得元に一時的に接続できません。
+consignment-source-timeout = 装備情報の取得がタイムアウトしました。
+consignment-source-rate-limited = 装備情報の取得元がリクエスト頻度を制限しています。
+consignment-lookup-exhausted = 解析の試行回数が上限に達しました。
+consignment-credential-unavailable = 装備の読み取りに必要な認証情報を一時的に利用できません。
+
+# 一口价挂单 · 关闭原因
+consignment-auction-lot-created = 装備はオークションに出品されました。返却を確認できた後で再登録できます。
+consignment-seller-ineligible = 出品者は現在、装備を出品できません。
+consignment-service-disabled = サービス停止により登録が終了しました。
+consignment-seller-cancelled = 出品者が出品を取り消しました。
+consignment-admin-delisted = 管理者が出品を取り下げました。
+consignment-lookup-deadline = 解析期限を過ぎました。
+consignment-display-expired = 掲載期間が終了しました。
+consignment-deposit-expired = 装備の送付期限を過ぎました。
+
+# 一口价挂单 · 写拒绝
+consignment-already-open = この装備にはすでに有効な登録があります。
+consignment-fee-changed = 手数料率が変更されました。確認し直してください。
+consignment-stale-version = 出品内容が変更されました。再読み込みして確認してください。
+consignment-listing-not-active = この出品は操作を受け付けなくなりました。
+consignment-command-conflict = このコマンド ID は別のリクエストに使われています。
+consignment-registration-rate-limited = 1 時間あたりの登録上限に達しました。
+consignment-listing-limit-reached = 有効な出品数が上限に達しました。
+consignment-invalid-price = 有効な整数の出品価格を入力してください。
+consignment-invalid-equipment-url = 装備 ID が先頭に 0 や符号のない正の十進整数である装備 URL を入力してください。
+consignment-world-unavailable = このワールドでは新規登録を一時停止しています。

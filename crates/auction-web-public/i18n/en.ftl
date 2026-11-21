@@ -654,3 +654,103 @@ stale-build-notice = A new version has been deployed. Refresh this page to load 
 stale-build-refresh = Refresh page
 
 language-switch-failed = Failed to load the selected language. The current language is kept.
+
+# 一口价挂单 · 导航与标题
+consignment-nav = Fixed-price listings
+consignment-catalog = Equipment listings
+consignment-new = Register equipment
+consignment-mine = My listings
+consignment-detail = Listing details
+consignment-empty = No listings match the selected filters.
+
+# 一口价挂单 · 字段
+consignment-mode = Listing mode
+consignment-direct = Direct sale
+consignment-consigned = Consignment
+consignment-world = World
+consignment-equipment-url = Equipment URL
+consignment-eid = Equipment ID
+consignment-price = Asking price (Credits)
+consignment-seller = Seller
+consignment-fee = Estimated fee
+consignment-net = Estimated seller proceeds
+consignment-expires = Expires at
+consignment-category = Equipment category
+consignment-search = Search by equipment name
+consignment-source-time = Equipment data collected at
+consignment-state-filter = Listing status
+
+# 一口价挂单 · 告知
+consignment-direct-notice = The seller holds the equipment. Contact the seller in game. This site does not collect payment or guarantee the trade.
+consignment-deposit-notice = Awaiting equipment delivery. The site does not yet hold the equipment.
+consignment-mail-unavailable = This environment does not accept consignment mail. Do not send equipment.
+consignment-source-disclosure = The server will send the world, equipment ID, and access key to hvdata.gisadan.dev to verify the equipment and its owner.
+
+# 一口价挂单 · 操作与进度
+consignment-submit = Submit registration
+consignment-reprice = Change asking price
+consignment-withdraw = Cancel listing
+consignment-withdraw-confirm = Cancel this listing?
+consignment-register-again = Register again
+consignment-attempts = Attempts made
+consignment-next-attempt = Next lookup at
+consignment-paused = External lookups are paused.
+consignment-pending = Checking the result of your last submission…
+consignment-reenter-url = Re-enter the original equipment URL to retry the same command.
+
+# 一口价挂单 · 视图
+consignment-resolving = Looking up equipment
+consignment-lookup-failed = Equipment lookup failed
+consignment-ineligible = Equipment lookup complete. Listing not permitted.
+consignment-displayed = Listed
+consignment-awaiting-deposit = Awaiting equipment delivery
+consignment-expired = Expired
+consignment-closed = Closed
+consignment-disabled = The fixed-price listing service is disabled.
+consignment-unavailable = The fixed-price listing service is temporarily unavailable.
+consignment-not-found = This listing does not exist or is no longer displayed.
+
+# 一口价挂单 · 资格原因
+consignment-not-tradeable = This equipment cannot be traded.
+consignment-owner-missing = The source did not provide a valid owner.
+consignment-owner-mismatch = The current equipment owner does not match the account used to register it.
+consignment-history-owner-mismatch = The last owner verified by this site does not match the person who registered it. This version does not accept equipment transferred outside the site.
+consignment-history-alias-conflict = This site has conflicting records for the same equipment.
+consignment-history-unproven = This site has insufficient proof of delivery or return.
+consignment-equipment-busy = This equipment is already listed or has outstanding auction obligations.
+
+# 一口价挂单 · 解析原因
+consignment-equipment-not-found = The equipment was not found or the access key is incorrect.
+consignment-source-request-rejected = The equipment source rejected the request.
+consignment-source-http-invalid = The equipment source returned an unsupported response.
+consignment-source-schema-invalid = The equipment data has an invalid format.
+consignment-source-shape-unconfirmed = The equipment source returned a field format that has not yet been verified.
+consignment-source-identity-mismatch = The equipment identity returned by the source does not match the request.
+consignment-source-too-large = The equipment data exceeds the read limit.
+consignment-source-unavailable = The equipment source is temporarily unreachable.
+consignment-source-timeout = The equipment lookup timed out.
+consignment-source-rate-limited = The equipment source is rate limiting requests.
+consignment-lookup-exhausted = No lookup attempts remain.
+consignment-credential-unavailable = The credential for reading this equipment is temporarily unavailable.
+
+# 一口价挂单 · 关闭原因
+consignment-auction-lot-created = The equipment entered an auction. You can register it again once its return is confirmed.
+consignment-seller-ineligible = The seller is currently ineligible to list equipment.
+consignment-service-disabled = The service was disabled and the listing was closed.
+consignment-seller-cancelled = The seller cancelled the listing.
+consignment-admin-delisted = An administrator removed the listing.
+consignment-lookup-deadline = The lookup deadline has passed.
+consignment-display-expired = The listing period has ended.
+consignment-deposit-expired = The deadline for sending the equipment has passed.
+
+# 一口价挂单 · 写拒绝
+consignment-already-open = You already have an active registration for this equipment.
+consignment-fee-changed = The fee rate changed. Review it and confirm again.
+consignment-stale-version = The listing changed. Reload before confirming.
+consignment-listing-not-active = This listing no longer accepts changes.
+consignment-command-conflict = This command ID was already used for a different request.
+consignment-registration-rate-limited = You have reached the hourly registration limit.
+consignment-listing-limit-reached = You have reached the limit for active listings.
+consignment-invalid-price = Enter a valid whole-number asking price.
+consignment-invalid-equipment-url = Enter an equipment URL whose ID uses decimal digits, starts with a nonzero digit, and has no sign.
+consignment-world-unavailable = This world is temporarily closed to new registrations.
