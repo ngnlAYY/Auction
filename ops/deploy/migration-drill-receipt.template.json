@@ -11,9 +11,9 @@
     "version": "<候选版本>",
     "commit": "<完整提交 SHA>",
     "package": "<CI 制品名称>",
-    "package_sha256": "<64 位小写 SHA-256>",
+    "package_sha256": "<已校验的外层 Release tarball SHA-256，64 位小写十六进制>",
     "cli_sha256": "<64 位小写 SHA-256>",
-    "previous_version": "<停机测量使用的旧版本/提交>"
+    "previous_version": "<停机测量所用旧角色制品的 package ID>"
   },
   "backup": {
     "created_at": null,

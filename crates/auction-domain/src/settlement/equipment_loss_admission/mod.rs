@@ -265,6 +265,8 @@ impl EquipmentLossAdmission {
             self.auction.world_id == "main"
                 && self.auction.status == "settled"
                 && self.auction.settled_at.is_some()
+                && self.lot.auction_id == self.auction.id
+                && self.lot.equipment_id == self.equipment.id
                 && self.lot.status == "sold",
             EquipmentLossBlocker::MainSettledSoldLot,
         );
@@ -291,7 +293,10 @@ impl EquipmentLossAdmission {
                     && obligation.auction_id == self.auction.id
                     && obligation.equipment_id == self.equipment.id
                     && obligation.world_id == "main"
-            }) && self.recovery.equipment_id == self.equipment.id
+            }) && self.recovery.lot_id == self.lot.id
+                && self.recovery.auction_id == self.auction.id
+                && self.recovery.equipment_id == self.equipment.id
+                && self.recovery.payment_obligation_id == payment.id
                 && self.recovery.winner_user_id == payment.recipient_user_id
                 && payment.recipient_user_id == self.lot.leader_user_id
                 && refund.recipient_user_id == payment.recipient_user_id
@@ -336,9 +341,15 @@ impl EquipmentLossAdmission {
                 && fulfillment.proof_digest.is_none()
                 && fulfillment.proof_observed_at.is_none()
         };
+
+        let delivery = &self.delivery;
+        // 付款履约的领取、派发与人工复核都会推进版本。处置事务围栏使用锁内当前版本。
         check(
             &mut blockers,
             self.payment_fulfillment.execution_state == "manual_reconcile"
+                && self.payment_fulfillment.state_version > 0
+                && self.payment_fulfillment.delivery_id == Some(delivery.id)
+                && self.payment_fulfillment.prepare_command_id == Some(delivery.command_id)
                 && self.seller_fulfillment.execution_state == "pending"
                 && self.refund_fulfillment.execution_state == "pending"
                 && self.seller_fulfillment.state_version == 1
@@ -350,7 +361,6 @@ impl EquipmentLossAdmission {
                     .all(|fulfillment| unclaimed(fulfillment)),
             EquipmentLossBlocker::FulfillmentAlreadyActedOrClaimed,
         );
-        let delivery = &self.delivery;
         let metadata = &delivery.result_metadata;
         check(
             &mut blockers,
@@ -363,7 +373,9 @@ impl EquipmentLossAdmission {
                 && Some(delivery.command_id) == self.payment_fulfillment.prepare_command_id
                 && delivery.request_digest.is_some()
                 && delivery.request_digest == self.payment_fulfillment.prepare_request_digest
+                && delivery.activation_command_id.is_some()
                 && delivery.activation_command_id == self.payment_fulfillment.activate_command_id
+                && delivery.activation_request_digest.is_some()
                 && delivery.activation_request_digest
                     == self.payment_fulfillment.activate_request_digest
                 && delivery.external_reference.is_none()

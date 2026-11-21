@@ -62,6 +62,7 @@ export interface AdminSessionHostCapabilities {
   readonly check: AdminSessionCheckTrigger;
   readonly writesAllowed: AdminSessionWritePermission;
   readonly confirmed: () => AdminSession | null;
+  readonly cookieGeneration?: () => string | null;
   readonly writeReview?: AdminSessionWriteReview;
 }
 
@@ -121,23 +122,46 @@ export function adminSessionHostLive(host: AdminSessionHost): boolean {
 
 /** 会话重读必须由外壳触发，不能根据单次网络错误推断登出；只重查这个句柄对应的外壳。 */
 export function requestAdminSessionCheck(host: AdminSessionHost): void {
-  registeredSessionHost(host)?.capabilities.check();
+  try {
+    registeredSessionHost(host)?.capabilities.check();
+  } catch {
+    // A check callback failure cannot authorize or alter the request that triggered it.
+  }
 }
 
 /** 未确认或外壳已卸载时写门禁关闭。 */
 export function adminSessionWritesAllowed(host: AdminSessionHost): boolean {
-  return registeredSessionHost(host)?.capabilities.writesAllowed() ?? false;
+  try {
+    return registeredSessionHost(host)?.capabilities.writesAllowed() ?? false;
+  } catch {
+    return false;
+  }
 }
 
 /** 最近一次已认证会话；只用于同代际核对，不是授权来源。 */
 export function confirmedAdminSession(host: AdminSessionHost): AdminSession | null {
-  const entry = registeredSessionHost(host);
-  return entry === null ? null : entry.capabilities.confirmed();
+  try {
+    const entry = registeredSessionHost(host);
+    return entry === null ? null : entry.capabilities.confirmed();
+  } catch {
+    return null;
+  }
 }
 
 /** 读取此宿主登记的身份观测与请求失效回调，旧句柄不能接管新宿主。 */
 export function adminSessionWriteReview(host: AdminSessionHost): AdminSessionWriteReview | null {
   return registeredSessionHost(host)?.capabilities.writeReview ?? null;
+}
+/** 读取发送边界上的 Cookie 代际；旧能力对象只提供 review 时沿用其读取器。 */
+export function adminSessionCookieGeneration(host: AdminSessionHost): string | null {
+  const capabilities = registeredSessionHost(host)?.capabilities;
+  try {
+    return (
+      capabilities?.cookieGeneration?.() ?? capabilities?.writeReview?.cookieGeneration() ?? null
+    );
+  } catch {
+    return null;
+  }
 }
 
 /** 两个会话属于同一身份与同一 CSRF 代际；宿主归属由调用方持有的句柄保证。 */
@@ -196,7 +220,9 @@ export async function fetchAdminSession(
   if (!requestStillLive(host, signal)) {
     return err("network_error");
   }
-  const response = await sendGet(host, SESSION_WITH_SERVER_TIME, signal);
+  const response = await sendGet(host, SESSION_WITH_SERVER_TIME, signal).catch(() =>
+    err("network_error"),
+  );
   if (!requestStillLive(host, signal)) {
     return err("network_error");
   }
@@ -228,6 +254,9 @@ export async function loginAdmin(
 ): Promise<Result<AdminSession, string>> {
   if (!requestStillLive(host, signal)) {
     return err("network_error");
+  }
+  if (actor.includes(":")) {
+    return err("invalid_request");
   }
   const authorization = `Basic ${base64EncodeUtf8(`${actor}:${secret}`)}`;
   const response = await sendRequest(
@@ -269,17 +298,19 @@ export async function logoutAdmin(
   if (session === null) {
     return err(adminApiFailureClient("unauthenticated"));
   }
-  const response = await sendRequest(
-    () =>
-      ok({
-        url: "/api/v1/admin/session",
-        init: {
-          method: "DELETE",
-          headers: { "x-csrf-token": session.csrfToken },
-        },
-      }),
-    signal,
-  );
+  const response = await sendRequest(() => {
+    // 注销状态会推进复核 epoch；只按发出 DELETE 时的 Cookie 与冻结会话代际核对。
+    if (adminSessionCookieGeneration(host) !== session.csrfToken) {
+      return err("unauthenticated");
+    }
+    return ok({
+      url: "/api/v1/admin/session",
+      init: {
+        method: "DELETE",
+        headers: { "x-csrf-token": session.csrfToken },
+      },
+    });
+  }, signal);
   if (!requestStillLive(host, signal)) {
     return err(adminApiFailureClient("network_error"));
   }
@@ -409,7 +440,13 @@ function decodeAdminSessionResponse(body: string): Result<AdminSession, string> 
   const expiresAt = parseStrictRfc3339(data.expires_at);
   const absoluteExpiresAt = parseStrictRfc3339(data.absolute_expires_at);
   const serverTime = parseStrictRfc3339(data.server_time);
-  if (expiresAt === null || absoluteExpiresAt === null || serverTime === null) {
+  if (
+    expiresAt === null ||
+    absoluteExpiresAt === null ||
+    serverTime === null ||
+    expiresAt <= serverTime ||
+    absoluteExpiresAt < expiresAt
+  ) {
     return err(invalidResponseError(null));
   }
   return ok({

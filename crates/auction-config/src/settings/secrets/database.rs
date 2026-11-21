@@ -110,18 +110,34 @@ fn explicit_database_url(value: String) -> Result<String, ConfigError> {
     if url.cannot_be_a_base() || url.fragment().is_some() {
         return Err(invalid());
     }
-    let mut host = url.host_str().is_some_and(|host| !host.is_empty());
+    let authority_host = url.host_str().filter(|host| !host.is_empty());
+    let mut query_host: Option<String> = None;
+    let mut hostaddr: Option<String> = None;
     let mut database = !url.path().trim_start_matches('/').is_empty();
     let mut port = url.port();
     for (key, value) in url.query_pairs() {
         match key.as_ref() {
-            "host" | "hostaddr" => host = !value.is_empty(),
+            "host" | "hostaddr" => {
+                if value.is_empty() {
+                    return Err(invalid());
+                }
+                let selected = if key == "host" { &mut query_host } else { &mut hostaddr };
+                if selected.as_deref().is_some_and(|existing| existing != value) {
+                    return Err(invalid());
+                }
+                *selected = Some(value.into_owned());
+            }
             "dbname" => database = !value.is_empty(),
             "port" => port = Some(value.parse::<u16>().map_err(|_| invalid())?),
             _ => {}
         }
     }
-    if !host || !database || port == Some(0) {
+    if authority_host
+        .is_some_and(|authority| query_host.as_deref().is_some_and(|query| authority != query))
+        || (authority_host.is_none() && query_host.is_none() && hostaddr.is_none())
+        || !database
+        || port == Some(0)
+    {
         return Err(invalid());
     }
     if port.is_none() {
@@ -157,4 +173,41 @@ pub fn database_url_username(database_url: &str) -> Option<String> {
     url.query_pairs()
         .find(|(key, value)| key.as_ref() == "user" && !value.is_empty())
         .map(|(_, value)| value.into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::explicit_database_url;
+
+    #[test]
+    fn accepts_query_only_tcp_and_unix_socket_endpoints() {
+        for url in [
+            "postgresql:///auction?host=db.example&port=5432",
+            "postgresql:///auction?hostaddr=127.0.0.1&port=5432",
+            "postgresql:///auction?host=%2Fvar%2Frun%2Fpostgresql&port=5432",
+        ] {
+            assert!(explicit_database_url(url.to_owned()).is_ok(), "{url}");
+        }
+    }
+
+    #[test]
+    fn rejects_implicit_or_ambiguous_endpoints() {
+        for url in [
+            "postgresql:///auction",
+            "postgresql:///auction?host=&port=5432",
+            "postgresql://db.example/auction?host=other.example&port=5432",
+            "postgresql:///auction?host=db.example&host=db.other&port=5432",
+        ] {
+            assert!(explicit_database_url(url.to_owned()).is_err(), "{url}");
+        }
+    }
+    #[test]
+    fn accepts_host_and_hostaddr_as_distinct_endpoint_hints() {
+        assert!(
+            explicit_database_url(
+                "postgresql:///auction?host=db.example&hostaddr=127.0.0.1&port=5432".to_owned()
+            )
+            .is_ok()
+        );
+    }
 }

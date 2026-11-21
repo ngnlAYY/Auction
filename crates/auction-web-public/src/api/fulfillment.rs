@@ -6,8 +6,10 @@ pub(crate) use auction_contracts::{
 };
 use auction_time::{SecondsFormat, Timestamp};
 use url::form_urlencoded;
+use uuid::Uuid;
 
-use super::queries::{cached_public_read, fetch_bid_log_auctions};
+use super::queries::cached_get::cached_public_read;
+use super::queries::fetch_bid_log_auctions;
 use super::{HistoricalAuction, decoder, swr_cache};
 
 /// 履约进度接口的每页数量上限；超过时服务端返回 400。页面按上限请求，自定义输入超出时就地提示。
@@ -38,6 +40,8 @@ pub(crate) async fn fetch_fulfillment_page(
     page: i64,
     page_size: i64,
 ) -> Result<FulfillmentRead, String> {
+    let auction_id =
+        Uuid::try_parse(&auction_id).map_err(|_| "invalid_request".to_owned())?.to_string();
     let page = page.max(1);
     let mut query = form_urlencoded::Serializer::new(String::new());
     query

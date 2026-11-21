@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use auction_application::admin::{AdminIntakeError, AdminIntakeSourceSnapshot};
 use auction_application::core::ApplicationFuture;
 use auction_application::core::{
-    ApplicationError, Clock, CompetitionTransactionError, RepositoryError,
+    ApplicationError, Clock, CompetitionTransactionError, RepositoryError, RequestHash,
 };
 use auction_application::mail::{
     EquipmentRejectionReason, MailAuctionAcceptance, MailAuctionIntakeCommand,
@@ -374,6 +374,18 @@ fn accepted_submission_take_passes_the_unified_judgement() {
     let take = &commands[0];
     assert_eq!(take.operation, MailDeliveryOperation::Take);
     assert_eq!(take.origin_id, "main:7000002:take");
+    // 升级前已入队的领取使用同一个稳定 ID，摘要请求中没有 notification_body 字段。
+    assert_eq!(take.command_id.as_uuid(), Uuid::from_u128(0xf11b8d7d_25c3_52fb_b14b_44d8f619df77));
+    let legacy = RequestHash::from_canonical_bytes(
+        concat!(
+            r#"{"command_kind":"mail_delivery","aggregate_id":"f11b8d7d-25c3-52fb-b14b-44d8f619df77","#,
+            r#""request":{"operation":"take","world_id":"main","external_mail_id":"7000002","#,
+            r#""recipient":"seller01","template":null,"result_code":null,"user_key_user_id":null,"#,
+            r#""attachment_ids":["900000001"]}}"#,
+        )
+        .as_bytes(),
+    );
+    assert_eq!(take.request_hash, legacy);
     assert_eq!(take.attachment_ids, ["900000001"]);
     assert!(take.shape().admits());
 }

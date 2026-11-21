@@ -1037,6 +1037,7 @@ async fn postgres_lot_watch_outbox_does_not_override_newer_proxy_unwatch() {
     .execute(pool)
     .await
     .expect("写入测试命令");
+    let mut proxy_transaction = pool.begin().await.expect("开启代理 fixture 事务");
     sqlx::query(
         "INSERT INTO public.bid_proxy_authorizations
             (authorization_id, lot_id, user_id, authorization_sequence, usage_number,
@@ -1049,9 +1050,23 @@ async fn postgres_lot_watch_outbox_does_not_override_newer_proxy_unwatch() {
     .bind(lot_id)
     .bind(user_id)
     .bind(command_id)
-    .execute(pool)
+    .execute(&mut *proxy_transaction)
     .await
     .expect("写入测试代理");
+    sqlx::query(
+        "INSERT INTO public.bid_proxy_authorization_transitions
+            (authorization_id, transition_number, transition_kind, origin_command_id,
+             old_maximum_amount, new_maximum_amount, old_mode, new_mode, old_status,
+             new_status, reason, resulting_state_version, created_at)
+         VALUES ($1, 1, 'created', $2, NULL, 500000, NULL, 'fast', NULL, 'active', NULL, 1,
+                 clock_timestamp())",
+    )
+    .bind(authorization_id)
+    .bind(command_id)
+    .execute(&mut *proxy_transaction)
+    .await
+    .expect("写入测试代理创建转换");
+    proxy_transaction.commit().await.expect("提交测试代理历史");
     sqlx::query(
         "INSERT INTO public.lot_watch_events
             (event_id, event_kind, lot_id, user_id, authorization_id, state_version,

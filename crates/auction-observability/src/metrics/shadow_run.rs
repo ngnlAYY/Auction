@@ -55,7 +55,14 @@ pub(super) fn build(registry: &Registry) -> Result<Arc<dyn ShadowRecorder>, Metr
         }
     }
     registry.register(Box::new(evaluations.clone())).map_err(MetricsError::Registry)?;
-    registry.register(Box::new(mismatches.clone())).map_err(MetricsError::Registry)?;
+    if let Err(error) = registry.register(Box::new(mismatches.clone())) {
+        return match registry.unregister(Box::new(evaluations)) {
+            Ok(()) => Err(MetricsError::Registry(error)),
+            Err(rollback_error) => Err(MetricsError::Registry(prometheus::Error::Msg(format!(
+                "failed to register shadow mismatch collector: {error}; rollback failed: {rollback_error}",
+            )))),
+        };
+    }
     Ok(Arc::new(PrometheusShadowRecorder { evaluations, mismatches }))
 }
 

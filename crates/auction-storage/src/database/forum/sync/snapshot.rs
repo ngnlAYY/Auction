@@ -10,8 +10,9 @@ use auction_domain::{AuctionId, AuctionStatus, EquipmentId, SettlementWorld};
 use auction_time::Timestamp;
 use uuid::Uuid;
 
-use super::validation::{lot_code, parse_world, storage_error};
+use super::validation::{lot_code, parse_world};
 use crate::database::settlement::holding::leader_held_nanos;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 use crate::database::{
     DatabaseStore, auction::competition::parse_auction_status, public::lots::map_forum_equipment,

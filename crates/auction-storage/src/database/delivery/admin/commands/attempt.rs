@@ -22,6 +22,7 @@ use crate::database::delivery::audit::{
     ADMIN_RECONCILE, ADMIN_RELEASE, ADMIN_RETRY_FAILED, DeliveryAudit,
     append as append_delivery_audit,
 };
+use crate::database::mail::delivery::disposition::mail_handed_over;
 use crate::database::recovery::commands::reset_after_delivery_retry;
 use crate::database::settlement::fulfillment::SettlementDeliveryEligibility;
 
@@ -151,12 +152,9 @@ pub(super) async fn execute_transaction(
         None
     };
     let mail_handed_over = reactivates
-        && crate::database::mail::delivery::mail_handed_over(
-            transaction.transaction_mut()?,
-            command.delivery_id,
-        )
-        .await
-        .map_err(DeliveryAdminTransactionError::Sqlx)?;
+        && mail_handed_over(transaction.transaction_mut()?, command.delivery_id)
+            .await
+            .map_err(DeliveryAdminTransactionError::Sqlx)?;
     let payload: serde_json::Value =
         row.try_get("payload").map_err(DeliveryAdminTransactionError::Sqlx)?;
     let recipient_renamed = reactivates

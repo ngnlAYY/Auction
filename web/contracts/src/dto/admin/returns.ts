@@ -7,6 +7,7 @@
 
 import * as v from "valibot";
 import { integer, jsonValue, requiredNullable, strictStruct, uint8, uint32 } from "../../wire";
+import { uuid } from "../../wire/uuid";
 import { AdminStrictPaginationResponseSchema } from "./pagination";
 
 /** 列表单页上限，与应用层端口一致。 */
@@ -84,6 +85,15 @@ export const ADMIN_SETTLEMENT_RETURN_HANDLE_ACTIONS = [
   "retry_take",
 ] as const;
 
+export const AdminSettlementReturnActionSchema = v.picklist(ADMIN_SETTLEMENT_RETURN_ACTIONS);
+export type AdminSettlementReturnAction = v.InferOutput<typeof AdminSettlementReturnActionSchema>;
+export const AdminSettlementReturnHandleActionSchema = v.picklist(
+  ADMIN_SETTLEMENT_RETURN_HANDLE_ACTIONS,
+);
+export type AdminSettlementReturnHandleAction = v.InferOutput<
+  typeof AdminSettlementReturnHandleActionSchema
+>;
+
 /** 动作被拒绝的类型化原因闭集。 */
 export const ADMIN_SETTLEMENT_RETURN_BLOCKERS = [
   "untrusted",
@@ -97,19 +107,34 @@ export const ADMIN_SETTLEMENT_RETURN_BLOCKERS = [
   "observation_required",
 ] as const;
 
-/** Take 结果未知的原因闭集（详情 `take_unknown_reason`）：前五项是邮箱维护在原 Take 会话里的
- * 观察，后四项由持久事实推出；只有 `assets_claimable` 允许再次领回。 */
-export const ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS = [
+/** 邮箱维护在原 Take 会话里能持久化为 `take_observed` 的原因。 */
+const TAKE_OBSERVATIONS = [
   "assets_claimable",
   "assets_unclaimable",
   "assets_changed",
   "mail_missing",
   "receipt_unproven",
+] as const;
+
+/** Take 结果未知的原因闭集。除原会话观察外，其余原因由持久事实推出。 */
+export const ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS = [
+  ...TAKE_OBSERVATIONS,
   "session_changed",
   "take_unverifiable",
   "disposition_conflict",
   "awaiting_observation",
 ] as const;
+
+/** 领回动作转结果未知时持久化在 `take_unknown.details` 中的失败码。 */
+const TAKE_FAILURE_CODES = [
+  "settlement_return_take_conflict",
+  "settlement_return_take_unknown",
+  "settlement_return_take_not_started",
+  "settlement_return_take_failed",
+  "mail_disposition_conflict",
+] as const;
+
+const SWEEP_RETRIES = v.pipe(uint8, v.maxValue(8));
 
 /** 资产当前位置闭集；与资产对账使用同一组名称，互斥且不重复计数。 */
 export const ADMIN_SETTLEMENT_RETURN_ASSET_LOCATIONS = [
@@ -165,34 +190,28 @@ export const ADMIN_SETTLEMENT_RETURN_OBLIGATION_KINDS = [
 
 /** 案件的安全摘要；列表行与详情共用。 */
 export const AdminSettlementReturnSummaryResponseSchema = strictStruct({
-  /** 案件 ID，即退件入站邮件 ID。 */
   return_id: v.string(),
   case_version: integer,
-  status: v.string(),
-  match_state: v.string(),
-  reason_code: v.string(),
+  status: v.picklist(ADMIN_SETTLEMENT_RETURN_STATUSES),
+  match_state: v.picklist(ADMIN_SETTLEMENT_RETURN_MATCH_STATES),
+  reason_code: v.picklist(ADMIN_SETTLEMENT_RETURN_REASONS),
   world_id: v.string(),
-  /** 退件在 Bot 收件箱中的远端 MID。 */
   external_mail_id: v.string(),
   received_at: v.string(),
   obligation_id: requiredNullable(v.string()),
-  obligation_kind: requiredNullable(v.string()),
+  obligation_kind: requiredNullable(v.picklist(ADMIN_SETTLEMENT_RETURN_OBLIGATION_KINDS)),
   auction_id: requiredNullable(v.string()),
   lot_id: requiredNullable(v.string()),
-  /** 被退回的原派发投递；只在已绑定时存在。 */
   delivery_id: requiredNullable(v.string()),
   dispatch_no: requiredNullable(uint32),
-  /** 原派发冻结收件人；补寄只寄给这个名字。 */
   recipient: requiredNullable(v.string()),
   credits: integer,
   cod: integer,
   attachment_count: uint32,
-  plan: requiredNullable(v.string()),
-  /** 案件建立时冻结的补寄上限（不含首寄）。 */
+  plan: requiredNullable(v.picklist(ADMIN_SETTLEMENT_RETURN_PLANS)),
   resend_limit: uint8,
-  /** 原义务已发生的补寄次数；未绑定义务时为空。 */
   resends_used: requiredNullable(uint32),
-  asset_location: v.string(),
+  asset_location: v.picklist(ADMIN_SETTLEMENT_RETURN_ASSET_LOCATIONS),
   created_at: v.string(),
   updated_at: v.string(),
   closed_at: requiredNullable(v.string()),
@@ -213,16 +232,20 @@ export type AdminSettlementReturnListResponse = v.InferOutput<
 >;
 
 /** 案件处理事件（只追加）。 */
-export const AdminSettlementReturnEventResponseSchema = strictStruct({
-  case_version: integer,
-  event_kind: v.string(),
-  occurred_at: v.string(),
-  /** Admin 命令触发时为操作者；Worker 事件为空。 */
-  actor_id: requiredNullable(v.string()),
-  command_id: requiredNullable(v.string()),
-  /** 安全细节对象（分类、原因码、派发编号、投递 ID、失败码等），不含正文或秘密。 */
-  details: jsonValue,
-});
+export const AdminSettlementReturnEventResponseSchema = v.pipe(
+  strictStruct({
+    case_version: v.pipe(integer, v.minValue(1)),
+    event_kind: v.picklist(ADMIN_SETTLEMENT_RETURN_EVENT_KINDS),
+    occurred_at: v.string(),
+    actor_id: requiredNullable(v.string()),
+    command_id: requiredNullable(uuid),
+    details: jsonValue,
+  }),
+  v.check(
+    (event) => validSettlementReturnEventDetails(event.event_kind, event.details),
+    "invalid settlement return event details",
+  ),
+);
 
 export type AdminSettlementReturnEventResponse = v.InferOutput<
   typeof AdminSettlementReturnEventResponseSchema
@@ -246,7 +269,7 @@ export type AdminSettlementReturnDispatchResponse = v.InferOutput<
 
 /** 本案的持久 Take。 */
 export const AdminSettlementReturnTakeResponseSchema = strictStruct({
-  execution_state: v.string(),
+  execution_state: v.picklist(ADMIN_SETTLEMENT_RETURN_TAKE_STATES),
   delivery_id: requiredNullable(v.string()),
   delivery_status: requiredNullable(v.string()),
   failure_code: requiredNullable(v.string()),
@@ -272,8 +295,8 @@ export type AdminSettlementReturnCustodyResponse = v.InferOutput<
 
 /** 一个不被允许的动作及其类型化原因。 */
 export const AdminSettlementReturnBlockerResponseSchema = strictStruct({
-  action: v.string(),
-  blocker: v.string(),
+  action: v.picklist(ADMIN_SETTLEMENT_RETURN_ACTIONS),
+  blocker: v.picklist(ADMIN_SETTLEMENT_RETURN_BLOCKERS),
 });
 
 export type AdminSettlementReturnBlockerResponse = v.InferOutput<
@@ -290,7 +313,7 @@ export const AdminSettlementReturnDetailResponseSchema = strictStruct({
   /** 本案授权的补寄派发编号。 */
   resend_dispatch_no: requiredNullable(uint32),
   custody: requiredNullable(AdminSettlementReturnCustodyResponseSchema),
-  allowed_actions: v.array(v.string()),
+  allowed_actions: v.array(v.picklist(ADMIN_SETTLEMENT_RETURN_ACTIONS)),
   blockers: v.array(AdminSettlementReturnBlockerResponseSchema),
   /** 案件待重新核验（`recheck_pending`），但没有在线 Worker 能只读读取该世界的 MoogleMail：
    * 核验能力不可用，案件保持待核验，能力恢复后自动继续。其他状态恒为 `false`。 */
@@ -302,37 +325,39 @@ export const AdminSettlementReturnDetailResponseSchema = strictStruct({
   /** 案件 Take 结果未知（`take_unknown`）时的具体原因，取
    * `ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS`；其他状态为 `null`。只读说明，再次领回的
    * 资格以 `allowed_actions` 为准。 */
-  take_unknown_reason: requiredNullable(v.string()),
+  take_unknown_reason: requiredNullable(v.picklist(ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS)),
 });
 
 export type AdminSettlementReturnDetailResponse = v.InferOutput<
   typeof AdminSettlementReturnDetailResponseSchema
 >;
 
-/** `POST …/{return_id}/handle` 请求；动作只取 `ADMIN_SETTLEMENT_RETURN_HANDLE_ACTIONS`。 */
-export interface AdminSettlementReturnHandleRequest {
-  /** 稳定命令 ID（UUID）。 */
-  command_id: string;
-  /** 页面读取时的案件版本。 */
-  expected_version: number;
-  action: string;
-}
+/** `POST …/{return_id}/handle` 请求；recheck 只接受专用端点。 */
+export const AdminSettlementReturnHandleRequestSchema = strictStruct({
+  command_id: uuid,
+  expected_version: v.pipe(integer, v.minValue(1)),
+  action: v.picklist(ADMIN_SETTLEMENT_RETURN_HANDLE_ACTIONS),
+});
+export type AdminSettlementReturnHandleRequest = v.InferOutput<
+  typeof AdminSettlementReturnHandleRequestSchema
+>;
 
 /** `POST …/{return_id}/recheck` 请求。 */
-export interface AdminSettlementReturnRecheckRequest {
-  /** 稳定命令 ID（UUID）。 */
-  command_id: string;
-  expected_version: number;
-}
+export const AdminSettlementReturnRecheckRequestSchema = strictStruct({
+  command_id: uuid,
+  expected_version: v.pipe(integer, v.minValue(1)),
+});
+export type AdminSettlementReturnRecheckRequest = v.InferOutput<
+  typeof AdminSettlementReturnRecheckRequestSchema
+>;
 
 /** 命令结果；同一 `command_id` 原样重试返回首次提交时的结果。 */
 export const AdminSettlementReturnCommandResponseSchema = strictStruct({
-  command_id: v.string(),
-  return_id: v.string(),
-  action: v.string(),
-  /** 命令提交后的案件版本。 */
+  command_id: uuid,
+  return_id: uuid,
+  action: v.picklist(ADMIN_SETTLEMENT_RETURN_ACTIONS),
   case_version: integer,
-  status: v.string(),
+  status: v.picklist(ADMIN_SETTLEMENT_RETURN_STATUSES),
 });
 
 /** 解析 `AdminSettlementReturnCommandResponseSchema` 的退件命令回执必须传入的字段策略：任意
@@ -346,3 +371,109 @@ export const ADMIN_SETTLEMENT_RETURN_COMMAND_RESPONSE_FIELD_POLICY = {
 export type AdminSettlementReturnCommandResponse = v.InferOutput<
   typeof AdminSettlementReturnCommandResponseSchema
 >;
+
+/** 校验持久化案件事件的闭集细节，与 Admin HTTP 的事件投影一致。 */
+export function validSettlementReturnEventDetails(kind: string, details: unknown): boolean {
+  if (typeof details !== "object" || details === null || Array.isArray(details)) return false;
+  const value = details as Record<string, unknown>;
+  const keys = Object.keys(value).sort().join(",");
+  const matches = (expected: string): boolean => keys === expected;
+  const positiveInteger = (input: unknown): boolean =>
+    typeof input === "number" && Number.isSafeInteger(input) && input > 0;
+  const stringValue = (input: unknown): input is string => typeof input === "string";
+  const uuidValue = (input: unknown): boolean => v.safeParse(uuid, input).success;
+  const stateValue = (input: unknown): boolean =>
+    v.safeParse(v.picklist(ADMIN_SETTLEMENT_RETURN_MATCH_STATES), input).success;
+  const reasonValue = (input: unknown): boolean =>
+    v.safeParse(v.picklist(ADMIN_SETTLEMENT_RETURN_REASONS), input).success;
+  switch (kind) {
+    case "opened":
+      return (
+        (matches("dispatch_no,match_state,reason_code") &&
+          (value.dispatch_no === null || positiveInteger(value.dispatch_no)) &&
+          stateValue(value.match_state) &&
+          reasonValue(value.reason_code)) ||
+        (matches("backfilled") && value.backfilled === true)
+      );
+    case "acknowledged":
+    case "recheck_requested":
+    case "held":
+      return matches("");
+    case "recheck_rebound":
+      return (
+        (matches("delivery_id,dispatch_no,match_state,reason_code,verified_version") &&
+          uuidValue(value.delivery_id) &&
+          positiveInteger(value.dispatch_no) &&
+          stateValue(value.match_state) &&
+          reasonValue(value.reason_code) &&
+          positiveInteger(value.verified_version)) ||
+        (matches("backfill_orphan_ordering_repaired,migration") &&
+          value.migration === 123 &&
+          value.backfill_orphan_ordering_repaired === true)
+      );
+    case "recheck_unchanged":
+      return (
+        (matches("match_state,reason_code") &&
+          stateValue(value.match_state) &&
+          reasonValue(value.reason_code)) ||
+        (matches("reason_code") && value.reason_code === "mail_not_found")
+      );
+    case "take_requested":
+      return (
+        (matches("plan") && (value.plan === "resend" || value.plan === "hold")) ||
+        (matches("handover") && value.handover === true)
+      );
+    case "take_retry_requested":
+      return (
+        matches("delivery_id,fencing_version,observed_case_version") &&
+        uuidValue(value.delivery_id) &&
+        positiveInteger(value.fencing_version) &&
+        positiveInteger(value.observed_case_version)
+      );
+    case "take_activated":
+      return (
+        (matches("delivery_id") && uuidValue(value.delivery_id)) ||
+        (uuidValue(value.delivery_id) &&
+          value.requeued === true &&
+          stringValue(value.reason) &&
+          ((matches("delivery_id,reason,requeued,restarts") && positiveInteger(value.restarts)) ||
+            (matches("delivery_id,reason,requeued,sweep_retries") &&
+              v.safeParse(SWEEP_RETRIES, value.sweep_retries).success)))
+      );
+    case "take_proven":
+      return matches("dispatch_no,next,proof")
+        ? positiveInteger(value.dispatch_no) && value.next === "resend" && stringValue(value.proof)
+        : matches("next,proof,resend_blocked") &&
+            value.next === "hold" &&
+            stringValue(value.proof) &&
+            (value.resend_blocked === null ||
+              v.safeParse(v.picklist(ADMIN_SETTLEMENT_RETURN_BLOCKERS), value.resend_blocked)
+                .success);
+    case "take_unknown":
+      return (
+        matches("delivery_id,failure_code") &&
+        (value.delivery_id === null || uuidValue(value.delivery_id)) &&
+        v.safeParse(v.picklist(TAKE_FAILURE_CODES), value.failure_code).success
+      );
+    case "take_observed":
+      return (
+        matches("delivery_id,fencing_version,observation,sweep_retries") &&
+        uuidValue(value.delivery_id) &&
+        positiveInteger(value.fencing_version) &&
+        v.safeParse(SWEEP_RETRIES, value.sweep_retries).success &&
+        v.safeParse(v.picklist(TAKE_OBSERVATIONS), value.observation).success
+      );
+    case "resend_authorized":
+      return matches("dispatch_no") && positiveInteger(value.dispatch_no);
+    case "resent":
+      return (
+        matches("delivery_id,dispatch_no") &&
+        uuidValue(value.delivery_id) &&
+        positiveInteger(value.dispatch_no)
+      );
+    case "inbox_closed":
+      return matches("asset_location") && value.asset_location === "returned_in_inbox";
+    default:
+      return false;
+  }
+}

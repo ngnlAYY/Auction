@@ -31,7 +31,7 @@ use super::take::{
 };
 use super::work::{TakeProof, consume_take_proof};
 use crate::database::TrackedTransaction as Transaction;
-use crate::database::mail::delivery::settlement_return_take_conflicts;
+use crate::database::mail::delivery::disposition::settlement_return_take_conflicts;
 use crate::database::settlement::fulfillment::{
     lock_settlement_delivery_eligibility, recovery_allows_execution_now,
 };

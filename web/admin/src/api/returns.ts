@@ -20,6 +20,7 @@ import {
   ADMIN_SETTLEMENT_RETURN_STATUSES,
   ADMIN_SETTLEMENT_RETURN_TAKE_STATES,
   ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS,
+  type AdminSettlementReturnAction,
   type AdminSettlementReturnCommandResponse,
   AdminSettlementReturnCommandResponseSchema,
   type AdminSettlementReturnCustodyResponse,
@@ -31,6 +32,7 @@ import {
   AdminSettlementReturnListResponseSchema,
   type AdminSettlementReturnSummaryResponse,
   type AdminSettlementReturnTakeResponse,
+  validSettlementReturnEventDetails,
 } from "@auction/contracts/dto/admin/returns";
 import { apiResponseSchema } from "@auction/contracts/dto/response";
 import { decode } from "@auction/contracts/wire";
@@ -111,8 +113,8 @@ const ADMIN_SETTLEMENT_RETURN_LIST_FIELD_POLICY = {
 } as const;
 
 /** 详情的全部具型整数字段都会参与页面决策或作为下一次命令的输入；解析完整响应原文时拒绝
- * 重复键，并拒绝这些字段的小数、指数与 `-0` 词法。事件 `details` 仍是安全投影中的自由对象，
- * 只对其路径上的具型字段施加整数词法。 */
+ * 重复键，并拒绝这些字段的小数、指数与 `-0` 词法。事件 `details` 保留自由 JSON，但重排次数
+ * 在 HTTP 投影中必须是整数。 */
 const ADMIN_SETTLEMENT_RETURN_DETAIL_FIELD_POLICY = {
   uniqueKeys: "all",
   integerPaths: [
@@ -124,6 +126,7 @@ const ADMIN_SETTLEMENT_RETURN_DETAIL_FIELD_POLICY = {
     ["data", "summary", "dispatch_no"],
     ["data", "summary", "resends_used"],
     ["data", "events", null, "case_version"],
+    ["data", "events", null, "details", "sweep_retries"],
     ["data", "dispatches", null, "dispatch_no"],
     ["data", "resend_dispatch_no"],
     ["data", "custody", "credits"],
@@ -218,7 +221,7 @@ export async function fetchSettlementReturn(
 export interface SettlementReturnActionIntent {
   readonly returnId: string;
   readonly expectedVersion: number;
-  readonly action: string;
+  readonly action: AdminSettlementReturnAction;
 }
 
 // 只有本模块的工厂能构造提交；外部同形对象无法把另一份意图的正文混进本次路由与回执核对。
@@ -519,7 +522,17 @@ function validEvent(event: AdminSettlementReturnEventResponse): boolean {
     validAdminTime(event.occurred_at) &&
     (event.actor_id === null || validSafeText(event.actor_id, 128)) &&
     (event.command_id === null || validUuid(event.command_id)) &&
-    isJsonObject(event.details)
+    validEventDetails(event.event_kind, event.details)
+  );
+}
+
+function validEventDetails(kind: string, details: unknown): boolean {
+  if (!isJsonObject(details) || !validSettlementReturnEventDetails(kind, details)) return false;
+  const deliveryId = details.delivery_id;
+  return (
+    deliveryId === undefined ||
+    deliveryId === null ||
+    (typeof deliveryId === "string" && validUuid(deliveryId))
   );
 }
 

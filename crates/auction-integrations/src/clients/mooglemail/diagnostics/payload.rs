@@ -1,5 +1,7 @@
 //! 加密载荷和公开认证头的闭集校验，以及敏感临时缓冲的清理。
 
+use std::io::{self, Write};
+
 use auction_application::mail::{
     MailDiagnosticContext, MailDiagnosticError, MailDiagnosticOutcome, MailDiagnosticStage,
     MailMessage,
@@ -10,6 +12,24 @@ use crate::safe_diagnostics;
 
 pub const MAX_PAYLOAD: usize = 8 * 1024 * 1024;
 pub const FORMAT_VERSION: u8 = 2;
+struct LimitedPayloadWriter<'a>(&'a mut Vec<u8>);
+
+impl Write for LimitedPayloadWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let Some(end) = self.0.len().checked_add(bytes.len()) else {
+            return Err(io::Error::other("diagnostic payload too large"));
+        };
+        if end > MAX_PAYLOAD {
+            return Err(io::Error::other("diagnostic payload too large"));
+        }
+        self.0.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 /// 临时明文不实现 Debug；正常和提前返回都会尽力清零当前分配。
 pub(super) struct SensitiveBytes(pub(super) Vec<u8>);
@@ -171,15 +191,15 @@ pub fn parsed_message(message: &MailMessage) -> Result<SensitiveBytes, MailDiagn
             ))?;
         value.attachments.push((attachment.external_equipment_id.clone(), key));
     }
-    let result = SensitiveBytes(serde_json::to_vec(&value).map_err(
-        safe_diagnostics::error_map("mooglemail_diagnostics", "encode_message", || {
+    let mut encoded = SensitiveBytes(Vec::with_capacity(message.body.len().min(MAX_PAYLOAD)));
+    if let Err(error) = serde_json::to_writer(&mut LimitedPayloadWriter(&mut encoded.0), &value) {
+        return Err(if error.is_io() {
+            MailDiagnosticError::PayloadTooLarge
+        } else {
             MailDiagnosticError::Serialization
-        }),
-    )?);
-    if result.0.len() > MAX_PAYLOAD {
-        return Err(MailDiagnosticError::PayloadTooLarge);
+        });
     }
-    Ok(result)
+    Ok(SensitiveBytes(std::mem::take(&mut encoded.0)))
 }
 
 /// 验证文件名身份及所有公开头字段；头部还必须通过 AEAD 认证才能被信任。

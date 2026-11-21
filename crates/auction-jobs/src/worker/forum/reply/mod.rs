@@ -18,6 +18,7 @@ mod rejection;
 
 mod cycle;
 mod topic;
+use crate::worker::forum::sync::links::valid_public_base_url;
 pub(crate) use cycle::{FinalScanSchedule, run_cycle};
 
 use super::MAX_BATCH_SIZE;
@@ -75,9 +76,7 @@ impl ForumReplyRuntime {
         if batch_size == 0
             || batch_size > MAX_BATCH_SIZE
             || item_timeout.is_zero()
-            || public_base_url
-                .as_deref()
-                .is_some_and(|value| !super::sync::valid_public_base_url(value))
+            || public_base_url.as_deref().is_some_and(|value| !valid_public_base_url(value))
         {
             return Err(WorkerError::InvalidForumReplyConfiguration);
         }

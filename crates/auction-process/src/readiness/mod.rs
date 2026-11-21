@@ -57,6 +57,9 @@ async fn probe(target: ReadinessTarget<'_>, path: &str) -> bool {
 }
 
 async fn status_is_ok(stream: &mut (impl AsyncRead + AsyncWrite + Unpin), path: &str) -> bool {
+    if !path.starts_with('/') || path.bytes().any(|byte| matches!(byte, b'\r' | b'\n')) {
+        return false;
+    }
     let request = format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
     if stream.write_all(request.as_bytes()).await.is_err() {
         return false;

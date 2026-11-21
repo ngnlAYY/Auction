@@ -133,11 +133,7 @@ pub(super) async fn list_postgres(
         entries.truncate(request.limit as usize);
     }
     let next_cursor = has_more.then(|| entries.last().map(entry_cursor)).flatten();
-    transaction
-        .commit()
-        .await
-        .map_err(|error| storage_error_from(error, "提交公开价格历史读取事务失败"))?;
-    Ok(PublicPriceHistoryPage {
+    let page = PublicPriceHistoryPage {
         entries,
         total: None,
         stats: None,
@@ -145,7 +141,13 @@ pub(super) async fn list_postgres(
         offset: 0,
         next_cursor,
         has_more,
-    })
+    };
+    page.validate(&request).map_err(storage_error)?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交公开价格历史读取事务失败"))?;
+    Ok(page)
 }
 
 fn map_postgres_entry(

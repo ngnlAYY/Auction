@@ -20,6 +20,17 @@ pub(super) const POSTAGE_ESTIMATE_CREDITS: u64 = 0;
 pub(super) fn kind_of(claim: &DeliveryWorkClaim) -> Option<NotificationKind> {
     let operation = claim.payload.get("operation").and_then(serde_json::Value::as_str);
     let template = claim.payload.get("template").and_then(serde_json::Value::as_str);
+    if claim.origin_kind == "settlement" && operation == Some("send") {
+        return match NotificationKind::from_template(template?)? {
+            kind @ (NotificationKind::SettlementWinnerEquipmentCod
+            | NotificationKind::SettlementPaymentCarrier
+            | NotificationKind::SettlementPaymentReminder
+            | NotificationKind::SettlementEquipmentHandoff
+            | NotificationKind::SettlementSellerPayout
+            | NotificationKind::SettlementBuyerRefund) => Some(kind),
+            _ => None,
+        };
+    }
     NotificationKind::from_delivery(&claim.origin_kind, operation, template)
 }
 
@@ -78,6 +89,7 @@ mod tests {
         stages: Mutex<Vec<(NotificationKind, NotificationStage)>>,
         failures: Mutex<Vec<(NotificationKind, NotificationFailure)>>,
         latencies: Mutex<Vec<(NotificationKind, u64)>>,
+        postage: Mutex<Vec<(NotificationKind, u64)>>,
     }
 
     impl NotificationRecorder for FakeRecorder {
@@ -93,7 +105,9 @@ mod tests {
             self.latencies.lock().unwrap().push((kind, latency.as_secs()));
         }
 
-        fn observe_postage_estimate(&self, _kind: NotificationKind, _credits: u64) {}
+        fn observe_postage_estimate(&self, kind: NotificationKind, credits: u64) {
+            self.postage.lock().unwrap().push((kind, credits));
+        }
     }
 
     fn claim(origin_kind: &str, operation: &str, template: &str) -> DeliveryWorkClaim {
@@ -134,6 +148,10 @@ mod tests {
             &[(kind.unwrap(), NotificationStage::Sent)]
         );
         assert_eq!(recorder.latencies.lock().unwrap().as_slice(), &[(kind.unwrap(), 90)]);
+        assert_eq!(
+            recorder.postage.lock().unwrap().as_slice(),
+            &[(kind.unwrap(), POSTAGE_ESTIMATE_CREDITS)]
+        );
     }
 
     #[test]

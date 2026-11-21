@@ -131,11 +131,12 @@ sub document {
     # 代码示例中的 HTML id 不能成为真实锚点。
     $text =~ s/(?<!`)(`+)(?!`)(.*?)\1(?!`)/blank($&)/gse;
     $text =~ s{<code\b[^>]*>.*?</code>}{blank($&)}gise;
-    while ($text =~ /<(?:a|h[1-6])\b[^>]*\b(?:id|name)\s*=\s*(["'])(.*?)\1[^>]*>/gis) {
-        $anchors{entities($2)} = 1;
+    while ($text =~ /<(?:a|h[1-6])\b[^>]*\b(?:id|name)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))[^>]*>/gis) {
+        my $anchor = defined $1 ? $1 : defined $2 ? $2 : $3;
+        $anchors{entities($anchor)} = 1;
     }
     my %references;
-    $text =~ s{^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:<([^>\n]+)>|(\S+))[^\n]*}{
+    $text =~ s{(?m:^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:<([^>\n]+)>|(\S+))[^\n]*)}{
         my ($label, $target) = ($1, defined $2 ? $2 : $3);
         my $key = reference_key($label);
         $references{$key} //= $target;
@@ -195,15 +196,29 @@ sub check_link {
 sub check_table_continuation {
     my ($file, $text) = @_;
     my @lines = split /\n/, $text, -1;
-    for my $index (1 .. $#lines) {
-        next unless $lines[$index - 1] =~ /^ {0,3}\|/;
-        my $line = $lines[$index];
-        next if $line !~ /\S/
-            || $line =~ /^ {0,3}(?:[|>]|<|\#{1,6}(?:[ \t]|$)|[-+*][ \t]|[0-9]{1,9}[.)][ \t])/
-            || $line =~ /^ {0,3}(?:([-*_])[ \t]*)(?:\1[ \t]*){2,}$/;
-        printf STDERR "%s:%d: 表格行之后紧跟非表格文本，会被渲染进表格；表格后须空一行\n",
-            $file, $index + 1;
-        $failures++;
+    my $cells = sub {
+        my ($line) = @_;
+        $line =~ s/^\s*\|//;
+        $line =~ s/\|\s*$//;
+        return split /\|/, $line;
+    };
+    my $is_table_row = sub { scalar($cells->($_[0])) >= 2 };
+    my $is_delimiter = sub {
+        return 0 unless $is_table_row->($_[0]);
+        return !grep { $_ !~ /^\s*:?-{3,}:?\s*$/ } $cells->($_[0]);
+    };
+    for (my $index = 2; $index < @lines; $index++) {
+        next unless $is_table_row->($lines[$index - 2]) && $is_delimiter->($lines[$index - 1]);
+        for (my $row = $index; $row < @lines; $row++) {
+            my $line = $lines[$row];
+            last if $line !~ /\S/;
+            last if $line =~ /^ {0,3}(?:>|<|\#{1,6}(?:[ \t]|$)|[-+*][ \t]|[0-9]{1,9}[.)][ \t])/;
+            next if $is_table_row->($line);
+            printf STDERR "%s:%d: 表格行之后紧跟非表格文本，会被渲染进表格；表格后须空一行\n",
+                $file, $row + 1;
+            $failures++;
+            last;
+        }
     }
 }
 

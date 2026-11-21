@@ -89,17 +89,18 @@ impl DatabaseStore {
                 .await
                 .map_err(|source| query_error("schema_marker", source))?;
         let schema_identity = if schema_identity_present {
-            let identity = crate::database::migrations::read_schema_identity(&mut *transaction)
-                .await
-                .map_err(|source| query_error("schema_identity", source))?
-                .ok_or(RecoveryPreflightError::SchemaIdentityInvalid)?;
+            let identity =
+                crate::database::migrations::evidence::read_schema_identity(&mut *transaction)
+                    .await
+                    .map_err(|source| query_error("schema_identity", source))?
+                    .ok_or(RecoveryPreflightError::SchemaIdentityInvalid)?;
             Some(identity)
         } else {
             None
         };
 
         let migration_history_present =
-            crate::database::migrations::postgres_history_present(&mut *transaction)
+            crate::database::migrations::evidence::postgres_history_present(&mut *transaction)
                 .await
                 .map_err(|source| query_error("migration_marker", source))?;
         let migration = if migration_history_present {

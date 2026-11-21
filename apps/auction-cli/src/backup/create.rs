@@ -62,26 +62,68 @@ pub(crate) async fn create_backup(
             );
             progress(format_args!("pg_dump {database}（schema {before}）"));
             environment.dump(&temporary).await?;
-            libpq::list_archive(&temporary).await?;
+            let archive = files::open_regular(&temporary)?;
+            libpq::list_archive(&archive).await?;
             let after = schema_version(store, database).await?;
             if after != before {
                 anyhow::bail!("备份期间 schema 版本从 {before} 变为 {after}，archive 已丢弃");
             }
-            files::open_regular(&temporary)?.sync_all().context("同步 archive 失败")?;
-            // 硬链接发布不会覆盖同名文件；作用域退出时仅回收本次临时名。
-            std::fs::hard_link(temporary.as_path(), output)
-                .with_context(|| format!("发布 archive 失败：{}", output.display()))?;
-            drop(temporary);
-            files::sync_parent(output)?;
+            archive.sync_all().context("同步 archive 失败")?;
             let manifest = BackupManifest {
                 format: FORMAT.to_owned(),
                 archive_file_name: archive_name.to_owned(),
                 database_name_sha256: sha256_bytes(database.as_bytes()),
-                archive_sha256: sha256_file(output).await?,
+                archive_sha256: sha256_file(&temporary).await?,
                 schema_version: before,
                 created_at: Timestamp::now(),
             };
-            files::write_private(&manifest_path, &serde_json::to_vec_pretty(&manifest)?)?;
+            let manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
+            let staged_manifest = manifest_path.with_file_name(format!(
+                ".{}.{}.partial",
+                archive_name,
+                uuid::Uuid::new_v4()
+            ));
+            let staged_manifest_guard = DropGuard::new(staged_manifest.clone(), |path| {
+                let _ = std::fs::remove_file(path);
+            });
+            files::write_private(&staged_manifest, &manifest_bytes)?;
+            // 两个最终名称都使用硬链接无覆盖发布；任一后续错误都会回收未配对 archive。
+            let mut archive_published = false;
+            let mut manifest_published = false;
+            let publish_result = (|| -> anyhow::Result<()> {
+                std::fs::hard_link(temporary.as_path(), output)
+                    .with_context(|| format!("发布 archive 失败：{}", output.display()))?;
+                archive_published = true;
+                std::fs::hard_link(&staged_manifest, &manifest_path).with_context(|| {
+                    format!("发布 archive manifest 失败：{}", manifest_path.display())
+                })?;
+                manifest_published = true;
+                files::sync_parent(output)?;
+                Ok(())
+            })();
+            if let Err(error) = publish_result {
+                let cleanup = (|| -> anyhow::Result<()> {
+                    if manifest_published {
+                        std::fs::remove_file(&manifest_path)
+                            .context("清理未配对的 archive manifest 失败")?;
+                    }
+                    if archive_published {
+                        std::fs::remove_file(output).context("清理未配对的 archive 失败")?;
+                    }
+                    if archive_published || manifest_published {
+                        files::sync_parent(output).context("同步未配对备份清理失败")?;
+                    }
+                    Ok(())
+                })();
+                return Err(match cleanup {
+                    Ok(()) => error,
+                    Err(cleanup_error) => {
+                        error.context(format!("另有发布文件清理失败：{cleanup_error:#}"))
+                    }
+                });
+            }
+            drop(staged_manifest_guard);
+            drop(temporary);
             Ok(manifest)
         },
     )

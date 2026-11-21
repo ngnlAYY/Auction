@@ -9,7 +9,7 @@ use auction_time::{TimeDelta, Timestamp};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::support::files;
+use crate::support::{digest::is_lower_hex, files};
 
 const MAX_RECEIPT_BYTES: u64 = 4 * 1024 * 1024;
 /// 删除文件前演练回执至少还剩的有效期（秒）。文件删除之后数据库执行会再校验一次回执新鲜度，
@@ -58,6 +58,7 @@ pub(super) struct DryRunTable {
 pub(super) struct FilesystemRetention {
     pub(super) dataset_family: String,
     pub(super) candidate_files: u64,
+    pub(super) root_identity_sha256: String,
     pub(super) candidate_bytes: u64,
 }
 
@@ -102,8 +103,8 @@ pub(super) fn validate_receipt(
     now: Timestamp,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(
-        receipt.format == "auction-retention-dry-run-receipt.v1",
-        "只读演练回执格式不支持"
+        receipt.format == "auction-retention-dry-run-receipt.v2",
+        "只读演练回执格式不受支持"
     );
     let database_retention = &receipt.database_retention;
     anyhow::ensure!(
@@ -121,6 +122,10 @@ pub(super) fn validate_receipt(
         database_retention.policy_version == policy_version
             && database_retention.policy_sha256 == policy_sha256,
         "只读演练回执的政策身份与编译制品不一致；先重新演练"
+    );
+    anyhow::ensure!(
+        is_lower_hex(&receipt.filesystem_retention.root_identity_sha256, 64),
+        "只读演练回执缺少有效的文件系统根身份摘要"
     );
     anyhow::ensure!(
         database_retention.transaction_read_only == "on"

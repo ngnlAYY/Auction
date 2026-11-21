@@ -147,8 +147,8 @@ const WRITE_SESSION_BODY = {
   message: "",
   data: {
     authenticated: true,
-    actor: "fixture",
-    csrf_token: "csrf-fixture",
+    actor: TEST_SESSION.actor,
+    csrf_token: TEST_SESSION.csrfToken,
     expires_at: "2026-11-19T01:00:00Z",
     absolute_expires_at: "2026-11-20T00:00:00Z",
     server_time: "2026-11-19T00:00:00Z",
@@ -211,7 +211,8 @@ export function valueAt(root: unknown, path: string): unknown {
   let current = root;
   for (const key of pathParts(path)) {
     if (Array.isArray(current)) {
-      current = current[Number(key)];
+      const index = arrayIndex(key, current.length);
+      current = index === null ? undefined : current[index];
     } else if (typeof current === "object" && current !== null) {
       current = (current as Record<string, unknown>)[key];
     } else {
@@ -233,9 +234,13 @@ export function setAt(root: unknown, path: string, value: unknown): void {
   if (key === undefined) {
     throw new Error("缺少字段路径");
   }
-  const parent = valueAt(root, `/${parts.join("/")}`);
+  const parent = valueAt(root, pointerPath(parts));
   if (Array.isArray(parent)) {
-    parent[Number(key)] = value;
+    const index = arrayIndex(key, parent.length);
+    if (index === null) {
+      throw new Error(`数组字段路径无效 ${path}`);
+    }
+    parent[index] = value;
   } else if (typeof parent === "object" && parent !== null) {
     (parent as Record<string, unknown>)[key] = value;
   } else {
@@ -250,7 +255,7 @@ export function removeAt(root: unknown, path: string): unknown {
   if (key === undefined) {
     throw new Error("缺少字段路径");
   }
-  const parent = jsonObject(valueAt(root, `/${parts.join("/")}`), path);
+  const parent = jsonObject(valueAt(root, pointerPath(parts)), path);
   if (!Object.hasOwn(parent, key)) {
     throw new Error(`字段不存在 ${path}`);
   }
@@ -259,12 +264,44 @@ export function removeAt(root: unknown, path: string): unknown {
   return removed;
 }
 
+function arrayIndex(key: string, length: number): number | null {
+  if (!/^(?:0|[1-9][0-9]*)$/u.test(key)) {
+    return null;
+  }
+  const index = Number(key);
+  return Number.isSafeInteger(index) && index < length ? index : null;
+}
+
 function pathParts(path: string): string[] {
-  return path.split("/").filter((part) => part !== "");
+  if (path === "") {
+    return [];
+  }
+  if (!path.startsWith("/")) {
+    throw new Error("字段路径无效");
+  }
+  return path
+    .slice(1)
+    .split("/")
+    .map((part) => {
+      if (/~(?:[^01]|$)/u.test(part)) {
+        throw new Error("字段路径转义无效");
+      }
+      return part.replace(/~1/gu, "/").replace(/~0/gu, "~");
+    });
+}
+
+function pointerPath(parts: readonly string[]): string {
+  return parts.length === 0
+    ? ""
+    : `/${parts.map((part) => part.replace(/~/gu, "~0").replace(/\//gu, "~1")).join("/")}`;
 }
 
 /** 把测试里构造的普通 JSON 值收窄为接口参数类型；每一项都经过运行期判定。 */
 export function asAdminJsonValue(value: unknown): AdminJsonValue {
+  return convertAdminJsonValue(value, new Set());
+}
+
+function convertAdminJsonValue(value: unknown, ancestors: Set<object>): AdminJsonValue {
   if (value === null || typeof value === "string" || typeof value === "boolean") {
     return value;
   }
@@ -274,15 +311,29 @@ export function asAdminJsonValue(value: unknown): AdminJsonValue {
     }
     return value;
   }
-  if (Array.isArray(value)) {
-    return value.map(asAdminJsonValue);
+  if (typeof value !== "object") {
+    throw new Error("JSON 值类型无效");
   }
-  const object = jsonObject(value, "JSON 值");
-  const result: Record<string, AdminJsonValue> = {};
-  for (const [key, item] of Object.entries(object)) {
-    result[key] = asAdminJsonValue(item);
+  if (ancestors.has(value)) {
+    throw new Error("JSON 值不能包含循环引用");
   }
-  return result;
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return value.map((item) => convertAdminJsonValue(item, ancestors));
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new Error("JSON 对象必须是普通记录");
+    }
+    const result: Record<string, AdminJsonValue> = Object.create(null);
+    for (const [key, item] of Object.entries(value)) {
+      result[key] = convertAdminJsonValue(item, ancestors);
+    }
+    return result;
+  } finally {
+    ancestors.delete(value);
+  }
 }
 
 /** 让真实写入发送器处理内存回执，保留原始状态、正文及端点证据。 */

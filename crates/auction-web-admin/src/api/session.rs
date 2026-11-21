@@ -125,7 +125,7 @@ impl AdminSession {
 
     /// 上报一次人工操作。写守卫核对 Cookie 与本宿主的 CSRF，避免替别的登录身份续期。
     pub(crate) async fn renew(&self) -> Result<Self, AdminSessionRenewalFailure> {
-        let client_failure = |code| AdminSessionRenewalFailure {
+        let client_failure = |code: String| AdminSessionRenewalFailure {
             failure: AdminApiFailure::client(code),
             retry_after_millis: None,
         };
@@ -147,7 +147,11 @@ impl AdminSession {
             let failure = read_response_failure(&response).await;
             return Err(AdminSessionRenewalFailure { failure, retry_after_millis });
         }
-        decode_session_response(response).await.map_err(client_failure)
+        let renewed = decode_session_response(response).await.map_err(client_failure)?;
+        if renewed.actor != self.actor {
+            return Err(client_failure("invalid_response".to_owned()));
+        }
+        Ok(renewed)
     }
 }
 
@@ -191,12 +195,18 @@ fn decode_admin_session(body: &str) -> Result<AdminSession, String> {
         return Err("invalid_response".to_owned());
     };
     let parse = |value: &str| Timestamp::parse_from_rfc3339(value).map_err(invalid_response_error);
+    let expires_at = parse(&data.expires_at)?;
+    let absolute_expires_at = parse(&data.absolute_expires_at)?;
+    let server_time = parse(server_time)?;
+    if expires_at <= server_time || expires_at > absolute_expires_at {
+        return Err("invalid_response".to_owned());
+    }
     Ok(AdminSession {
         actor: data.actor,
         csrf_token: data.csrf_token,
-        expires_at: parse(&data.expires_at)?,
-        absolute_expires_at: parse(&data.absolute_expires_at)?,
-        server_time: parse(server_time)?,
+        expires_at,
+        absolute_expires_at,
+        server_time,
         received_at_millis: monotonic_millis(),
     })
 }

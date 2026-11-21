@@ -166,7 +166,7 @@ mod tests {
 
     use super::page;
     use crate::api::fetch_player_support;
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         assert_field, has_live_text, mount_writer, settle_writer, writer_form,
     };
     use crate::surface::query::SupportQuery;

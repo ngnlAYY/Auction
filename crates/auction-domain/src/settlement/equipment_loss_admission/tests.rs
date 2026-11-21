@@ -101,6 +101,7 @@ fn admission() -> EquipmentLossAdmission {
         payment: obligation(1, "winner_equipment_cod", "ready", 5000, None),
         payment_fulfillment: {
             let mut fulfillment = fulfillment("manual_reconcile");
+            fulfillment.state_version = 5;
             fulfillment.delivery_id = Some(uuid(30));
             fulfillment.prepare_command_id = Some(uuid(31));
             fulfillment.activate_command_id = Some(uuid(32));
@@ -218,6 +219,36 @@ fn every_guard_rejects_independently() {
                     let mut fulfillment = fulfillment("pending");
                     fulfillment.claim_token = Some("claim".to_owned());
                     fulfillment
+                },
+                ..admission()
+            },
+            EquipmentLossBlocker::FulfillmentAlreadyActedOrClaimed,
+        ),
+        (
+            EquipmentLossAdmission {
+                payment_fulfillment: EquipmentLossFulfillment {
+                    state_version: 0,
+                    ..admission().payment_fulfillment
+                },
+                ..admission()
+            },
+            EquipmentLossBlocker::FulfillmentAlreadyActedOrClaimed,
+        ),
+        (
+            EquipmentLossAdmission {
+                seller_fulfillment: EquipmentLossFulfillment {
+                    state_version: 2,
+                    ..fulfillment("pending")
+                },
+                ..admission()
+            },
+            EquipmentLossBlocker::FulfillmentAlreadyActedOrClaimed,
+        ),
+        (
+            EquipmentLossAdmission {
+                refund_fulfillment: EquipmentLossFulfillment {
+                    state_version: 2,
+                    ..fulfillment("pending")
                 },
                 ..admission()
             },

@@ -353,16 +353,23 @@ function optionalString(value: unknown): string | null {
 
 function decodeIntakeResult(value: AdminIntakeResult): Result<AdminIntakeResult, string> {
   if (
+    !Number.isSafeInteger(value.auction_sequence) ||
     !(value.auction_sequence >= 1 && value.auction_sequence <= MAX_JSON_SAFE_INTEGER) ||
+    !Number.isSafeInteger(value.auction_state_version) ||
     !(value.auction_state_version >= 1 && value.auction_state_version <= MAX_JSON_SAFE_INTEGER) ||
     !validTrimmedText(value.equipment_category) ||
+    (value.equipment_level !== null && !Number.isSafeInteger(value.equipment_level)) ||
     (value.equipment_level !== null && value.equipment_level < 0) ||
     !validTrimmedText(value.equipment_name) ||
     !validTrimmedText(value.external_equipment_id) ||
+    !Number.isSafeInteger(value.lot_number) ||
     value.lot_number <= 0 ||
+    !Number.isSafeInteger(value.lot_state_version) ||
     !(value.lot_state_version >= 1 && value.lot_state_version <= MAX_JSON_SAFE_INTEGER) ||
+    !Number.isSafeInteger(value.preview_revision) ||
     !(value.preview_revision >= 0 && value.preview_revision <= MAX_JSON_SAFE_INTEGER) ||
     !validTrimmedText(value.seller_player_id) ||
+    !Number.isSafeInteger(value.start_price) ||
     !(value.start_price >= 1 && value.start_price <= MAX_JSON_SAFE_INTEGER)
   ) {
     return err("intake_result");

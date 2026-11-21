@@ -5,9 +5,10 @@ use super::super::model::{
     OperationsAlertCredentialSnapshot, OperationsAlertForumSnapshot, OperationsAlertMailSnapshot,
     OperationsAlertNotificationSnapshot, OperationsAlertSourceObservation,
 };
+use super::super::signals::thresholds::reached;
 use super::super::signals::{
     OPERATIONS_ALERT_MAIL_POLL_STALL_AGE, OperationsAlertKind, OperationsAlertSignal,
-    OperationsAlertSource, reached,
+    OperationsAlertSource,
 };
 
 pub(super) fn evaluate_mail(

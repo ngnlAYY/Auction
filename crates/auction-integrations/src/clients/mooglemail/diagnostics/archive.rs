@@ -79,11 +79,13 @@ impl MoogleMailDiagnosticArchive {
         let context_wire = payload::context(&context)?;
         let id = Uuid::new_v4();
         let digest = auction_application::core::lower_hex(&Sha256::digest(&body.0));
+        let key_id = self.keys.current_id().to_owned();
+        let key = self.keys.resolve(&key_id).ok().ok_or(MailDiagnosticError::Authentication)?;
         let header = payload::PublicHeader {
             version: payload::FORMAT_VERSION,
             evidence_id: id,
             key_source: self.config.key_source.clone(),
-            key_id: self.keys.current_id().to_owned(),
+            key_id: key_id.clone(),
             context: context_wire,
             outcome: payload::OutcomeWire { failure_code: "prepared".into(), decision_code: None },
             payload_kind: kind.into(),
@@ -94,7 +96,8 @@ impl MoogleMailDiagnosticArchive {
         };
         payload::validate_header(&header, id)?;
         let aad = authenticated_header(&header)?;
-        let encrypted = crypto::seal(self.keys.current(), &self.config.key_source, &aad, &body.0)?;
+        let encrypted = crypto::seal(key, &self.config.key_source, &aad, &body.0)?;
+        let encrypted = pack_prepared_ciphertext(&key_id, &encrypted)?;
         let prepared = PreparedMailEvidence::new(id, context, encrypted, body.0.len(), digest);
         Ok(if kind == "raw_response" {
             prepared.with_response_metadata(status, available)
@@ -108,11 +111,13 @@ impl MoogleMailDiagnosticArchive {
         prepared: PreparedMailEvidence,
         outcome: MailDiagnosticOutcome,
     ) -> Result<MailDiagnosticReceipt, MailDiagnosticError> {
+        let (key_id, prepared_ciphertext) = unpack_prepared_ciphertext(prepared.ciphertext())?;
+        let key = self.keys.resolve(key_id).ok().ok_or(MailDiagnosticError::Authentication)?;
         let header = payload::PublicHeader {
             version: payload::FORMAT_VERSION,
             evidence_id: prepared.evidence_id(),
             key_source: self.config.key_source.clone(),
-            key_id: self.keys.current_id().to_owned(),
+            key_id: key_id.to_owned(),
             context: payload::context(prepared.context())?,
             outcome: payload::OutcomeWire { failure_code: "prepared".into(), decision_code: None },
             payload_kind: prepared.payload_kind().to_owned(),
@@ -123,15 +128,22 @@ impl MoogleMailDiagnosticArchive {
         };
         payload::validate_header(&header, prepared.evidence_id())?;
         let body = crypto::open(
-            self.keys.current(),
+            key,
             &self.config.key_source,
             &authenticated_header(&header)?,
-            prepared.ciphertext(),
+            prepared_ciphertext,
         )?;
         verify_payload(&header, &body.0)?;
-        let final_header = payload::PublicHeader { outcome: payload::outcome(&outcome)?, ..header };
+        let active_key_id = self.keys.current_id().to_owned();
+        let active_key =
+            self.keys.resolve(&active_key_id).ok().ok_or(MailDiagnosticError::Authentication)?;
+        let final_header = payload::PublicHeader {
+            key_id: active_key_id,
+            outcome: payload::outcome(&outcome)?,
+            ..header
+        };
         let ciphertext = crypto::seal(
-            self.keys.current(),
+            active_key,
             &self.config.key_source,
             &authenticated_header(&final_header)?,
             &body.0,
@@ -250,6 +262,46 @@ pub fn export_mooglemail_diagnostic(
         }),
     )?);
     filesystem::write_private_export(&output, &bytes.0)
+}
+
+fn pack_prepared_ciphertext(
+    key_id: &str,
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, MailDiagnosticError> {
+    let key_length =
+        u32::try_from(key_id.len()).map_err(|_| MailDiagnosticError::Authentication)?;
+    let capacity = 4_usize
+        .checked_add(key_id.len())
+        .and_then(|length| length.checked_add(ciphertext.len()))
+        .ok_or(MailDiagnosticError::Authentication)?;
+    let mut packed = Vec::with_capacity(capacity);
+    packed.extend_from_slice(&key_length.to_be_bytes());
+    packed.extend_from_slice(key_id.as_bytes());
+    packed.extend_from_slice(ciphertext);
+    Ok(packed)
+}
+
+fn unpack_prepared_ciphertext(value: &[u8]) -> Result<(&str, &[u8]), MailDiagnosticError> {
+    let length_bytes: [u8; 4] = value
+        .get(..4)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or(MailDiagnosticError::Authentication)?;
+    let key_length = usize::try_from(u32::from_be_bytes(length_bytes))
+        .map_err(|_| MailDiagnosticError::Authentication)?;
+    let ciphertext_start =
+        4_usize.checked_add(key_length).ok_or(MailDiagnosticError::Authentication)?;
+    let key_id = std::str::from_utf8(
+        value.get(4..ciphertext_start).ok_or(MailDiagnosticError::Authentication)?,
+    )
+    .map_err(|_| MailDiagnosticError::Authentication)?;
+    let ciphertext = value
+        .get(ciphertext_start..)
+        .filter(|ciphertext| !ciphertext.is_empty())
+        .ok_or(MailDiagnosticError::Authentication)?;
+    if key_id.is_empty() {
+        return Err(MailDiagnosticError::Authentication);
+    }
+    Ok((key_id, ciphertext))
 }
 
 fn authenticated_header(header: &payload::PublicHeader) -> Result<Vec<u8>, MailDiagnosticError> {

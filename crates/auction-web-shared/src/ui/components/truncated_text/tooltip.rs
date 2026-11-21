@@ -4,8 +4,12 @@
 use std::cell::Cell;
 
 use dioxus::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use web_sys::{Element, HtmlElement as PortalElement};
 
-use super::document::{self, Element, PortalElement};
+use super::document::{self};
+#[cfg(not(target_arch = "wasm32"))]
+use super::host_document::{DomElement as Element, DomPortal as PortalElement};
 use super::interaction::TooltipInteraction;
 #[cfg(any(target_arch = "wasm32", test))]
 use super::tracking::AnchorFrames;

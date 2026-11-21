@@ -1,20 +1,12 @@
 //! Worker 配置校验的模块装配；边界校验在子目录按 owner 持有，此处只重新导出 `pub(super)` 函数。
 
-mod auction;
-mod control;
-mod delivery;
-mod forum;
-mod fulfillment;
-mod mooglemail;
-mod operations;
-mod recovery;
+pub(super) mod auction;
+pub(super) mod control;
+pub(super) mod delivery;
+pub(super) mod forum;
+pub(super) mod fulfillment;
+pub(super) mod mooglemail;
+pub(super) mod operations;
+pub(super) mod recovery;
 
-pub(super) use auction::validate_auction_worker;
-pub(super) use control::validate_worker_control;
-pub(super) use delivery::validate_delivery_worker;
-pub(super) use forum::{parse_public_base_url, validate_forum_worker};
-pub(super) use fulfillment::validate_fulfillment_worker;
 pub(crate) use mooglemail::sender_allowlist_has_case_duplicates;
-pub(super) use mooglemail::validate_mooglemail_worker;
-pub(super) use operations::validate_operations_alert_worker;
-pub(super) use recovery::validate_recovery_worker;

@@ -8,8 +8,8 @@ use std::{path::Path, time::Duration};
 use tokio::time::timeout;
 
 use super::model::{
-    BASE_RETENTION_KEEP, WAL_UPLOAD_FORMAT, WalUploadReceipt, require_staging_dir, retention_plan,
-    staged,
+    BASE_RETENTION_KEEP, LEGACY_WAL_UPLOAD_FORMAT, WAL_UPLOAD_FORMAT, WalUploadReceipt,
+    require_staging_dir, retention_plan, staged,
 };
 use crate::{
     app::{print_json, progress},
@@ -95,10 +95,15 @@ pub(super) async fn run(
                     // 重启后重试同一段时会因本地证据消失而重新加密，随机 age 密文与远端对象
                     // 摘要不一致，导致永久失败。
                     let receipt = WalUploadReceipt {
-                        format: WAL_UPLOAD_FORMAT.to_owned(),
+                        format: if item.record.source_sha256.is_some() {
+                            WAL_UPLOAD_FORMAT.to_owned()
+                        } else {
+                            LEGACY_WAL_UPLOAD_FORMAT.to_owned()
+                        },
                         segment_name: item.segment_name.clone(),
                         source_bytes: item.record.source_bytes,
                         source_mtime_ns: item.record.source_mtime_ns,
+                        source_sha256: item.record.source_sha256.clone(),
                         cipher_bytes: object.bytes,
                         cipher_sha256: object.sha256.clone(),
                         remote_key: object.key.clone(),

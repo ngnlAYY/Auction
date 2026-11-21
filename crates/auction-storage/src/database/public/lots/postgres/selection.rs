@@ -57,9 +57,8 @@ pub(super) async fn select_filtered_page(
     colors: &[EquipmentColorRule],
 ) -> Result<FilteredPageSelection, ApplicationError> {
     let selected_categories = request.category_selection.as_slice();
-    let multi_category_names = (selected_categories.len() > 1).then(|| {
-        selected_categories.iter().map(|category| category.as_str().to_owned()).collect::<Vec<_>>()
-    });
+    let multi_category_names = (selected_categories.len() > 1)
+        .then(|| selected_categories.iter().map(|category| category.as_str()).collect::<Vec<_>>());
     // 分组与等级规则留在应用层，统计仍须覆盖全部分类。多分类与单分类一样在同一个只读快照
     // 事务内完成；查询次数不随所选分类数量增加，也不按分类多次查询后在内存里合并分页。
     let mut rows = match multi_category_names.as_deref() {

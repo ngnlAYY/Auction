@@ -69,6 +69,8 @@ pub(crate) async fn claim_postgres(
             "retry_exhausted",
         )
         .await?;
+        super::super::delivery::restore_resolution_notifications(&mut transaction, batch_id)
+            .await?;
     }
 
     let orphan_rows = sqlx::query(
@@ -176,6 +178,12 @@ pub(crate) async fn claim_postgres(
 
     let mut resolved_rows = Vec::new();
     if urgent_rows.is_empty() {
+        // Different due digest signals can be locked by different workers; serialize the shared
+        // 24-hour check/create window before reading its current state.
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('operations-alert-digest', 0))")
+            .execute(&mut *transaction)
+            .await
+            .map_err(|error| storage_error_from(error, "锁定 operations alert 摘要窗口失败"))?;
         // 摘要窗口：最近 24 小时内已有摘要批次入队/成功时，本轮不再生成第二封摘要。
         let digest_due = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS (

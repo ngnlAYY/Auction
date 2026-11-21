@@ -4,13 +4,17 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::assert_matches;
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
+use auction_application::external_metrics::{
+    ExternalMetricsEvent, ExternalMetricsObserver, MailOperation, WaitOutcome,
+};
 use auction_integrations::mooglemail::{
     MoogleMailClient, MoogleMailClientConfig, MoogleMailCookie, MoogleMailErrorCategory,
     MoogleMailForm, MoogleMailMessageFields, MoogleMailParser, MoogleMailTarget, MoogleMailWorld,
 };
 use auction_test_support::mooglemail::{Fault, MailDouble};
+use tokio::sync::Notify;
 
 fn client(server: &MailDouble) -> MoogleMailClient {
     client_with_timeout(server, Duration::from_millis(200))
@@ -25,6 +29,32 @@ fn client_with_timeout(server: &MailDouble, request_timeout: Duration) -> Moogle
     })
     .expect("loopback client")
 }
+#[derive(Default)]
+struct ReadGateObserver(Notify);
+
+impl ExternalMetricsObserver for ReadGateObserver {
+    fn observe(&self, event: ExternalMetricsEvent) {
+        if matches!(
+            event,
+            ExternalMetricsEvent::MailGateWait {
+                operation: MailOperation::ReadMail,
+                outcome: WaitOutcome::Acquired,
+                ..
+            }
+        ) {
+            self.0.notify_one();
+        }
+    }
+}
+
+impl ReadGateObserver {
+    async fn wait_for_read_gate(&self) {
+        tokio::time::timeout(Duration::from_secs(5), self.0.notified())
+            .await
+            .expect("background read acquired the request gate");
+    }
+}
+
 fn cookie() -> MoogleMailCookie {
     MoogleMailCookie::new("ipb_member_id=fixture; ipb_pass_hash=fixture").expect("fixture cookie")
 }
@@ -548,7 +578,9 @@ async fn too_many_requests_with_state_lock_body_counts_one_rate_limit_signal() {
 #[tokio::test]
 async fn queued_foreground_write_overtakes_queued_background_read() {
     let server = MailDouble::start().await.unwrap();
-    let client = client_with_timeout(&server, Duration::from_secs(5));
+    let signals = Arc::new(ReadGateObserver::default());
+    let client =
+        client_with_timeout(&server, Duration::from_secs(5)).with_external_metrics(signals.clone());
     let cookie = cookie();
     let world = MoogleMailWorld::Main;
     let (compose, form) = send_form(&client, &cookie, world).await;
@@ -567,8 +599,8 @@ async fn queued_foreground_write_overtakes_queued_background_read() {
         },
         async {
             wait_for_requests(&server, 2).await;
-            // 等后台读取先在在途锁上排队，再发起前台写入。
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            // 请求门事件在背景读取登记于在途锁之前同步发出；收到后该 future 已排队。
+            signals.wait_for_read_gate().await;
             client.post(&compose, &cookie, form).await
         },
     );

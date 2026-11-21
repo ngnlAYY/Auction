@@ -150,8 +150,21 @@ pub(super) fn valid_attempt(value: &auction_contracts::AdminDeliveryAttemptRespo
                 && value.subject.is_some()
                 && value.credits.is_some()
                 && value.cod.is_some()
+                && value.body_digest.is_some()
+                && value.external_mail_id.is_none()
+                && value.bound_sent_mail_id.is_none()
         }
-        _ => value.external_mail_id.is_some(),
+        "take" => {
+            value.external_mail_id.is_some()
+                && value.recipient.is_none()
+                && value.subject.is_none()
+                && value.body_digest.is_none()
+                && value.credits.is_none()
+                && value.cod.is_none()
+                && value.equipment_ids.is_empty()
+                && value.bound_sent_mail_id.is_none()
+        }
+        _ => false,
     }
 }
 

@@ -1,10 +1,10 @@
 use std::{
     fs,
-    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink},
     path::{Path, PathBuf},
 };
 
-use super::{CHECKSUMS, inspect};
+use super::{CHECKSUMS, inspect, read_member};
 use crate::support::digest::sha256_bytes;
 
 struct TempRoot(PathBuf);
@@ -107,7 +107,6 @@ fn package() -> TempRoot {
         sums.push_str(&format!("{}  {relative}\n", sha256_bytes(bytes)));
     }
     sums.push_str(&format!("{}  RELEASE-MANIFEST.v1\n", sha256_bytes(manifest.as_bytes())));
-    sums.push_str(&format!("{}  {CHECKSUMS}\n", "0".repeat(64)));
     root.write(CHECKSUMS, sums.as_bytes(), 0o644);
     root
 }
@@ -123,6 +122,36 @@ fn valid_release_package_passes() {
 }
 
 #[test]
+fn candidate_package_is_rejected() {
+    let root = package();
+    let manifest_path = root.path().join("RELEASE-MANIFEST.v1");
+    let manifest = fs::read_to_string(manifest_path).expect("读取发布清单");
+    let candidate = manifest.replace(
+        "package=auction-rust-0.1.0-aaaaaaaaaaaa\n",
+        "package=auction-rust-0.1.0-aaaaaaaaaaaa-candidate\n",
+    );
+    assert_ne!(candidate, manifest);
+    root.write("RELEASE-MANIFEST.v1", candidate.as_bytes(), 0o644);
+    assert!(inspect(root.path()).is_err());
+}
+
+#[test]
+fn solid_web_profile_is_rejected() {
+    let root = package();
+    let profile_path = root.path().join("docs/WEB-ADMIN-MANIFEST.v1");
+    let manifest = fs::read_to_string(profile_path).expect("读取 Admin 页面标记");
+    let solid = manifest.replace("profile=wasm-release", "profile=solid-release");
+    assert_ne!(solid, manifest);
+    root.write("docs/WEB-ADMIN-MANIFEST.v1", solid.as_bytes(), 0o644);
+    let mut sums = String::new();
+    for (relative, bytes, _) in members(root.path()) {
+        sums.push_str(&format!("{}  {relative}\n", sha256_bytes(&bytes)));
+    }
+    root.write(CHECKSUMS, sums.as_bytes(), 0o644);
+    assert!(inspect(root.path()).is_err());
+}
+
+#[test]
 fn mutated_binary_or_missing_file_is_rejected() {
     let root = package();
     root.write("bin/auction-cli", b"tampered", 0o755);
@@ -134,6 +163,27 @@ fn mutated_binary_or_missing_file_is_rejected() {
 
     let root = package();
     root.write("docs/extra.md", b"extra", 0o644);
+    assert!(inspect(root.path()).is_err());
+}
+
+#[test]
+fn excessive_artifact_directory_depth_is_rejected() {
+    let root = package();
+    let mut directory = root.path().to_path_buf();
+    for _ in 0..=super::MAX_DIRECTORY_DEPTH {
+        directory.push("nested");
+        fs::create_dir(&directory).expect("建立嵌套制品目录");
+    }
+    assert!(inspect(root.path()).is_err());
+}
+
+#[test]
+fn excessive_artifact_directory_count_is_rejected() {
+    let root = package();
+    for index in 0..super::MAX_DIRECTORIES {
+        let path = root.path().join(format!("nested-{index:04}"));
+        fs::create_dir(path).expect("建立制品目录");
+    }
     assert!(inspect(root.path()).is_err());
 }
 
@@ -154,8 +204,16 @@ fn manifest_and_payload_inconsistencies_are_rejected() {
     for (relative, bytes, _) in members(root.path()) {
         sums.push_str(&format!("{}  {relative}\n", sha256_bytes(&bytes)));
     }
-    sums.push_str(&format!("{}  {CHECKSUMS}\n", "0".repeat(64)));
     root.write(CHECKSUMS, sums.as_bytes(), 0o644);
+    assert!(inspect(root.path()).is_err());
+}
+
+#[test]
+fn checksum_self_entry_is_rejected() {
+    let root = package();
+    let checksums = fs::read_to_string(root.path().join(CHECKSUMS)).expect("读取 SHA256SUMS");
+    let updated = format!("{checksums}{}  {CHECKSUMS}\n", "0".repeat(64));
+    root.write(CHECKSUMS, updated.as_bytes(), 0o644);
     assert!(inspect(root.path()).is_err());
 }
 
@@ -196,7 +254,6 @@ fn package_name_and_modes_are_enforced() {
     for (relative, bytes, _) in members(root.path()) {
         sums.push_str(&format!("{}  {relative}\n", sha256_bytes(&bytes)));
     }
-    sums.push_str(&format!("{}  {CHECKSUMS}\n", "0".repeat(64)));
     root.write(CHECKSUMS, sums.as_bytes(), 0o644);
     assert!(inspect(root.path()).is_err());
 }
@@ -207,4 +264,11 @@ fn symlinks_are_rejected() {
     std::os::unix::fs::symlink("/etc/hostname", root.path().join("docs/link"))
         .expect("建立符号链接");
     assert!(inspect(root.path()).is_err());
+}
+
+#[test]
+fn read_member_rejects_a_symlink_at_open_time() {
+    let root = package();
+    symlink("WEB-PUBLIC-SHA256", root.path().join("docs/link")).expect("建立符号链接");
+    assert!(read_member(root.path(), "docs/link").is_err());
 }

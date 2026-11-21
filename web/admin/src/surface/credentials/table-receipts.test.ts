@@ -81,12 +81,7 @@ async function withCredentials(
   const { host, release } = registerAdminSessionHost({
     check() {},
     writesAllowed: () => true,
-    confirmed: () => ({
-      ...TEST_SESSION,
-      actor: "fixture",
-      csrfToken: "csrf-fixture",
-      csrf_token: "csrf-fixture",
-    }),
+    confirmed: () => TEST_SESSION,
   });
   try {
     harness.installBrowserRequest();

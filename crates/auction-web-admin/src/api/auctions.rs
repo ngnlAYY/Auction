@@ -12,6 +12,8 @@ use auction_contracts::{
 use auction_time::Timestamp;
 use gloo_net::http::Method;
 use serde::Serialize;
+use url::form_urlencoded;
+
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
@@ -34,11 +36,13 @@ pub(crate) async fn fetch_admin_auctions(
     page_size: i64,
 ) -> Result<AdminAuctionPage, String> {
     super::pagination::validate(page, page_size, 100, 100_000)?;
-    let mut url = format!("/api/v1/admin/auctions?page={page}&page_size={page_size}");
+    let mut query = form_urlencoded::Serializer::new(String::new());
+    query.append_pair("page", &page.to_string());
+    query.append_pair("page_size", &page_size.to_string());
     if !world_id.is_empty() && world_id != "all" {
-        url.push_str("&world_id=");
-        url.push_str(&world_id);
+        query.append_pair("world_id", &world_id);
     }
+    let url = format!("/api/v1/admin/auctions?{}", query.finish());
     let response = send_get(&url).await?;
     if !response.ok() {
         return Err(response_error(response).await);
@@ -227,6 +231,32 @@ fn command_into_auction(value: AdminAuctionCommandResponse) -> AdminAuction {
 }
 
 /// 跨字段谓词保留为独立校验：时间顺序、cancelled 字段组合与值域仍在浏览器边界 fail-closed。
+fn valid_auction_lifecycle(value: &AdminAuction) -> bool {
+    let preview_opened = value.preview_opened_at.as_deref().and_then(parse_admin_time);
+    let opened = value.opened_at.as_deref().and_then(parse_admin_time);
+    let final_phase = value.final_phase_at.as_deref().and_then(parse_admin_time);
+    let settled = value.settled_at.as_deref().and_then(parse_admin_time);
+    let ordered = opened
+        .is_none_or(|opened| preview_opened.is_some_and(|preview| opened >= preview))
+        && final_phase.is_none_or(|final_phase| opened.is_some_and(|opened| final_phase >= opened))
+        && settled.is_none_or(|settled| opened.is_some_and(|opened| settled >= opened));
+    ordered
+        && match value.status.as_str() {
+            "draft" => {
+                preview_opened.is_none()
+                    && opened.is_none()
+                    && final_phase.is_none()
+                    && settled.is_none()
+            }
+            "preview" => opened.is_none() && final_phase.is_none() && settled.is_none(),
+            "live" => opened.is_some() && final_phase.is_none() && settled.is_none(),
+            "final" | "settling" => opened.is_some() && final_phase.is_some() && settled.is_none(),
+            "settled" => opened.is_some() && final_phase.is_some() && settled.is_some(),
+            "cancelled" => opened.is_none() && final_phase.is_none() && settled.is_none(),
+            _ => false,
+        }
+}
+
 pub(super) fn decode_auction(value: AdminAuction) -> Result<AdminAuction, &'static str> {
     let preview_scheduled_at =
         parse_admin_time(&value.preview_scheduled_at).ok_or("auction_preview_time")?;
@@ -245,6 +275,7 @@ pub(super) fn decode_auction(value: AdminAuction) -> Result<AdminAuction, &'stat
             value.status.as_str(),
             "draft" | "preview" | "live" | "final" | "settling" | "settled" | "cancelled"
         )
+        || !valid_auction_lifecycle(&value)
         || scheduled_open_at < preview_scheduled_at
         || !(0..=MAX_JSON_SAFE_INTEGER).contains(&value.preview_revision)
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.state_version)

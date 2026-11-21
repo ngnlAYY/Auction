@@ -893,11 +893,12 @@ async fn insert_cod_reclaim(pool: &PgPool, limit: i32) -> (Uuid, Uuid, Uuid, Uui
     .expect("写入 COD 退件消费事实");
     for (index, kind) in ["reclaim_equipment_take", "buyer_blacklist"].into_iter().enumerate() {
         sqlx::query(
-            "INSERT INTO public.settlement_recovery_actions
+            r#"INSERT INTO public.settlement_recovery_actions
                 (id, recovery_id, kind, ordinal, execution_state, state_version,
                  proof_kind, proof_reference, proof_digest, proof_observed_at,
-                 created_at, updated_at, completed_at)
-             VALUES ($1, $2, $3, $4, 'satisfied', 1, 'test_proof', $5, $6, $7, $7, $7, $7)",
+                 reason, created_at, updated_at, completed_at)
+             VALUES ($1, $2, $3, $4, 'satisfied', 1, 'test_proof', $5, $6, $7,
+                     $8, $7, $7, $7)"#,
         )
         .bind(Uuid::new_v4())
         .bind(recovery_id)
@@ -906,6 +907,11 @@ async fn insert_cod_reclaim(pool: &PgPool, limit: i32) -> (Uuid, Uuid, Uuid, Uui
         .bind(format!("cod-reclaim-action-{index}-{recovery_id}"))
         .bind([5_u8; 32].as_slice())
         .bind(now)
+        .bind((kind == "buyer_blacklist").then(|| {
+            auction_application::admin::recovery_buyer_blacklist_reason(
+                u32::try_from(limit).expect("positive COD return limit"),
+            )
+        }))
         .execute(pool)
         .await
         .expect("写入 COD 恢复动作");

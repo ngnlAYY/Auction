@@ -1,8 +1,10 @@
 //! 保留清理执行的请求、批准绑定与回执模型。执行只覆盖政策 v2 的代码内闭集运行态表；
 //! 批准只能来自一次新鲜的只读演练，并按数据族绑定候选行/字节与表级计数。
 
+use std::path::PathBuf;
+
 use auction_time::Timestamp;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
@@ -11,7 +13,7 @@ use uuid::Uuid;
 pub const RETENTION_PURGE_RECEIPT_FORMAT: &str = "auction-retention-purge-receipt.v1";
 
 /// 逐数据族批准令牌的规范串版本；改变规范串即让旧令牌全部失效。
-pub const RETENTION_PURGE_APPROVAL_FORMAT: &str = "auction-retention-purge-approval.v1";
+pub const RETENTION_PURGE_APPROVAL_FORMAT: &str = "auction-retention-purge-approval.v2";
 
 /// 只读演练回执在执行前的最大年龄；过期必须先重新演练。
 pub const RETENTION_PURGE_RECEIPT_MAX_AGE_SECONDS: i64 = 900;
@@ -39,6 +41,7 @@ pub struct RetentionPurgeTableApproval {
 #[derive(Debug, Clone)]
 pub struct RetentionPurgeApproval {
     pub dataset_family: String,
+    pub filesystem_root_identity_sha256: Option<String>,
     pub approval_token: String,
     pub candidate_rows: i64,
     pub candidate_bytes: Option<u64>,
@@ -59,6 +62,61 @@ pub struct RetentionPurgeFilesystemResult {
     pub limit_reached: bool,
     pub needs_follow_up: bool,
     pub failure_code: Option<String>,
+    pub artifact_sha256: String,
+}
+
+/// CLI-produced file purge evidence reference; outcome values stay inside the artifact bytes.
+#[derive(Debug, Clone)]
+pub struct RetentionPurgeFilesystemArtifactRef {
+    pub path: PathBuf,
+    pub sha256: [u8; 32],
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RetentionPurgeFilesystemArtifact {
+    pub(super) format: String,
+    pub(super) run_id: Uuid,
+    pub(super) dry_run_run_id: Uuid,
+    pub(super) database_name: String,
+    pub(super) dataset_family: String,
+    pub(super) approval_token_sha256: String,
+    pub(super) policy_version: i64,
+    pub(super) policy_sha256: String,
+    pub(super) filesystem_root_identity_sha256: String,
+    pub(super) approved_max_files: u64,
+    pub(super) completed_at: Timestamp,
+    pub(super) outcome: RetentionPurgeOutcome,
+    pub(super) directory_present: bool,
+    pub(super) examined_files: u64,
+    pub(super) deleted_files: u64,
+    pub(super) deleted_bytes: u64,
+    pub(super) retained_files: u64,
+    pub(super) write_unknown_held_files: u64,
+    pub(super) write_unknown_over_hold_window_files: u64,
+    pub(super) unexpected_entries: u64,
+    pub(super) limit_reached: bool,
+    pub(super) needs_follow_up: bool,
+    pub(super) failure_code: Option<String>,
+}
+
+impl RetentionPurgeFilesystemArtifact {
+    pub(super) fn into_result(self, artifact_sha256: String) -> RetentionPurgeFilesystemResult {
+        RetentionPurgeFilesystemResult {
+            directory_present: self.directory_present,
+            examined_files: self.examined_files,
+            deleted_files: self.deleted_files,
+            deleted_bytes: self.deleted_bytes,
+            retained_files: self.retained_files,
+            write_unknown_held_files: self.write_unknown_held_files,
+            write_unknown_over_hold_window_files: self.write_unknown_over_hold_window_files,
+            unexpected_entries: self.unexpected_entries,
+            limit_reached: self.limit_reached,
+            needs_follow_up: self.needs_follow_up,
+            failure_code: self.failure_code,
+            artifact_sha256,
+        }
+    }
 }
 
 /// 一次清理请求；数据库身份、演练身份与批准都必须由调用方从回执解析后原样传入。
@@ -71,15 +129,14 @@ pub struct RetentionPurgeRequest {
     pub policy_sha256: String,
     pub batch_size: u32,
     pub approvals: Vec<RetentionPurgeApproval>,
-    /// 文件族已在本进程执行的结果；只在批准了 `mail_diagnostic_files` 时存在。
-    pub filesystem: Option<RetentionPurgeFilesystemResult>,
+    pub filesystem_artifact: Option<RetentionPurgeFilesystemArtifactRef>,
     /// CLI 主机操作者身份；只并入审计 metadata（`entrypoint`、`os_uid`、可选 `sudo_user`），
     /// 不进入回执，也不改变审计的 actor 与 source。
     pub operator_identity: Option<auction_application::core::CliOperatorIdentity>,
 }
 
 /// 清理结果的终态；`partial_limit_reached` 表示批准上限内已删完但仍有候选。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RetentionPurgeOutcome {
     Complete,
@@ -192,6 +249,9 @@ pub enum RetentionPurgeError {
     #[error("retention filesystem approval is missing or inconsistent")]
     FilesystemInvalid,
 
+    #[error("retention filesystem artifact has already been consumed")]
+    FilesystemArtifactReplay,
+
     #[error("retention purge count exceeds the representable range")]
     CountOverflow,
 
@@ -210,75 +270,104 @@ pub enum RetentionPurgeError {
     },
 }
 
+/// 逐数据族批准令牌的规范化输入。
+#[derive(Debug, Clone, Copy)]
+pub struct RetentionPurgeApprovalTokenInput<'a> {
+    /// 数据库名称。
+    pub database_name: &'a str,
+    /// 只读演练的运行标识。
+    pub dry_run_run_id: Uuid,
+    /// 保留政策摘要。
+    pub policy_sha256: &'a str,
+    /// 数据族名称。
+    pub dataset_family: &'a str,
+    /// 文件族根目录身份摘要。
+    pub filesystem_root_identity_sha256: Option<&'a str>,
+    /// 批准的候选行数。
+    pub candidate_rows: i64,
+    /// 批准的候选字节数。
+    pub candidate_bytes: Option<u64>,
+    /// 按表绑定的候选行数。
+    pub tables: &'a [(String, i64)],
+}
+
 /// 逐数据族批准令牌：SHA-256 的十六进制摘要，绑定演练身份、政策与精确计数。
 /// 同一数据库同一演练同一族得到同一令牌；任一字段变化都会得到不同令牌。
-pub fn retention_purge_approval_token(
-    database_name: &str,
-    dry_run_run_id: Uuid,
-    policy_sha256: &str,
-    dataset_family: &str,
-    candidate_rows: i64,
-    candidate_bytes: Option<u64>,
-    tables: &[(String, i64)],
-) -> String {
-    let mut tables = tables.to_vec();
+pub fn retention_purge_approval_token(input: RetentionPurgeApprovalTokenInput<'_>) -> String {
+    let mut tables = input.tables.to_vec();
     tables.sort();
     let mut canonical = String::new();
     canonical.push_str(RETENTION_PURGE_APPROVAL_FORMAT);
     canonical.push('\n');
-    canonical.push_str(&format!("database={database_name}\n"));
-    canonical.push_str(&format!("run_id={dry_run_run_id}\n"));
-    canonical.push_str(&format!("policy_sha256={policy_sha256}\n"));
-    canonical.push_str(&format!("family={dataset_family}\n"));
-    canonical.push_str(&format!("candidate_rows={candidate_rows}\n"));
-    match candidate_bytes {
-        Some(bytes) => canonical.push_str(&format!("candidate_bytes={bytes}\n")),
-        None => canonical.push_str("candidate_bytes=none\n"),
-    }
+    append_canonical_field(&mut canonical, input.database_name);
+    append_canonical_field(&mut canonical, &input.dry_run_run_id.to_string());
+    append_canonical_field(&mut canonical, input.policy_sha256);
+    append_canonical_field(&mut canonical, input.dataset_family);
+    append_canonical_field(&mut canonical, input.filesystem_root_identity_sha256.unwrap_or("none"));
+    append_canonical_field(&mut canonical, &input.candidate_rows.to_string());
+    append_canonical_field(
+        &mut canonical,
+        &input.candidate_bytes.map_or_else(|| "none".to_owned(), |bytes| bytes.to_string()),
+    );
+    append_canonical_field(&mut canonical, &tables.len().to_string());
     for (table, rows) in &tables {
-        canonical.push_str(&format!("table={table}:{rows}\n"));
+        append_canonical_field(&mut canonical, table);
+        append_canonical_field(&mut canonical, &rows.to_string());
     }
     auction_application::core::lower_hex(&Sha256::digest(canonical.as_bytes()))
+}
+
+fn append_canonical_field(canonical: &mut String, value: &str) {
+    canonical.push_str(&value.len().to_string());
+    canonical.push(':');
+    canonical.push_str(value);
+    canonical.push('\n');
 }
 
 #[cfg(test)]
 mod tests {
     use uuid::Uuid;
 
-    use super::{RETENTION_PURGE_APPROVAL_FORMAT, retention_purge_approval_token};
+    use super::{
+        RETENTION_PURGE_APPROVAL_FORMAT, RetentionPurgeApprovalTokenInput,
+        retention_purge_approval_token,
+    };
 
     fn token(family: &str, rows: i64) -> String {
-        retention_purge_approval_token(
-            "auction_test",
-            Uuid::nil(),
-            &"a".repeat(64),
-            family,
-            rows,
-            None,
-            &[("service_heartbeats".to_owned(), rows)],
-        )
+        retention_purge_approval_token(RetentionPurgeApprovalTokenInput {
+            database_name: "auction_test",
+            dry_run_run_id: Uuid::nil(),
+            policy_sha256: &"a".repeat(64),
+            dataset_family: family,
+            filesystem_root_identity_sha256: None,
+            candidate_rows: rows,
+            candidate_bytes: None,
+            tables: &[("service_heartbeats".to_owned(), rows)],
+        })
     }
 
     #[test]
     fn approval_token_is_deterministic_and_table_order_independent() {
-        let first = retention_purge_approval_token(
-            "auction_test",
-            Uuid::nil(),
-            &"b".repeat(64),
-            "session_records",
-            7,
-            None,
-            &[("public_sessions".to_owned(), 3), ("admin_sessions".to_owned(), 4)],
-        );
-        let second = retention_purge_approval_token(
-            "auction_test",
-            Uuid::nil(),
-            &"b".repeat(64),
-            "session_records",
-            7,
-            None,
-            &[("admin_sessions".to_owned(), 4), ("public_sessions".to_owned(), 3)],
-        );
+        let first = retention_purge_approval_token(RetentionPurgeApprovalTokenInput {
+            database_name: "auction_test",
+            dry_run_run_id: Uuid::nil(),
+            policy_sha256: &"b".repeat(64),
+            dataset_family: "session_records",
+            filesystem_root_identity_sha256: None,
+            candidate_rows: 7,
+            candidate_bytes: None,
+            tables: &[("public_sessions".to_owned(), 3), ("admin_sessions".to_owned(), 4)],
+        });
+        let second = retention_purge_approval_token(RetentionPurgeApprovalTokenInput {
+            database_name: "auction_test",
+            dry_run_run_id: Uuid::nil(),
+            policy_sha256: &"b".repeat(64),
+            dataset_family: "session_records",
+            filesystem_root_identity_sha256: None,
+            candidate_rows: 7,
+            candidate_bytes: None,
+            tables: &[("admin_sessions".to_owned(), 4), ("public_sessions".to_owned(), 3)],
+        });
         assert_eq!(first, second);
         assert_eq!(first.len(), 64);
         assert!(first.chars().all(|value| value.is_ascii_hexdigit()));
@@ -287,61 +376,62 @@ mod tests {
 
     #[test]
     fn approval_token_changes_with_every_bound_field() {
-        let base = token("service_heartbeat", 3);
+        let policy_sha256 = "a".repeat(64);
+        let tables = [("service_heartbeats".to_owned(), 3)];
+        let base_input = RetentionPurgeApprovalTokenInput {
+            database_name: "auction_test",
+            dry_run_run_id: Uuid::nil(),
+            policy_sha256: &policy_sha256,
+            dataset_family: "service_heartbeat",
+            filesystem_root_identity_sha256: None,
+            candidate_rows: 3,
+            candidate_bytes: None,
+            tables: &tables,
+        };
+        let base = retention_purge_approval_token(base_input);
         assert_ne!(base, token("service_heartbeat", 4));
         assert_ne!(base, token("realtime_events", 3));
         assert_ne!(
             base,
-            retention_purge_approval_token(
-                "other_database",
-                Uuid::nil(),
-                &"a".repeat(64),
-                "service_heartbeat",
-                3,
-                None,
-                &[("service_heartbeats".to_owned(), 3)],
-            )
+            retention_purge_approval_token(RetentionPurgeApprovalTokenInput {
+                database_name: "other_database",
+                ..base_input
+            })
         );
         assert_ne!(
             base,
-            retention_purge_approval_token(
-                "auction_test",
-                Uuid::from_u128(1),
-                &"a".repeat(64),
-                "service_heartbeat",
-                3,
-                None,
-                &[("service_heartbeats".to_owned(), 3)],
-            )
+            retention_purge_approval_token(RetentionPurgeApprovalTokenInput {
+                dry_run_run_id: Uuid::from_u128(1),
+                ..base_input
+            })
+        );
+        let other_policy_sha256 = "c".repeat(64);
+        assert_ne!(
+            base,
+            retention_purge_approval_token(RetentionPurgeApprovalTokenInput {
+                policy_sha256: &other_policy_sha256,
+                ..base_input
+            })
+        );
+        let root_identity_sha256 = "d".repeat(64);
+        assert_ne!(
+            base,
+            retention_purge_approval_token(RetentionPurgeApprovalTokenInput {
+                filesystem_root_identity_sha256: Some(&root_identity_sha256),
+                ..base_input
+            })
         );
         assert_ne!(
             base,
-            retention_purge_approval_token(
-                "auction_test",
-                Uuid::nil(),
-                &"c".repeat(64),
-                "service_heartbeat",
-                3,
-                None,
-                &[("service_heartbeats".to_owned(), 3)],
-            )
-        );
-        assert_ne!(
-            base,
-            retention_purge_approval_token(
-                "auction_test",
-                Uuid::nil(),
-                &"a".repeat(64),
-                "service_heartbeat",
-                3,
-                Some(1),
-                &[("service_heartbeats".to_owned(), 3)],
-            )
+            retention_purge_approval_token(RetentionPurgeApprovalTokenInput {
+                candidate_bytes: Some(1),
+                ..base_input
+            })
         );
     }
 
     #[test]
     fn approval_token_canonical_prefix_is_versioned() {
-        assert_eq!(RETENTION_PURGE_APPROVAL_FORMAT, "auction-retention-purge-approval.v1");
+        assert_eq!(RETENTION_PURGE_APPROVAL_FORMAT, "auction-retention-purge-approval.v2");
     }
 }

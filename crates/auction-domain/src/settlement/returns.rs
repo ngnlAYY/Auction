@@ -374,6 +374,9 @@ impl SettlementReturnAdmission {
                 if self.status != S::Held {
                     return Err(B::StateConflict);
                 }
+                if self.funding == SettlementReturnFunding::Unresolved {
+                    return Err(B::SendUnresolved);
+                }
                 if !self.take_proven {
                     return Err(B::ProofRequired);
                 }

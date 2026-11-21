@@ -10,11 +10,10 @@ use uuid::Uuid;
 
 use super::{DeliveryTransactionError, run_serializable_delivery_transaction};
 use crate::database::delivery::audit::{DeliveryAudit, PREPARE, append as append_delivery_audit};
-use crate::database::settlement::fulfillment::mapping::{
-    repository_error, validate_claim_identity,
-};
+use crate::database::repository_error;
+use crate::database::settlement::fulfillment::mapping::validate_claim_identity;
 
-pub(in crate::database::settlement::fulfillment) async fn prepare_postgres(
+pub(in crate::database) async fn prepare_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
     claim: &SettlementFulfillmentClaim,

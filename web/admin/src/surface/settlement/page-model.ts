@@ -66,12 +66,19 @@ export function resolveCatalogSelection(
     return first === undefined ? { kind: "resolving" } : { kind: "matched", entry: first };
   }
 
-  // 有 UUID 时只能解析到该记录。不同世界可以复用同一个期号，不能取查询的第一项代替。
-  const entry = page.auctions.find((candidate) =>
-    auctionId === "" ? candidate.sequence === sequence : candidate.auctionId === auctionId,
-  );
-  if (entry !== undefined) {
-    return entry.sequence === sequence ? { kind: "matched", entry } : { kind: "contradictory" };
+  // UUID 未命中时继续补查；目录中的同一期号可能属于另一个世界。
+  if (auctionId !== "") {
+    const pageMatch = page.auctions.find((candidate) => candidate.auctionId === auctionId);
+    if (pageMatch !== undefined) {
+      return pageMatch.sequence === sequence
+        ? { kind: "matched", entry: pageMatch }
+        : { kind: "contradictory" };
+    }
+  } else {
+    const pageMatch = page.auctions.find((candidate) => candidate.sequence === sequence);
+    if (pageMatch !== undefined) {
+      return { kind: "matched", entry: pageMatch };
+    }
   }
   if (lookup === null) {
     return { kind: "resolving" };
@@ -105,19 +112,26 @@ export function resetDetailState(
 const MAX_SAFE_GENERATION = BigInt(Number.MAX_SAFE_INTEGER);
 
 function generationNumber(value: bigint): number {
+  if (value <= 0n) {
+    return 0;
+  }
   return value > MAX_SAFE_GENERATION ? Number.MAX_SAFE_INTEGER : Number(value);
+}
+
+function normalizeGeneration(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.min(Math.max(Math.trunc(value), 0), Number.MAX_SAFE_INTEGER);
 }
 
 /** 未决宿主以 `bigint` 推进世代；恢复报告沿用原页面的 `number` 世代形状。 */
 export function generationNumberCell(reload: Cell<bigint>): Cell<number> {
   const cell: Cell<number> = Object.assign(() => generationNumber(reload()), {
     peek: () => generationNumber(reload.peek()),
-    set: (value: number) => {
-      const bounded = Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
-      reload.set(BigInt(bounded));
-    },
+    set: (value: number) => reload.set(BigInt(normalizeGeneration(value))),
     update: (change: (current: number) => number) => {
-      reload.update((current) => BigInt(change(generationNumber(current))));
+      reload.update((current) => BigInt(normalizeGeneration(change(generationNumber(current)))));
     },
   });
   return cell;
@@ -208,6 +222,9 @@ export function reconcileSettlementCatalog(state: CatalogReconcileState): void {
     return;
   }
   const page = load.result.value;
+  if (page.pageSize !== state.currentPageSize) {
+    return;
+  }
   if (isEmptyCatalogTail(page)) {
     const lastPage = Math.max(Math.trunc((page.total - 1) / page.pageSize) + 1, 1);
     const clamped = Math.min(lastPage, Math.trunc(100_000 / page.pageSize) + 1);

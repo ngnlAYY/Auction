@@ -1,5 +1,6 @@
-//! 单事务恢复：只恢复到 manifest 对应的同名空库（零其他连接、可写主节点、无用户对象），
-//! 恢复后核对 schema 身份与迁移历史；不建库、不删库、不终止他人连接。
+//! 单事务恢复：只恢复到 manifest 对应的同名空库（零其他连接、可写主节点、无用户对象）。
+//! 空库与零连接检查只是时点预检，不阻止普通客户端重连；操作者须将客户端阻断保持到 pg_restore 完成。
+//! 不建库、不删库、不终止他人连接。
 
 use std::path::Path;
 
@@ -73,7 +74,7 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
     }
     progress(format_args!("pg_restore → {}", options.database));
     environment
-        .restore(options.database, &current.archive)
+        .restore(options.database, &current.archive_file)
         .await
         .context("恢复失败；单事务恢复应已整体回滚，请用 db preflight 复核目标仍为空库")?;
 

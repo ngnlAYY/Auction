@@ -10,7 +10,8 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::errors::storage_error;
+use crate::database::operations::alert::{MAX_ATTEMPTS, MAX_ATTEMPTS_SQL};
+use crate::database::storage_error;
 use crate::database::{TrackedPool, storage_error_from};
 
 fn webhook_kind(value: &str) -> Result<OperationsAlertKind, ApplicationError> {
@@ -48,6 +49,18 @@ pub(crate) async fn claim_due_webhook_postgres(
     .await
     .map_err(|error| storage_error_from(error, "收口过期 webhook 投递失败"))?;
 
+    sqlx::query(
+        "UPDATE public.operations_alert_webhook_deliveries
+         SET status = 'failed', next_attempt_at = NULL, completed_at = $1,
+             failure_code = 'retry_exhausted', updated_at = $1
+         WHERE status = 'pending' AND next_attempt_at <= $1 AND attempt_count >= $2",
+    )
+    .bind(now)
+    .bind(MAX_ATTEMPTS_SQL)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|error| storage_error_from(error, "终结耗尽重试次数的 webhook 投递失败"))?;
+
     let pending = sqlx::query(
         "SELECT delivery.id, delivery.command_id, delivery.fingerprint, delivery.payload,
                 delivery.claim_fencing, delivery.attempt_count, signal.kind
@@ -55,11 +68,13 @@ pub(crate) async fn claim_due_webhook_postgres(
          JOIN public.operations_alert_signals AS signal
            ON signal.fingerprint = delivery.fingerprint
          WHERE delivery.status = 'pending' AND delivery.next_attempt_at <= $1
+           AND delivery.attempt_count < $2
          ORDER BY delivery.next_attempt_at, delivery.created_at, delivery.id
          LIMIT 1
          FOR UPDATE OF delivery SKIP LOCKED",
     )
     .bind(now)
+    .bind(MAX_ATTEMPTS_SQL)
     .fetch_optional(&mut *transaction)
     .await
     .map_err(|error| storage_error_from(error, "读取 webhook 待投递失败"))?;
@@ -207,15 +222,25 @@ pub(crate) async fn claim_due_webhook_postgres(
             let _ = transaction.rollback().await;
             return Err(storage_error("webhook 投递已存在"));
         }
-        sqlx::query(
+        let signal_state_version: i64 = row
+            .try_get("state_version")
+            .map_err(|error| storage_error_from(error, "webhook state_version"))?;
+        let updated = sqlx::query(
             "UPDATE public.operations_alert_signals
              SET next_webhook_at = NULL, state_version = state_version + 1
-             WHERE fingerprint = $1 AND active",
+             WHERE fingerprint = $1 AND active
+               AND webhook_generation = $2 AND state_version = $3",
         )
         .bind(&fingerprint)
+        .bind(signal_generation)
+        .bind(signal_state_version)
         .execute(&mut *transaction)
         .await
         .map_err(|error| storage_error_from(error, "消费 webhook 冷却时间失败"))?;
+        if updated.rows_affected() != 1 {
+            let _ = transaction.rollback().await;
+            return Err(storage_error("webhook signal 状态已变化"));
+        }
         Some(OperationsAlertWebhookDispatch {
             delivery_id: id,
             command_id,
@@ -242,7 +267,14 @@ pub(crate) async fn finish_webhook_postgres(
     finish.validate().map_err(|_: auction_application::operations::OperationsAlertError| {
         storage_error("webhook 终态时间无效")
     })?;
-    let (status, next_attempt_at, completed_at, failure_code) = match finish.outcome {
+    let outcome = if finish.outcome == OperationsAlertWebhookOutcome::Retryable
+        && dispatch.attempt_count >= MAX_ATTEMPTS
+    {
+        OperationsAlertWebhookOutcome::RetryExhausted
+    } else {
+        finish.outcome
+    };
+    let (status, next_attempt_at, completed_at, failure_code) = match outcome {
         OperationsAlertWebhookOutcome::Succeeded => {
             ("succeeded", None, Some(Timestamp::now()), None)
         }
@@ -266,7 +298,7 @@ pub(crate) async fn finish_webhook_postgres(
          SET status = $2, next_attempt_at = $3, completed_at = $4, failure_code = $5,
              claim_token = NULL, claim_expires_at = NULL, sending_at = NULL, updated_at = $6
          WHERE id = $1 AND command_id = $7 AND claim_token = $8 AND claim_fencing = $9
-           AND status = 'sending'",
+           AND status = 'sending' AND claim_expires_at > $6",
     )
     .bind(dispatch.delivery_id)
     .bind(status)
@@ -284,7 +316,7 @@ pub(crate) async fn finish_webhook_postgres(
         let _ = transaction.rollback().await;
         return Err(storage_error("webhook 终态租约失效"));
     }
-    let signal_next = match finish.outcome {
+    let signal_next = match outcome {
         OperationsAlertWebhookOutcome::Succeeded | OperationsAlertWebhookOutcome::Retryable => {
             finish.next_webhook_at
         }

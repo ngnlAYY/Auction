@@ -3,7 +3,6 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::delivery::{
     DeliveryPreparation, DeliveryPreparedSend, DeliverySendResult, DeliveryTransport,
     DeliveryTransportError, DeliveryWorkClaim,
@@ -14,14 +13,13 @@ use auction_application::settlement::SettlementFulfillmentEquipmentSecretReader;
 use super::types::{MoogleMailDeliveryTransport, MoogleMailNotificationTemplates};
 use super::{
     ActionExpectation, decode_payload, decode_settlement_payload, invalid_payload,
-    is_notification_origin, preflight_unproven, transport_error,
+    is_notification_origin, transport_error,
 };
 use crate::EquipmentKeyOpener;
 use crate::clients::mooglemail::{
     MoogleMailClient, MoogleMailCredentialSet, MoogleMailError, MoogleMailOperation,
     MoogleMailParser, MoogleMailSender, MoogleMailWorld,
 };
-use crate::safe_diagnostics;
 
 mod actions;
 mod authorization;
@@ -151,21 +149,14 @@ impl MoogleMailDeliveryTransport {
                     world,
                     MoogleMailOperation::ReturnMessage,
                     None,
-                    session,
+                    Arc::new(session),
                 )
                 .await
             }
             "take" => {
                 let take = take.ok_or_else(invalid_payload)?;
-                let session = Arc::try_unwrap(take.session).map_err(|diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "mooglemail_take",
-                        "unwrap_action_session",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext::default(),
-                    );
-                    preflight_unproven(MoogleMailOperation::Take)
-                })?;
+                // Take 动作与 fence lease 共用原会话，不能要求此处 Arc 唯一所有。
+                let session = take.session;
                 self.send_action(
                     &claim,
                     &payload.external_mail_id,

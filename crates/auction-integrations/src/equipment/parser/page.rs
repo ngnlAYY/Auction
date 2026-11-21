@@ -1,10 +1,11 @@
 //! 组合 HTML 提取、领域名称识别和 header 状态，保持来源大类交叉校验。
 
+use auction_application::mail::EquipmentSourceDetailCode as EquipmentParseError;
+
 use super::super::model::EquipmentFacts;
-use super::{
-    EquipmentParseError, header::parse_header, html::extract_equipment_page,
-    identity::parse_identity,
-};
+use super::header::parse_header;
+use super::html::extract_equipment_page;
+use super::identity::parse_identity;
 
 pub(crate) fn parse_equipment_page(
     body: &[u8],

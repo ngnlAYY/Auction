@@ -20,6 +20,10 @@ pub(crate) async fn fetch_admin_proxy_events(
     page: i64,
     page_size: i64,
 ) -> Result<AdminProxyEventPage, String> {
+    if !valid_uuid(&lot_id) {
+        return Err("invalid_request".to_owned());
+    }
+
     super::pagination::validate(page, page_size, 100, 100_000)?;
     let url = format!("/api/v1/admin/lots/{lot_id}/proxy-events?page={page}&page_size={page_size}");
     let response = send_get(&url).await?;

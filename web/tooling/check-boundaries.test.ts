@@ -99,7 +99,7 @@ describe("包方向与目标归属", () => {
   test("别名按目标归属判定，不能从 contracts 跳到 public", () => {
     expect(
       expectViolation("@auction/contracts/../../public/src/main", "web/contracts/src/a.ts"),
-    ).toContain("不允许从 contracts 导入 public");
+    ).toContain("未登记的 @auction 包名");
   });
 
   test("shared 只能导入 contracts 与自身", () => {
@@ -107,7 +107,7 @@ describe("包方向与目标归属", () => {
     expect(decide("@auction/web-shared/result", "web/shared/src/a.ts").kind).toBe("ok");
     expect(
       expectViolation("@auction/web-shared/../../public/src/main", "web/contracts/src/a.ts"),
-    ).toContain("不允许从 contracts 导入");
+    ).toContain("未登记的 @auction 包名");
   });
 
   test("contracts 不导入 shared/public/admin", () => {
@@ -157,10 +157,10 @@ describe("包方向与目标归属", () => {
   test("别名穿越到包外或 web/ 之外也被拒绝", () => {
     expect(
       expectViolation("@auction/contracts/../../../web/public/src/main", "web/contracts/src/a.ts"),
-    ).toContain("不允许从 contracts 导入");
+    ).toContain("未登记的 @auction 包名");
     expect(
       expectViolation("@auction/contracts/../../../../crates/auction-web-public/src/main"),
-    ).toContain("web/ 之外");
+    ).toContain("未登记的 @auction 包名");
   });
 
   test("测试虚拟模块例外按完整文件路径点名", () => {

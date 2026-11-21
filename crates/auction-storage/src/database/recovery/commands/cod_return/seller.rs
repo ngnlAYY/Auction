@@ -99,7 +99,7 @@ pub(super) async fn return_to_seller(
         (payment_obligation_id, "cod_returned_three_times"),
         (seller_payout_obligation_id, "equipment_returned_to_seller"),
     ] {
-        let _updated = sqlx::query_scalar::<_, Uuid>(
+        let updated = sqlx::query_scalar::<_, Uuid>(
             r#"UPDATE public.settlement_obligation_fulfillments
                SET execution_state = 'failed',
                    state_version = state_version + 1,
@@ -124,6 +124,25 @@ pub(super) async fn return_to_seller(
         .fetch_optional(&mut **transaction)
         .await
         .map_err(map_sql_error)?;
+        if updated.is_none() {
+            let already_failed: bool = sqlx::query_scalar(
+                r#"SELECT EXISTS(
+                       SELECT 1
+                       FROM public.settlement_obligation_fulfillments
+                       WHERE obligation_id = $1
+                         AND execution_state = 'failed'
+                         AND last_error_code = $2
+                   )"#,
+            )
+            .bind(obligation)
+            .bind(failure_code)
+            .fetch_one(&mut **transaction)
+            .await
+            .map_err(map_sql_error)?;
+            if !already_failed {
+                return Err(RecoveryCommandError::StaleState);
+            }
+        }
     }
 
     // COD 退回达到冻结上限后以统一处置事实收口；读取侧据此解除两个失败义务的告警。

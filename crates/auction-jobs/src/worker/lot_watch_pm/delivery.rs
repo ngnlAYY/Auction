@@ -14,6 +14,7 @@ pub(super) async fn process(
     deadline: tokio::time::Instant,
     activity: &auction_application::operations::ExternalWriteActivity,
     claimed_world: &std::sync::Mutex<Option<auction_domain::SettlementWorld>>,
+    fence_started: &std::sync::atomic::AtomicBool,
 ) -> Result<(), LotWatchError> {
     check_deadline(deadline)?;
     let Some(mut claim) = runtime.store.claim(request).await? else {
@@ -103,33 +104,29 @@ pub(super) async fn process(
     if !activity.enter_critical() {
         return Ok(());
     }
+    // 围栏调用一旦开始，取消时的事务提交结果可能未知。
+    fence_started.store(true, std::sync::atomic::Ordering::SeqCst);
     if !runtime.store.start_sending(claim.clone(), sender.clone()).await? {
         return Ok(());
     }
-    check_claim_deadline(runtime, claim.world, deadline)?;
     claim.sender = Some(sender);
-    // start 提交响应未知直接返回；绝不执行 POST，也绝不释放回 pending。
-    let receipt = if !activity.enabled() && *drain.borrow() {
-        None
-    } else {
-        prepared
-            .send()
-            .await
-            .inspect_err(|error| {
-                diagnostics::warn(
-                    "forum_pm",
-                    "send_message",
-                    error.diagnostic_kind(),
-                    DiagnosticContext {
-                        world: Some(claim.world),
-                        notification_id: diagnostic_id(&claim.message.notification_id),
-                        ..Default::default()
-                    },
-                );
-            })
-            .ok()
-    };
-    check_claim_deadline(runtime, claim.world, deadline)?;
+    // start 提交响应未知直接返回；围栏确认后，deadline/drain 都不能撤销原 owner 的 POST。
+    let receipt = prepared
+        .send()
+        .await
+        .inspect_err(|error| {
+            diagnostics::warn(
+                "forum_pm",
+                "send_message",
+                error.diagnostic_kind(),
+                DiagnosticContext {
+                    world: Some(claim.world),
+                    notification_id: diagnostic_id(&claim.message.notification_id),
+                    ..Default::default()
+                },
+            );
+        })
+        .ok();
     let sent = receipt.is_some();
     runtime.store.finish(claim, receipt).await?;
     // None 表示远端结果未知，不重发：只记录失败原因，仍由人工对账收口。
@@ -152,7 +149,7 @@ pub(super) async fn process(
     Ok(())
 }
 
-/// timeout 可能先 poll 出迟到回执；每次阶段交接都复核原截止，过期后只保留持久 claim。
+/// 围栏前的阶段交接复核预算；确认发送围栏后由 owner 完成 POST 和结果收口。
 fn check_deadline(deadline: tokio::time::Instant) -> Result<(), LotWatchError> {
     (tokio::time::Instant::now() < deadline).ok_or(LotWatchError::Unavailable)
 }

@@ -39,7 +39,7 @@ impl SettlementFulfillmentService {
     )]
     pub(super) async fn prepare_classified(
         &self,
-        mut claim: SettlementFulfillmentClaim,
+        claim: SettlementFulfillmentClaim,
         prepared_at: Timestamp,
         retry_delay: Duration,
     ) -> Result<Outcome, ApplicationError> {
@@ -86,7 +86,7 @@ impl SettlementFulfillmentService {
                 Ok(current)
                     if current.user_id == user && current.eligible && current.state_version > 0 =>
                 {
-                    claim.recipient = current.game_identity;
+                    // 只绑定 users owner 版本；执行命令仍保留领取时冻结的收件人名称。
                     Some(current.state_version)
                 }
                 recipient_result => {
@@ -163,10 +163,13 @@ impl SettlementFulfillmentService {
             drop(identity);
             return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
         }
-        // Admin 明确配置的 bot 名称与页面身份等值处理；其余情况仍要求远端身份精确匹配。
-        if identity.snapshot().identity.player_name != claim.recipient
-            && !self.is_configured_bot(&claim.recipient)
-        {
+        // 配置名不能证明它与当前认证 UID 是同一角色；身份不一致时停止内部资金提交。
+        let route = identity_route(
+            &identity.snapshot().identity.player_name,
+            &claim.recipient,
+            self.is_configured_bot(&claim.recipient),
+        );
+        if route != InternalIdentityRoute::Internal {
             if identity
                 .check_current()
                 .await
@@ -183,6 +186,17 @@ impl SettlementFulfillmentService {
             {
                 drop(identity);
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
+            }
+            if route == InternalIdentityRoute::ManualReconcile {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    SafeErrorKind::DEPENDENCY_MISMATCH,
+                    "fulfillment_internal",
+                    "configured_bot_identity_mismatch",
+                    claim_context(&claim),
+                );
+                drop(identity);
+                return self.manual_internal(claim, "internal_identity_mismatch").await;
             }
             // 后续授权可能读取外部证据，先释放非重入 guard；发送 owner 仍独立核验当前凭据。
             drop(identity);
@@ -243,25 +257,54 @@ impl SettlementFulfillmentService {
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
             }
         };
-        if !policy.matches_identity(&prepared.snapshot().identity.authenticated_uid)
-            || prepared.snapshot().identity.player_name != claim.recipient
-            || repaired_uid
+        let identity_valid = policy
+            .matches_identity(&prepared.snapshot().identity.authenticated_uid)
+            && !repaired_uid
                 .as_ref()
-                .is_some_and(|uid| prepared.snapshot().identity.authenticated_uid != *uid)
-            || prepared
-                .check_current()
-                .await
-                .inspect_err(|error| {
-                    record_error(
-                        DiagnosticLevel::Warn,
-                        error.diagnostic_kind(),
-                        "fulfillment_internal",
-                        "validate_combined_freshness",
-                        claim_context(&claim),
-                    );
-                })
-                .is_err()
-        {
+                .is_some_and(|uid| prepared.snapshot().identity.authenticated_uid != *uid);
+        let identity_fresh = prepared
+            .check_current()
+            .await
+            .inspect_err(|error| {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    error.diagnostic_kind(),
+                    "fulfillment_internal",
+                    "validate_combined_freshness",
+                    claim_context(&claim),
+                );
+            })
+            .is_ok();
+        if !identity_valid || !identity_fresh {
+            record_error(
+                DiagnosticLevel::Warn,
+                SafeErrorKind::DEPENDENCY_MISMATCH,
+                "fulfillment_internal",
+                "validate_combined_binding",
+                DiagnosticContext {
+                    defer_reason: Some("internal_evidence_wait"),
+                    ..claim_context(&claim)
+                },
+            );
+            return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
+        }
+        if prepared.snapshot().identity.player_name != claim.recipient {
+            if identity_route(
+                &prepared.snapshot().identity.player_name,
+                &claim.recipient,
+                self.is_configured_bot(&claim.recipient),
+            ) == InternalIdentityRoute::ManualReconcile
+            {
+                record_error(
+                    DiagnosticLevel::Warn,
+                    SafeErrorKind::DEPENDENCY_MISMATCH,
+                    "fulfillment_internal",
+                    "configured_bot_identity_mismatch",
+                    claim_context(&claim),
+                );
+                drop(prepared);
+                return self.manual_internal(claim, "internal_identity_mismatch").await;
+            }
             record_error(
                 DiagnosticLevel::Warn,
                 SafeErrorKind::DEPENDENCY_MISMATCH,
@@ -401,4 +444,46 @@ pub(super) fn evidence_request(
         observe_main_cash: cash,
         deadline: Instant::now() + budget,
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InternalIdentityRoute {
+    Internal,
+    External,
+    ManualReconcile,
+}
+
+fn identity_route(
+    player_name: &str,
+    recipient: &str,
+    configured_bot: bool,
+) -> InternalIdentityRoute {
+    if player_name == recipient {
+        InternalIdentityRoute::Internal
+    } else if configured_bot {
+        InternalIdentityRoute::ManualReconcile
+    } else {
+        InternalIdentityRoute::External
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{InternalIdentityRoute, identity_route};
+
+    #[test]
+    fn configured_bot_name_mismatch_requires_manual_reconciliation() {
+        assert_eq!(
+            identity_route("configured-bot", "configured-bot", true),
+            InternalIdentityRoute::Internal,
+        );
+        assert_eq!(
+            identity_route("authenticated-profile", "configured-bot", true),
+            InternalIdentityRoute::ManualReconcile,
+        );
+        assert_eq!(
+            identity_route("authenticated-profile", "recipient", false),
+            InternalIdentityRoute::External,
+        );
+    }
 }

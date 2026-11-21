@@ -328,8 +328,8 @@ function countdownDisplay(end: bigint | null, now: number): CountdownDisplay {
     };
   }
   const nowNanoseconds = BigInt(now) * 1_000_000n;
-  const remainingSeconds = Number((end - nowNanoseconds) / 1_000_000_000n);
-  if (remainingSeconds <= 0) {
+  const remainingNanos = end - nowNanoseconds;
+  if (remainingNanos <= 0n) {
     return {
       label: t("auction-countdown-expired"),
       urgent: false,
@@ -337,6 +337,7 @@ function countdownDisplay(end: bigint | null, now: number): CountdownDisplay {
       empty: false,
     };
   }
+  const remainingSeconds = Number((remainingNanos + 999_999_999n) / 1_000_000_000n);
   const days = Math.trunc(remainingSeconds / 86_400);
   const hours = Math.trunc((remainingSeconds % 86_400) / 3_600);
   const minutes = Math.trunc((remainingSeconds % 3_600) / 60);

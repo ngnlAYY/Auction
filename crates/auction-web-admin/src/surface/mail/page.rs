@@ -17,7 +17,7 @@ use crate::api::{
     AdminMailIntakeQuery, fetch_mail_intake_detail, fetch_mail_intakes, fetch_mail_state,
 };
 #[cfg(test)]
-use crate::surface::auctions::draft_page_tests::RecordRead;
+use crate::surface::auctions::editor::tests::RecordRead;
 use crate::surface::pagination::{use_admin_page, use_admin_pagination};
 use crate::surface::pending::{PendingCommandPanel, use_pending_commands};
 
@@ -183,8 +183,11 @@ pub fn page() -> Element {
     };
     let polling_state = polling.read_unchecked();
     // 只保留当前邮箱的完成快照；切换邮箱不能继续显示或操作上一邮箱的轮询状态。
-    let current_polling =
-        polling_state.as_ref().filter(|(mailbox, _, _)| mailbox == &active_mailbox());
+    let current_mailbox = active_mailbox();
+    let current_generation = polling_refresh();
+    let current_polling = polling_state.as_ref().filter(|(mailbox, generation, _)| {
+        mailbox == &current_mailbox && *generation == current_generation
+    });
     let polling_content = if active_mailbox().is_empty() {
         rsx! {
             p { {t!("admin-mail-polling-not-loaded")} }
@@ -407,7 +410,7 @@ mod tests {
 
     use super::{page, use_intake_selection};
     use crate::api::{AdminMailIntakePage, AdminMailIntakeQuery, AdminMailPolling};
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         RecordRead, button, click_button, has_live_text, init_i18n, mount_writer, settle_writer,
         writer_form,
     };

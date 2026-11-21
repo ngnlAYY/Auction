@@ -341,7 +341,7 @@ pub(super) async fn insert_settlement_realtime(
                 "state_version": state_version,
             }),
             state_version: i64_version(state_version, "拍卖状态版本")?,
-            origin_command_id: command_id.as_uuid(),
+            origin_command_id: Some(command_id.as_uuid()),
             created_at: Some(occurred_at),
         },
     )

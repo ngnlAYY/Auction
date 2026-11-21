@@ -21,10 +21,10 @@ use axum::routing::{get, post};
 use axum::serve::Listener;
 use uuid::Uuid;
 
+use super::handlers::credential_check::mail_credential_check;
 use super::handlers::equipment_read;
 use super::handlers::external_accounts;
 use super::handlers::live;
-use super::handlers::mail_credential_check;
 use super::handlers::mail_progress;
 use super::handlers::metrics;
 use super::handlers::not_found;

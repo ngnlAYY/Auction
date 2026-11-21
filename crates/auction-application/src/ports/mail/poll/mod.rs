@@ -129,14 +129,24 @@ pub struct MailPollBatch {
 impl MailPollBatch {
     /// 校验批次必须与领取的邮箱和租约对应，且整批才能进入同一数据库事务。
     pub fn validate(&self, claim: &MailPollClaim) -> bool {
-        self.mailbox_key == claim.mailbox_key
-            && self.claim_token == claim.claim_token
-            && auction_domain::valid_optional_text(self.next_cursor.as_deref(), 256, true)
-            && self.items.len() <= usize::from(MAX_MAIL_POLL_BATCH_SIZE)
-            && self.polled_at.timestamp_nanos_opt().is_some()
-            && self.next_poll_at.timestamp_nanos_opt().is_some()
-            && self.next_poll_at >= self.polled_at
-            && self.items.iter().all(MailPollIntake::validate)
+        if !claim.validate()
+            || self.mailbox_key != claim.mailbox_key
+            || self.claim_token != claim.claim_token
+            || !auction_domain::valid_optional_text(self.next_cursor.as_deref(), 256, true)
+            || self.items.len() > usize::from(MAX_MAIL_POLL_BATCH_SIZE)
+            || self.polled_at.timestamp_nanos_opt().is_none()
+            || self.next_poll_at.timestamp_nanos_opt().is_none()
+            || self.next_poll_at < self.polled_at
+        {
+            return false;
+        }
+        let mut ids = std::collections::HashSet::with_capacity(self.items.len());
+        let mut external_ids = std::collections::HashSet::with_capacity(self.items.len());
+        self.items.iter().all(|item| {
+            item.validate()
+                && ids.insert(item.id)
+                && external_ids.insert((item.world_id.as_str(), item.external_mail_id.as_str()))
+        })
     }
 }
 

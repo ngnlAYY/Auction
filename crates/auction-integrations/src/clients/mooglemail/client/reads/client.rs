@@ -189,11 +189,11 @@ impl MoogleMailClient {
                 read_unavailable(target.world)
             })?;
             // 当前等待者仍收到原错误；后续重试不复用失败结果，也不借替换条目重置请求预算。
-            if let Some(receiver) = requests
-                .entries
-                .get(&key)
-                .filter(|receiver| !matches!(receiver.borrow().as_ref(), Some(Err(_))))
-            {
+            if let Some(receiver) = requests.entries.get(&key).filter(|receiver| {
+                let result = receiver.borrow();
+                !matches!(result.as_ref(), Some(Err(_)))
+                    && !(result.is_none() && receiver.has_changed().is_err())
+            }) {
                 receiver.clone()
             } else {
                 if requests.started >= MAX_REQUESTS_PER_ROUND {

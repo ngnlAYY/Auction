@@ -36,7 +36,7 @@ impl MoogleMailGateway {
         let deadline = tokio::time::Instant::now()
             .checked_add(self.config.fetch_budget)
             .ok_or_else(|| configuration(world))?;
-        let mut session = tokio::time::timeout_at(
+        let session = tokio::time::timeout_at(
             deadline,
             self.credentials.begin_read(world, MoogleMailOperation::Sent),
         )
@@ -133,7 +133,7 @@ impl MoogleMailGateway {
         let deadline = tokio::time::Instant::now()
             .checked_add(self.config.fetch_budget)
             .ok_or_else(|| configuration(world))?;
-        let mut session = tokio::time::timeout_at(
+        let session = tokio::time::timeout_at(
             deadline,
             self.credentials.begin_read(world, MoogleMailOperation::ReadMail),
         )

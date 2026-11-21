@@ -3,8 +3,8 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{self, File},
-    os::unix::fs::PermissionsExt,
+    fs::{self, File, OpenOptions},
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Component, Path, PathBuf},
 };
 
@@ -23,6 +23,9 @@ const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 const MAX_MEMBER_BYTES: u64 = 512 * 1024 * 1024;
 /// 制品文件数量上限，避免在异常目录树上散列无限文件。
 const MAX_MEMBERS: usize = 4096;
+/// 制品目录数量与深度上限，避免异常目录树导致无界枚举或内存增长。
+const MAX_DIRECTORIES: usize = 4096;
+const MAX_DIRECTORY_DEPTH: usize = 64;
 
 const RELEASE_MANIFEST: &str = "RELEASE-MANIFEST.v1";
 const RELEASE_MANIFEST_SCHEMA: &str = "auction-release-manifest/1";
@@ -30,8 +33,8 @@ const CHECKSUMS: &str = "SHA256SUMS";
 const DEPENDENCIES: &str = "docs/DEPENDENCIES.md";
 const WEB_MANIFEST_SCHEMA: &str = "auction-web-assets/1";
 
-/// 通过静态校验的部署制品；只保留路径、标识与摘要。
-#[derive(Debug, Clone)]
+/// 通过静态校验的部署制品；除元数据外，为每个二进制保留已校验的打开句柄，避免重开可变路径。
+#[derive(Debug)]
 pub(crate) struct Artifact {
     pub(crate) root: PathBuf,
     pub(crate) package: String,
@@ -42,9 +45,10 @@ pub(crate) struct Artifact {
     pub(crate) admin_payload_sha256: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct ArtifactBinary {
     pub(crate) name: &'static str,
+    pub(crate) file: File,
     pub(crate) path: PathBuf,
     pub(crate) sha256: String,
     pub(crate) bytes: u64,
@@ -70,7 +74,6 @@ pub(crate) fn inspect(root: &Path) -> anyhow::Result<Artifact> {
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
         anyhow::bail!("制品必须是解压后的普通目录：{}", root.display());
     }
-
     let manifest_bytes = files::read_bounded(&root.join(RELEASE_MANIFEST), MAX_MANIFEST_BYTES)?;
     let manifest =
         parse_release_manifest(&manifest_bytes).context("解析 RELEASE-MANIFEST.v1 失败")?;
@@ -93,7 +96,10 @@ pub(crate) fn inspect(root: &Path) -> anyhow::Result<Artifact> {
 
     let checksums_bytes = files::read_bounded(&root.join(CHECKSUMS), MAX_MANIFEST_BYTES)?;
     let checksums = parse_sha256sums(&checksums_bytes).context("解析 SHA256SUMS 失败")?;
-    // 发布脚本在同一文件内写入自身摘要，实际值取决于写入顺序；该条只参与集合校验，不参与比对。
+    // SHA256SUMS 不列入自身摘要；仍须出现在 RELEASE-MANIFEST 白名单中，但不参与摘要比对。
+    if checksums.contains_key(CHECKSUMS) {
+        anyhow::bail!("SHA256SUMS 不得包含自身摘要");
+    }
     for path in manifest.files.keys().filter(|path| path.as_str() != CHECKSUMS) {
         let expected =
             checksums.get(path).with_context(|| format!("SHA256SUMS 缺少清单文件：{path}"))?;
@@ -140,11 +146,23 @@ pub(crate) fn inspect(root: &Path) -> anyhow::Result<Artifact> {
         if metadata.len() == 0 {
             anyhow::bail!("制品程序不得为空：{path}");
         }
+        let (mut file, bytes) = read_member(root, &path)?;
+        let metadata =
+            file.metadata().with_context(|| format!("读取制品程序元数据失败：{path}"))?;
+        if metadata.len() == 0 || bytes != metadata.len() {
+            anyhow::bail!("制品程序不得为空或读取期间变化：{path}");
+        }
+        let (actual_digest, hashed_bytes) =
+            sha256_reader(&mut file).with_context(|| format!("读取制品程序失败：{path}"))?;
+        if actual_digest != *digest || hashed_bytes != bytes {
+            anyhow::bail!("制品程序摘要或大小与已校验清单不一致：{path}");
+        }
         binaries.push(ArtifactBinary {
             name,
+            file,
             path: root.join(&path),
             sha256: digest.clone(),
-            bytes: metadata.len(),
+            bytes,
         });
     }
 
@@ -225,7 +243,7 @@ fn parse_release_manifest(bytes: &[u8]) -> anyhow::Result<ReleaseManifest> {
     Ok(ReleaseManifest { package, source_commit, source_fingerprint, files })
 }
 
-/// 发布包名只允许发布脚本生成的形状；合并包（`-single`）与脏包（`-dirty`）不能用于分体部署。
+/// 正式分体发布包名才可部署；本地、分支和合并候选包不能进入部署流程。
 fn validate_package_name(package: &str) -> anyhow::Result<()> {
     if package.len() > 256
         || package.contains('/')
@@ -236,6 +254,7 @@ fn validate_package_name(package: &str) -> anyhow::Result<()> {
         || package.contains("-dirty-")
         || package.ends_with("-single")
         || package.contains("-single-")
+        || package.ends_with("-candidate")
     {
         anyhow::bail!("RELEASE-MANIFEST.v1 的 package 不是可分体部署的发布包名");
     }
@@ -244,8 +263,9 @@ fn validate_package_name(package: &str) -> anyhow::Result<()> {
 
 fn collect_members(root: &Path) -> anyhow::Result<BTreeMap<String, u32>> {
     let mut members = BTreeMap::new();
-    let mut pending = vec![root.to_path_buf()];
-    while let Some(directory) = pending.pop() {
+    let mut pending = vec![(root.to_path_buf(), 0_usize)];
+    let mut directory_count = 1_usize;
+    while let Some((directory, depth)) = pending.pop() {
         for entry in fs::read_dir(&directory)
             .with_context(|| format!("读取制品目录失败：{}", directory.display()))?
         {
@@ -264,13 +284,24 @@ fn collect_members(root: &Path) -> anyhow::Result<BTreeMap<String, u32>> {
                 .to_owned();
             validate_relative_path(&relative)?;
             if metadata.is_dir() {
-                pending.push(path);
+                directory_count += 1;
+                let child_depth = depth + 1;
+                if directory_count > MAX_DIRECTORIES {
+                    anyhow::bail!("制品目录数量超过 {MAX_DIRECTORIES} 上限");
+                }
+                if child_depth > MAX_DIRECTORY_DEPTH {
+                    anyhow::bail!("制品目录深度超过 {MAX_DIRECTORY_DEPTH} 上限");
+                }
+                pending.push((path, child_depth));
                 continue;
             }
-            if !metadata.is_file() || metadata.len() > MAX_MEMBER_BYTES {
-                anyhow::bail!("制品包含非普通文件或超大文件：{relative}");
+            if !metadata.is_file()
+                || metadata.len() > MAX_MEMBER_BYTES
+                || metadata.permissions().mode() & 0o7000 != 0
+            {
+                anyhow::bail!("制品包含非普通文件、特殊权限位或超大文件：{relative}");
             }
-            if members.insert(relative.clone(), metadata.permissions().mode() & 0o777).is_some() {
+            if members.insert(relative.clone(), metadata.permissions().mode() & 0o7777).is_some() {
                 anyhow::bail!("制品包含重复路径：{relative}");
             }
             if members.len() > MAX_MEMBERS {
@@ -302,7 +333,8 @@ fn parse_sha256sums(bytes: &[u8]) -> anyhow::Result<BTreeMap<String, String>> {
     Ok(sums)
 }
 
-/// 校验一个 Web surface 的静态资源标记；返回 `sha256(WEB-<surface>-SHA256)`。
+/// 校验一个 Web surface 的构建清单与标记并返回清单摘要。Web 文件已嵌入对应 surface 二进制，
+/// 发布包仅携带摘要清单与标记；部署字节由二进制 SHA-256 校验。
 fn inspect_web_surface(root: &Path, surface: &str) -> anyhow::Result<String> {
     let list_path = root.join(format!("docs/WEB-{}-SHA256", surface.to_uppercase()));
     let manifest_path = root.join(format!("docs/WEB-{}-MANIFEST.v1", surface.to_uppercase()));
@@ -343,9 +375,9 @@ fn inspect_web_surface(root: &Path, surface: &str) -> anyhow::Result<String> {
     }
     if fields.get("schema").map(String::as_str) != Some(WEB_MANIFEST_SCHEMA)
         || fields.get("surface").map(String::as_str) != Some(surface)
-        || fields.get("profile").is_none_or(String::is_empty)
+        || fields.get("profile").map(String::as_str) != Some("wasm-release")
     {
-        anyhow::bail!("Web 资源标记的 schema、surface 或 profile 无效：{surface}");
+        anyhow::bail!("Web 资源标记的 schema、surface 或部署 profile 无效：{surface}");
     }
     if fields.get("payload_sha256").map(String::as_str) != Some(payload_sha256.as_str()) {
         anyhow::bail!("Web 资源标记的 payload_sha256 与摘要清单不一致：{surface}");
@@ -356,18 +388,21 @@ fn inspect_web_surface(root: &Path, surface: &str) -> anyhow::Result<String> {
 /// 打开并读取成员文件；返回描述符与字节数，供摘要计算与统计复用。
 fn read_member(root: &Path, relative: &str) -> anyhow::Result<(File, u64)> {
     let path = root.join(relative);
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
+        .open(&path)
+        .with_context(|| format!("打开制品文件失败：{relative}"))?;
     let metadata =
-        fs::symlink_metadata(&path).with_context(|| format!("读取制品文件失败：{relative}"))?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        file.metadata().with_context(|| format!("读取制品文件元数据失败：{relative}"))?;
+    if !metadata.is_file() {
         anyhow::bail!("制品成员不是普通文件：{relative}");
     }
     if metadata.len() > MAX_MEMBER_BYTES {
         anyhow::bail!("制品成员超过大小上限：{relative}");
     }
-    Ok((
-        File::open(&path).with_context(|| format!("打开制品文件失败：{relative}"))?,
-        metadata.len(),
-    ))
+    let bytes = metadata.len();
+    Ok((file, bytes))
 }
 
 fn parse_mode(value: &str) -> anyhow::Result<u32> {

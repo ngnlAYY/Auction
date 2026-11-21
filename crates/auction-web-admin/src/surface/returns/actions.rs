@@ -3,10 +3,11 @@
 //! 确认框只展示服务端冻结的后果（原收件人、资产与补寄次数），不提供可编辑的资产、金额或收件人。
 //! 提交时冻结案件、版本、动作与 `command_id`。结果未知可在未决区原样重试，被明确拒绝时重读详情。
 
+use auction_contracts::AdminSettlementReturnAction;
 use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
-use super::labels::{action_effect_key, action_key, blocker_key, label};
+use super::labels::{ReturnEnum, action_effect_key, action_key, blocker_key, label};
 use super::list::assets_text;
 use crate::api::{
     SettlementReturnDetail, SettlementReturnSummary, return_failure_needs_reload,
@@ -16,9 +17,9 @@ use crate::surface::AdminActionFeedback;
 use crate::surface::pending::{PendingCommands, set_if_alive};
 
 /// 一次待确认的动作：冻结读取时的案件版本，确认后原样提交。
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 struct PendingAction {
-    action: String,
+    action: AdminSettlementReturnAction,
     expected_version: i64,
 }
 
@@ -40,11 +41,11 @@ pub(super) fn ActionSection(
     });
     let version = summary.case_version;
     // 按钮文案在渲染前取好，按钮只捕获动作名与读取时的案件版本。
-    let buttons: Vec<(String, String)> = allowed_actions
+    let buttons: Vec<(String, AdminSettlementReturnAction, String)> = allowed_actions
         .into_iter()
         .map(|action| {
             let text = label(action_key, &action);
-            (action, text)
+            (action.code().to_owned(), action, text)
         })
         .collect();
     let blockers: Vec<String> = blockers
@@ -61,9 +62,9 @@ pub(super) fn ActionSection(
                 p { class: "admin-panel__note", {t!("settlement-return-actions-none")} }
             } else {
                 div { class: "admin-settlement-return-actions__buttons",
-                    for (action, text) in buttons {
+                    for (action_code, action, text) in buttons {
                         button {
-                            key: "{action}",
+                            key: "{action_code}",
                             class: "admin-btn-primary",
                             r#type: "button",
                             disabled: !can_open.call(()),
@@ -72,7 +73,7 @@ pub(super) fn ActionSection(
                                 let mut notice = notice;
                                 notice.set(None);
                                 confirming.set(Some(PendingAction {
-                                    action: action.clone(),
+                                    action,
                                     expected_version: version,
                                 }));
                             },
@@ -110,8 +111,8 @@ fn ConfirmDialog(
     use_drop(move || restore_focus.call(()));
     let recipient = summary.recipient.clone().unwrap_or_else(|| t!("value-empty"));
     let used = summary.resends_used.unwrap_or_default();
-    let effect = action_effect_key(&pending.action).map_or_else(
-        || pending.action.clone(),
+    let effect = action_effect_key(pending.action.code()).map_or_else(
+        || pending.action.code().to_owned(),
         |key| {
             t!(
                 key,
@@ -229,7 +230,7 @@ mod tests {
     use crate::api::{
         AdminApiFailure, AdminWriteEndpoint, AdminWriteFailure, return_failure_needs_reload,
     };
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         RecordRead, button, click_button, command_button, has_live_text, has_text, mount_writer,
         settle_writer,
     };

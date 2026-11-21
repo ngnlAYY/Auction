@@ -66,11 +66,13 @@ bun_version=$(bun --version)
 	printf '无法生成 web/ 依赖准备凭据\n' >&2
 	exit 1
 }
-prepared=$(mktemp node_modules/.auction-prepared.next.XXXXXX)
-trap 'rm -f -- "$prepared"' EXIT
-printf 'lock_sha256=%s\nbun_version=%s\n' "$lock_sha256" "$bun_version" >"$prepared"
-chmod 0644 "$prepared"
-mv -f -- "$prepared" node_modules/.auction-prepared
+	prepared=$(mktemp node_modules/.auction-prepared.next.XXXXXX)
+	trap 'rm -f -- "$prepared"' EXIT
+	tree_sha256=$(bash ../ci/release/web-dependency-tree.sh node_modules)
+	[[ "$tree_sha256" =~ ^[0-9a-f]{64}$ ]] || { printf '无法计算 web/ 依赖树摘要\n' >&2; exit 1; }
+	printf 'lock_sha256=%s\nbun_version=%s\ntree_sha256=%s\n' "$lock_sha256" "$bun_version" "$tree_sha256" >"$prepared"
+	chmod 0644 "$prepared"
+	mv -f -- "$prepared" node_modules/.auction-prepared
 trap - EXIT
 '''
 

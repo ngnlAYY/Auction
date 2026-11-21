@@ -3,7 +3,7 @@
 use auction_web_shared::{Dialog, t};
 use dioxus::prelude::*;
 
-use super::super::auctions::{
+use super::super::auctions::editor::{
     DraftFeedback, DraftRead, DraftRefreshButton, DraftWriteFeedback, close_edit_draft,
     close_matching_draft, focus_draft_field_after_render, observe_draft_write,
 };
@@ -236,7 +236,8 @@ fn submit_lot_update(
             )
         },
         move |_| {
-            close_matching_draft(draft, |edit| edit.base == base && edit.kind == kind);
+            let base = base.clone();
+            close_matching_draft(draft, move |edit| edit.base == base && edit.kind == kind);
             set_if_alive(notice, Some(success));
         },
         |_| {},
@@ -260,12 +261,12 @@ mod tests {
     use super::super::row::AdminLotRow;
     use super::{AdminLotEditDialog, LotEdit};
     use crate::api::AdminLot;
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         CapturedWrite, DIALOG_TITLE_CLOSE, RecordRead, WriteScript, assert_field, button,
         click_button, command_button, has_live_text, has_text, init_i18n, mount_writer,
         settle_writer, writer_form,
     };
-    use crate::surface::auctions::use_draft_page;
+    use crate::surface::auctions::editor::use_draft_page;
     use crate::surface::pagination::use_admin_pagination;
     use crate::surface::pending::{PendingCommands, use_pending_commands};
     use crate::surface::realtime::{TestPage, text_attributes};

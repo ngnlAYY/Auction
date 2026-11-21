@@ -8,9 +8,11 @@ use auction_domain::{DataKeyDomain, valid_key_id, valid_text};
 use auction_time::Timestamp;
 use url::Url;
 
-use super::super::{ConfigError, MoogleMailEquipmentFilterConfig, MoogleMailWorkerConfig};
+use super::super::{
+    ConfigError, MoogleMailEquipmentFilterConfig, MoogleMailWorkerConfig, load_mooglemail_keyenv,
+};
 use crate::StandardCronSchedule;
-use crate::settings::secrets::{AppSecrets, SecretString, load_mooglemail_keyenv};
+use crate::settings::secrets::model::{AppSecrets, SecretString};
 
 /// 主动告警依赖完整的邮件 transport；配置校验只检查本地凭据来源，不探测外部账号。
 pub(super) fn validate_notification_mail_credentials(

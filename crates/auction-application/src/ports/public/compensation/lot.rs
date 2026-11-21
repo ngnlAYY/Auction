@@ -130,8 +130,8 @@ impl PublicCompensationLotPage {
             "公开逐件结算明细页大小溢出"
         })?;
         let reversal_count = self.entries.iter().filter(|entry| entry.reversal.is_some()).count();
-        if self.total < entry_count
-            || entry_count > self.limit
+        if self.total < 0
+            || entry_count > self.total.saturating_sub(self.offset).clamp(0, self.limit)
             || i64::try_from(reversal_count).map_err(|error| {
                 record_error(
                     DiagnosticLevel::Error,
@@ -145,9 +145,10 @@ impl PublicCompensationLotPage {
         {
             return Err("公开逐件结算明细页无效");
         }
-        for (index, entry) in self.entries.iter().enumerate() {
+        let mut seen_lot_ids = std::collections::HashSet::with_capacity(self.entries.len());
+        for entry in &self.entries {
             entry.validate()?;
-            if self.entries[..index].iter().any(|other| other.lot_id == entry.lot_id) {
+            if !seen_lot_ids.insert(entry.lot_id) {
                 return Err("公开逐件结算明细重复");
             }
         }

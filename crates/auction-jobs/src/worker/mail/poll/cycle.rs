@@ -11,10 +11,11 @@ use auction_application::scheduling::RecurringSchedule;
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult};
 use auction_time::{TimeDelta, Timestamp};
 
-use super::super::maintenance::{run_maintenance, run_read_observation};
 use super::processing::process_claim;
 use super::{MailPollGateway, MailPollRuntime, MailPollRuntimeConfig};
 use crate::worker::diagnostics;
+use crate::worker::mail::maintenance::observation::run_read_observation;
+use crate::worker::mail::maintenance::sweep::run_maintenance;
 use crate::worker::runtime::{PersistentWorker, WorkerError, poll_delay};
 
 /// 收件等待期间重读开关的切片上限；不改变原触发点或重复叠加 jitter。

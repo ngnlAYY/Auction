@@ -19,8 +19,9 @@ use super::preconditions::{
 };
 use crate::deploy::artifact::{Artifact, ArtifactBinary, REQUIRED_BINARIES};
 use crate::deploy::install::{
-    FORMAT, InstallArtifactFailure, ROLE_BINARIES, RetainRequest, RetainedBinary, RollbackRecord,
-    SchemaSource, install_artifact, install_retained, latest, load, retain,
+    FORMAT, InstallArtifactFailure, InstallRecoveryOutcome, ROLE_BINARIES, RetainRequest,
+    RetainedBinary, RollbackRecord, SchemaSource, install_artifact, install_retained, latest, load,
+    retain,
 };
 use crate::deploy::receipts::{FailedReceipt, installed_identity};
 use crate::deploy::role_binary;
@@ -28,8 +29,8 @@ use crate::deploy::verification::installed_artifacts;
 use crate::receipt::{
     Action, Artifact as ReceiptArtifact, CliIdentity, DeployRecord, DeploySection,
     DeploymentReceipt, FORMAT as RECEIPT_FORMAT, LEGACY_FORMAT as LEGACY_RECEIPT_FORMAT,
-    LegacyDeployRecord, Outcome, ReceiptContext, RoleIdentity, append, list as list_receipts,
-    read as read_receipt, record_deploy,
+    LegacyDeployRecord, MigrationRecord, Outcome, ReceiptContext, RoleIdentity, append,
+    list as list_receipts, read as read_receipt, record_deploy,
 };
 use crate::service::ManagedRole;
 use crate::support::digest::{sha256_bytes, sha256_path};
@@ -69,6 +70,19 @@ fn record(retained_roles: RoleIdentity) -> RollbackRecord {
 }
 
 fn receipt(action: Action, deploy: DeploySection) -> DeploymentReceipt {
+    let migration = match (&action, &deploy) {
+        (Action::Deploy, DeploySection::Current(record)) => {
+            let before_version = record.database_version;
+            let expected_version = record.roles.schema_version.unwrap_or(before_version);
+            Some(MigrationRecord {
+                before_version,
+                after_version: expected_version,
+                expected_version,
+                applied: expected_version - before_version,
+            })
+        }
+        _ => None,
+    };
     DeploymentReceipt {
         format: RECEIPT_FORMAT.to_owned(),
         receipt_id: Uuid::new_v4(),
@@ -79,7 +93,7 @@ fn receipt(action: Action, deploy: DeploySection) -> DeploymentReceipt {
         actor: "operator".to_owned(),
         actor_uid: 0,
         backup_id: None,
-        migration: None,
+        migration,
         artifacts: Vec::new(),
         failure: None,
         deploy: Some(deploy),
@@ -337,17 +351,20 @@ fn install_failure_guidance_follows_the_swap_back_result() {
     let retained = record(role_identity('a', 1));
     let install_dir = Path::new("/opt/auction/bin");
     let reverse_directory = Path::new("/var/lib/auction/deployment/rollback/reverse");
-    let failure = |restored| InstallArtifactFailure {
+    let failure = |outcome| InstallArtifactFailure {
         error: anyhow::anyhow!("原子替换程序失败"),
-        restored,
+        outcome,
     };
 
-    let swapped = install_failed(failure(true), install_dir, 2, &retained, reverse_directory);
-    let text = format!("{swapped:#}");
-    assert!(
-        text.contains("已复核为回退前的程序") && text.contains("auction-cli 未被替换"),
-        "{text}"
+    let swapped = install_failed(
+        failure(InstallRecoveryOutcome::Restored),
+        install_dir,
+        2,
+        &retained,
+        reverse_directory,
     );
+    let text = format!("{swapped:#}");
+    assert!(text.contains("auction-cli 未被替换"), "{text}");
     assert!(text.contains("/opt/auction/bin/auction-cli service start --owner-secrets"), "{text}");
     assert!(text.contains(&format!("rollback --receipt-id {}", retained.record_id)), "{text}");
     assert!(text.contains("/var/lib/auction/deployment/rollback/reverse"), "{text}");
@@ -355,7 +372,13 @@ fn install_failure_guidance_follows_the_swap_back_result() {
     assert!(!text.contains("安装目录核对处拒绝"), "安装目录核对会通过，不能这样指引：{text}");
     assert!(text.ends_with("原子替换程序失败"), "{text}");
 
-    let mixed = install_failed(failure(false), install_dir, 2, &retained, reverse_directory);
+    let mixed = install_failed(
+        failure(InstallRecoveryOutcome::Mixed),
+        install_dir,
+        2,
+        &retained,
+        reverse_directory,
+    );
     let text = format!("{mixed:#}");
     assert!(text.contains("自动换回未完成") && text.contains("可能新旧混合"), "{text}");
     assert!(text.contains("安装中途失败的手工换回"), "{text}");
@@ -364,6 +387,17 @@ fn install_failure_guidance_follows_the_swap_back_result() {
     assert!(!text.contains("已复核为回退前的程序"), "{text}");
     assert!(!text.contains("service start"), "{text}");
     assert!(text.ends_with("原子替换程序失败"), "{text}");
+
+    let unverified = install_failed(
+        failure(InstallRecoveryOutcome::UntouchedUnverified),
+        install_dir,
+        2,
+        &retained,
+        reverse_directory,
+    );
+    let text = format!("{unverified:#}");
+    assert!(text.contains("没有替换任何程序") && text.contains("身份未能复核"), "{text}");
+    assert!(!text.contains("service start"), "{text}");
 }
 
 #[test]
@@ -412,6 +446,7 @@ impl Site {
                 write_program(&bin.join(name), &content);
                 ArtifactBinary {
                     name,
+                    file: fs::File::open(bin.join(name)).expect("固定真实制品文件句柄"),
                     path: bin.join(name),
                     sha256: sha256_bytes(content.as_bytes()),
                     bytes: content.len() as u64,
@@ -517,7 +552,12 @@ impl Site {
                 assert!(!text.contains("部署回执也未写入"), "{text}");
             }
             (Err(failure), DeployFault::InstallThird) => {
-                assert!(failure.restored, "{:#}", failure.error);
+                assert_eq!(
+                    failure.outcome,
+                    InstallRecoveryOutcome::Restored,
+                    "{:#}",
+                    failure.error
+                );
                 self.publish(id, Action::Deploy, Outcome::Failed, deploy);
             }
             (Ok(()), DeployFault::InstallThird) => panic!("第三个程序必须安装失败"),
@@ -578,7 +618,11 @@ impl Site {
                 Ok(Attempt::Succeeded(reverse))
             }
             Err(failure) => {
-                assert!(fail_third && failure.restored, "{:#}", failure.error);
+                assert!(
+                    fail_third && failure.outcome == InstallRecoveryOutcome::Restored,
+                    "{:#}",
+                    failure.error
+                );
                 self.publish(reverse_id, Action::Rollback, Outcome::Failed, deploy);
                 Ok(Attempt::Failed(reverse))
             }
@@ -603,6 +647,16 @@ impl Site {
     ) -> DeploymentReceipt {
         let context = ReceiptContext::resolve(None, Some("operator")).expect("上下文");
         let failure = (outcome == Outcome::Failed).then(|| "安装第三个程序失败".to_owned());
+        let migration = (action == Action::Deploy && outcome == Outcome::Succeeded).then(|| {
+            let before_version = deploy.database_version;
+            let expected_version = deploy.roles.schema_version.expect("制品 schema 版本");
+            MigrationRecord {
+                before_version,
+                after_version: expected_version,
+                expected_version,
+                applied: expected_version - before_version,
+            }
+        });
         record_deploy(
             &self.state,
             id,
@@ -610,7 +664,7 @@ impl Site {
             outcome,
             Timestamp::now(),
             &context,
-            None,
+            migration,
             self.role_artifacts(),
             deploy,
             failure,

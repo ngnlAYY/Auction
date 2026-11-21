@@ -128,16 +128,30 @@ fn resolve_local_datetime(
     let wall = if value.len() == 16 { format!("{value}:00Z") } else { format!("{value}Z") };
     let wall = Timestamp::parse_from_rfc3339(&wall).map_err(|_error| LocalTimeError::Invalid)?;
     let (target, target_second) = local_fields(wall);
-    let wall_minute_millis = (wall.timestamp() - i64::from(target_second)) * 1_000;
+    let Some(wall_minute_millis) = wall
+        .timestamp()
+        .checked_sub(i64::from(target_second))
+        .and_then(|seconds| seconds.checked_mul(1_000))
+    else {
+        return Err(LocalTimeError::Invalid);
+    };
     let mut utc = None;
     // 时区偏移不足一天。逐分钟反查，并补正含秒的旧偏移，不把时间移到缺口之后或择一回拨时刻。
     for minutes in -1_440_i64..=1_440 {
-        let probe = wall_minute_millis + minutes * 60_000;
+        let Some(probe) = wall_minute_millis.checked_add(minutes * 60_000) else {
+            continue;
+        };
         let Some((fields, second)) = local_at(probe) else { continue };
         if fields != target {
             continue;
         }
-        let candidate = probe + (i64::from(target_second) - i64::from(second)) * 1_000;
+        let Some(candidate) = i64::from(target_second)
+            .checked_sub(i64::from(second))
+            .and_then(|delta| delta.checked_mul(1_000))
+            .and_then(|delta| probe.checked_add(delta))
+        else {
+            continue;
+        };
         if target_second != second && local_at(candidate) != Some((target, target_second)) {
             continue;
         }

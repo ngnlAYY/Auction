@@ -109,7 +109,16 @@ export async function fetchBidLogAuctionStatus(
     if (signal.aborted) {
       return err("network_error");
     }
-    const page = await fetchAuctionPage(worldId, status, pageNumber, SUMMARY_PAGE_SIZE, signal);
+    const page = await fetchAuctionPage(
+      worldId,
+      status,
+      pageNumber,
+      SUMMARY_PAGE_SIZE,
+      signal,
+    ).catch(() => null);
+    if (page === null) {
+      return err(signal.aborted ? "network_error" : "invalid_response");
+    }
     if (signal.aborted) {
       return err("network_error");
     }
@@ -141,7 +150,11 @@ export async function fetchBidLogAuctionStatus(
     const complete =
       rowCount < pageSize || (total !== null && saturatingMultiply(pageNumber, pageSize) >= total);
     if (observe !== undefined) {
-      await observe({ status, auctions: page.value.auctions, complete }, signal);
+      try {
+        await observe({ status, auctions: page.value.auctions, complete }, signal);
+      } catch {
+        return err(signal.aborted ? "network_error" : "invalid_response");
+      }
       if (signal.aborted) {
         return err("network_error");
       }
@@ -243,48 +256,54 @@ async function tryJoinThree<T1, T2, T3, E>(
       settled = true;
       resolve(ok([firstValue.value, secondValue.value, thirdValue.value]));
     };
-    void first.then((result) => {
-      if (settled) {
-        return;
-      }
-      if (!result.ok) {
-        fail(result.error);
-        return;
-      }
-      firstValue = { value: result.value };
-      remaining -= 1;
-      if (remaining === 0) {
-        finish();
-      }
-    });
-    void second.then((result) => {
-      if (settled) {
-        return;
-      }
-      if (!result.ok) {
-        fail(result.error);
-        return;
-      }
-      secondValue = { value: result.value };
-      remaining -= 1;
-      if (remaining === 0) {
-        finish();
-      }
-    });
-    void third.then((result) => {
-      if (settled) {
-        return;
-      }
-      if (!result.ok) {
-        fail(result.error);
-        return;
-      }
-      thirdValue = { value: result.value };
-      remaining -= 1;
-      if (remaining === 0) {
-        finish();
-      }
-    });
+    void first
+      .then((result) => {
+        if (settled) {
+          return;
+        }
+        if (!result.ok) {
+          fail(result.error);
+          return;
+        }
+        firstValue = { value: result.value };
+        remaining -= 1;
+        if (remaining === 0) {
+          finish();
+        }
+      })
+      .catch(() => fail("network_error" as E));
+    void second
+      .then((result) => {
+        if (settled) {
+          return;
+        }
+        if (!result.ok) {
+          fail(result.error);
+          return;
+        }
+        secondValue = { value: result.value };
+        remaining -= 1;
+        if (remaining === 0) {
+          finish();
+        }
+      })
+      .catch(() => fail("network_error" as E));
+    void third
+      .then((result) => {
+        if (settled) {
+          return;
+        }
+        if (!result.ok) {
+          fail(result.error);
+          return;
+        }
+        thirdValue = { value: result.value };
+        remaining -= 1;
+        if (remaining === 0) {
+          finish();
+        }
+      })
+      .catch(() => fail("network_error" as E));
   });
 }
 

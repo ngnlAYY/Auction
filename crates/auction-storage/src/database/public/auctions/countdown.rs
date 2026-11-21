@@ -5,8 +5,8 @@ use auction_application::core::ApplicationError;
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::mapping::storage_error;
 use crate::database::DatabaseStore;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(super) async fn read(

@@ -4,7 +4,7 @@ import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskScope } from "@auction/web-shared/reactive/tasks";
-import { unreachable } from "@auction/web-shared/result";
+import { err, unreachable } from "@auction/web-shared/result";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { For, Show } from "solid-js";
@@ -107,7 +107,7 @@ export function ConfigurationForm(props: {
         complete,
         confirmedTarget,
         context.signal,
-      );
+      ).catch(() => err(complete ? "setup_outcome_unknown" : "network_error"));
       if (!context.alive()) {
         return;
       }

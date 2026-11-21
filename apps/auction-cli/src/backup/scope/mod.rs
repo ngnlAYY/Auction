@@ -6,7 +6,7 @@
 
 use std::{
     fs::{self, OpenOptions},
-    os::unix::fs::OpenOptionsExt,
+    os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
 };
 
@@ -15,7 +15,8 @@ use auction_config::AppConfig;
 use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use crate::support::digest::{sha256_bytes, sha256_file};
+use self::temporary::{PlaintextGuard, ScopePairTemps, remove_if_present};
+use crate::support::digest::{sha256_bytes, sha256_file, sha256_reader};
 use crate::support::files::{self, FileIdentity};
 
 mod bundle;
@@ -23,6 +24,7 @@ mod collect;
 mod crypto;
 pub(crate) mod extract;
 mod sidecar;
+mod temporary;
 
 pub(crate) use sidecar::ScopeSidecar;
 
@@ -72,24 +74,34 @@ pub(crate) async fn create(
     let archive_name = archive
         .file_name()
         .and_then(|name| name.to_str())
-        .context("备份范围要求 archive 使用 UTF-8 文件名")?;
-    let output_dir = archive.parent().context("备份 archive 缺少父目录")?;
-    let recipient = config.backup.offsite.age_recipient.as_str();
+        .context("备份范围要求 archive 使用 UTF-8 文件名")?
+        .to_owned();
+    let output_dir = archive.parent().context("备份 archive 缺少父目录")?.to_path_buf();
+    let recipient = config.backup.offsite.age_recipient.clone();
     if recipient.is_empty() {
         anyhow::bail!("启用备份范围时必须配置 [backup.offsite].age_recipient");
     }
+    let recipient_sha256 = sha256_bytes(recipient.as_bytes());
+    let lock_path = output_dir.join(format!(".{archive_name}.scope.lock"));
+    let _scope_lock = files::lock_file(&lock_path, "同一备份范围正在生成或恢复")?;
+    if let Some(summary) =
+        recover_scope_pair(&output_dir, archive, &archive_name, &recipient_sha256).await?
+    {
+        return Ok(Some(summary));
+    }
     crate::support::process::age_version().await?;
-    let collected = collect::collect(&plan)?;
     let plaintext = output_dir.join(format!(".{archive_name}.scope.partial"));
-    let mut guard = PlaintextGuard::new(plaintext.clone());
-    let digest = {
+    let plaintext_for_task = plaintext.clone();
+    let (collected, digest, mut guard) = tokio::task::spawn_blocking(move || {
+        let collected = collect::collect(&plan)?;
+        let guard = PlaintextGuard::new(plaintext_for_task.clone());
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-            .open(&plaintext)
-            .with_context(|| format!("创建范围暂存文件失败：{}", plaintext.display()))?;
+            .open(&plaintext_for_task)
+            .with_context(|| format!("创建范围暂存文件失败：{}", plaintext_for_task.display()))?;
         let digest = {
             let mut writer = std::io::BufWriter::new(&mut file);
             let digest = bundle::write(&mut writer, &collected.artifacts)?;
@@ -97,19 +109,29 @@ pub(crate) async fn create(
             digest
         };
         file.sync_all().context("同步范围暂存文件失败")?;
-        digest
-    };
-    let bundle_path = output_dir.join(sidecar::bundle_file_name(archive_name));
-    crypto::seal_file(&plaintext, &bundle_path, recipient).await?;
+        Ok::<_, anyhow::Error>((collected, digest, guard))
+    })
+    .await
+    .context("后台收集并打包备份范围失败")??;
+    let sidecar_path = output_dir.join(sidecar::sidecar_file_name(&archive_name));
+    let pair_id = uuid::Uuid::new_v4();
+    let bundle_temporary =
+        output_dir.join(format!(".{archive_name}.scope.bundle.{pair_id}.partial"));
+    let sidecar_temporary = output_dir.join(format!(".{archive_name}.scope.{pair_id}.partial"));
+    let mut pair_guard = ScopePairTemps::new(bundle_temporary.clone(), sidecar_temporary.clone());
+
+    crypto::seal_file(&plaintext, &bundle_temporary, &recipient).await?;
     guard.remove()?;
-    let bundle_sha256 = sha256_file(&bundle_path).await?;
-    let bundle_metadata = files::open_regular(&bundle_path)?.metadata()?;
+    let bundle_sha256 = sha256_file(&bundle_temporary).await?;
+    let bundle_metadata = files::open_regular(&bundle_temporary)?.metadata()?;
+    let bundle_name = sidecar::bundle_file_name(&archive_name);
+    let bundle_path = output_dir.join(&bundle_name);
     let listed = digest.entries.len().min(sidecar::MAX_LISTED_FILES);
     let sidecar = sidecar::ScopeSidecar {
         format: sidecar::FORMAT.to_owned(),
         created_at: Timestamp::now(),
         age_recipient_sha256: sha256_bytes(recipient.as_bytes()),
-        bundle_file_name: sidecar::bundle_file_name(archive_name),
+        bundle_file_name: bundle_name,
         bundle_sha256: bundle_sha256.clone(),
         bundle_bytes: bundle_metadata.len(),
         plaintext_sha256: digest.sha256.clone(),
@@ -119,12 +141,25 @@ pub(crate) async fn create(
         files: digest.entries[..listed].to_vec(),
         files_truncated: listed < digest.entries.len(),
     };
-    let sidecar_path = output_dir.join(sidecar::sidecar_file_name(archive_name));
     let sidecar_bytes = sidecar.to_bytes()?;
-    files::write_private(&sidecar_path, &sidecar_bytes)?;
+    files::write_private(&sidecar_temporary, &sidecar_bytes)?;
+    let _staged_bundle = validate_staged_bundle(&bundle_temporary, &bundle_path)?;
+    let _staged_sidecar = files::open_private_regular(&sidecar_temporary)?;
+
+    // The staged sidecar is durable before publishing the bundle. A retry can finish this pair
+    // if the process stops between either final hard-link publication.
+    pair_guard.preserve();
+    fs::hard_link(&bundle_temporary, &bundle_path)
+        .with_context(|| format!("发布备份范围密文失败：{}", bundle_path.display()))?;
+    files::sync_parent(&bundle_path)?;
+    fs::hard_link(&sidecar_temporary, &sidecar_path)
+        .with_context(|| format!("发布备份范围 sidecar 失败：{}", sidecar_path.display()))?;
+    files::sync_parent(&sidecar_path)?;
+    pair_guard.cleanup()?;
     let sidecar_metadata = files::open_regular(&sidecar_path)?.metadata()?;
+    let bundle_metadata = files::open_regular(&bundle_path)?.metadata()?;
     Ok(Some(ScopeSummary {
-        sidecar_file_name: sidecar::sidecar_file_name(archive_name),
+        sidecar_file_name: sidecar::sidecar_file_name(&archive_name),
         sidecar_sha256: sha256_bytes(&sidecar_bytes),
         sidecar_identity: FileIdentity::of(&sidecar_metadata),
         bundle_file_name: sidecar.bundle_file_name,
@@ -133,6 +168,229 @@ pub(crate) async fn create(
         plaintext_sha256: sidecar.plaintext_sha256,
         plaintext_bytes: sidecar.plaintext_bytes,
         files_count: sidecar.files_count,
+    }))
+}
+
+fn path_exists(path: &Path) -> anyhow::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("检查范围路径失败：{}", path.display())),
+    }
+}
+
+fn validate_staged_bundle(path: &Path, published: &Path) -> anyhow::Result<std::fs::File> {
+    let file = files::open_regular(path)?;
+    let metadata = file.metadata().context("读取备份范围暂存密文元数据失败")?;
+    validate_scope_file_metadata(&metadata, path)?;
+    match metadata.nlink() {
+        1 => {}
+        2 => {
+            let published_file = files::open_regular(published)?;
+            let published_metadata =
+                published_file.metadata().context("读取已发布备份范围密文元数据失败")?;
+            validate_scope_file_metadata(&published_metadata, published)?;
+            if published_metadata.nlink() != 2
+                || metadata.dev() != published_metadata.dev()
+                || metadata.ino() != published_metadata.ino()
+            {
+                anyhow::bail!("备份范围暂存密文的第二个硬链接不匹配：{}", path.display());
+            }
+        }
+        _ => anyhow::bail!("备份范围暂存密文必须是单链接或配对发布的硬链接：{}", path.display()),
+    }
+    Ok(file)
+}
+
+fn validate_scope_file_metadata(metadata: &std::fs::Metadata, path: &Path) -> anyhow::Result<()> {
+    if !metadata.is_file()
+        || metadata.uid() != files::effective_uid()
+        || metadata.mode() & 0o7777 != 0o600
+    {
+        anyhow::bail!("备份范围文件必须归当前账号所有且权限为 0600：{}", path.display());
+    }
+    Ok(())
+}
+
+async fn recover_scope_pair(
+    output_dir: &Path,
+    archive: &Path,
+    archive_name: &str,
+    recipient_sha256: &str,
+) -> anyhow::Result<Option<ScopeSummary>> {
+    if let Some(summary) = scope_summary(archive, archive_name, recipient_sha256).await? {
+        return Ok(Some(summary));
+    }
+    let output_dir = output_dir.to_path_buf();
+    let blocking_archive_name = archive_name.to_owned();
+    let blocking_recipient_sha256 = recipient_sha256.to_owned();
+    let recovered = tokio::task::spawn_blocking(move || {
+        recover_scope_pair_blocking(&output_dir, &blocking_archive_name, &blocking_recipient_sha256)
+    })
+    .await
+    .context("后台恢复备份范围暂存文件失败")??;
+    if !recovered {
+        return Ok(None);
+    }
+    let summary = scope_summary(archive, archive_name, recipient_sha256)
+        .await?
+        .context("备份范围暂存对已发布，但无法核验最终文件对")?;
+    Ok(Some(summary))
+}
+
+fn recover_scope_pair_blocking(
+    output_dir: &Path,
+    archive_name: &str,
+    recipient_sha256: &str,
+) -> anyhow::Result<bool> {
+    let sidecar_path = output_dir.join(sidecar::sidecar_file_name(archive_name));
+    let bundle_path = output_dir.join(sidecar::bundle_file_name(archive_name));
+    let prefix = format!(".{archive_name}.scope.");
+    let mut candidates = Vec::new();
+    let mut orphan_bundles = Vec::new();
+    for entry in fs::read_dir(output_dir).context("枚举备份范围暂存文件失败")? {
+        let entry = entry.context("读取备份范围暂存目录项失败")?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if name
+            .strip_prefix(&format!(".{archive_name}.scope.bundle."))
+            .and_then(|name| name.strip_suffix(".partial"))
+            .and_then(|id| uuid::Uuid::parse_str(id).ok())
+            .is_some()
+        {
+            orphan_bundles.push(output_dir.join(name));
+            continue;
+        }
+        let Some(id) = name
+            .strip_prefix(&prefix)
+            .and_then(|name| name.strip_suffix(".partial"))
+            .and_then(|id| uuid::Uuid::parse_str(id).ok())
+        else {
+            continue;
+        };
+        candidates.push((id, output_dir.join(name)));
+    }
+
+    let mut valid_candidates = Vec::new();
+    for (id, temporary_sidecar) in candidates {
+        let temporary_bundle =
+            output_dir.join(format!(".{archive_name}.scope.bundle.{id}.partial"));
+        let candidate = (|| -> anyhow::Result<_> {
+            let (record, _) = sidecar::read_staged(&temporary_sidecar)?;
+            let expected_bundle = record.validate(&sidecar_path, archive_name)?;
+            if record.age_recipient_sha256 != recipient_sha256 {
+                anyhow::bail!("待恢复的备份范围 sidecar 与当前 age 收件人不一致");
+            }
+            match validate_staged_bundle(&temporary_bundle, &bundle_path) {
+                Ok(_) => {}
+                Err(error) if is_not_found(&error) => {}
+                Err(error) => return Err(error),
+            }
+            Ok((temporary_sidecar.clone(), temporary_bundle, record, expected_bundle))
+        })();
+        match candidate {
+            Ok(candidate) => valid_candidates.push(candidate),
+            Err(error) if is_not_found(&error) => {
+                match files::open_private_regular(&temporary_sidecar) {
+                    Ok(_) => remove_if_present(&temporary_sidecar)?,
+                    Err(error) if is_not_found(&error) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(error) => {
+                if contains_io_error(&error) {
+                    return Err(error);
+                }
+            }
+        }
+    }
+    for (temporary_sidecar, temporary_bundle, record, expected_bundle) in valid_candidates {
+        if !path_exists(&bundle_path)? {
+            if !path_exists(&temporary_bundle)? {
+                files::open_private_regular(&temporary_sidecar)?;
+                remove_if_present(&temporary_sidecar)?;
+                continue;
+            }
+            let _staged_bundle = validate_staged_bundle(&temporary_bundle, &bundle_path)?;
+            fs::hard_link(&temporary_bundle, &bundle_path)
+                .with_context(|| format!("恢复备份范围密文失败：{}", bundle_path.display()))?;
+            files::sync_parent(&bundle_path)?;
+        }
+        let bundle_file = files::open_regular(&expected_bundle)?;
+        let metadata = bundle_file.metadata()?;
+        validate_scope_file_metadata(&metadata, &expected_bundle)?;
+        if metadata.nlink() == 2 {
+            let _staged_bundle = validate_staged_bundle(&temporary_bundle, &bundle_path)?;
+        } else if metadata.nlink() != 1 {
+            anyhow::bail!("待恢复的备份范围密文链接数无效：{}", expected_bundle.display());
+        }
+        let (sha256, bytes) = sha256_reader(bundle_file).with_context(|| {
+            format!("读取待恢复的备份范围密文失败：{}", expected_bundle.display())
+        })?;
+        if metadata.len() != record.bundle_bytes
+            || bytes != record.bundle_bytes
+            || sha256 != record.bundle_sha256
+        {
+            anyhow::bail!("待恢复的备份范围密文与 sidecar 不一致：{}", expected_bundle.display());
+        }
+        let _staged_sidecar = files::open_private_regular(&temporary_sidecar)?;
+        if let Err(error) = fs::hard_link(&temporary_sidecar, &sidecar_path)
+            && error.kind() != std::io::ErrorKind::AlreadyExists
+        {
+            return Err(error)
+                .with_context(|| format!("恢复备份范围 sidecar 失败：{}", sidecar_path.display()));
+        }
+        files::sync_parent(&sidecar_path)?;
+        remove_if_present(&temporary_sidecar)?;
+        remove_if_present(&temporary_bundle)?;
+        return Ok(true);
+    }
+
+    for orphan in orphan_bundles {
+        match validate_staged_bundle(&orphan, &bundle_path) {
+            Ok(_) => remove_if_present(&orphan)?,
+            Err(error) if is_not_found(&error) => {}
+            Err(error) => {
+                if contains_io_error(&error) {
+                    return Err(error);
+                }
+            }
+        }
+    }
+    if path_exists(&bundle_path)? {
+        let metadata = files::open_private_regular(&bundle_path)?.metadata()?;
+        if metadata.nlink() != 1 || metadata.mode() & 0o077 != 0 {
+            anyhow::bail!("未配对的备份范围密文不符合临时文件策略：{}", bundle_path.display());
+        }
+        remove_if_present(&bundle_path)?;
+        files::sync_parent(&bundle_path)?;
+    }
+    Ok(false)
+}
+
+async fn scope_summary(
+    archive: &Path,
+    archive_name: &str,
+    recipient_sha256: &str,
+) -> anyhow::Result<Option<ScopeSummary>> {
+    let Some(verified) = verify(archive, archive_name).await? else {
+        return Ok(None);
+    };
+    if verified.sidecar.age_recipient_sha256 != recipient_sha256 {
+        anyhow::bail!("已有备份范围与当前 age 收件人不一致");
+    }
+    let sidecar_metadata = files::open_regular(&verified.sidecar_path)?.metadata()?;
+    let bundle_metadata = files::open_regular(&verified.bundle_path)?.metadata()?;
+    Ok(Some(ScopeSummary {
+        sidecar_file_name: sidecar::sidecar_file_name(archive_name),
+        sidecar_sha256: verified.sidecar_sha256,
+        sidecar_identity: FileIdentity::of(&sidecar_metadata),
+        bundle_file_name: verified.sidecar.bundle_file_name.clone(),
+        bundle_sha256: verified.sidecar.bundle_sha256.clone(),
+        bundle_identity: FileIdentity::of(&bundle_metadata),
+        plaintext_sha256: verified.sidecar.plaintext_sha256.clone(),
+        plaintext_bytes: verified.sidecar.plaintext_bytes,
+        files_count: verified.sidecar.files_count,
     }))
 }
 
@@ -167,40 +425,8 @@ pub(crate) fn is_not_found(error: &anyhow::Error) -> bool {
     })
 }
 
-/// 明文暂存在任何退出路径上都被删除；封存成功后立即主动删除。
-struct PlaintextGuard {
-    path: PathBuf,
-    armed: bool,
-}
-
-impl PlaintextGuard {
-    fn new(path: PathBuf) -> Self {
-        Self { path, armed: true }
-    }
-
-    fn remove(&mut self) -> anyhow::Result<()> {
-        if !self.armed {
-            return Ok(());
-        }
-        match fs::remove_file(&self.path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("删除范围明文暂存失败：{}", self.path.display()));
-            }
-        }
-        self.armed = false;
-        files::sync_parent(&self.path)
-    }
-}
-
-impl Drop for PlaintextGuard {
-    fn drop(&mut self) {
-        if self.armed {
-            let _ = fs::remove_file(&self.path);
-        }
-    }
+fn contains_io_error(error: &anyhow::Error) -> bool {
+    error.chain().any(<dyn std::error::Error + 'static>::is::<std::io::Error>)
 }
 
 #[cfg(test)]
@@ -351,7 +577,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn age_roundtrip_keeps_plaintext_off_disk_and_rejects_wrong_identity() {
+    async fn age_roundtrip_uses_private_output_and_rejects_wrong_identity() {
         if !tool_available("age") || !tool_available("age-keygen") {
             eprintln!("跳过：本机没有 age/age-keygen");
             return;
@@ -381,10 +607,10 @@ mod tests {
         // 输出目录里不能留下明文暂存。
         assert!(!tree.0.join(".bundle.age.partial").exists());
 
-        let decrypted = tree.0.join("bundle.decrypted");
-        super::crypto::decrypt_file(&identity, &sealed, &decrypted).await.expect("解密");
+        let decrypted = tree.write_private("bundle.decrypted", b"");
+        let output = fs::OpenOptions::new().write(true).open(&decrypted).expect("打开私有输出");
+        super::extract::decrypt_to_file(&identity, &sealed, &output).await.expect("解密");
         assert_eq!(fs::read(&decrypted).expect("读取"), b"{\"secret\":\"do-not-leak\"}");
-        assert!(!tree.0.join(".bundle.decrypted.partial").exists());
 
         // 用另一把私钥不能解开，且不能留下部分输出。
         let other = tree.0.join("other.txt");
@@ -395,9 +621,10 @@ mod tests {
             .expect("age-keygen");
         std::fs::set_permissions(&other, std::os::unix::fs::PermissionsExt::from_mode(0o600))
             .expect("权限");
-        let wrong = tree.0.join("wrong.decrypted");
-        assert!(super::crypto::decrypt_file(&other, &sealed, &wrong).await.is_err());
-        assert!(!wrong.exists());
+        let wrong = tree.write_private("wrong.decrypted", b"");
+        let output = fs::OpenOptions::new().write(true).open(&wrong).expect("打开私有输出");
+        assert!(super::extract::decrypt_to_file(&other, &sealed, &output).await.is_err());
+        assert_eq!(output.metadata().expect("读取输出大小").len(), 0);
     }
 
     #[tokio::test]

@@ -10,11 +10,7 @@ cd "$repository_root"
 # 工具选择与身份共用同一入口；任一发布工具缺失时不进入任何发布操作。
 source ci/release/build-identity.sh
 command_name=${1:-}
-# 正式发行只由发布 tag 触发的 CI 运行代表；本地命令与 workflow_dispatch 都是候选构建。
-# 判定只读触发上下文，必须在任何工具、临时目录或制品目录操作之前完成。
-is_formal_release() {
-	[[ ${GITHUB_ACTIONS-} == true && ${GITHUB_REF_TYPE-} == tag ]]
-}
+# 正式发行只由共享身份入口判断；必须在任何工具、临时目录或制品目录操作之前完成。
 
 reject_solid_formal_release() {
 	if ! is_formal_release || ! web_stack_uses_solid; then
@@ -207,21 +203,26 @@ write_build_info() {
 	chmod 0644 "$destination"
 }
 
-replace_generated_directory() {
+replace_generated_directory() (
 	local next=$1 current=$2
-	local backup="$current.previous.$$"
-	rm -rf "$backup"
+	local backup lock_directory lock_fd
+	lock_directory="$(dirname "$current")/.locks"
+	mkdir -p -- "$lock_directory" || return 1
+	exec {lock_fd}>"$lock_directory/$(basename "$current").lock" || return 1
+	flock -x "$lock_fd" || return 1
+	backup=$(mktemp -d "$(dirname "$current")/.previous.XXXXXX") || return 1
+	rmdir -- "$backup" || return 1
 	if [[ -e "$current" ]]; then
-		mv "$current" "$backup"
+		mv -T -- "$current" "$backup" || return 1
 	fi
-	if ! mv "$next" "$current"; then
-		if [[ -e "$backup" ]]; then
-			mv "$backup" "$current"
-		fi
+	if ! mv -T -- "$next" "$current"; then
+		if [[ -e "$backup" ]]; then mv -T -- "$backup" "$current" || return 1; fi
 		return 1
 	fi
-	rm -rf "$backup"
-}
+	if ! rm -rf -- "$backup"; then
+		printf '目录已发布，但旧目录清理失败：%s\n' "$backup" >&2
+	fi
+)
 
 # 从固定白名单重算摘要，不执行缓存清单提供的路径；字节损坏必须使复用失效。
 artifact_checksums() (
@@ -348,6 +349,16 @@ build_variant() (
 	fi
 	verify_build_info "$next" "$variant"
 
+	# Cargo 与构建产物目录按 variant 共享；锁覆盖缓存清理、编译和制品复制。
+	build_lock_directory="$(dirname "$build_root")/.locks"
+	mkdir -p -- "$build_lock_directory"
+	exec {build_lock_fd}>"$build_lock_directory/$(basename "$build_root").lock"
+	flock -x "$build_lock_fd"
+	# 锁内重查复用，前一个进程可能已完成并发布同一身份制品。
+	if artifacts_reusable "$variant" "$artifact_directory" "$features" "${selected_binaries[@]}"; then
+		printf '%s 构建输入未变，复用：%s\n' "$variant" "$artifact_directory"
+		return 0
+	fi
 	# 强制重新展开两个 RustEmbed 类型，避免 Cargo 复用前一份 Web payload 的过程宏结果。
 	if [[ -f "$build_root/CACHEDIR.TAG" ]]; then
 		cargo clean --target-dir "$build_root" -p auction-public-api -p auction-admin-api
@@ -860,21 +871,31 @@ create_archive() {
 
 verify_archive() {
 	local archive=$1 package_name=$2 epoch=$3 extraction_root=$4
-	local members duplicates expected_timestamp verbose
+	local members normalized_members duplicates expected_timestamp verbose member normalized member_path
 	members=$(tar --list --gzip --file "$archive")
 	if [[ -z "$members" ]]; then
 		printf 'release archive 为空\n' >&2
 		return 1
 	fi
+	normalized_members=
 	while IFS= read -r member; do
-		if [[ "$member" == /* || "$member" == *'/../'* || "$member" != "$package_name"/* ]]; then
+		normalized=${member%/}
+		if [[ "$normalized" == /* ||
+			( "$normalized" != "$package_name" && "$normalized" != "$package_name/"* ) ]]; then
 			printf 'release archive member 路径非法：%s\n' "$member" >&2
 			return 1
 		fi
+		case "/$normalized/" in
+		*/../* | */./* | *//* )
+			printf 'release archive member 含非规范路径组件：%s\n' "$member" >&2
+			return 1
+			;;
+		esac
+		normalized_members+="$normalized"$'\n'
 	done <<<"$members"
-	duplicates=$(printf '%s\n' "$members" | LC_ALL=C sort | uniq -d)
+	duplicates=$(printf '%s' "$normalized_members" | LC_ALL=C sort | uniq -d)
 	if [[ -n "$duplicates" ]]; then
-		printf 'release archive member 重复：%s\n' "$duplicates" >&2
+		printf 'release archive member 归一化后重复：%s\n' "$duplicates" >&2
 		return 1
 	fi
 
@@ -925,7 +946,12 @@ package_release() (
 	else
 		verify_artifacts
 	fi
-	local commit state fingerprint epoch version suffix package_name temporary_root package_root
+	local package_lock_fd package_lock_name=release
+	if [[ "$single_binary" == true ]]; then package_lock_name=single; fi
+	mkdir -p "$repository_root/target/dist/.locks"
+	exec {package_lock_fd}>"$repository_root/target/dist/.locks/$package_lock_name.lock"
+	flock -x "$package_lock_fd"
+	local commit state fingerprint epoch version suffix candidate_suffix package_name temporary_root package_root
 	commit=$(git rev-parse --verify 'HEAD^{commit}')
 	state=$(worktree_state)
 	fingerprint=$(source_fingerprint)
@@ -943,7 +969,8 @@ package_release() (
 	if [[ "$state" == dirty ]]; then
 		suffix=-dirty
 	fi
-	package_name="auction-rust-${version}-${commit:0:12}${variant_suffix}${suffix}"
+	candidate_suffix=$(release_candidate_suffix) || return 1
+	package_name="auction-rust-${version}-${commit:0:12}${variant_suffix}${suffix}${candidate_suffix}"
 	mkdir -p "$repository_root/target/dist/tmp"
 	temporary_root=$(mktemp -d "$repository_root/target/dist/tmp/auction-release.XXXXXX")
 	# 子 shell 限定 EXIT trap 的生命周期；任一步骤失败也回收本次装包目录，不触碰旧发布包。

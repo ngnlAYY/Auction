@@ -90,7 +90,7 @@ fn plan_alignment_reread(
     }
     match attempt {
         Some((key, _)) if key == alignment_key => AlignmentAction::Wait,
-        Some((_, generation)) if loaded_generation.is_none_or(|loaded| loaded < *generation) => {
+        Some((_, generation)) if loaded_generation.is_some_and(|loaded| loaded < *generation) => {
             AlignmentAction::Wait
         }
         _ => AlignmentAction::Reread,

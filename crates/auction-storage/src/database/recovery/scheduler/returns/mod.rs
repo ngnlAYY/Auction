@@ -4,7 +4,5 @@
 mod action;
 mod mapping;
 mod model;
-mod record;
+pub(in crate::database::recovery::scheduler) mod record;
 mod validation;
-
-pub(super) use record::record_return_postgres;

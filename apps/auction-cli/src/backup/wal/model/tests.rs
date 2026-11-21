@@ -1,12 +1,15 @@
 use std::path::Path;
 
-use super::paths::{base_id_from_file_name, valid_base_id};
-use super::{
-    ArchiveManifest, BASE_MANIFEST_FORMAT, BASE_RECEIPT_FORMAT, BaseManifest, BaseReceipt,
-    BaseStaged, Duplicate, MANIFEST_FORMAT, SourceIdentity, WAL_UPLOAD_FORMAT, WalUploadReceipt,
-    base_cipher_path, base_id, base_manifest_path, base_receipt_path, classify, retention_plan,
-    staged, valid_recipient, valid_segment_name, wal_upload_path,
+use super::manifest::{
+    ArchiveManifest, BaseManifest, BaseReceipt, BaseStaged, Duplicate, SourceIdentity,
+    WalUploadReceipt,
 };
+use super::paths::{
+    base_cipher_path, base_id, base_id_from_file_name, base_manifest_path, base_receipt_path,
+    retention_plan, valid_base_id, valid_recipient, valid_segment_name, wal_upload_path,
+};
+use super::scan::{classify, staged};
+use super::{BASE_MANIFEST_FORMAT, BASE_RECEIPT_FORMAT, MANIFEST_FORMAT, WAL_UPLOAD_FORMAT};
 
 #[test]
 fn segment_names_match_postgresql_forms() {
@@ -38,7 +41,9 @@ fn manifest_validation_binds_segment_and_length() {
         segment_name: "000000010000000000000001".to_owned(),
         source_bytes: 16 * 1024 * 1024,
         source_mtime_ns: 1,
+        source_sha256: Some("b".repeat(64)),
         cipher_bytes: 4096,
+        cipher_sha256: Some("a".repeat(64)),
         archived_unix_seconds: 2,
     };
     assert!(record.validate("000000010000000000000001").is_ok());
@@ -59,12 +64,13 @@ fn durable_upload_proof_classifies_without_cipher_or_manifest() {
         std::env::temp_dir().join(format!("auction-wal-upload-proof-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&directory).expect("建立临时暂存目录");
     let segment = "000000010000000000000001";
-    let source = SourceIdentity { bytes: 128, mtime_ns: 7 };
+    let source = SourceIdentity { bytes: 128, mtime_ns: 7, sha256: "b".repeat(64) };
     let receipt = WalUploadReceipt {
         format: WAL_UPLOAD_FORMAT.to_owned(),
         segment_name: segment.to_owned(),
         source_bytes: source.bytes,
         source_mtime_ns: source.mtime_ns,
+        source_sha256: Some(source.sha256.clone()),
         cipher_bytes: 64,
         cipher_sha256: "a".repeat(64),
         remote_key: format!("wal/{segment}.zst.age"),
@@ -80,7 +86,7 @@ fn durable_upload_proof_classifies_without_cipher_or_manifest() {
         Duplicate::Uploaded(record) => assert_eq!(record.cipher_bytes, 64),
         other => panic!("应识别为已上传：{other:?}"),
     }
-    let changed = SourceIdentity { bytes: 128, mtime_ns: 8 };
+    let changed = SourceIdentity { bytes: 128, mtime_ns: 8, sha256: source.sha256 };
     assert!(classify(&directory, segment, &changed).is_err());
     let _ = std::fs::remove_dir_all(&directory);
 }

@@ -82,21 +82,17 @@ impl Competitor {
     }
 }
 
-/// 等到本库恰有 `count` 个会话在等待重量级锁（行锁排队），超时失败。
-async fn wait_for_lock_waiters(pool: &PgPool, count: i64) {
+/// 等到恰有 `count` 个会话被本轮指定的行锁持有者阻塞，超时失败。
+async fn wait_for_lock_waiters(pool: &PgPool, count: i64, blocker_pid: i32) {
     let deadline = Instant::now() + StdDuration::from_secs(10);
     loop {
-        let waiting: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM pg_stat_activity
-             WHERE datname = current_database() AND wait_event_type = 'Lock'",
-        )
-        .fetch_one(pool)
-        .await
-        .expect("读取锁等待");
+        let waiting = crate::support::lock_waiters::count_blocked_by(pool, blocker_pid)
+            .await
+            .expect("读取锁等待");
         if waiting >= count {
             return;
         }
-        assert!(Instant::now() < deadline, "等待第 {count} 个锁等待者超时");
+        assert!(Instant::now() < deadline, "等待第 {count} 个目标锁等待者超时");
         tokio::time::sleep(StdDuration::from_millis(10)).await;
     }
 }
@@ -136,6 +132,10 @@ async fn race(
         .execute(&mut *holder)
         .await
         .expect("持有 world 行锁");
+    let blocker_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *holder)
+        .await
+        .expect("读取 world 锁持有会话");
 
     let activate = {
         let store = Arc::clone(store);
@@ -152,15 +152,15 @@ async fn race(
     };
     let (activation, competition) = if return_first {
         let activation = activate();
-        wait_for_lock_waiters(pool, 1).await;
+        wait_for_lock_waiters(pool, 1, blocker_pid).await;
         let competition = compete();
-        wait_for_lock_waiters(pool, 2).await;
+        wait_for_lock_waiters(pool, 2, blocker_pid).await;
         (activation, competition)
     } else {
         let competition = compete();
-        wait_for_lock_waiters(pool, 1).await;
+        wait_for_lock_waiters(pool, 1, blocker_pid).await;
         let activation = activate();
-        wait_for_lock_waiters(pool, 2).await;
+        wait_for_lock_waiters(pool, 2, blocker_pid).await;
         (activation, competition)
     };
     sqlx::query("COMMIT").execute(&mut *holder).await.expect("释放 world 行锁");
@@ -205,9 +205,13 @@ async fn race(
         .fetch_one(pool)
         .await
         .expect("读取最新事件");
+        let expected_details = serde_json::json!({
+            "failure_code": "mail_disposition_conflict",
+            "delivery_id": null,
+        });
         assert_eq!(
-            (kind.as_str(), details["failure_code"].as_str()),
-            ("take_unknown", Some("mail_disposition_conflict")),
+            (kind.as_str(), details),
+            ("take_unknown", expected_details),
             "冲突原因记在案件事件里（{label}）"
         );
         assert_eq!(

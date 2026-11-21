@@ -17,7 +17,7 @@ mod panel;
 mod sources;
 
 pub(crate) use panel::{PendingCommandNotices, PendingCommandPanel};
-pub(super) use sources::advance_command_reload;
+pub(in crate::surface) use sources::advance_command_reload;
 pub(crate) use sources::{use_pending_commands, use_pending_commands_with_gate};
 
 type Deliver = Box<dyn FnOnce(bool) -> CommandDelivery>;
@@ -483,7 +483,7 @@ mod tests {
         WriteTransportStub, admin_fixture, blacklist_admin_user, mutate_admin_user,
         publish_admin_rules, submit_mail_template,
     };
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         RecordRead, button, click_button, has_live_text, has_text, mount_writer, settle_writer,
     };
     use crate::surface::realtime::TestPage;

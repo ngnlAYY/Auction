@@ -10,7 +10,7 @@ use dioxus::prelude::*;
 
 use super::{NOW, SessionFixture, logout_ticket, read_ticket};
 use crate::api::AdminUserPage;
-use crate::surface::auctions::draft_page_tests::{
+use crate::surface::auctions::editor::tests::{
     RecordRead, button, click_button, has_live_text, init_i18n, mount_writer, settle_writer,
 };
 use crate::surface::auth::effects::TestSession;

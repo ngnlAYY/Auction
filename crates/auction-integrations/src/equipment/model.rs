@@ -3,9 +3,10 @@
 use std::collections::BTreeMap;
 
 use auction_application::admin::{AdminIntakeError, CanonicalEquipment};
+use auction_application::mail::EquipmentSourceDetailCode as EquipmentParseError;
 use serde::Serialize;
 
-use super::parser::{EquipmentLevel, EquipmentParseError, normalize_stat_value, parse_identity};
+use super::parser::{EquipmentLevel, normalize_stat_value, parse_identity};
 use crate::safe_diagnostics;
 
 pub(super) struct EquipmentFacts {

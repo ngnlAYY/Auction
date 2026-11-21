@@ -324,7 +324,7 @@ async fn postgres_public_lot_counts_follow_the_auction_status_in_one_query() {
         "main",
         2,
         "settled",
-        &[("Two-Handed", "sold"), ("Heavy", "unsold"), ("Cloth", "live")],
+        &[("Two-Handed", "sold"), ("Heavy", "unsold"), ("Cloth", "withdrawn")],
     )
     .await;
 

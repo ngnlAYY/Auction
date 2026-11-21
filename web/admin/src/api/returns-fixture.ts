@@ -53,7 +53,11 @@ export function returnDetail() {
     occurred_at: "2026-11-16T01:02:03Z",
     actor_id: null,
     command_id: null,
-    details: { dispatch_no: 1 },
+    details: {
+      dispatch_no: 1,
+      match_state: "manual_reconcile",
+      reason_code: "returned_assets_match",
+    },
   };
   const secondEvent = {
     case_version: 2,
@@ -61,7 +65,13 @@ export function returnDetail() {
     occurred_at: "2026-11-16T01:03:03Z",
     actor_id: null,
     command_id: null,
-    details: {},
+    details: {
+      delivery_id: DELIVERY,
+      dispatch_no: 1,
+      match_state: "manual_reconcile",
+      reason_code: "returned_assets_match",
+      verified_version: 2,
+    },
   };
   return {
     firstEvent,

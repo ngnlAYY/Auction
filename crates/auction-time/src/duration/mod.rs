@@ -87,14 +87,20 @@ impl Duration {
         }
     }
 
-    /// 由微秒构造。
+    /// 由微秒构造；超出取值范围时 panic。
     pub const fn microseconds(microseconds: i64) -> Self {
-        Self(SignedDuration::from_micros(microseconds))
+        match Self::in_range(SignedDuration::from_micros(microseconds)) {
+            Some(duration) => duration,
+            None => out_of_range(),
+        }
     }
 
-    /// 由纳秒构造。
+    /// 由纳秒构造；超出取值范围时 panic。
     pub const fn nanoseconds(nanoseconds: i64) -> Self {
-        Self(SignedDuration::from_nanos(nanoseconds))
+        match Self::in_range(SignedDuration::from_nanos(nanoseconds)) {
+            Some(duration) => duration,
+            None => out_of_range(),
+        }
     }
 
     /// 零时长。

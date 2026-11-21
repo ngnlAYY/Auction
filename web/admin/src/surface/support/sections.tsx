@@ -91,7 +91,7 @@ export function bids(bids: readonly AdminPlayerSupportBidResponse[]): JSX.Elemen
                   <th scope="col">{t("support-lot-number")}</th>
                   <th scope="col">{t("support-amount")}</th>
                   <th scope="col">{t("support-mechanism")}</th>
-                  <th scope="col">{t("delivery-status")}</th>
+                  <th scope="col">{t("support-lot-status")}</th>
                   <th scope="col">{t("support-created-at")}</th>
                 </tr>
               </thead>

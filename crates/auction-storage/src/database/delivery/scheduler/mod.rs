@@ -64,14 +64,14 @@ macro_rules! season_reminder_outstanding_gate {
     };
 }
 
-/// 换季提醒的冻结赛季边界：只解析规范格式且 PostgreSQL 能识别的时刻，否则为 NULL。
+/// 换季提醒的冻结赛季边界：只解析规范秒/毫秒/微秒/纳秒精度 UTC RFC 3339，否则为 NULL。
 /// 发送围栏与预检退役共用；单行异常载荷只让该行不可发送、不被边界退役，不能让领取前
 /// 清理以 22007 失败而阻断全部投递。CASE 保证只对已校验的后缀做类型转换。
 macro_rules! season_reminder_boundary {
     () => {
         r#"(CASE
     WHEN deliveries.payload ->> 'external_mail_id'
-         ~ '^season-end:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+         ~ '^season-end:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{3}|\.[0-9]{6}|\.[0-9]{9})?Z$'
      AND pg_input_is_valid(substring(deliveries.payload ->> 'external_mail_id' from 12), 'timestamptz')
     THEN (substring(deliveries.payload ->> 'external_mail_id' from 12))::timestamptz
 END)"#
@@ -564,7 +564,7 @@ mod notice_gate_tests {
             ('00000000-0000-0000-0000-0000000000e1',
              '00000000-0000-0000-0000-0000000000f1', decode(repeat('44', 32), 'hex'),
              'season_reminder', 'season_reminder:1:alice', 'alice',
-             '{"external_mail_id":"season-end:2999-01-01T00:00:00Z","world":"isekai","operation":"send","template":"isekai_season_reminder"}'::jsonb,
+             '{"external_mail_id":"season-end:2999-01-01T00:00:00.123Z","world":"isekai","operation":"send","template":"isekai_season_reminder"}'::jsonb,
              'isekai', 'send', 'isekai_season_reminder'),
             ('00000000-0000-0000-0000-0000000000e2',
              '00000000-0000-0000-0000-0000000000f2', decode(repeat('44', 32), 'hex'),

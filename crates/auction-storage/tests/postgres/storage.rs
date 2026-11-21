@@ -7,7 +7,10 @@
 
 use std::assert_matches;
 
-use auction_application::auction::{PublicPriceHistoryReader, WorldReader};
+use auction_application::auction::{
+    PublicPriceHistoryListRequest, PublicPriceHistoryReader, PublicPriceHistorySort,
+    PublicPriceHistoryStats, WorldReader,
+};
 use auction_application::core::{ApplicationError, SessionError};
 use auction_application::public::{AdminSessionRecord, AdminSessionStore};
 use auction_storage::postgres_expected_migration_version;
@@ -150,7 +153,10 @@ async fn postgres_admin_session_cannot_be_validated_or_renewed_after_waiting_pas
     for renew in [false, true] {
         let token_hash = [u8::from(renew) + 1; 32];
         let csrf_hash = [3; 32];
-        let now = Timestamp::now();
+        let now: Timestamp = sqlx::query_scalar("SELECT clock_timestamp()")
+            .fetch_one(store.postgres_pool())
+            .await
+            .expect("读取 PostgreSQL 时钟");
         let expires_at = now.checked_add_signed(Duration::seconds(2)).unwrap();
         let absolute_expires_at = now.checked_add_signed(Duration::minutes(5)).unwrap();
         store
@@ -464,25 +470,59 @@ async fn postgres_public_login_serializes_concurrent_evictions_under_user_lock()
         seed_public_session(&store, user_id, "concurrent", index, base).await;
     }
 
-    let login = |seed: &'static str| {
-        let store = &store;
-        async move {
-            store
-                .create_public(
-                    PublicSessionRecord {
-                        token_hash: session_token_hash(seed),
-                        user_id,
-                        authenticated_user_version: 1,
-                        created_at: Timestamp::now(),
-                    },
-                    10,
-                )
-                .await
+    let mut blocker = store.postgres_pool().begin().await.expect("开启用户锁事务");
+    sqlx::query("SELECT id FROM public.users WHERE id = $1 FOR UPDATE")
+        .bind(user_id)
+        .fetch_one(&mut *blocker)
+        .await
+        .expect("持有用户行锁");
+    let blocker_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *blocker)
+        .await
+        .expect("读取锁持有会话");
+    let first_store = store.clone();
+    let first = tokio::spawn(async move {
+        first_store
+            .create_public(
+                PublicSessionRecord {
+                    token_hash: session_token_hash("concurrent-a"),
+                    user_id,
+                    authenticated_user_version: 1,
+                    created_at: Timestamp::now(),
+                },
+                10,
+            )
+            .await
+    });
+    let second_store = store.clone();
+    let second = tokio::spawn(async move {
+        second_store
+            .create_public(
+                PublicSessionRecord {
+                    token_hash: session_token_hash("concurrent-b"),
+                    user_id,
+                    authenticated_user_version: 1,
+                    created_at: Timestamp::now(),
+                },
+                10,
+            )
+            .await
+    });
+    let mut both_waiting = false;
+    for _ in 0..400 {
+        let waiting = support::lock_waiters::count_blocked_by(store.postgres_pool(), blocker_pid)
+            .await
+            .expect("读取用户行锁等待");
+        if waiting >= 2 {
+            both_waiting = true;
+            break;
         }
-    };
-    let (first, second) = tokio::join!(login("concurrent-a"), login("concurrent-b"));
-    first.expect("并发登录 A 应成功");
-    second.expect("并发登录 B 应成功");
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(both_waiting, "两个登录都应排队等待同一用户行锁");
+    blocker.commit().await.expect("释放用户行锁");
+    first.await.expect("并发登录 A 任务结束").expect("并发登录 A 应成功");
+    second.await.expect("并发登录 B 任务结束").expect("并发登录 B 应成功");
 
     let (active, revoked): (i64, i64) = sqlx::query_as(
         "SELECT count(*) FILTER (WHERE revoked_at IS NULL),
@@ -505,6 +545,151 @@ async fn postgres_public_login_serializes_concurrent_evictions_under_user_lock()
 async fn postgres_price_history_index_matches_owner_predicate() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
     let store = database.store().await.expect("连接克隆测试数据库");
+    use sqlx::Row;
+    use uuid::Uuid;
+
+    let pool = store.postgres_pool();
+    let request = PublicPriceHistoryListRequest {
+        name_terms: Vec::new(),
+        world_id: None,
+        closed_from: None,
+        closed_before: None,
+        minimum_price: None,
+        maximum_price: None,
+        buyer: None,
+        seller: None,
+        sort: PublicPriceHistorySort::ClosedDesc,
+        limit: 25,
+        offset: 0,
+        cursor: None,
+    };
+    let empty_page =
+        store.list_public_price_history(request.clone()).await.expect("空库价格历史编号页");
+    assert!(empty_page.entries.is_empty());
+    assert_eq!(empty_page.total, Some(0));
+    assert_eq!(
+        empty_page.stats,
+        Some(PublicPriceHistoryStats {
+            count: 0,
+            minimum: 0,
+            maximum: 0,
+            median: 0,
+            median_exact: None,
+        }),
+    );
+
+    let now = Timestamp::now();
+    let closed_at = now - Duration::hours(1);
+    let auction_id = Uuid::new_v4();
+    let command_id = Uuid::new_v4();
+    let buyer_id = Uuid::new_v4();
+    let sold_lot_id = Uuid::new_v4();
+    let unsold_lot_id = Uuid::new_v4();
+    let sold_equipment_id = Uuid::new_v4();
+    let unsold_equipment_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO public.users (id, username, public_key_hash)
+         VALUES ($1, 'price-history-buyer', decode(repeat('ab', 32), 'hex'))",
+    )
+    .bind(buyer_id)
+    .execute(pool)
+    .await
+    .expect("写入价格历史买家");
+    sqlx::query(
+        "INSERT INTO public.auctions
+            (id, world_id, sequence, title, status, settled_at, scheduled_open_at,
+             preview_scheduled_at, scheduled_end_at, effective_end_at, policy_snapshot)
+         VALUES ($1, 'main', 900001, 'price history index fixture', 'settled', $2,
+                 $3, $3, $3, $2, $4)",
+    )
+    .bind(auction_id)
+    .bind(closed_at)
+    .bind(closed_at - Duration::days(1))
+    .bind(serde_json::json!({
+        "schema_version": 4,
+        "start_price": 100,
+        "bid_increment_ppm": 0,
+        "minimum_increment": 1,
+        "soft_close_window_seconds": 900,
+        "soft_close_extension_seconds": 900,
+        "proxy_enabled": true,
+        "proxy_default_mode": "fast",
+        "proxy_slow_interval_seconds": 600,
+        "proxy_max_outbid_uses": 0,
+        "final_phase_lead_seconds": 900,
+        "scheduled_end_at": closed_at,
+        "settlement": {"version": 0, "mode": "legacy_zero_v0", "anchors": []},
+        "recovery": {"version": 1, "mode": "remind_v1", "payment_timeout_seconds": 604800}
+    }))
+    .execute(pool)
+    .await
+    .expect("写入价格历史场次");
+    sqlx::query(
+        "INSERT INTO public.auction_commands
+            (command_id, command_kind, aggregate_id, request_hash, result_code)
+         VALUES ($1, 'settle_auction', $2, decode(repeat('cd', 32), 'hex'), 'accepted')",
+    )
+    .bind(command_id)
+    .bind(auction_id)
+    .execute(pool)
+    .await
+    .expect("写入价格历史结算命令");
+    sqlx::query(
+        "INSERT INTO public.auction_settlements
+            (auction_id, command_id, policy_version, policy_mode, pool_enabled,
+             opening_pool_balance, closing_pool_balance, settled_at)
+         VALUES ($1, $2, 0, 'legacy_zero_v0', false, 0, 0, $3)",
+    )
+    .bind(auction_id)
+    .bind(command_id)
+    .bind(closed_at)
+    .execute(pool)
+    .await
+    .expect("写入价格历史场次结算");
+    for (id, external_id, name) in [
+        (sold_equipment_id, "price-history-sold", "Sold history staff"),
+        (unsold_equipment_id, "price-history-unsold", "Unsold history staff"),
+    ] {
+        sqlx::query(
+            "INSERT INTO public.equipment
+                (id, world_id, external_equipment_id, name, category, attributes, collected_at)
+             VALUES ($1, 'main', $2, $3, 'Staff', '{}'::jsonb, $4)",
+        )
+        .bind(id)
+        .bind(external_id)
+        .bind(name)
+        .bind(closed_at)
+        .execute(pool)
+        .await
+        .expect("写入价格历史装备");
+    }
+    sqlx::query(
+        "INSERT INTO public.lots
+            (id, auction_id, equipment_id, lot_number, status, start_price, current_price,
+             leader_user_id, effective_end_at, category_key, category_number)
+         VALUES ($1, $2, $3, 1, 'sold', 100, 500, $4, $5, 'Staff', 1),
+                ($6, $2, $7, 2, 'unsold', 100, NULL, NULL, $5, 'Staff', 2)",
+    )
+    .bind(sold_lot_id)
+    .bind(auction_id)
+    .bind(sold_equipment_id)
+    .bind(buyer_id)
+    .bind(closed_at)
+    .bind(unsold_lot_id)
+    .bind(unsold_equipment_id)
+    .execute(pool)
+    .await
+    .expect("写入价格历史成交与流拍 lot");
+    sqlx::query(
+        "INSERT INTO public.lot_settlements
+            (lot_id, end_price, listed_price, buyer_amount, seller_amount, tax_amount,
+             compensation_amount, hold_ppm, adjustment_ppm)
+         VALUES ($1, 500, 500, 500, 500, 0, 0, 0, 0)",
+    )
+    .bind(sold_lot_id)
+    .execute(pool)
+    .await
+    .expect("写入价格历史 lot 结算");
 
     let (definition, predicate): (String, Option<String>) = sqlx::query_as(
         "SELECT pg_get_indexdef(i.indexrelid), pg_get_expr(i.indpred, i.indrelid)
@@ -531,24 +716,76 @@ async fn postgres_price_history_index_matches_owner_predicate() {
         "谓词必须与查询恒定条件一致：{predicate}"
     );
 
-    // 索引不得改变价格历史的可见集合：空库上带与不带索引的结果都必须为空页。
-    let request = auction_application::auction::PublicPriceHistoryListRequest {
-        name_terms: Vec::new(),
-        world_id: None,
-        closed_from: None,
-        closed_before: None,
-        minimum_price: None,
-        maximum_price: None,
-        buyer: None,
-        seller: None,
-        sort: auction_application::auction::PublicPriceHistorySort::ClosedDesc,
-        limit: 25,
-        offset: 0,
-        cursor: None,
-    };
-    let page = store.list_public_price_history(request).await.expect("空库价格历史编号页");
-    assert_eq!(page.entries.len(), 0, "空库不应有历史行");
-    assert_eq!(page.total, Some(0), "空库统计应为零");
+    // 比较真实非空成交集合：已成交 lot 可见，流拍 lot 不可见；关闭所有索引扫描后集合应相同。
+    let page = store.list_public_price_history(request.clone()).await.expect("价格历史编号页");
+    let indexed_ids = page.entries.iter().map(|entry| entry.lot_id).collect::<Vec<_>>();
+    assert_eq!(indexed_ids, vec![sold_lot_id], "应显示成交记录并排除流拍 lot");
+    assert_eq!(page.total, Some(1));
+    assert_eq!(
+        page.stats,
+        Some(PublicPriceHistoryStats {
+            count: 1,
+            minimum: 500,
+            maximum: 500,
+            median: 500,
+            median_exact: Some("500".to_owned()),
+        }),
+    );
+
+    let filtered = store
+        .list_public_price_history(PublicPriceHistoryListRequest {
+            minimum_price: Some(501),
+            ..request.clone()
+        })
+        .await
+        .expect("无匹配成交记录的价格历史编号页");
+    assert_eq!(filtered, empty_page);
+
+    let past_end = store
+        .list_public_price_history(PublicPriceHistoryListRequest {
+            offset: request.limit,
+            ..request
+        })
+        .await
+        .expect("超出成交记录范围的价格历史编号页");
+    assert!(past_end.entries.is_empty());
+    assert_eq!(past_end.total, page.total);
+    assert_eq!(past_end.stats, page.stats);
+
+    let mut transaction = pool.begin().await.expect("开启无索引扫描对照事务");
+    sqlx::query("SET LOCAL enable_indexscan = off")
+        .execute(&mut *transaction)
+        .await
+        .expect("关闭 index scan");
+    sqlx::query("SET LOCAL enable_indexonlyscan = off")
+        .execute(&mut *transaction)
+        .await
+        .expect("关闭 index-only scan");
+    sqlx::query("SET LOCAL enable_bitmapscan = off")
+        .execute(&mut *transaction)
+        .await
+        .expect("关闭 bitmap scan");
+    let rows = sqlx::query(auction_storage::benchmark_sql::numbered_query_sql())
+        .bind(None::<Vec<String>>)
+        .bind(None::<&str>)
+        .bind(None::<Timestamp>)
+        .bind(None::<Timestamp>)
+        .bind(None::<i64>)
+        .bind(None::<i64>)
+        .bind(None::<&str>)
+        .bind(None::<&str>)
+        .bind(25_i64)
+        .bind(0_i64)
+        .bind("closed_desc")
+        .fetch_all(&mut *transaction)
+        .await
+        .expect("无索引扫描价格历史查询");
+    let sequential_ids = rows
+        .iter()
+        .filter_map(|row| row.try_get::<Option<Uuid>, _>("lot_id").expect("读取 lot id"))
+        .collect::<Vec<_>>();
+    assert_eq!(sequential_ids, indexed_ids, "索引开关不得改变可见历史集合");
+    transaction.commit().await.expect("提交无索引扫描对照事务");
 
     store.postgres_pool().close().await;
 }

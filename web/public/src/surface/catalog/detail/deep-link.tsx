@@ -48,7 +48,10 @@ export function LotDeepLink(props: { readonly lotId: string }): JSX.Element {
       return frozen?.lotId === lotId && frozen.route === router.current() ? frozen : null;
     },
     // 目录定位可能等多次请求。代号按详情开始读取时取样。
-    (frozen, context) => resolve(lotId, frozen, refreshGeneration.peek(), context.signal),
+    (frozen, context) =>
+      resolve(lotId, frozen, refreshGeneration.peek(), context.signal).catch(() =>
+        err({ kind: "lot_detail_fetch_error" } satisfies LotDetailFetchError),
+      ),
   );
   const navigationFailed = createCell(false);
   useContentLoading(() => details.state() === "pending");

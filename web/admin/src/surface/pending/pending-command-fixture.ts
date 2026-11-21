@@ -37,9 +37,9 @@ export interface PendingHarness {
 }
 
 const SESSION: AdminSession = Object.freeze({
-  actor: "fixture",
-  csrfToken: "csrf-fixture",
-  csrf_token: "csrf-fixture",
+  actor: "admin",
+  csrfToken: "csrf-token",
+  csrf_token: "csrf-token",
   expiresAt: 4_000_000_000n,
   absoluteExpiresAt: 4_000_000_000n,
   serverTime: 1_800_000_000n,

@@ -21,6 +21,7 @@ import {
   rememberPublicReadRetryAfter,
 } from "../swr-cache";
 
+const MAX_RETRY_AFTER_MILLIS = 60 * 60 * 1_000;
 /** 条件 GET 的响应分类；304 只在确实发送了 If-None-Match 时成立。 */
 export type ConditionalResponse =
   | { readonly kind: "not_modified" }
@@ -150,15 +151,12 @@ export async function cachedPublicRead<T>(
         return failure.kind === "busy" ? failure : { kind: "rejected", error: blocked.error };
       }
       const observed: { window?: ReturnType<typeof rememberPublicReadRetryAfter> } = {};
-      const observeResponse =
-        observeRetryAfter === undefined
-          ? undefined
-          : (response: TransportResponseMetadata) => {
-              const delay = requestedRetryDelay(response);
-              if (delay === null) return;
-              observed.window = rememberPublicReadRetryAfter(requestUrl, response.status, delay);
-              observeRetryAfter(observed.window.notBefore);
-            };
+      const observeResponse = (response: TransportResponseMetadata) => {
+        const delay = requestedRetryDelay(response);
+        if (delay === null) return;
+        observed.window = rememberPublicReadRetryAfter(requestUrl, response.status, delay);
+        observeRetryAfter?.(observed.window.notBefore);
+      };
       const conditional = await conditionalGet(
         requestUrl,
         etag,
@@ -202,11 +200,15 @@ export async function cachedPublicRead<T>(
 function requestedRetryDelay(response: TransportResponseMetadata): number | null {
   const retryAfter = response.headers.get("Retry-After");
   if (response.status < 400 || retryAfter === null) return null;
-  if (/^[0-9]+$/u.test(retryAfter)) return Number(retryAfter) * 1_000;
+  if (/^[0-9]+$/u.test(retryAfter)) {
+    const seconds = Number(retryAfter);
+    return Number.isSafeInteger(seconds) ? Math.min(seconds * 1_000, MAX_RETRY_AFTER_MILLIS) : null;
+  }
   const deadline = parseImfFixdate(retryAfter);
   if (deadline === null) return null;
   const serverDate = parseImfFixdate(response.headers.get("Date") ?? "");
-  return Math.max(0, deadline - (serverDate ?? Date.now()));
+  const delay = Math.max(0, deadline - (serverDate ?? Date.now()));
+  return Number.isFinite(delay) ? Math.min(delay, MAX_RETRY_AFTER_MILLIS) : null;
 }
 
 function responseOk(response: { readonly status: number }): boolean {

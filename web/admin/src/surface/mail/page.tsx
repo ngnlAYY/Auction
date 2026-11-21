@@ -245,7 +245,11 @@ export function page(): JSX.Element {
       return { kind: "idle" };
     }
     const snapshot = polling();
-    if (snapshot === undefined || snapshot.mailbox !== mailbox) {
+    if (
+      snapshot === undefined ||
+      snapshot.mailbox !== mailbox ||
+      snapshot.generation !== pollingRefresh()
+    ) {
       return { kind: "loading" };
     }
     if (!snapshot.result.ok) {

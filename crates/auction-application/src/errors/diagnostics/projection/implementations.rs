@@ -131,6 +131,15 @@ impl DiagnosticError for crate::ports::core::CompetitionTransactionError {
             Error::SerializationConflict => SafeErrorKind::REPOSITORY_SERIALIZATION_CONFLICT,
             Error::QueueWaitTimeout => SafeErrorKind::COMPETITION_QUEUE_TIMEOUT,
             Error::Conflict => SafeErrorKind::REPOSITORY_CONFLICT,
+            Error::CommandLedger(crate::ports::core::CommandLedgerError::InvalidRecord) => {
+                SafeErrorKind::COMMAND_LEDGER_INVALID
+            }
+            Error::CommandLedger(crate::ports::core::CommandLedgerError::Conflict) => {
+                SafeErrorKind::COMMAND_CONFLICT
+            }
+            Error::CommandLedger(crate::ports::core::CommandLedgerError::Storage) => {
+                SafeErrorKind::REPOSITORY_FAILED
+            }
             _ => SafeErrorKind::COMPETITION_REJECTED,
         }
     }

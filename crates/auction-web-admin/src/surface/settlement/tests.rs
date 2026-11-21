@@ -20,7 +20,7 @@ use super::query::{
 };
 use super::recovery::{AdminRecoveryDialog, RecoveryConfirmationDraft, RecoveryRead};
 use crate::api::{AdminApiFailure, AdminSettlementCatalogPage};
-use crate::surface::auctions::draft_page_tests::{
+use crate::surface::auctions::editor::tests::{
     RecordRead, button, init_i18n, mount_writer, settle_writer, writer_form,
 };
 use crate::surface::pagination::use_admin_pagination;

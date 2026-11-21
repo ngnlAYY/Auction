@@ -320,7 +320,11 @@ export function reviewedSentProofSubmission(
     expectedFencingVersion: proof.request.fencingVersion,
     acceptCollectedAssets:
       proof.preview.requires_collected_asset_acceptance && proof.accepted.collectedAssets,
-    acceptAttemptHistory: proof.preview.requires_attempt_history_acceptance,
+    acceptAttemptHistory:
+      proof.preview.requires_attempt_history_acceptance &&
+      (proof.preview.prior_unbound_attempts !== true || proof.accepted.priorUnboundAttempts) &&
+      (proof.preview.sent_before_current_attempt !== true ||
+        proof.accepted.sentBeforeCurrentAttempt),
   };
 }
 

@@ -236,7 +236,7 @@ impl RealtimeCache {
             && (fact_index == 1
                 || self.last_facts.get(lot_id).is_some_and(|previous| {
                     previous.state_version == state_version - 1
-                        && previous.fact_index + 1 == fact_index
+                        && previous.fact_index.checked_add(1) == Some(fact_index)
                 })
                 || (!self.last_facts.contains_key(lot_id)
                     && self

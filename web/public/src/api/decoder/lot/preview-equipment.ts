@@ -129,7 +129,7 @@ export function validEquipment(value: unknown, full: boolean): boolean {
     optionalStats(decoded, "stats") &&
     optionalFinite(decoded, "avg_roll") &&
     gameUrl(decoded.game_equipment_url) &&
-    (!full || optionalAttributes(decoded, "attributes"))
+    (!full || (Object.hasOwn(decoded, "attributes") && validAttributes(decoded.attributes)))
   );
 }
 
@@ -192,10 +192,6 @@ function validStats(value: unknown): boolean {
     }
   }
   return true;
-}
-
-function optionalAttributes(value: JsonObject, key: string): boolean {
-  return !Object.hasOwn(value, key) || validAttributes(value[key]);
 }
 
 function optionalStats(value: JsonObject, key: string): boolean {

@@ -48,13 +48,13 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
 
 1. `gh release download v<版本> -D <本轮目录>/candidate-release -p 'auction-rust-*.tar.gz' -p SHA256SUMS -p DEPENDENCIES.md`。
 2. 在仓库根执行 `bash ci/release/verify-deployment-package.sh <tar.gz> --tag v<版本>`。它会核对外层与包内 SHA256SUMS、`RELEASE-MANIFEST.v1` 与 `DEPENDENCIES.md` 的源码身份、构建提交能否从 tag 到达，以及 GitHub 来源证明（需要已登录的 `gh`）。不加 `--offline`；校验不过就停止。
-3. 解包到 `candidate/`，记录包名、SHA-256、`source_commit` 与包内 CLI 摘要。
+3. 对通过来源证明的同一 tar.gz 计算并保存外层 SHA-256（`VERIFIED_RELEASE_TARBALL_SHA256`），记录包名、该摘要、`source_commit` 与包内 CLI 摘要；演练和 deploy 都使用这份外层摘要。
 
 ## 2. 生产基线（只读）
 
-记录三个角色的 `MainPID`、`/proc/<pid>/exe` 摘要与 `NRestarts`，以及 `db status` 中的当前 schema、配置文件的摘要/属主/权限、`<程序目录>` 及其父目录与四个程序的属主/权限、`<部署状态目录>` 及其父目录的属主/权限，和表行数。用候选包的 CLI 判断本次是否含迁移（当前 `latest_version` 与候选的 `expected_version` 是否不同）。
+记录三个角色的 `MainPID`、`/proc/<pid>/exe` 摘要与 `NRestarts`，以及 `db status` 中的当前 schema、配置文件的摘要/属主/权限，和表行数。用候选包的 CLI 判断本次是否含迁移（当前 `latest_version` 与候选的 `expected_version` 是否不同）。
 
-旧程序（演练中的“旧角色”）就是线上正在运行的那个包：是 Release 时从 GitHub Release 下载，否则取上一轮演练目录里归档的 `candidate/`。两种情况都要与线上 `/proc/<pid>/exe` 摘要逐个核对。
+含迁移时，从当前安装目录三个角色程序的 SHA-256 匹配最新成功 deploy/rollback 回执，记录其 `deploy.roles.package`；它是演练回执 `artifact.previous_version` 的唯一来源。不得填写数据库 schema 或 CLI package；找不到匹配回执时 fail closed。
 
 ## 3. 迁移演练（含迁移时必做，deploy 会强制核对回执）
 
@@ -77,7 +77,7 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
   - `anomalies=[]`，`conclusion.result="passed"`；
   - `operator ≠ reviewer`，可用独立的只读审核子代理担任 reviewer；
   - `evidence_files` 覆盖所有被引用的证据并附 SHA-256。
-- 回执 7 天内有效（`--drill-max-age-days` 默认 7），且必须与本次制品的提交、包名和 CLI 摘要一致。
+  - 回执的 `artifact.package_sha256` 必须等于步骤 1 对本次已验证外层 tar.gz 计算的摘要；`artifact.previous_version` 必须等于步骤 2 按当前三个角色 SHA-256 匹配到的成功回执 `deploy.roles.package`；该值不是 schema 或 CLI package。
 
 ## 4. 传输
 
@@ -93,6 +93,7 @@ description: 更新 Auction 云端分体部署：取 GitHub Release 资产并校
   --state-dir <部署状态目录> \
   --worker-unit <Worker unit> --admin-unit <Admin unit> --public-unit <Public unit> \
   --backup-dir <停机备份目录> \
+  --package-sha256 "$VERIFIED_RELEASE_TARBALL_SHA256" \
   --migration-drill-receipt <receipt.json> --protection-window-minutes 60 \
   --actor <name> --startup-timeout-seconds 60 --dry-run
 ```

@@ -96,6 +96,9 @@ impl Listener for UnixHttpListener {
                         diagnostics::io_kind(&error),
                         DiagnosticContext { route: Some("__listener__"), ..Default::default() },
                     );
+                    if !accept_error_is_retryable(&error) {
+                        panic!("Unix HTTP listener accept failed permanently");
+                    }
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             }
@@ -105,6 +108,22 @@ impl Listener for UnixHttpListener {
     fn local_addr(&self) -> io::Result<Self::Addr> {
         Ok(None)
     }
+}
+
+fn accept_error_is_retryable(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::Interrupted
+            | io::ErrorKind::WouldBlock
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::TimedOut
+    ) || error.raw_os_error().is_some_and(|code| {
+        code == libc::EMFILE
+            || code == libc::ENFILE
+            || code == libc::ENOMEM
+            || code == libc::ENOBUFS
+    })
 }
 
 impl Drop for UnixHttpListener {

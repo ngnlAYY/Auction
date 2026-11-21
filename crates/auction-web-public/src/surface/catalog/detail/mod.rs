@@ -6,7 +6,7 @@
 mod bid_history;
 mod deep_link;
 mod drawer;
-mod entry;
+pub(super) mod entry;
 mod lookup;
 mod own_proxy;
 mod price_history;
@@ -22,7 +22,6 @@ pub(crate) use deep_link::{
     LotDeepLink, LotViewDisposition, LotViewRequest, LotViewTarget, dispose_lot_view,
 };
 pub(crate) use drawer::CatalogDetailHost;
-pub(super) use entry::{CatalogViewButton, use_catalog_detail_entry};
 pub(crate) use lookup::{
     LotDetailLookup, LotDetailLookupButton, LotDetailLookupHost, use_lot_detail_lookup,
 };

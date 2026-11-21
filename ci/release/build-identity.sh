@@ -15,6 +15,19 @@ dioxus | solid) ;;
 	;;
 esac
 
+# 只有 release 工作流的 tag push 属于正式发行；手动触发即使选 tag 仍是候选。
+is_formal_release() {
+	[[ ${GITHUB_ACTIONS-} == true && ${GITHUB_EVENT_NAME-} == push &&
+		${GITHUB_REF_TYPE-} == tag ]]
+}
+
+release_candidate_suffix() {
+	if is_formal_release; then
+		return 0
+	fi
+	printf '%s' '-candidate'
+}
+
 web_surface_supports_solid() {
 	local surface=$1 candidate
 	for candidate in "${web_solid_surfaces[@]}"; do
@@ -117,6 +130,7 @@ build_tool_path() {
 # 发布工具的字节身份：闭集内每个二进制的 SHA-256。同版本工具重装后字节变化也会改变身份。
 # 全 Dioxus 沿用原有流式实现；Solid 需要同时读取 bun 版本并以临时清单固定失败边界。
 build_tools_identity() (
+	set -o pipefail
 	local name path digest version file identity
 	if web_stack_uses_solid; then
 		file=$(mktemp) || {
@@ -164,7 +178,7 @@ build_tools_identity() (
 			digest=$(sha256_file "$path") || return 1
 			printf '%s\0%s\0' "$name" "$digest"
 		done
-	} | sha256sum | awk '{print $1}'
+	} | sha256_stdin '发布工具身份'
 )
 
 # 发布与 Web 共用工具选择；按工具字节身份隔离 sccache daemon，避免新客户端连接旧进程。
@@ -233,7 +247,8 @@ fingerprint_file_list() (
 )
 
 # 源码身份覆盖已跟踪与未忽略的新文件，以及删除和 mode 变化；敏感忽略文件不进入。
-source_fingerprint() {
+source_fingerprint() (
+	set -o pipefail
 	local commit
 	commit=$(git rev-parse --verify 'HEAD^{commit}') || return 1
 	{
@@ -242,7 +257,8 @@ source_fingerprint() {
 		git ls-files -z --cached --others --exclude-standard |
 			LC_ALL=C sort -zu | fingerprint_file_list || return 1
 	} | sha256_stdin
-}
+)
+
 
 # 浏览器工作区路径依赖的闭包由 web-build-inputs 核对。依赖变化时，单端缓存与共享构建号一同失效。
 web_workspace_dependency_paths=(
@@ -360,39 +376,25 @@ web_write_find() {
 }
 
 web_count_files() (
-	local root=$1 file count=0
+	local root=$1 file count=0 item
 	shift
-	if ! web_stack_uses_solid; then
-		count=$(find "$root" "$@" -print | wc -l) || return 1
-		printf '%s\n' "$count"
-		return
-	fi
 	file=$(mktemp) || {
 		printf '无法创建 Web payload 计数清单：%s\n' "$root" >&2
 		return 1
 	}
 	trap 'rm -f -- "$file"' EXIT
 	web_write_find "$file" "$root" "$@" -print0 || return 1
-	while IFS= read -r -d '' _; do count=$((count + 1)); done <"$file"
+	while IFS= read -r -d '' item; do count=$((count + 1)); done <"$file"
 	printf '%s\n' "$count"
 )
 
-# 先落盘 find 的字节数清单并检查退出码，再求和；空清单只能由成功的 find 产生。
+# 汇总字节数，只有枚举和求和均成功时才发布结果。
 web_find_sizes_sum() (
-	local root=$1 file total
+	set -o pipefail
+	local root=$1 total
 	shift
-	file=$(mktemp) || {
-		printf '无法创建 Web payload 体积清单：%s\n' "$root" >&2
-		return 1
-	}
-	trap 'rm -f -- "$file"' EXIT
-	# 这里需要的是字节数行而不是文件名清单，不能复用追加 -print0 的 web_write_find。
-	find "$root" "$@" -printf '%s\n' >"$file" || {
+	total=$(find "$root" "$@" -printf '%s\n' | awk '{ total += $1 } END { print total + 0 }') || {
 		printf '无法测量 Web payload 文件大小：%s\n' "$root" >&2
-		return 1
-	}
-	total=$(awk '{ total += $1 } END { print total + 0 }' "$file") || {
-		printf '无法汇总 Web payload 文件大小：%s\n' "$root" >&2
 		return 1
 	}
 	printf '%s\n' "$total"
@@ -400,88 +402,66 @@ web_find_sizes_sum() (
 
 # 0=找到，1=没找到，2=枚举失败；调用方必须把 2 当作校验失败，不能当成空清单。
 web_find_contains() (
-	local root=$1 needle=$2 file status
-	local -a pipeline_status
+	local root=$1 needle=$2 file find_status grep_status
 	shift 2
-	if ! web_stack_uses_solid; then
-		if find "$root" "$@" -print0 | grep -zF -- "$needle" >/dev/null; then
-			return 0
-		fi
-		pipeline_status=("${PIPESTATUS[@]}")
-		if ((pipeline_status[0] != 0)); then
-			printf '无法在 Web payload 中搜索：%s\n' "$root" >&2
-			return 2
-		fi
-		if ((pipeline_status[1] == 1)); then
-			return 1
-		fi
-		printf '无法在 Web payload 中搜索：%s\n' "$root" >&2
-		return 2
-	fi
 	file=$(mktemp) || {
 		printf '无法创建 Web payload 搜索清单：%s\n' "$root" >&2
 		return 2
 	}
 	trap 'rm -f -- "$file"' EXIT
-	web_write_find "$file" "$root" "$@" -print0 || return 2
+	if find "$root" "$@" -print0 >"$file"; then
+		find_status=0
+	else
+		find_status=$?
+	fi
 	if grep -zFq -- "$needle" "$file"; then
 		return 0
 	else
-		status=$?
-		if ((status == 1)); then
-			return 1
-		fi
+		grep_status=$?
+	fi
+	if ((grep_status != 1)); then
 		printf '无法在 Web payload 中搜索：%s\n' "$root" >&2
 		return 2
 	fi
+	if ((find_status != 0)); then
+		printf '无法在 Web payload 中搜索：%s\n' "$root" >&2
+		return 2
+	fi
+	return 1
 )
 
-# payload 文件摘要清单（不含内嵌标记），按路径排序；生成与复核共用同一算法。
-# 全 Dioxus 保留改动前的流式管道；Solid 使用带退出码检查的临时清单。
+# Web 摘要在枚举、排序和哈希均成功后才输出，保留 NUL 分隔的文件名。
 web_payload_checksums() (
+	set -o pipefail
 	cd "$1" || {
 		printf '无法进入 Web payload 目录：%s\n' "$1" >&2
 		return 1
 	}
-	if ! web_stack_uses_solid; then
-		local forbidden
-		forbidden=$(find . -type f \( -name '*.map' -o -path '*/.*' \) -print -quit) || return 1
-		if [[ -n "$forbidden" ]]; then
-			printf 'Web payload 含禁止发布的文件：%q\n' "$forbidden" >&2
+	local forbidden_path checksums
+	forbidden_path=$(find . -type f \( -name '*.map' -o -path '*/.*' \) -print -quit) || {
+		printf '无法枚举 Web payload 文件：%s\n' "$1" >&2
+		return 1
+	}
+	if [[ -n "$forbidden_path" ]]; then
+		printf 'Web payload 含禁止发布的文件：%q\n' "$forbidden_path" >&2
+		return 1
+	fi
+	checksums=$(
+		find . -type f ! -name auction-web-manifest.v1 -print0 |
+			LC_ALL=C sort -z | xargs -0 -r sha256sum
+		local -a stages=("${PIPESTATUS[@]}")
+		if ((stages[0] != 0)); then
+			printf '无法枚举 Web payload 文件：%s\n' "$1" >&2
 			return 1
 		fi
-		find . -type f ! -name auction-web-manifest.v1 -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum
-		return
+		if ((stages[1] != 0 || stages[2] != 0)); then
+			printf '无法排序或生成 Web payload 文件摘要：%s\n' "$1" >&2
+			return 1
+		fi
+	) || return 1
+	if [[ -n "$checksums" ]]; then
+		printf '%s\n' "$checksums"
 	fi
-	local forbidden files sorted
-	# 清单认证的是可公开内嵌的文件，生成与复核都必须先拒绝源码映射和路径中的点段。
-	if ! forbidden=$(find . -type f \( -name '*.map' -o -path '*/.*' \) -print -quit); then
-		printf '无法检查 Web payload 禁止文件：%s\n' "$1" >&2
-		return 1
-	fi
-	if [[ -n "$forbidden" ]]; then
-		printf 'Web payload 含禁止发布的文件：%q\n' "$forbidden" >&2
-		return 1
-	fi
-	files=$(mktemp) || {
-		printf '无法创建 Web payload 清单临时文件\n' >&2
-		return 1
-	}
-	sorted=$(mktemp) || {
-		rm -f -- "$files"
-		printf '无法创建 Web payload 排序临时文件\n' >&2
-		return 1
-	}
-	trap 'rm -f -- "$files" "$sorted"' EXIT
-	web_write_find "$files" . -type f ! -name auction-web-manifest.v1 -print0 || return 1
-	LC_ALL=C sort -z "$files" >"$sorted" || {
-		printf '无法排序 Web payload 文件摘要清单：%s\n' "$1" >&2
-		return 1
-	}
-	xargs -0 -r sha256sum <"$sorted" || {
-		printf '无法生成 Web payload 文件摘要：%s\n' "$1" >&2
-		return 1
-	}
 )
 
 # 入口文档只接受构建实际产出的四种资源标签；任何其他标签或换行写法都失败关闭。
@@ -875,18 +855,16 @@ web_payload_initial_js_bytes() (
 	printf '%s\n' "$total"
 )
 
-# Dioxus 体积沿用改动前的流式实现，不依赖临时清单。
+# Dioxus 仍分别统计 WASM 与未压缩 payload；枚举失败不得用部分结果完成预算核对。
 web_payload_sizes_dioxus() (
 	local surface=$1
 	local stable_root=$2
 	local root wasm_bytes payload_bytes
 	root="$stable_root/public"
 	[[ -d "$root" && ! -L "$root" ]] || return 1
-	wasm_bytes=$(find "$root" -type f -name "auction-web-${surface}_bg*.wasm" -printf '%s\n' |
-		awk '{ total += $1 } END { print total + 0 }') || return 1
+	wasm_bytes=$(web_find_sizes_sum "$root" -type f -name "auction-web-${surface}_bg*.wasm") || return 1
 	# 体积预算按原始表示统计；构建期 brotli 副本（*.br）只影响传输量，不计入 payload。
-	payload_bytes=$(find "$root" -type f ! -name '*.br' -printf '%s\n' |
-		awk '{ total += $1 } END { print total + 0 }') || return 1
+	payload_bytes=$(web_find_sizes_sum "$root" -type f ! -name '*.br') || return 1
 	printf '%s %s\n' "$wasm_bytes" "$payload_bytes"
 )
 
@@ -1202,7 +1180,7 @@ web_inputs_fingerprint() {
 		Cargo.toml mise.lock web \
 		crates/auction-web-shared/style crates/auction-web-shared/assets \
 		"crates/auction-web-$surface/assets" "crates/auction-web-$surface/i18n" \
-		ci/release/web-bundle.sh ci/release/build-identity.sh) || return 1
+		ci/release/web-bundle.sh ci/release/web-dependency-tree.sh ci/release/build-identity.sh) || return 1
 	printf 'auction-web-inputs/3\0surface=%s\0stack=%s\0fingerprint=%s\0' \
 		"$surface" "$stack" "$identity" | sha256_stdin
 }

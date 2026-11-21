@@ -43,7 +43,11 @@ pub(crate) fn required_script_value(source: &str, name: &str) -> Option<i64> {
         if !suffix.starts_with('=') || suffix.starts_with("==") {
             continue;
         }
-        if prefix.ends_with('.') || found.is_some() {
+        if prefix.ends_with('.')
+            || prefix.ends_with('[')
+            || prefix.ends_with(']')
+            || found.is_some()
+        {
             return None;
         }
         cursor += 1;

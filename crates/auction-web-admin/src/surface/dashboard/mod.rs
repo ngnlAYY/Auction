@@ -140,7 +140,7 @@ mod tests {
     use super::{page, use_manual_refresh};
     use crate::api::{AdminApiFailure, AdminDashboardSnapshot, AdminMailPolling};
     use crate::surface::AdminReadinessResource;
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         RecordRead, button, click_button, has_live_text, init_i18n, mount_writer_at, settle_writer,
     };
     use crate::surface::pending::{PendingCommandHost, PendingCommandNotices};

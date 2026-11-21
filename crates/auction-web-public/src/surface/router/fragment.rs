@@ -109,7 +109,7 @@ impl FragmentScroll {
                         scroll.cancel();
                         return;
                     }
-                    let native = kind == "hashchange" || scroll.native_fragment_entry();
+                    let native = kind == "hashchange";
                     scroll.enter(&scroll.history.current_route(), native);
                 }
             });
@@ -168,24 +168,17 @@ impl FragmentScroll {
     }
 
     fn queue_frame(&self) {
-        if self.frame.get().is_none() && self.target.borrow().pending_id().is_some() {
-            self.frame.set(
-                self.window.request_animation_frame(self.on_frame.as_ref().unchecked_ref()).ok(),
-            );
+        if self.frame.get().is_some() || self.target.borrow().pending_id().is_none() {
+            return;
+        }
+        match self.window.request_animation_frame(self.on_frame.as_ref().unchecked_ref()) {
+            Ok(frame) => self.frame.set(Some(frame)),
+            Err(_) => self.attempt_frame(),
         }
     }
 
     fn position(&self) -> (f64, f64) {
         (self.window.scroll_x().unwrap_or_default(), self.window.scroll_y().unwrap_or_default())
-    }
-
-    fn native_fragment_entry(&self) -> bool {
-        // 原生同页锚点没有 Dioxus 的 [x, y] 状态。目标已挂载时浏览器会自行定位。
-        self.window
-            .history()
-            .ok()
-            .and_then(|history| history.state().ok())
-            .is_some_and(|state| state.is_null())
     }
 
     fn visible_element(&self, id: &str) -> Option<Element> {

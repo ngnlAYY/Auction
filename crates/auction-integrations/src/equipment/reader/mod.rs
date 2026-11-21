@@ -31,10 +31,8 @@ use reqwest::Client;
 use tokio::{sync::Mutex, time::Instant};
 use url::Url;
 
-use super::{
-    config::EquipmentSourcePolicy,
-    parser::{parse_equipment_page, parse_equipment_url},
-};
+use super::config::EquipmentSourcePolicy;
+use super::parser::{parse_equipment_page, parse_equipment_url};
 use crate::{
     EquipmentKeySealer, EquipmentKeySealerError,
     mooglemail::{MoogleMailClient, MoogleMailCredentialSet, MoogleMailWorld},

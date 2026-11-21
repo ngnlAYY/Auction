@@ -82,7 +82,8 @@ impl WorkerMailCredentialCheckResponse {
         {
             return None;
         }
-        self.checks
+        let observations = self
+            .checks
             .into_iter()
             .map(|check| {
                 Some(AdminCredentialCheckObservation {
@@ -90,7 +91,11 @@ impl WorkerMailCredentialCheckResponse {
                     status: AdminCredentialCheckStatus::parse(&check.status)?,
                 })
             })
-            .collect()
+            .collect::<Option<Vec<_>>>()?;
+        if observations.len() == 2 && observations[0].world == observations[1].world {
+            return None;
+        }
+        Some(observations)
     }
 }
 

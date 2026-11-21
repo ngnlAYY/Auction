@@ -142,26 +142,13 @@ fn write_query_pairs_to_history(
             return false;
         };
         let location = window.location();
-        let mut serializer = url::form_urlencoded::Serializer::new(String::new());
-        for (key, value) in read_query_pairs() {
-            if !keys.contains(&key.as_str()) {
-                serializer.append_pair(&key, &value);
-            }
-        }
-        for (key, value) in pairs {
-            serializer.append_pair(key, value);
-        }
-        let encoded = serializer.finish();
         let pathname = location.pathname().unwrap_or_else(|_| "/".to_owned());
+        let search = location.search().unwrap_or_default();
         let hash = location.hash().unwrap_or_default();
-        let url = if encoded.is_empty() {
-            format!("{pathname}{hash}")
-        } else {
-            format!("{pathname}?{encoded}{hash}")
-        };
-        // 保留既有 history state（Router 可能在其中记录滚动位置等信息）。
+        let current = format!("{pathname}{search}{hash}");
+        let target = patch_query(&current, keys, pairs, false);
         let state = history.state().unwrap_or(JsValue::NULL);
-        write_history_entry(&history, &state, Some(&url), mode)
+        write_history_entry(&history, &state, Some(&target), mode)
     }
 
     #[cfg(not(target_arch = "wasm32"))]

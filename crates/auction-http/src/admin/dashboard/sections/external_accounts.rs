@@ -33,7 +33,7 @@ pub(crate) fn map_external_accounts(
     let observed_at = timestamp(status.observed_at);
     // 最近一次已结束维护失败即降级；另一个世界仍在运行不掩盖该失败。
     let latest_maintenance_failed = status.maintenance.last_failure_at.is_some_and(|failure| {
-        status.maintenance.last_success_at.is_none_or(|success| failure > success)
+        status.maintenance.last_success_at.is_none_or(|success| failure >= success)
     });
     AdminDashboardSectionResponse {
         status: if latest_maintenance_failed {

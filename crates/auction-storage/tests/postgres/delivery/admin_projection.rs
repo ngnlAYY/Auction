@@ -67,7 +67,7 @@ async fn insert_pending(pool: &PgPool, origin_kind: &str, created_at: Timestamp)
     insert_pending_to(pool, origin_kind, recipient, created_at).await
 }
 
-/// 写入一条发给指定收件人的 pending 投递；结算退件 Take 用 Take 载荷，其余为普通 Send。
+/// 写入一条 pending 投递；结算退件 Take 与案件动作、邮件证据在同一事务内绑定。
 async fn insert_pending_to(
     pool: &PgPool,
     origin_kind: &str,
@@ -75,11 +75,106 @@ async fn insert_pending_to(
     created_at: Timestamp,
 ) -> Uuid {
     let id = Uuid::new_v4();
-    let payload = if origin_kind == "settlement_return_action" {
-        r#"{"schema_version":1,"operation":"take","world":"main"}"#
-    } else {
-        r#"{"schema_version":1,"operation":"send","template":"register_key","credits":0,"cod":0,"attachment_ids":[]}"#
-    };
+    if origin_kind == "settlement_return_action" {
+        let return_mail_id = Uuid::new_v4();
+        let prepare_command_id = Uuid::new_v4();
+        let activate_command_id = Uuid::new_v4();
+        let external_mail_id = id.as_u128().to_string();
+        let payload = serde_json::json!({
+            "schema_version": 1,
+            "operation": "take",
+            "world": "main",
+            "external_mail_id": external_mail_id,
+            "credits": 0,
+            "cod": 0,
+            "attachment_ids": [],
+        });
+        let mut transaction = pool.begin().await.expect("开启 Take 投影夹具事务");
+        sqlx::query(
+            "INSERT INTO public.inbound_mail
+                (id, mailbox_key, external_mail_id, world_id, mail_kind, content_digest,
+                 received_at, status, decision_code, processed_at, created_at)
+             VALUES ($1, 'main:bot', $2, 'main', 'delivery', decode(repeat('55', 32), 'hex'),
+                     $3, 'accepted', 'settlement_recovery_returned', $3, $3)",
+        )
+        .bind(return_mail_id)
+        .bind(&external_mail_id)
+        .bind(created_at)
+        .execute(&mut *transaction)
+        .await
+        .expect("写入退件入站邮件");
+        sqlx::query(
+            "INSERT INTO public.settlement_return_evidence
+                (return_mail_id, match_state, reason_code, recorded_at)
+             VALUES ($1, 'untrusted', 'source_unproven', $2)",
+        )
+        .bind(return_mail_id)
+        .bind(created_at)
+        .execute(&mut *transaction)
+        .await
+        .expect("写入退件证据");
+        sqlx::query(
+            "INSERT INTO public.settlement_return_cases
+                (return_mail_id, world_id, status, reason_code, resend_limit, created_at, updated_at)
+             VALUES ($1, 'main', 'quarantined', 'source_unproven', 3, $2, $2)",
+        )
+        .bind(return_mail_id)
+        .bind(created_at)
+        .execute(&mut *transaction)
+        .await
+        .expect("写入退件案件");
+        sqlx::query(
+            "INSERT INTO public.deliveries
+                (id, command_id, request_digest, origin_kind, origin_id, recipient, payload,
+                 status, activation_command_id, activation_request_digest, activated_at,
+                 created_at, updated_at)
+             VALUES ($1, $2, decode(repeat('44', 32), 'hex'), 'settlement_return_action',
+                     $3, $4, $5, 'pending', $6, decode(repeat('66', 32), 'hex'), $7, $7, $7)",
+        )
+        .bind(id)
+        .bind(prepare_command_id)
+        .bind(format!("settlement_return:{return_mail_id}"))
+        .bind(recipient)
+        .bind(&payload)
+        .bind(activate_command_id)
+        .bind(created_at)
+        .execute(&mut *transaction)
+        .await
+        .expect("写入绑定退件案件的 Take 投递");
+        sqlx::query(
+            "INSERT INTO public.settlement_return_actions
+                (return_mail_id, world_id, source_external_mail_id, expected_credits, expected_cod,
+                 expected_attachment_ids, execution_state, created_at, updated_at)
+             VALUES ($1, 'main', $2, 0, 0, '{}', 'pending', $3, $3)",
+        )
+        .bind(return_mail_id)
+        .bind(&external_mail_id)
+        .bind(created_at)
+        .execute(&mut *transaction)
+        .await
+        .expect("写入待推进的 Take action");
+        sqlx::query(
+            "UPDATE public.settlement_return_actions
+             SET execution_state = 'enqueued', delivery_id = $2, prepare_command_id = $3,
+                 prepare_request_digest = decode(repeat('44', 32), 'hex'),
+                 activate_command_id = $4,
+                 activate_request_digest = decode(repeat('66', 32), 'hex'),
+                 state_version = state_version + 1, updated_at = $5
+             WHERE return_mail_id = $1",
+        )
+        .bind(return_mail_id)
+        .bind(id)
+        .bind(prepare_command_id)
+        .bind(activate_command_id)
+        .bind(created_at)
+        .execute(&mut *transaction)
+        .await
+        .expect("按生命周期推进 Take action 并绑定投递");
+        transaction.commit().await.expect("提交完整退件 Take 夹具");
+        return id;
+    }
+
+    let payload = r#"{"schema_version":1,"operation":"send","template":"register_key","credits":0,"cod":0,"attachment_ids":[]}"#;
     sqlx::query(
         "INSERT INTO public.deliveries
             (id, command_id, request_digest, origin_kind, origin_id, recipient, payload,

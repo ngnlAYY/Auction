@@ -7,10 +7,9 @@ use auction_application::forum::{
 use auction_domain::{AuctionId, BidAmount, LotId};
 use uuid::Uuid;
 
-use super::super::super::DatabaseStore;
-use super::validation::{
-    MAX_FIXED_POST_ID_BYTES, MAX_THREAD_ID_BYTES, parse_world, valid_decimal_id,
-};
+use super::validation::{MAX_FIXED_POST_ID_BYTES, MAX_THREAD_ID_BYTES, parse_world};
+use crate::database::DatabaseStore;
+use crate::database::forum::sync::validation::valid_decimal_id;
 use crate::database::storage_error;
 use crate::database::storage_error_from;
 

@@ -553,7 +553,7 @@ mod tests {
         AdminApiFailure, AdminSessionWritePermission, AdminWriteEndpoint, AdminWriteFailure,
         MailTemplateAttempt, MailTemplateBodyProblem,
     };
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         button, click_button, has_live_text, init_i18n, mount_writer, writer_form,
     };
     use crate::surface::pending::{

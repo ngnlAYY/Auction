@@ -35,6 +35,9 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
         || snapshot.attempt_count > i32::MAX as u32
         || is_zero_time(snapshot.created_at)
         || snapshot.updated_at < snapshot.created_at
+        || snapshot.claimed_at.is_some_and(|value| value > snapshot.updated_at)
+        || snapshot.sending_at.is_some_and(|value| value > snapshot.updated_at)
+        || snapshot.completed_at.is_some_and(|value| value > snapshot.updated_at)
         // 退役/抑制原因只允许出现在从未开始外部写入的失败终态，且二者互斥。
         || (snapshot.retirement_reason.is_some() && snapshot.suppression_reason.is_some())
         || ((snapshot.retirement_reason.is_some() || snapshot.suppression_reason.is_some())
@@ -154,7 +157,9 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
         && snapshot.origin_kind == "operations_alert"
         && snapshot.reason_code.as_deref() == Some("operations_alert_batch_terminal")
     {
-        return snapshot.lease_expires_at.is_none()
+        return snapshot.retirement_reason.is_none()
+            && snapshot.suppression_reason.is_none()
+            && snapshot.lease_expires_at.is_none()
             && snapshot.claimed_at.is_none()
             && snapshot.sending_at.is_none()
             && snapshot.completed_at.is_some_and(|completed| {
@@ -218,10 +223,11 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
             && snapshot.external_reference.is_none()
             && !snapshot.take_required
             && snapshot.returned_mail_id.is_none()
-            && snapshot.fencing_version > 0
-            && snapshot
-                .claimed_at
-                .is_none_or(|claimed| !is_zero_time(claimed) && claimed >= snapshot.created_at)
+            && snapshot.claimed_at.is_none_or(|claimed| {
+                !is_zero_time(claimed)
+                    && claimed >= snapshot.created_at
+                    && snapshot.attempt_count > 0
+            })
             && snapshot.completed_at.is_some_and(|completed| {
                 !is_zero_time(completed)
                     && completed >= snapshot.created_at
@@ -231,6 +237,8 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
     }
 
     if snapshot.lease_expires_at.is_some_and(is_zero_time)
+        || snapshot.claimed_at.is_some_and(|claimed| claimed > snapshot.updated_at)
+        || snapshot.sending_at.is_some_and(|sending| sending > snapshot.updated_at)
         || !valid_timeline(
             snapshot.created_at,
             snapshot.claimed_at,

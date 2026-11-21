@@ -15,7 +15,8 @@ use crate::database::DatabaseStore;
 mod mapping;
 mod postgres;
 
-use self::mapping::{map_equipment, storage_error, validate_lot_request};
+use self::mapping::{map_equipment, validate_lot_request};
+use crate::database::storage_error;
 use postgres::{detail_postgres, list_postgres};
 
 /// 装配根注入有效装备标色规则的公开只读适配器，规则在进程启动时冻结。

@@ -77,16 +77,24 @@ pub(super) async fn retention_dry_run(
     .await?;
 
     let (ordinary_days, hold_days) = super::mail_diagnostic_windows()?;
+    let root_path = &config.worker.mooglemail.diagnostics.directory;
+    let root_identity_before = super::purge::filesystem_root_identity_sha256(root_path)?;
     let snapshot = auction_integrations::mooglemail::mail_diagnostic_retention_snapshot(
-        &config.worker.mooglemail.diagnostics.directory,
+        root_path,
         super::days_to_duration(ordinary_days)?,
         super::days_to_duration(hold_days)?,
         std::time::SystemTime::now(),
     )
     .map_err(|error| anyhow::anyhow!("只读统计加密邮件诊断文件失败：{}", error.as_str()))?;
+    let root_identity_sha256 = super::purge::filesystem_root_identity_sha256(root_path)?;
+    anyhow::ensure!(
+        root_identity_sha256 == root_identity_before,
+        "只读演练期间邮件诊断目录身份变化；请重新执行演练"
+    );
 
     let filesystem = serde_json::json!({
         "dataset_family": "mail_diagnostic_files",
+        "root_identity_sha256": root_identity_sha256,
         "policy_state": "delete_after_age",
         "retention_kind": "filesystem",
         "directory_present": snapshot.directory_present,
@@ -105,7 +113,7 @@ pub(super) async fn retention_dry_run(
         "deletion_authorized": false,
     });
     let receipt = serde_json::json!({
-        "format": "auction-retention-dry-run-receipt.v1",
+        "format": "auction-retention-dry-run-receipt.v2",
         "run_id": run_id,
         "created_at": auction_time::Timestamp::now(),
         "database_retention": &report,

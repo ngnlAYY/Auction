@@ -157,15 +157,19 @@ export async function fetchAdminAudit(
   if (!appendTimeFilter(query, "occurred_to", normalized.occurredTo)) {
     return err("invalid_query");
   }
-  const response = await sendGet(host, `/api/v1/admin/audit?${query.toString()}`, signal);
-  if (!response.ok) {
-    return err(response.error);
+  try {
+    const response = await sendGet(host, `/api/v1/admin/audit?${query.toString()}`, signal);
+    if (!response.ok) {
+      return err(response.error);
+    }
+    if (response.value.status < 200 || response.value.status >= 300) {
+      return err(await responseError(response.value, signal, host));
+    }
+    const decoded = decodeAuditPage(response.value, page, pageSize);
+    return decoded.ok ? ok(decoded.value) : err(decodeFailureCode(decoded.error));
+  } catch {
+    return err("network_error");
   }
-  if (response.value.status < 200 || response.value.status >= 300) {
-    return err(await responseError(response.value, signal, host));
-  }
-  const decoded = decodeAuditPage(response.value, page, pageSize);
-  return decoded.ok ? ok(decoded.value) : err(decodeFailureCode(decoded.error));
 }
 
 /** `decodeAdminReceipt` 已上报并返回 `invalid_response`；组合校验失败在这里补报一次。 */

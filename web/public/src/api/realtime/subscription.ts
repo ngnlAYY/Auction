@@ -4,6 +4,7 @@
 // 每帧先解码，序列跳号时回到 HTTP 补发，缺口仍存在才降级重连。
 
 import { transportErrorCode } from "@auction/web-shared/net/transport";
+import { createPromiseResolvers } from "@auction/web-shared/platform/promise";
 import { createTimeoutFuture } from "@auction/web-shared/platform/timer";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { reportBrowserError } from "@auction/web-shared/ui/bootstrap";
@@ -26,6 +27,8 @@ import {
 const REALTIME_CONNECT_TIMEOUT_MILLIS = 10_000;
 /** 连续毒帧上限：单帧解码失败只计数降级，连续 5 帧失败才断开整条订阅。 */
 const MAX_CONSECUTIVE_BAD_FRAMES = 5;
+/** 握手与 HTTP 补读期间最多缓存 256 帧；溢出后重连并从持久事件游标补读。 */
+const MAX_QUEUED_FRAMES = 256;
 /** HTTP catch-up 翻页上限：落后超过 50 页（5000 事件）说明逐页重放代价过大，
  * 转为全量 refetch 降级，由各 resource 重读权威快照。 */
 const MAX_CATCH_UP_PAGES = 50;
@@ -51,7 +54,17 @@ async function fetchRealtimePage(
   let observedStatus: number | null = null;
   const response = await sendGet(`/api/v1/events?${query.toString()}`, signal, (status) => {
     observedStatus = status;
-  });
+  }).catch(() => null);
+  if (response === null) {
+    if (signal.aborted) {
+      return err(realtimeErrorTransient("network_error"));
+    }
+    const status = observedStatus;
+    if (status === 401 || status === 403 || status === 404) {
+      return err(realtimeErrorPermanent(`HTTP ${status}`));
+    }
+    return err(realtimeErrorTransient("invalid_response"));
+  }
   if (signal.aborted) {
     return err(realtimeErrorTransient("network_error"));
   }
@@ -255,14 +268,14 @@ async function waitForSocketOpen(
 ): Promise<"open" | "failed" | "aborted" | "timeout"> {
   const timeout = createTimeoutFuture(REALTIME_CONNECT_TIMEOUT_MILLIS);
   let abortListener: (() => void) | null = null;
-  const aborted = new Promise<"aborted">((resolve) => {
-    if (signal.aborted) {
-      resolve("aborted");
-      return;
-    }
-    abortListener = () => resolve("aborted");
+  const abortedGate = createPromiseResolvers<"aborted">();
+  const aborted = abortedGate.promise;
+  if (signal.aborted) {
+    abortedGate.resolve("aborted");
+  } else {
+    abortListener = () => abortedGate.resolve("aborted");
     signal.addEventListener("abort", abortListener, { once: true });
-  });
+  }
   try {
     return await Promise.race([opened, timeout.promise.then(() => "timeout" as const), aborted]);
   } finally {
@@ -358,29 +371,45 @@ function openSocket(url: string): Result<SocketConnection, RealtimeError> {
   let closed = false;
   let closeCode: number | null = null;
   let opened = false;
-  let resolveOpened: ((state: "open" | "failed") => void) | null = null;
-  const openedPromise = new Promise<"open" | "failed">((resolve) => {
-    resolveOpened = resolve;
-  });
+  const openGate = createPromiseResolvers<"open" | "failed">();
+  let resolveOpened: typeof openGate.resolve | null = openGate.resolve;
+  const openedPromise = openGate.promise;
 
-  const push = (message: Incoming): void => {
-    const waiter = waiters.shift();
-    if (waiter !== undefined) {
-      waiter(message);
-    } else {
-      queue.push(message);
-    }
-  };
   const settleOpen = (state: "open" | "failed"): void => {
     if (resolveOpened !== null) {
       resolveOpened(state);
       resolveOpened = null;
     }
   };
+  const failQueueOverflow = (): void => {
+    closed = true;
+    queue.length = 0;
+    queue.push({ kind: "failed", detail: "WebSocket 接收队列超过上限" });
+    settleOpen("failed");
+    try {
+      socket.close();
+    } catch {
+      // 关闭失败不恢复已丢弃的缓冲帧；下一次订阅会从持久游标补读。
+    }
+  };
+  const push = (message: Incoming): void => {
+    if (closed) return;
+    const waiter = waiters.shift();
+    if (waiter !== undefined) {
+      waiter(message);
+      return;
+    }
+    if (queue.length >= MAX_QUEUED_FRAMES) {
+      failQueueOverflow();
+      return;
+    }
+    queue.push(message);
+  };
   const markClosed = (): void => {
     if (!closed) {
       closed = true;
-      push({ kind: "closed" });
+      const waiter = waiters.shift();
+      waiter?.({ kind: "closed" });
     }
   };
 
@@ -423,7 +452,7 @@ function openSocket(url: string): Result<SocketConnection, RealtimeError> {
 
   const inbox: Inbox = {
     next: (signal) => {
-      if (signal?.aborted === true) {
+      if (signalAborted(signal)) {
         return Promise.resolve(null);
       }
       const queued = queue.shift();
@@ -433,28 +462,28 @@ function openSocket(url: string): Result<SocketConnection, RealtimeError> {
       if (closed) {
         return Promise.resolve({ kind: "closed" });
       }
-      return new Promise<Incoming | null>((resolve) => {
-        let settled = false;
-        const finish = (message: Incoming | null): void => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          signal?.removeEventListener("abort", onAbort);
-          const index = waiters.indexOf(waiter);
-          if (index >= 0) {
-            waiters.splice(index, 1);
-          }
-          resolve(message);
-        };
-        const onAbort = (): void => finish(null);
-        const waiter = (message: Incoming | null): void => finish(message);
-        waiters.push(waiter);
-        signal?.addEventListener("abort", onAbort, { once: true });
-        if (signal?.aborted === true) {
-          onAbort();
+      let settled = false;
+      const pending = createPromiseResolvers<Incoming | null>();
+      const finish = (message: Incoming | null): void => {
+        if (settled) {
+          return;
         }
-      });
+        settled = true;
+        signal?.removeEventListener("abort", onAbort);
+        const index = waiters.indexOf(waiter);
+        if (index >= 0) {
+          waiters.splice(index, 1);
+        }
+        pending.resolve(message);
+      };
+      const onAbort = (): void => finish(null);
+      const waiter = (message: Incoming | null): void => finish(message);
+      waiters.push(waiter);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signalAborted(signal)) {
+        onAbort();
+      }
+      return pending.promise;
     },
     dispose: () => {
       socket.removeEventListener("message", onMessage);

@@ -90,7 +90,10 @@ impl Drop for MailMessage {
 impl MailMessage {
     /// 校验 Worker 到应用边界的 envelope，拒绝不完整或越界的业务输入。
     pub fn validate(&self) -> Result<(), MailProcessingError> {
+        // stable_command_id 使用 `/` 分隔身份字段；输入边界拒绝分隔符以保持编码唯一。
         if !valid_text(&self.mailbox_key, 256)
+            || self.mailbox_key.contains('/')
+            || self.external_mail_id.contains('/')
             || !valid_text(&self.external_mail_id, 512)
             || !matches!(self.world_id.as_str(), "main" | "isekai")
             || self.received_at.timestamp_nanos_opt().is_none()

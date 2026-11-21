@@ -7,7 +7,7 @@ import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import type { TaskScope } from "@auction/web-shared/reactive/tasks";
 import { createTaskScope } from "@auction/web-shared/reactive/tasks";
-import type { Result } from "@auction/web-shared/result";
+import { err, type Result } from "@auction/web-shared/result";
 import { compareText } from "@auction/web-shared/text";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
@@ -206,7 +206,19 @@ function submitCommand(
   owner.commands.set(next);
   owner.tasks.spawn(async (context) => {
     await Promise.resolve();
-    if (!context.alive() || !ownerIdentityMatches(owner)) {
+    if (!context.alive()) {
+      return;
+    }
+    if (!ownerIdentityMatches(owner)) {
+      const commands = new Map(owner.commands.peek());
+      if (commands.get(lotId) === attempt) {
+        if (pending?.uncertain) {
+          commands.set(lotId, pending);
+        } else {
+          commands.delete(lotId);
+        }
+        owner.commands.set(commands);
+      }
       return;
     }
     // 首次发送和重放共用门禁。未交给传输时保留先前未知的原请求与结果。
@@ -226,7 +238,9 @@ function submitCommand(
       }
       return;
     }
-    const result = await setLotWatch(userId, auctionId, lotId, frozen, context.signal);
+    const result = await setLotWatch(userId, auctionId, lotId, frozen, context.signal).catch(() =>
+      err({ code: "network_error", status: 0 }),
+    );
     if (!context.alive() || !ownerIdentityMatches(owner)) {
       return;
     }

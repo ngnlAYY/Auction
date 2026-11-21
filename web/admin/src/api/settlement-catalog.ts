@@ -53,6 +53,12 @@ export async function fetchAdminSettlementCatalog(
   if (!bounds.ok) {
     return bounds;
   }
+  if (
+    (worldId !== "all" && worldId !== "main" && worldId !== "isekai") ||
+    (sequence !== null && (!Number.isSafeInteger(sequence) || sequence < 1))
+  ) {
+    return err("invalid_settlement_catalog_query");
+  }
   const query = new URLSearchParams();
   query.append("page", page.toString());
   query.append("page_size", pageSize.toString());

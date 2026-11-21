@@ -4,14 +4,13 @@
 //! `bid_log`（竞价日志与按状态的场次目录分页）、`lots`（lot 目录与详情）、`price_history`（价格历史）。
 
 mod bid_log;
-mod cached_get;
+pub(super) mod cached_get;
 mod current;
 mod directory;
 mod lots;
 mod price_history;
 
 pub(crate) use bid_log::{fetch_bid_log_auctions, fetch_bid_log_page, fetch_lot_bid_log};
-pub(super) use cached_get::cached_public_read;
 pub(crate) use current::{
     fetch_current_auction, fetch_historical_auction, fetch_worlds, revalidate_worlds,
 };

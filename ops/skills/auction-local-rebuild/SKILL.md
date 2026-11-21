@@ -54,7 +54,7 @@ description: 更新 Auction 本地隔离环境的 Public/Admin：冻结源码、
 1. `git worktree add --detach <本轮目录>/worktree <commit>`，再用 `source-file-sha256.json` 逐文件证明内容一致。worktree 会把部分文件权限规范成 0664，所以构建指纹会与冻结值不同；把 worktree 的构建指纹写进 plan，由 `install.py` 断言。
 2. 发布工具由 mise 安装在用户级数据目录，各 worktree 共用，不需要在 worktree 里重装；主仓库的 `mise.toml` 已受信任时 worktree 自动沿用。冻结提交的 `mise.lock` 与本机已装版本不一致时，先在 worktree 里执行 `mise install`。
 3. 在 worktree 中执行 `CARGO_BUILD_JOBS=2 mise run verify && CARGO_BUILD_JOBS=2 mise run release-check`。release profile 约 15 分钟，全程约 25–35 分钟；Fat LTO 内存占用大，不要提高并发。
-4. 产物：`target/dist/artifacts/embedded/`（本地安装用）与 `target/dist/package/auction-rust-<版本>-<短提交>.tar.gz`。核对 `release package 检查通过` 行中的 commit、`state=clean` 与指纹。
+4. 产物：`target/dist/artifacts/embedded/`（本地安装用）与 `target/dist/package/auction-rust-<版本>-<短提交>-candidate.tar.gz`。核对 `release package 检查通过` 行中的 commit、`state=clean` 与指纹。
 5. 运行 `make_plan.py` 前设置 `REBUILD_REPO=<worktree>`，使 plan 的 `repository_root` 指向 worktree、`isolated_source_snapshot=true`。
 
 本地构建的包只用于本地环境。线上部署只接受 GitHub Release 资产（见 `auction-production-deploy`），不要把本地包带上线。

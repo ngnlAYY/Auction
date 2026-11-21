@@ -8,7 +8,8 @@ use std::net::SocketAddr;
 
 use auction_application::settlement::SettlementReturnCommand;
 use auction_contracts::{
-    AdminSettlementReturnHandleRequest, AdminSettlementReturnRecheckRequest, ApiResponse,
+    AdminSettlementReturnHandleAction, AdminSettlementReturnHandleRequest,
+    AdminSettlementReturnRecheckRequest, ApiResponse,
 };
 use auction_domain::{CommandId, SettlementReturnAction};
 use auction_time::Timestamp;
@@ -75,9 +76,7 @@ pub(crate) async fn handle(
     let Ok(input) = serde_json::from_slice::<AdminSettlementReturnHandleRequest>(&body) else {
         return invalid_json();
     };
-    let Some(action) = handle_action(&input.action) else {
-        return invalid_command();
-    };
+    let action = handle_action(input.action);
     let request = CommandInput {
         command_id: input.command_id,
         expected_version: input.expected_version,
@@ -93,10 +92,19 @@ struct CommandInput {
     action: SettlementReturnAction,
 }
 
-/// handle 路由接受的动作闭集；重新核验只走独立路由，未知名称返回 `None`。
-fn handle_action(value: &str) -> Option<SettlementReturnAction> {
-    SettlementReturnAction::from_name(value)
-        .filter(|action| *action != SettlementReturnAction::Recheck)
+/// handle 路由的 DTO 类型已排除重新核验，逐项映射到应用动作闭集。
+fn handle_action(value: AdminSettlementReturnHandleAction) -> SettlementReturnAction {
+    use AdminSettlementReturnHandleAction as RequestAction;
+    use SettlementReturnAction as DomainAction;
+
+    match value {
+        RequestAction::ReclaimAndResend => DomainAction::ReclaimAndResend,
+        RequestAction::ReclaimAndHold => DomainAction::ReclaimAndHold,
+        RequestAction::ResendFromCustody => DomainAction::ResendFromCustody,
+        RequestAction::CloseInbox => DomainAction::CloseInbox,
+        RequestAction::Acknowledge => DomainAction::Acknowledge,
+        RequestAction::RetryTake => DomainAction::RetryTake,
+    }
 }
 
 /// 命令字段的结构校验；资格、版本与来源由存储层在命令事务内锁内复核。
@@ -176,23 +184,26 @@ fn action_message(action: SettlementReturnAction) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use auction_contracts::ADMIN_SETTLEMENT_RETURN_HANDLE_ACTIONS;
+    use auction_contracts::AdminSettlementReturnHandleAction as RequestAction;
     use auction_domain::SettlementReturnAction;
+    use auction_domain::SettlementReturnAction as DomainAction;
     use uuid::Uuid;
 
     use super::{CommandInput, handle_action, valid_input};
 
-    /// handle 只接受契约列出的六个动作；重新核验、未知名称与大小写变体都拒绝。
+    /// handle DTO 的闭集逐项映射到应用动作，不包含独立 recheck 路由。
     #[test]
-    fn handle_accepts_only_the_contract_action_set() {
-        for name in ADMIN_SETTLEMENT_RETURN_HANDLE_ACTIONS {
-            let action = handle_action(name).expect(name);
-            assert_eq!(action.as_str(), name);
-        }
-        for invalid in
-            ["recheck", "reconcile", "force_bind", "CLOSE_INBOX", "acknowledge_quarantine", ""]
-        {
-            assert_eq!(handle_action(invalid), None, "{invalid}");
+    fn handle_maps_the_contract_action_set() {
+        let actions = [
+            (RequestAction::ReclaimAndResend, DomainAction::ReclaimAndResend),
+            (RequestAction::ReclaimAndHold, DomainAction::ReclaimAndHold),
+            (RequestAction::ResendFromCustody, DomainAction::ResendFromCustody),
+            (RequestAction::CloseInbox, DomainAction::CloseInbox),
+            (RequestAction::Acknowledge, DomainAction::Acknowledge),
+            (RequestAction::RetryTake, DomainAction::RetryTake),
+        ];
+        for (request, expected) in actions {
+            assert_eq!(handle_action(request), expected);
         }
     }
 

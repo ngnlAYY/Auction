@@ -223,7 +223,11 @@ fn decode_alert_receipt(
     let result = payload.data.alert;
     if result.id != alert_id
         || result.action != action
-        || (action == "silence" && result.silenced_until.is_none())
+        || (action == "silence"
+            && result
+                .silenced_until
+                .as_deref()
+                .is_none_or(|value| auction_time::Timestamp::parse_from_rfc3339(value).is_err()))
         || (action == "acknowledge" && result.silenced_until.is_some())
         || result.id.is_empty()
         || command_id.is_nil()

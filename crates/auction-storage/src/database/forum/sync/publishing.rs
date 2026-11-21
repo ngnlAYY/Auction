@@ -7,7 +7,7 @@ use auction_application::forum::{
 use auction_time::Timestamp;
 
 use super::super::super::DatabaseStore;
-use super::validation::storage_error;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(super) async fn publish_postgres(

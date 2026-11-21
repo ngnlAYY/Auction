@@ -1,4 +1,4 @@
-//! 部署回执闭集：只记录程序摘要、迁移版本、恢复点标识、操作者与时间，不含配置或秘密。
+//! 部署回执闭集：只记录程序路径与可取得的摘要/字节数、迁移版本、恢复点标识、操作者与时间，不含配置或秘密。
 //!
 //! 回执是只追加事实：同一 `receipt_id` 的文件一旦发布就不再改写；更正必须形成新回执。新回执
 //! 写 v2；v1 回执原样兼容读取，deploy 段版本必须与回执格式一致。
@@ -49,7 +49,7 @@ pub(crate) struct MigrationRecord {
     pub applied: i64,
 }
 
-/// 实际运行的三角色程序身份；摘要取自 `/proc/<pid>/exe`，不信任安装路径。
+/// 程序身份观测；运行摘要取自 `/proc/<pid>/exe`，不信任安装路径；失败且文件不可读时只记录路径，不作身份证明。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Artifact {
@@ -101,6 +101,7 @@ impl DeploymentReceipt {
             && (migration.before_version < 0
                 || migration.after_version < migration.before_version
                 || migration.expected_version < 0
+                || migration.after_version > migration.expected_version
                 || migration.applied != migration.after_version - migration.before_version)
         {
             anyhow::bail!("部署回执的迁移版本自相矛盾");
@@ -141,6 +142,26 @@ impl DeploymentReceipt {
         Ok(())
     }
 
+    /// 新回执必须完整证明三个角色的程序身份，历史回执仍按原格式读取。
+    pub(super) fn validate_for_append(&self) -> anyhow::Result<()> {
+        self.validate()?;
+        if self.format == FORMAT && self.outcome == Outcome::Succeeded {
+            if self.action == Action::Deploy && self.migration.is_none() {
+                anyhow::bail!("成功 deploy 回执必须记录迁移结果");
+            }
+            if matches!(self.action, Action::Deploy | Action::Rollback)
+                && (self.artifacts.len() != MAX_ARTIFACTS
+                    || self
+                        .artifacts
+                        .iter()
+                        .any(|artifact| artifact.path.is_none() || artifact.sha256.is_none()))
+            {
+                anyhow::bail!("成功 deploy/rollback 回执必须记录三个角色的运行程序身份");
+            }
+        }
+        Ok(())
+    }
+
     /// 本回执能证明的已安装组件身份。只有成功回执的部署目标经运行程序摘要核对等于实际安装的
     /// 组件；失败回执的 deploy 段只是尝试安装的目标（安装中途失败并换回后实际仍是旧程序），
     /// 不能作为任何组件的身份来源，返回 None。
@@ -173,13 +194,13 @@ fn validate_artifact(artifact: &Artifact) -> anyhow::Result<()> {
     {
         anyhow::bail!("部署回执的程序路径必须是绝对路径且不含控制字符");
     }
-    match (artifact.path.is_some(), artifact.sha256.as_deref(), artifact.bytes) {
-        (_, Some(sha256), Some(bytes)) => {
+    match (artifact.sha256.as_deref(), artifact.bytes) {
+        (Some(sha256), Some(bytes)) => {
             if !is_lower_hex(sha256, 64) || bytes == 0 {
                 anyhow::bail!("部署回执的程序摘要无效");
             }
         }
-        (_, None, None) => {}
+        (None, None) => {}
         _ => anyhow::bail!("部署回执的程序摘要与字节数必须同时存在或同时缺失"),
     }
     Ok(())
@@ -358,7 +379,8 @@ mod tests {
         assert!(value.validate().is_err(), "成功 deploy 必须记录 deploy 段");
 
         value.deploy = Some(DeploySection::Current(deploy_record()));
-        value.validate().expect("deploy 回执必须通过");
+        value.migration = None;
+        value.validate().expect("历史成功 deploy 回执仍可读取");
 
         let mut value = receipt();
         value.deploy = Some(DeploySection::Current(deploy_record()));
@@ -379,12 +401,53 @@ mod tests {
         assert!(value.validate().is_err());
     }
 
+    #[test]
+    fn publishing_successful_deploy_or_rollback_requires_all_three_running_programs() {
+        for action in [Action::Deploy, Action::Rollback] {
+            let mut value = receipt();
+            value.action = action;
+            value.deploy = Some(DeploySection::Current(deploy_record()));
+            for role in ["admin", "public"] {
+                value.artifacts.push(Artifact {
+                    role: role.to_owned(),
+                    path: Some(format!("/opt/auction/bin/auction-{role}-api")),
+                    sha256: Some("b".repeat(64)),
+                    bytes: Some(1024),
+                });
+            }
+            value.validate_for_append().expect("三个角色均已核验");
+            value.migration = None;
+            assert_eq!(value.validate_for_append().is_ok(), action == Action::Rollback);
+            value.migration = receipt().migration;
+            value.artifacts[0].path = None;
+            assert!(value.validate_for_append().is_err(), "运行程序证据必须有路径");
+            value.artifacts.remove(0);
+            assert!(value.validate_for_append().is_err(), "不能缺少任何角色");
+        }
+    }
+
+    #[test]
+    fn historical_service_receipts_allow_partial_program_observations() {
+        for format in [LEGACY_FORMAT, FORMAT] {
+            let mut value = receipt();
+            value.format = format.to_owned();
+            let path_only = &mut value.artifacts[0];
+            path_only.sha256 = None;
+            path_only.bytes = None;
+            value.validate().expect("历史 service 回执可只记录进程路径");
+            value.artifacts = receipt().artifacts;
+            value.artifacts[0].path = None;
+            value.validate().expect("历史 service 回执可只记录进程摘要与大小");
+        }
+    }
+
     /// deploy 段版本必须与回执格式一致：v1 回执只能带平铺段，v2 回执只能带分段身份。
     #[test]
     fn deploy_section_version_follows_the_receipt_format() {
         let mut value = receipt();
         value.action = Action::Deploy;
         value.format = LEGACY_FORMAT.to_owned();
+        value.migration = None;
         value.deploy = Some(DeploySection::Legacy(legacy_record()));
         value.validate().expect("v1 deploy 回执原样可读");
         let json = serde_json::to_vec(&value).expect("序列化");

@@ -6,9 +6,31 @@ use serde::{Deserialize, Serialize};
 
 use super::paths::{valid_base_id, valid_segment_name};
 use super::{
-    BASE_MANIFEST_FORMAT, BASE_RECEIPT_FORMAT, CIPHER_SUFFIX, MANIFEST_FORMAT, WAL_UPLOAD_FORMAT,
+    BASE_MANIFEST_FORMAT, BASE_RECEIPT_FORMAT, CIPHER_SUFFIX, LEGACY_MANIFEST_FORMAT,
+    LEGACY_WAL_UPLOAD_FORMAT, MANIFEST_FORMAT, WAL_UPLOAD_FORMAT,
 };
 use crate::support::digest::is_lower_hex;
+
+fn source_digest_valid(
+    format: &str,
+    digest: Option<&str>,
+    current_format: &str,
+    legacy_format: &str,
+) -> bool {
+    match (format, digest) {
+        (format, Some(digest)) if format == current_format => is_lower_hex(digest, 64),
+        (format, None) => format == legacy_format,
+        _ => false,
+    }
+}
+
+fn cipher_digest_valid(format: &str, digest: Option<&str>) -> bool {
+    match (format, digest) {
+        (format, Some(digest)) if format == MANIFEST_FORMAT => is_lower_hex(digest, 64),
+        (format, None) if format == LEGACY_MANIFEST_FORMAT => true,
+        _ => false,
+    }
+}
 
 /// 单个 WAL 段的归档证据；与密文一起构成上传器唯一认可的暂存单元。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,12 +38,18 @@ use crate::support::digest::is_lower_hex;
 pub(crate) struct ArchiveManifest {
     pub(crate) format: String,
     pub(crate) segment_name: String,
-    /// 源 WAL 文件字节数；与 `source_mtime_ns` 一起证明重复归档的是同一份内容。
+    /// 源 WAL 文件字节数；重复判定还要求时间戳与源内容 SHA-256 一致。
     pub(crate) source_bytes: u64,
     /// 源 WAL 文件的 mtime（UNIX 纪元纳秒）。PostgreSQL 重试同一段时不变。
     pub(crate) source_mtime_ns: u64,
+    /// 源 WAL 内容摘要；旧 v1 记录缺少此字段，不能单独作为重复归档证明。
+    #[serde(default)]
+    pub(crate) source_sha256: Option<String>,
     /// 密文字节数；上传前与本地密文长度核对。
     pub(crate) cipher_bytes: u64,
+    /// 暂存密文摘要；上传时用于确认扫描后路径没有指向替换文件。
+    #[serde(default)]
+    pub(crate) cipher_sha256: Option<String>,
     /// 归档完成时刻；只用于诊断，不参与重复判定。
     pub(crate) archived_unix_seconds: u64,
 }
@@ -29,7 +57,12 @@ pub(crate) struct ArchiveManifest {
 impl ArchiveManifest {
     /// 字段闭集与段名一致性；不重算密文摘要（私钥离线，密文不可解）。
     pub(crate) fn validate(&self, segment: &str) -> anyhow::Result<()> {
-        if self.format != MANIFEST_FORMAT
+        if !source_digest_valid(
+            &self.format,
+            self.source_sha256.as_deref(),
+            MANIFEST_FORMAT,
+            LEGACY_MANIFEST_FORMAT,
+        ) || !cipher_digest_valid(&self.format, self.cipher_sha256.as_deref())
             || self.segment_name != segment
             || !valid_segment_name(&self.segment_name)
             || self.cipher_bytes == 0
@@ -48,6 +81,9 @@ pub(crate) struct WalUploadReceipt {
     pub(crate) segment_name: String,
     pub(crate) source_bytes: u64,
     pub(crate) source_mtime_ns: u64,
+    /// 源 WAL 内容摘要；旧 v1 回执缺少此字段，不再授权重试成功。
+    #[serde(default)]
+    pub(crate) source_sha256: Option<String>,
     pub(crate) cipher_bytes: u64,
     pub(crate) cipher_sha256: String,
     pub(crate) remote_key: String,
@@ -56,8 +92,12 @@ pub(crate) struct WalUploadReceipt {
 
 impl WalUploadReceipt {
     pub(crate) fn validate(&self, segment: &str) -> anyhow::Result<()> {
-        if self.format != WAL_UPLOAD_FORMAT
-            || self.segment_name != segment
+        if !source_digest_valid(
+            &self.format,
+            self.source_sha256.as_deref(),
+            WAL_UPLOAD_FORMAT,
+            LEGACY_WAL_UPLOAD_FORMAT,
+        ) || self.segment_name != segment
             || !valid_segment_name(&self.segment_name)
             || self.source_bytes == 0
             || self.cipher_bytes == 0
@@ -75,10 +115,11 @@ impl WalUploadReceipt {
 }
 
 /// 源 WAL 文件的本地身份；重复归档必须来自同一份内容。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SourceIdentity {
     pub(crate) bytes: u64,
     pub(crate) mtime_ns: u64,
+    pub(crate) sha256: String,
 }
 
 /// 同一段名的既有暂存状态。

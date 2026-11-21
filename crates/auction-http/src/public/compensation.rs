@@ -255,7 +255,7 @@ fn valid_pool_page(
         && page.limit == page_size
         && page.offset == offset
         && if cursor {
-            page.total.is_none()
+            page.total.is_none() && page.has_more == page.next_cursor.is_some()
         } else {
             page.total.is_some() && page.next_cursor.is_none() && !page.has_more
         }
@@ -286,18 +286,28 @@ async fn resolve_movement_equipment_urls(
     state: &PublicApiState,
     page: &mut PublicCompensationMovementPage,
 ) -> Result<std::collections::HashMap<Uuid, String>, (StatusCode, Json<ApiErrorResponse>)> {
-    let targets = page
-        .entries
-        .iter_mut()
-        .filter_map(|movement| {
-            Some(PublicEquipmentLinkTarget {
-                lot_id: movement.lot_id?,
-                equipment_id: movement.equipment_id?,
-                world_id: page.round.world_id.clone(),
-                projected_game_equipment_url: movement.projected_game_equipment_url.take()?,
-            })
-        })
-        .collect::<Vec<_>>();
+    let mut targets = Vec::new();
+    for movement in &mut page.entries {
+        let projected_game_equipment_url = movement.projected_game_equipment_url.take();
+        match (movement.lot_id, movement.equipment_id, projected_game_equipment_url) {
+            (None, None, None) => {}
+            (Some(lot_id), Some(equipment_id), Some(projected_game_equipment_url)) => {
+                targets.push(PublicEquipmentLinkTarget {
+                    lot_id,
+                    equipment_id,
+                    world_id: page.round.world_id.clone(),
+                    projected_game_equipment_url,
+                });
+            }
+            _ => {
+                return Err(api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "storage_unavailable",
+                    "补偿池返回数据无效",
+                ));
+            }
+        }
+    }
     resolve_equipment_urls(state, targets).await
 }
 
@@ -341,11 +351,25 @@ async fn resolve_equipment_urls(
             "补偿池返回数据无效",
         ));
     }
-    Ok(targets
-        .into_iter()
-        .zip(links)
-        .map(|(target, link)| (target.lot_id, link.into_url()))
-        .collect())
+    let mut urls = std::collections::HashMap::with_capacity(targets.len());
+    for (target, link) in targets.into_iter().zip(links) {
+        let url = link.into_url();
+        let matches_target =
+            url.strip_prefix(&target.projected_game_equipment_url).is_some_and(|suffix| {
+                suffix.len() == 11
+                    && suffix.starts_with('/')
+                    && suffix[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+            });
+        if !matches_target {
+            return Err(api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "storage_unavailable",
+                "补偿池返回数据无效",
+            ));
+        }
+        urls.insert(target.lot_id, url);
+    }
+    Ok(urls)
 }
 
 fn map_movement_page(

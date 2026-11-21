@@ -5,7 +5,7 @@
 //! 随机窗口后重读自己的权威接口。事件负载中的价格、领先者或版本都不参与页面结果，因此取消
 //! 合并或丢弃通知只会多读或少读一次快照，不会产生第二种竞价状态。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use auction_web_shared::timer::TimeoutFuture;
 use auction_web_shared::visibility::document_is_visible;
@@ -21,6 +21,7 @@ const BID_REFRESH_COALESCE_MILLIS: u32 = 100;
 /// 每个窗口另加的均匀抖动上界（不含）：同一事件推给全部连接，固定窗口会让所有客户端在
 /// 同一时刻重读并一起撞上匿名读闸门的并发许可上限；抖动把重读打散到 100–250 毫秒。
 const BID_REFRESH_JITTER_MILLIS: u32 = 150;
+const MAX_TRACKED_AUCTION_NOTICES: usize = 128;
 
 /// 由 `[0, 1)` 的均匀随机样本计算本次合并窗口，结果总在 `[100, 250)` 毫秒内。
 /// 随机源由调用方注入（浏览器为 `Math.random`）；越界或非有限样本按边界处理，不会越出窗口。
@@ -48,6 +49,7 @@ pub(crate) struct PublicBidRefresh(Signal<BidRefreshNotices>);
 struct BidRefreshNotices {
     latest: BidRefreshNotice,
     by_auction: BTreeMap<String, BidRefreshNotice>,
+    insertion_order: VecDeque<String>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -67,7 +69,15 @@ impl PublicBidRefresh {
             let revision = notices.latest.revision.saturating_add(1);
             let notice = BidRefreshNotice { revision, authority_generation };
             // 与全局修订号一起更新所属场次，另一场的通知不能覆盖已排定的抽屉补读。
+            if !notices.by_auction.contains_key(auction_id) {
+                notices.insertion_order.push_back(auction_id.to_owned());
+            }
             notices.by_auction.insert(auction_id.to_owned(), notice);
+            while notices.insertion_order.len() > MAX_TRACKED_AUCTION_NOTICES {
+                if let Some(expired) = notices.insertion_order.pop_front() {
+                    notices.by_auction.remove(&expired);
+                }
+            }
             notices.latest = notice;
         }
     }

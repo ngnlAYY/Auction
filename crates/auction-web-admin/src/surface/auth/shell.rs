@@ -223,7 +223,7 @@ mod tests {
     use dioxus::prelude::*;
 
     use super::{LogoutRecovery, refresh_after_navigation};
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         button, click_button, has_live_text, init_i18n, mount_writer,
     };
     use crate::surface::router::Route;

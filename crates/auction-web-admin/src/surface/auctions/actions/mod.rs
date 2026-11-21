@@ -15,8 +15,8 @@ mod tests;
 use dialog::{AdminAuctionActionDialog, LifecycleDraft, LifecycleTarget};
 use schedule::{AdminAuctionScheduleDialog, ScheduleDraft};
 
-pub(super) use model::{AdminAuctionNotice, auction_notice_label};
-pub(super) use row::AdminAuctionRow;
+pub(crate) use model::{AdminAuctionNotice, auction_notice_label};
+pub(crate) use row::AdminAuctionRow;
 
 /// 页级草稿宿主。在读取失败、换页或对应行卸载时保留草稿，当前页只打开一个编辑框。
 #[derive(Clone, Copy, PartialEq)]

@@ -60,7 +60,7 @@ solid_web_dependencies_ready() {
 	local web_root="$repository_root/web"
 	local prepared="$web_root/node_modules/.auction-prepared"
 	local vite="$web_root/node_modules/.bin/vite"
-	local lock_sha256 prepared_values prepared_lock prepared_bun current_bun
+	local lock_sha256 prepared_values prepared_lock prepared_bun current_bun installed_sha256 prepared_tree
 	if [[ ! -d "$web_root/node_modules" || -L "$web_root/node_modules" ]]; then
 		printf 'web/ 依赖未安装：先运行 mise run web-prepare\n' >&2
 		return 1
@@ -74,18 +74,21 @@ solid_web_dependencies_ready() {
 		return 1
 	fi
 	if ! prepared_values=$(awk -F= '
-		NF != 2 || ($1 != "lock_sha256" && $1 != "bun_version") || seen[$1]++ { exit 1 }
+		NF != 2 || ($1 != "lock_sha256" && $1 != "bun_version" && $1 != "tree_sha256") || seen[$1]++ { exit 1 }
 		{ value[$1] = $2 }
 		END {
-			if (NR != 2 || !seen["lock_sha256"] || !seen["bun_version"]) exit 1
+			if (NR != 3 || !seen["lock_sha256"] || !seen["bun_version"] || !seen["tree_sha256"]) exit 1
 			print value["lock_sha256"]
 			print value["bun_version"]
+			print value["tree_sha256"]
 		}' "$prepared"); then
 		printf 'web/ 依赖准备凭据格式无效：先运行 mise run web-prepare\n' >&2
 		return 1
 	fi
 	prepared_lock=${prepared_values%%$'\n'*}
-	prepared_bun=${prepared_values#*$'\n'}
+	prepared_values=${prepared_values#*$'\n'}
+	prepared_bun=${prepared_values%%$'\n'*}
+	prepared_tree=${prepared_values#*$'\n'}
 	if [[ ! "$prepared_lock" =~ ^[0-9a-f]{64}$ || -z "$prepared_bun" ]]; then
 		printf 'web/ 依赖准备凭据内容无效：先运行 mise run web-prepare\n' >&2
 		return 1
@@ -102,6 +105,22 @@ solid_web_dependencies_ready() {
 		printf 'web/ 依赖准备凭据与 web/bun.lock 不一致：先运行 mise run web-prepare\n' >&2
 		return 1
 	fi
+	if ! prepared_tree=$(awk -F= '$1 == "tree_sha256" { print $2; count++ } END { if (count != 1) exit 1 }' "$prepared"); then
+		printf 'web/ 依赖准备凭据缺少安装树摘要：先运行 mise run web-prepare\n' >&2
+		return 1
+	fi
+	if [[ ! "$prepared_tree" =~ ^[0-9a-f]{64}$ ]]; then
+		printf 'web/ 依赖准备凭据的安装树摘要无效\n' >&2
+		return 1
+	fi
+	if ! installed_sha256=$(bash "$repository_root/ci/release/web-dependency-tree.sh" "$web_root/node_modules"); then
+		printf '无法核对 web/ 已安装依赖树\n' >&2
+		return 1
+	fi
+	[[ "$installed_sha256" == "$prepared_tree" ]] || {
+		printf 'web/ 已安装依赖与准备凭据不一致：先运行 mise run web-prepare\n' >&2
+		return 1
+	}
 	current_bun=${bun_version:-}
 	if [[ -z "$current_bun" ]]; then
 		if ! current_bun=$(bun --version); then
@@ -125,19 +144,42 @@ verify_solid_entry_opt_out() {
 
 # 先把产物写到同目录的临时位置，校验与回执都完成后再换成稳定目录；失败时保留旧 payload。
 install_generated_directory() {
-	local next=$1 current=$2 backup
-	backup="$current.previous.$$"
-	rm -rf "$backup"
-	if [[ -e "$current" ]]; then
-		mv -T -- "$current" "$backup" || return 1
+	local next=$1 current=$2 backup=''
+	# 调用方在复用判定前已持有 surface 锁；这里不重复获取同一把锁，以免本进程自锁。
+	if [[ -e "$current" || -L "$current" ]]; then
+		backup=$(mktemp -d "$current.previous.XXXXXX") || return 1
+		mv -T -- "$current" "$backup/payload" || return 1
 	fi
 	if ! mv -T -- "$next" "$current"; then
-		if [[ -e "$backup" ]]; then
-			mv -T -- "$backup" "$current" || return 1
+		if [[ -n "$backup" ]]; then
+			mv -T -- "$backup/payload" "$current" || return 1
+			rmdir -- "$backup" || return 1
 		fi
 		return 1
 	fi
-	rm -rf "$backup"
+	if [[ -n "$backup" ]] && ! rm -rf -- "$backup"; then
+		printf 'Web payload 已发布，但旧目录清理失败：%s\n' "$backup" >&2
+	fi
+}
+
+# 恢复目录替换在两次 rename 之间被中断时留下的稳定 payload；调用方先持有 surface 锁。
+recover_generated_directory() {
+	local current=$1 backup
+	local -a previous=()
+	shopt -s nullglob
+	previous=("$current".previous.*)
+	shopt -u nullglob
+	if [[ ! -e "$current" && ! -L "$current" ]]; then
+		for backup in "${previous[@]}"; do
+			# 中断在保存旧目录之前只会留下空容器。
+			[[ -e "$backup/payload" || -L "$backup/payload" ]] || continue
+			mv -T -- "$backup/payload" "$current" || return 1
+			break
+		done
+	fi
+	if ((${#previous[@]})); then
+		rm -rf -- "${previous[@]}"
+	fi
 }
 
 # 构建期生成高等级 brotli 副本；后端按 Accept-Encoding 协商，Caddy 的即时压缩只作兜底。
@@ -186,8 +228,8 @@ compress_payload_assets() {
 			return 1
 		fi
 		if ((compressed_size * 10 >= size * 9)); then
-			if ! rm -f -- "$compressed"; then
-				printf '无法删除未采用的 brotli 临时文件：%s\n' "$file" >&2
+			if ! rm -f -- "$compressed" "$file.br"; then
+				printf '无法删除未采用的 brotli 副本：%s\n' "$file.br" >&2
 				return 1
 			fi
 		else
@@ -264,6 +306,13 @@ source_identity=$(web_inputs_fingerprint "$surface")
 # WASM 自定义 profile 与 rustflags 同样影响页面产物，不能只使外层原生二进制缓存失效。
 build_environment=$(build_env_fingerprint)
 
+lock_directory="$repository_root/target/web/.locks"
+mkdir -p -- "$lock_directory"
+exec {surface_lock_fd}>"$lock_directory/$surface.lock"
+flock -x "$surface_lock_fd"
+
+recover_generated_directory "$stable_root"
+
 if web_payload_reusable; then
 	printf '%s Web payload 输入未变，复用：sha256=%s files=%s\n' \
 		"$surface" "$(read_build_info "$marker" payload_sha256)" "$(wc -l <"$payload_manifest")"
@@ -271,23 +320,18 @@ if web_payload_reusable; then
 fi
 
 next_files=()
-solid_build_root=''
+generated_build_root=''
 cleanup() {
 	rm -f -- "${next_files[@]}"
-	if [[ -n "$solid_build_root" ]]; then
-		rm -rf -- "$solid_build_root"
+	if [[ -n "$generated_build_root" ]]; then
+		rm -rf -- "$generated_build_root"
 	fi
 }
 trap cleanup EXIT
 
-if [[ "$stack" == dioxus ]]; then
-	build_root="$stable_root"
-else
-	# Vite 的 outDir 被配置固定在稳定目录；命令行覆盖到同层的临时目录，校验通过后再换入。
-	mkdir -p "$(dirname "$stable_root")"
-	build_root=$(mktemp -d "$stable_root.next.XXXXXX") || exit 1
-	solid_build_root=$build_root
-fi
+mkdir -p "$(dirname "$stable_root")"
+build_root=$(mktemp -d "$stable_root.next.XXXXXX") || exit 1
+generated_build_root=$build_root
 payload_root="$build_root/public"
 payload_manifest="$build_root/PAYLOAD-SHA256"
 marker="$payload_root/auction-web-manifest.v1"
@@ -296,7 +340,7 @@ web_build_info="$build_root/WEB-BUILD-INFO"
 if [[ "$stack" == dioxus ]]; then
 	# Dioxus 会把继承 release 的自定义 profile 归入 release 中间目录；两个精确路径都清理，避免把历史
 	# 指纹文件再次复制进发布 payload，同时不触碰另一个 surface 或 Cargo 的共享依赖缓存。
-	rm -rf "$stable_root" "$repository_root/target/dx/$package/release/web" \
+	rm -rf "$repository_root/target/dx/$package/release/web" \
 		"$repository_root/target/dx/$package/wasm-release/web"
 
 	SOURCE_DATE_EPOCH=$source_epoch \
@@ -305,7 +349,7 @@ if [[ "$stack" == dioxus ]]; then
 		--platform web \
 		--profile wasm-release \
 		--debug-symbols false \
-		--out-dir "$stable_root" \
+		--out-dir "$build_root" \
 		--locked
 
 	# 加载器要等 JS 下载并执行后才请求 WASM；入口文档提前声明 preload，让最大的资源与 JS 并行下载。
@@ -452,24 +496,19 @@ chmod 0644 "$web_build_info_next"
 touch -d "@$source_epoch" "$web_build_info_next"
 mv -f -- "$web_build_info_next" "$web_build_info"
 
-if [[ "$stack" == solid ]]; then
-	# 临时清单会留在目录里并改变根目录 mtime；换入前清掉，再把统一 mtime 设为最后一步。
-	rm -f -- "${next_files[@]}"
-	next_files=()
-	chmod 0755 "$build_root"
-	touch -d "@$source_epoch" "$build_root"
-	install_generated_directory "$build_root" "$stable_root" || {
-		printf '%s Web payload 无法换入稳定目录：%s\n' "$surface" "$stable_root" >&2
-		exit 1
-	}
-	solid_build_root=''
-	payload_root="$stable_root/public"
-	payload_manifest="$stable_root/PAYLOAD-SHA256"
-	marker="$payload_root/auction-web-manifest.v1"
-	web_build_info="$stable_root/WEB-BUILD-INFO"
-else
-	touch -d "@$source_epoch" "$build_root"
-fi
+rm -f -- "${next_files[@]}"
+next_files=()
+chmod 0755 "$build_root"
+touch -d "@$source_epoch" "$build_root"
+install_generated_directory "$build_root" "$stable_root" || {
+	printf '%s Web payload 无法换入稳定目录：%s\n' "$surface" "$stable_root" >&2
+	exit 1
+}
+generated_build_root=''
+payload_root="$stable_root/public"
+payload_manifest="$stable_root/PAYLOAD-SHA256"
+marker="$payload_root/auction-web-manifest.v1"
+web_build_info="$stable_root/WEB-BUILD-INFO"
 
 printf '%s Web 发布 payload 已生成：sha256=%s files=%s\n' \
 	"$surface" "$payload_sha256" "$(wc -l <"$payload_manifest")"

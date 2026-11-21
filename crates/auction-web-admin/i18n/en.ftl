@@ -1805,6 +1805,7 @@ support-deliveries-title = Deliveries
 support-notifications-title = Notifications
 support-empty = No records in this section.
 support-lot = Lot
+support-lot-status = Lot status
 support-world = World
 support-lot-number = Lot no.
 support-amount = Amount

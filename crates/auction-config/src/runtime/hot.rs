@@ -4,7 +4,7 @@
 //! “只挑热字段”的捷径进入 Worker。读取沿用 runtime 文件的 owner、权限、类型和大小边界，
 //! 错误只报告路径或固定文案，不回显 TOML。
 
-use std::{path::Path, time::UNIX_EPOCH};
+use std::{os::unix::fs::MetadataExt, path::Path, time::UNIX_EPOCH};
 
 use auction_application::admin::{AdminRuntimeDocument, WorkerHotConfig};
 use auction_time::Timestamp;
@@ -17,10 +17,11 @@ use crate::{ConfigError, WorkerConfig};
 pub struct RuntimeFileStamp {
     len: u64,
     modified_nanos: Option<u128>,
+    change_token: (u64, u64, i64, i64),
 }
 
 impl RuntimeFileStamp {
-    /// 读取成功时记录的文件长度与修改时间；文件不可用时返回 `None`，由调用方决定告警。
+    /// 记录长度、修改时间、inode 与 change time；文件不可用时返回 `None`。
     pub fn read(path: &Path) -> Option<Self> {
         let metadata = std::fs::symlink_metadata(path).ok()?;
         let modified_nanos = metadata
@@ -28,14 +29,20 @@ impl RuntimeFileStamp {
             .ok()
             .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
             .map(|elapsed| elapsed.as_nanos());
-        Some(Self { len: metadata.len(), modified_nanos })
+        Some(Self {
+            len: metadata.len(),
+            modified_nanos,
+            change_token: (metadata.dev(), metadata.ino(), metadata.ctime(), metadata.ctime_nsec()),
+        })
     }
 
-    /// 文件内容代次未变化时跳过重复读取；修改时间与长度任一变化都重新校验。
+    /// 内容、inode 或 change time 任一变化都重新校验，即使写入方保留原修改时间。
     pub fn unchanged_from(&self, previous: Option<&Self>) -> bool {
         match previous {
             Some(previous) => {
-                self.len == previous.len && self.modified_nanos == previous.modified_nanos
+                self.len == previous.len
+                    && self.modified_nanos == previous.modified_nanos
+                    && self.change_token == previous.change_token
             }
             None => false,
         }
@@ -109,8 +116,12 @@ fn map_read_error(path: &Path) -> impl FnOnce(super::RuntimeFileStoreError) -> C
 
 /// 供测试构造修改时间代次；生产读取只经 `RuntimeFileStamp::read`。
 #[cfg(test)]
-fn stamp(len: u64, modified_nanos: Option<u128>) -> RuntimeFileStamp {
-    RuntimeFileStamp { len, modified_nanos }
+fn stamp(
+    len: u64,
+    modified_nanos: Option<u128>,
+    change_token: (u64, u64, i64, i64),
+) -> RuntimeFileStamp {
+    RuntimeFileStamp { len, modified_nanos, change_token }
 }
 
 #[cfg(test)]
@@ -232,14 +243,17 @@ mod tests {
 
     #[test]
     fn file_stamp_change_detection_is_strict() {
-        let first = stamp(10, Some(1));
-        let same = stamp(10, Some(1));
-        let longer = stamp(11, Some(1));
-        let rewritten = stamp(10, Some(2));
+        let unchanged_token = (1, 2, 3, 4);
+        let first = stamp(10, Some(1), unchanged_token);
+        let same = stamp(10, Some(1), unchanged_token);
+        let longer = stamp(11, Some(1), unchanged_token);
+        let rewritten = stamp(10, Some(2), unchanged_token);
+        let changed_token = stamp(10, Some(1), (1, 2, 3, 5));
         assert!(first.unchanged_from(Some(&same)));
         assert!(!first.unchanged_from(None));
         assert!(!longer.unchanged_from(Some(&first)));
         assert!(!rewritten.unchanged_from(Some(&first)));
+        assert!(!changed_token.unchanged_from(Some(&first)));
     }
 
     #[test]

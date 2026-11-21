@@ -342,7 +342,7 @@ mod tests {
         DeliveryAction, DeliveryDetailGetFixture,
     };
     use crate::surface::AdminActionFeedback;
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         RecordRead, button, click_button, command_button, has_live_text, init_i18n, mount_writer,
         settle_writer,
     };

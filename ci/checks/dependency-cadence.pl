@@ -58,14 +58,14 @@ validate($doc);
 
 if (@errors) {
     for my $error (@errors) {
-        print STDERR "::error title=依赖升级日历::${error}\n";
+        print STDERR "::error title=依赖升级日历::" . workflow_escape($error) . "\n";
     }
     print STDERR "升级日历校验失败（$calendar_path）。\n";
     exit 1;
 }
 
 for my $warning (@warnings) {
-    print STDERR "::warning title=依赖升级窗口::${warning}\n";
+    print STDERR "::warning title=依赖升级窗口::" . workflow_escape($warning) . "\n";
 }
 
 print_summary($doc);
@@ -79,16 +79,24 @@ USAGE
     exit $code;
 }
 
+sub workflow_escape {
+    my ($value) = @_;
+    $value =~ s/%/%25/g;
+    $value =~ s/\r/%0D/g;
+    $value =~ s/\n/%0A/g;
+    return $value;
+}
+
 sub fail_annotations {
     my ($message) = @_;
     (my $single = $message) =~ s/\s+/ /g;
-    print STDERR "::error title=依赖升级日历::${single}\n";
+    print STDERR "::error title=依赖升级日历::" . workflow_escape($single) . "\n";
 }
 
 sub fail_and_exit {
     my ($message) = @_;
     (my $single = $message) =~ s/\s+/ /g;
-    print STDERR "::error title=依赖升级日历::${single}\n";
+    print STDERR "::error title=依赖升级日历::" . workflow_escape($single) . "\n";
     exit 1;
 }
 
@@ -190,8 +198,10 @@ sub validate {
 
         my $label = $window->{id};
         my $state = $window->{status};
-        add_error("$label 的 status 必须是 " . join('、', sort keys %status))
-            unless defined $state && $status{$state};
+        unless (defined $state && !ref $state && $status{$state}) {
+            add_error("$label 的 status 必须是 " . join('、', sort keys %status));
+            next;
+        }
 
         my $start = parse_iso($window->{starts_on});
         my $end = parse_iso($window->{ends_on});
@@ -263,10 +273,11 @@ sub validate {
 
     return unless @parsed == @$windows;
 
-    for my $index (1 .. $#parsed) {
-        my $previous = $parsed[ $index - 1 ];
-        my $current  = $parsed[$index];
-        add_error("窗口顺序必须按时间递增：$current->{id} 早于 $previous->{id}")
+    my @chronological = sort { $a->{start} <=> $b->{start} } @parsed;
+    for my $index (1 .. $#chronological) {
+        my $previous = $chronological[$index - 1];
+        my $current  = $chronological[$index];
+        add_error("窗口日期不能重叠或相同：$current->{id} 与 $previous->{id}")
             if $current->{start} <= $previous->{start};
         add_error("窗口必须按季度连续：$previous->{id} 之后应为下一个季度，实际为 $current->{id}")
             if $current->{quarter_index} != $previous->{quarter_index} + 1;
@@ -306,6 +317,8 @@ sub print_summary {
     print "| --- | --- | --- | --- |\n";
     for my $window (@{ $doc->{windows} }) {
         my $note = defined $window->{note} ? $window->{note} : '';
+        $note =~ s/[\r\n]+/ /g;
+        $note =~ s/\\/\\\\/g;
         $note =~ s/\|/\\|/g;
         print "| $window->{id} | $window->{status} | $window->{starts_on} 至 $window->{ends_on} | $note |\n";
     }

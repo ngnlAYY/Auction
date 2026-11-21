@@ -7,7 +7,7 @@ use auction_web_shared::{AsyncState, AsyncStateKind};
 use dioxus::prelude::*;
 
 use super::super::admin_api_error_message;
-use super::super::auctions::use_draft_page;
+use super::super::auctions::editor::use_draft_page;
 use super::super::query::use_lots_query_state;
 use super::super::router::Route;
 use super::edit::{AdminLotEditDialog, LotEdit};
@@ -224,7 +224,7 @@ mod tests {
 
     use super::LotPageInvalidations;
     use crate::api::AdminApiFailure;
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         assert_field, click_button, field_by_static_id, mount_writer, writer_form,
     };
     use crate::surface::intake::AdminIntakeForm;

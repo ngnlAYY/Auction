@@ -91,7 +91,11 @@ pub fn record_error(
 ) {
     let diagnostic = SafeDiagnostic { level, safe_kind, kind, phase, context };
     match SINK.get() {
-        Some(sink) => sink.record(&diagnostic),
+        Some(sink) => {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                sink.record(&diagnostic);
+            }));
+        }
         None if diagnostic_enabled(&diagnostic) => emit_safe_diagnostic(&diagnostic),
         None => {}
     }

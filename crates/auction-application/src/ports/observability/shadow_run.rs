@@ -158,10 +158,24 @@ pub fn record_uncomparable(
     branch: &'static str,
     reason: &'static str,
 ) {
+    if !valid_uncomparable_reason(reason) {
+        tracing::error!(target: "auction::shadow", reason = "undeclared", "影子运行原因未在闭集中登记，样本已丢弃");
+        return;
+    }
     record(
         recorder,
         ShadowSample { owner, branch, outcome: ShadowOutcome::Uncomparable, reason: Some(reason) },
     );
+}
+
+fn valid_uncomparable_reason(value: &str) -> bool {
+    crate::ports::observability::sent_baseline::SentBaselineReason::ALL
+        .iter()
+        .any(|reason| reason.label() == value)
+        || matches!(
+            value,
+            "paired_query_error" | "classified_query_error" | "query_failed" | "timeout"
+        )
 }
 
 fn record(recorder: &dyn ShadowRecorder, sample: ShadowSample) {
@@ -169,8 +183,7 @@ fn record(recorder: &dyn ShadowRecorder, sample: ShadowSample) {
         // 未登记的分支不进入指标，避免动态 label 扩张基数；这属于调用点缺陷。
         tracing::error!(
             target: "auction::shadow",
-            owner = sample.owner.label(),
-            branch = sample.branch,
+            branch = "undeclared",
             "影子运行分支未在 owner 闭集中登记，样本已丢弃"
         );
         return;
@@ -200,7 +213,7 @@ fn record(recorder: &dyn ShadowRecorder, sample: ShadowSample) {
             "影子样本不可比较，不计入差异归零证据"
         ),
     }
-    recorder.record(sample);
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| recorder.record(sample)));
 }
 
 #[cfg(test)]

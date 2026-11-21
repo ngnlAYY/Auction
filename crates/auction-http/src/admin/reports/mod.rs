@@ -151,6 +151,12 @@ pub(crate) async fn admin_recovery_report(
             }
         };
     if !valid_recovery_report(&report, auction_uuid) {
+        diagnostics::error(
+            "admin_reports",
+            "validate_recovery",
+            SafeErrorKind::DOMAIN_REJECTED,
+            DiagnosticContext { auction_id: Some(auction_uuid), ..Default::default() },
+        );
         return internal_error();
     }
     let report = match map_recovery_report(report, include_send_attribution) {

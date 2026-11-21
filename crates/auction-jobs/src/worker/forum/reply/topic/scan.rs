@@ -65,6 +65,7 @@ pub(in crate::worker::forum::reply) async fn process_topic(
     };
     let auction_application::forum::ForumTopicScan {
         preview,
+        fixed_post_numbers,
         post_numbers,
         mode: _,
         page_count,
@@ -101,7 +102,7 @@ pub(in crate::worker::forum::reply) async fn process_topic(
     let post_numbers = preview
         .posts
         .iter()
-        .zip(post_numbers)
+        .zip(fixed_post_numbers.into_iter().chain(post_numbers))
         .map(|(post, post_number)| {
             (post.post.id.as_str(), usize::try_from(post_number).unwrap_or(usize::MAX))
         })

@@ -61,26 +61,76 @@ pub(in crate::database) async fn read_stored_equipment_secrets_postgres(
     .bind(owner_ids)
     .fetch_all(pool)
     .await
-    .map_err(|_| EquipmentSecretReadError::Unavailable)?;
+    .map_err(|error| {
+        crate::database::log_discarded_sql_error(
+            &error,
+            "equipment_secret_read_failed",
+            "读取装备密文信封失败",
+        );
+        EquipmentSecretReadError::Unavailable
+    })?;
     rows.into_iter().map(map_stored_equipment_secret).collect()
 }
 
 fn map_stored_equipment_secret(
     row: PgRow,
 ) -> Result<StoredEquipmentSecret, EquipmentSecretReadError> {
-    let stored_equipment_id: uuid::Uuid =
-        row.try_get("equipment_id").map_err(|_| EquipmentSecretReadError::Mismatch)?;
-    let world_id: String =
-        row.try_get("world_id").map_err(|_| EquipmentSecretReadError::Mismatch)?;
-    let external_equipment_id: String =
-        row.try_get("external_equipment_id").map_err(|_| EquipmentSecretReadError::Mismatch)?;
-    let ciphertext: Vec<u8> =
-        row.try_get("ciphertext").map_err(|_| EquipmentSecretReadError::Mismatch)?;
-    let nonce: Vec<u8> = row.try_get("nonce").map_err(|_| EquipmentSecretReadError::Mismatch)?;
-    let encryption_key_id: String =
-        row.try_get("encryption_key_id").map_err(|_| EquipmentSecretReadError::Mismatch)?;
-    let fingerprint: String =
-        row.try_get("fingerprint").map_err(|_| EquipmentSecretReadError::Mismatch)?;
+    let stored_equipment_id: uuid::Uuid = row.try_get("equipment_id").map_err(|error| {
+        crate::database::log_discarded_sql_error(
+            &error,
+            "equipment_secret_projection_mismatch",
+            "读取装备密文信封标识失败",
+        );
+        EquipmentSecretReadError::Mismatch
+    })?;
+    let world_id: String = row.try_get("world_id").map_err(|error| {
+        crate::database::log_discarded_sql_error(
+            &error,
+            "equipment_secret_projection_mismatch",
+            "读取装备密文信封世界失败",
+        );
+        EquipmentSecretReadError::Mismatch
+    })?;
+    let external_equipment_id: String = row.try_get("external_equipment_id").map_err(|error| {
+        crate::database::log_discarded_sql_error(
+            &error,
+            "equipment_secret_projection_mismatch",
+            "读取装备密文信封外部标识失败",
+        );
+        EquipmentSecretReadError::Mismatch
+    })?;
+    let ciphertext: Vec<u8> = row.try_get("ciphertext").map_err(|error| {
+        crate::database::log_discarded_sql_error(
+            &error,
+            "equipment_secret_projection_mismatch",
+            "读取装备密文信封密文失败",
+        );
+        EquipmentSecretReadError::Mismatch
+    })?;
+    let nonce: Vec<u8> = row.try_get("nonce").map_err(|error| {
+        crate::database::log_discarded_sql_error(
+            &error,
+            "equipment_secret_projection_mismatch",
+            "读取装备密文信封随机数失败",
+        );
+        EquipmentSecretReadError::Mismatch
+    })?;
+    let encryption_key_id: String = row.try_get("encryption_key_id").map_err(|error| {
+        crate::database::log_discarded_sql_error(
+            &error,
+            "equipment_secret_projection_mismatch",
+            "读取装备密文信封密钥标识失败",
+        );
+        EquipmentSecretReadError::Mismatch
+    })?;
+    let fingerprint: String = row.try_get("fingerprint").map_err(|error| {
+        crate::database::log_discarded_sql_error(
+            &error,
+            "equipment_secret_projection_mismatch",
+            "读取装备密文信封指纹失败",
+        );
+        EquipmentSecretReadError::Mismatch
+    })?;
 
     if stored_equipment_id.is_nil()
         || !matches!(world_id.as_str(), "main" | "isekai")

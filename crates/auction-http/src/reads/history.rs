@@ -112,6 +112,7 @@ pub(crate) async fn list_bid_log(
     if page_result.limit != page_size
         || page_result.offset != offset
         || cursor_raw.is_some() != page_result.total.is_none()
+        || cursor_raw.is_some() && (page_result.has_more != page_result.next_cursor.is_some())
         || cursor_raw.is_none() && (page_result.next_cursor.is_some() || page_result.has_more)
         || page_result.entries.iter().any(|entry| {
             entry.auction_id != auction_id || lot_id.is_some_and(|lot_id| entry.lot_id != lot_id)
@@ -216,6 +217,7 @@ pub(crate) async fn list_price_history(
     };
     request.validate().map_err(|_| query_rejection())?;
 
+    let filter_request = request.clone();
     let Some(reader) = state.price_history() else {
         return Err(api_error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -242,6 +244,7 @@ pub(crate) async fn list_price_history(
         || page_result.offset != offset
         || cursor_raw.is_some() != page_result.total.is_none()
         || cursor_raw.is_some() != page_result.stats.is_none()
+        || cursor_raw.is_some() && (page_result.has_more != page_result.next_cursor.is_some())
         || cursor_raw.is_none() && (page_result.next_cursor.is_some() || page_result.has_more)
         || page_result.stats.as_ref().is_some_and(|stats| stats.validate().is_err())
         || page_result.entries.iter().any(|entry| {
@@ -252,6 +255,7 @@ pub(crate) async fn list_price_history(
                 || entry.equipment_category.is_empty()
                 || entry.buyer_name.is_empty()
                 || entry.seller_name.is_empty()
+                || !price_history_entry_matches_request(entry, &filter_request)
         })
     {
         return Err(api_error(
@@ -267,6 +271,24 @@ pub(crate) async fn list_price_history(
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static(LOW_FREQUENCY_CACHE_CONTROL));
     Ok(response)
+}
+
+fn price_history_entry_matches_request(
+    entry: &auction_application::auction::PublicPriceHistoryEntry,
+    request: &PublicPriceHistoryListRequest,
+) -> bool {
+    let name = entry.equipment_name.to_lowercase();
+    request.name_terms.iter().all(|term| name.contains(&term.to_lowercase()))
+        && request.world_id.as_ref().is_none_or(|world| &entry.world_id == world)
+        && request.closed_from.is_none_or(|from| entry.closed_at >= from)
+        && request.closed_before.is_none_or(|before| entry.closed_at < before)
+        && request.minimum_price.is_none_or(|minimum| entry.price >= minimum)
+        && request.maximum_price.is_none_or(|maximum| entry.price <= maximum)
+        && request.buyer.as_ref().is_none_or(|buyer| entry.buyer_name.eq_ignore_ascii_case(buyer))
+        && request
+            .seller
+            .as_ref()
+            .is_none_or(|seller| entry.seller_name.eq_ignore_ascii_case(seller))
 }
 
 fn parse_history_name_terms(value: Option<&String>) -> Result<Vec<String>, ()> {
@@ -371,7 +393,7 @@ mod tests {
 
     use super::{list_bid_log, list_price_history};
     use crate::middleware::security::PublicHttpSecurity;
-    use crate::server::contract_fixtures::{assert_http, assert_wire};
+    use crate::server::contract_fixtures::{assert_http, assert_wire, response_json};
     use crate::state::PublicApiState;
 
     const AUCTION_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2b);
@@ -567,6 +589,23 @@ mod tests {
             request: PublicPriceHistoryListRequest,
         ) -> ApplicationFuture<'_, PublicPriceHistoryPage> {
             Box::pin(async move {
+                if request.minimum_price == Some(2_002) {
+                    return Ok(PublicPriceHistoryPage {
+                        entries: Vec::new(),
+                        total: Some(0),
+                        stats: Some(PublicPriceHistoryStats {
+                            count: 0,
+                            minimum: 0,
+                            maximum: 0,
+                            median: 0,
+                            median_exact: None,
+                        }),
+                        limit: request.limit,
+                        offset: request.offset,
+                        next_cursor: None,
+                        has_more: false,
+                    });
+                }
                 let at = Timestamp::from_timestamp(1_763_124_640, 110_000_000).expect("成交时刻");
                 let row = PublicPriceHistoryEntry {
                     lot_id: LOT_ID,
@@ -670,5 +709,23 @@ mod tests {
             .expect("成交历史");
             assert_http(&format!("public/{name}"), StatusCode::OK, response).await;
         }
+
+        let response = list_price_history(
+            axum::extract::State(state),
+            "/api/v1/price-history?min_price=2002".parse().expect("无匹配成交历史 URI"),
+        )
+        .await
+        .expect("无匹配成交历史");
+        let body = response_json(StatusCode::OK, response).await;
+        assert_eq!(
+            body["data"],
+            json!({
+                "rows": [],
+                "stats": {"count": 0, "min": 0, "max": 0, "median": 0},
+                "page": 1,
+                "page_size": 50,
+                "total": 0,
+            }),
+        );
     }
 }

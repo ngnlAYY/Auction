@@ -144,11 +144,13 @@ pub(crate) async fn list(
 
     let mut entries = rows.iter().map(map_round).collect::<Result<Vec<_>, ApplicationError>>()?;
 
-    let entry_count =
-        i64::try_from(entries.len()).map_err(|_| storage_error("补偿池页大小溢出"))?;
+    let entry_count = i64::try_from(entries.len())
+        .map_err(|error| storage_error(&format!("补偿池页大小溢出：{error}")))?;
     let has_more = use_cursor && entry_count > request.limit;
     if has_more {
-        entries.truncate(request.limit as usize);
+        let limit = usize::try_from(request.limit)
+            .map_err(|error| storage_error(&format!("补偿池分页大小超出平台范围：{error}")))?;
+        entries.truncate(limit);
     }
     let next_cursor = has_more
         .then(|| {

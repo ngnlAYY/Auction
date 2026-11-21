@@ -14,7 +14,7 @@ use super::super::errors::admin_error;
 use super::{REPLAY_COMMAND_KIND, replay_result_from_payload, replay_result_to_payload};
 use crate::database::DatabaseStore;
 use crate::database::operations::audit_health::AuditWriteResult as _;
-use crate::database::realtime::consumer::resolve_failure_postgres_tx;
+use crate::database::realtime::consumer::failure::resolve_failure_postgres_tx;
 use crate::database::storage_error;
 use crate::database::storage_error_from;
 
@@ -158,9 +158,15 @@ async fn replay_postgres_inner(
     if original.validate().is_err() {
         return Err(admin_error(RealtimeAdminError::ReplayMismatch));
     }
-    let origin_command_id: Option<Uuid> = failure
+    let original_origin_command_id: Option<Uuid> = failure
         .try_get("origin_command_id")
         .map_err(|error| storage_error_from(error, "读取 PostgreSQL 原 realtime 命令引用失败"))?;
+    let origin_command_id = normalize_replay_origin_command_id(
+        transaction,
+        original.event_id,
+        original_origin_command_id,
+    )
+    .await?;
     let origin_bid_id: Option<Uuid> = failure
         .try_get("origin_bid_id")
         .map_err(|error| storage_error_from(error, "读取 PostgreSQL 原 realtime bid 引用失败"))?;
@@ -296,4 +302,110 @@ async fn replay_postgres_inner(
         return Err(storage_error("PostgreSQL realtime replay 命令结果状态异常"));
     }
     Ok(result)
+}
+
+/// 只在 000118 可证明为历史 recovery relist 来源时，清除 replay 副本上的非竞价命令引用。
+async fn normalize_replay_origin_command_id(
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
+    event_id: Uuid,
+    origin_command_id: Option<Uuid>,
+) -> Result<Option<Uuid>, ApplicationError> {
+    let Some(origin_command_id) = origin_command_id else {
+        return Ok(None);
+    };
+    let is_auction_command: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+             SELECT 1 FROM public.auction_commands WHERE command_id = $1
+         )",
+    )
+    .bind(origin_command_id)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|error| storage_error_from(error, "核对 realtime replay 原命令来源失败"))?;
+    if is_auction_command {
+        return Ok(Some(origin_command_id));
+    }
+    let is_proven_recovery_relist: bool = sqlx::query_scalar(
+        r#"SELECT EXISTS (
+               SELECT 1
+               FROM public.realtime_events AS event
+               JOIN public.settlement_recoveries AS recovery
+                 ON recovery.relisted_auction_id::text = event.public_payload->>'auction_id'
+               WHERE event.event_id = $1
+                 AND event.origin_command_id = $2
+                 AND event.kind = 'preview_catalog_changed'
+                 AND event.schema_version = 1
+                 AND event.state_version IS NOT NULL
+                 AND event.origin_bid_id IS NULL
+                 AND event.origin_fact_index IS NULL
+                 AND recovery.stage IN ('completed', 'refunding')
+                 AND recovery.resolution IS NOT NULL
+                 AND recovery.relisted_auction_id IS NOT NULL
+                 AND recovery.relisted_lot_id IS NOT NULL
+                 AND event.stream_key = 'auction:' || recovery.relisted_auction_id::text
+                 AND jsonb_typeof(event.public_payload) = 'object'
+                 AND jsonb_typeof(event.public_payload->'preview_revision') = 'number'
+                 AND event.public_payload->>'preview_revision' ~ '^[1-9][0-9]*$'
+                 AND event.public_payload = jsonb_build_object(
+                     'world', recovery.world_id,
+                     'auction_id', recovery.relisted_auction_id,
+                     'preview_revision', event.public_payload->'preview_revision'
+                 )
+                 AND (
+                     EXISTS (
+                         SELECT 1
+                         FROM public.settlement_recovery_commands AS command
+                         WHERE command.command_id = event.origin_command_id
+                           AND command.recovery_id = recovery.id
+                           AND command.action = recovery.resolution
+                           AND command.result_code = 'ok'
+                           AND command.result_payload->>'recovery_id' = recovery.id::text
+                           AND command.result_payload->>'relisted_auction_id' =
+                               recovery.relisted_auction_id::text
+                           AND command.result_payload->>'relisted_lot_id' =
+                               recovery.relisted_lot_id::text
+                     )
+                     OR EXISTS (
+                         SELECT 1
+                         FROM public.audit_records AS audit
+                         WHERE audit.action = 'auction.recovery.relisted'
+                           AND audit.entity_type = 'settlement_recovery'
+                           AND audit.entity_id = recovery.id::text
+                           AND audit.result = 'success'
+                           AND audit.source = 'worker'
+                           AND audit.metadata->>'origin_command_id' =
+                               event.origin_command_id::text
+                           AND audit.metadata->>'resolution' = recovery.resolution
+                           AND audit.metadata->>'relisted_auction_id' =
+                               recovery.relisted_auction_id::text
+                           AND audit.metadata->>'relisted_lot_id' =
+                               recovery.relisted_lot_id::text
+                     )
+                     OR EXISTS (
+                         SELECT 1
+                         FROM public.audit_records AS audit
+                         WHERE audit.action = 'auction.recovery.' || recovery.resolution
+                           AND audit.entity_type = 'auction'
+                           AND audit.entity_id = recovery.id::text
+                           AND audit.result = 'success'
+                           AND audit.source = 'admin'
+                           AND audit.metadata->>'command_id' = event.origin_command_id::text
+                           AND audit.metadata->>'relisted_auction_id' =
+                               recovery.relisted_auction_id::text
+                           AND audit.metadata->>'relisted_lot_id' =
+                               recovery.relisted_lot_id::text
+                     )
+                 )
+           )"#,
+    )
+    .bind(event_id)
+    .bind(origin_command_id)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|error| storage_error_from(error, "核对历史恢复重挂重放来源失败"))?;
+    if is_proven_recovery_relist {
+        Ok(None)
+    } else {
+        Err(admin_error(RealtimeAdminError::ReplayMismatch))
+    }
 }

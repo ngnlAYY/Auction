@@ -38,6 +38,7 @@ function bid(
   amount: number,
 ): RealtimeEvent {
   return event(sequence, eventId, "lot.bid_accepted", {
+    auction_id: "auction-1",
     lot_id: "lot-1",
     bid_id: bidId,
     state_version: stateVersion,

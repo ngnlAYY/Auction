@@ -214,7 +214,7 @@ impl MoogleMailGateway {
                         MailScanStream::Inbox,
                         None,
                         round.observed_at(),
-                        true,
+                        false,
                     );
                     self.observe_scan(
                         world,

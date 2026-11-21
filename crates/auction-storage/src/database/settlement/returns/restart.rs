@@ -19,9 +19,8 @@ use super::cases::{CaseEvent, CaseRow, CaseTransition, transition};
 use super::errors::ReturnTransactionError;
 use super::take::{ActionRow, take_command_id};
 use crate::database::TrackedTransaction as Transaction;
-use crate::database::mail::delivery::{
-    restart_unstarted_take_in_transaction, settlement_return_take_conflicts,
-};
+use crate::database::mail::delivery::disposition::settlement_return_take_conflicts;
+use crate::database::mail::delivery::restart::restart_unstarted_take_in_transaction;
 
 /// 每个案件允许的“确定未外写”重启次数；用满后转结果未知，防止确定失败的 Take 无限循环。
 pub(super) const MAX_NOT_STARTED_RESTARTS: i64 = 2;

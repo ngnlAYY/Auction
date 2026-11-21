@@ -298,7 +298,7 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
         onMouseEnter={() => {
           interaction.hovered.set(true);
           interaction.dismissed.set(false);
-          showTooltip(mountedElement.peek(), displayDiffers(), truncated, interaction, request());
+          showTooltip(triggerElement, displayDiffers(), truncated, interaction, request());
         }}
         onMouseLeave={() => {
           interaction.hovered.set(false);
@@ -307,7 +307,7 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
         onFocus={() => {
           focused.set(true);
           if (!interaction.dismissed.peek()) {
-            showTooltip(mountedElement.peek(), displayDiffers(), truncated, interaction, request());
+            showTooltip(triggerElement, displayDiffers(), truncated, interaction, request());
           }
         }}
         onBlur={() => {

@@ -17,7 +17,10 @@ use crate::api::session_preference::PATH as SESSION_PREFERENCE_PATH;
 use crate::api::{CommandError, TransportError};
 
 use super::PublicSessionApiError;
-use super::identity::observe_public_session_failure;
+use super::identity::{
+    SessionIdentityObservation, observe_public_session_failure,
+    observe_public_session_failure_observed,
+};
 
 const PATH: &str = "/api/v1/session";
 
@@ -146,12 +149,19 @@ pub(in crate::api) fn decode_identity_response<T: DeserializeOwned>(
 pub(in crate::api) async fn decode_account_identity_response<T: DeserializeOwned>(
     response: impl Into<HttpResponse>,
     expected_user: Option<&str>,
+    observation: &SessionIdentityObservation,
     validate: impl FnOnce(&Value) -> bool,
 ) -> Result<T, CommandError> {
     let response = response.into();
     let status = response.status();
     let body = response.text().await;
-    decode_account_identity_body(status, body.as_deref(), expected_user, validate)
+    decode_account_identity_body(
+        status,
+        body.as_deref(),
+        expected_user,
+        Some(observation),
+        validate,
+    )
 }
 
 /// 锁外私有读取的成功与失败都须经过发起代次检查，旧失败也不能触发身份复核。
@@ -166,18 +176,23 @@ pub(in crate::api) async fn decode_observed_account_read<T: DeserializeOwned>(
     if !current() {
         return Err(CommandError { code: "session_observation_stale".to_owned(), status: 0 });
     }
-    decode_account_identity_body(status, body.as_deref(), None, validate)
+    decode_account_identity_body(status, body.as_deref(), None, None, validate)
 }
 
 fn decode_account_identity_body<T: DeserializeOwned>(
     status: u16,
     body: Option<&str>,
     expected_user: Option<&str>,
+    observation: Option<&SessionIdentityObservation>,
     validate: impl FnOnce(&Value) -> bool,
 ) -> Result<T, CommandError> {
     decode_identity_response(status, body, validate).map_err(|error| {
         let code = error.into_read_code();
-        observe_public_session_failure(status, &code, expected_user);
+        if let Some(observation) = observation {
+            observe_public_session_failure_observed(status, &code, expected_user, observation);
+        } else {
+            observe_public_session_failure(status, &code, expected_user);
+        }
         CommandError { status, code }
     })
 }

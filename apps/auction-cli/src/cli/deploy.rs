@@ -11,6 +11,10 @@ use super::{ActorArgs, OwnerSecretsArg, ShutdownArgs, UnitArgs};
 pub(crate) struct DeployArgs {
     /// 解压后的 CI 发布包根目录；必须含 bin/、RELEASE-MANIFEST.v1、SHA256SUMS 与 docs/ Web 标记。
     pub(crate) artifact_dir: PathBuf,
+
+    /// 已校验的外层 Release tarball SHA-256；含迁移部署必填。
+    #[arg(long, value_name = "SHA256")]
+    pub(crate) package_sha256: Option<String>,
     #[command(flatten)]
     pub(crate) units: UnitArgs,
     /// 停机后执行迁移所用的 owner 凭据；服务账号没有 DDL 权限。

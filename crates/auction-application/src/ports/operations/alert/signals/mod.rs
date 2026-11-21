@@ -8,14 +8,13 @@ mod kind;
 mod severity;
 mod signal;
 mod source;
-mod thresholds;
+pub(super) mod thresholds;
 
 pub use errors::OperationsAlertError;
 pub use kind::OperationsAlertKind;
 pub use severity::{OPERATIONS_ALERT_DIGEST_INTERVAL, OperationsAlertSeverity};
 pub use signal::OperationsAlertSignal;
 pub use source::OperationsAlertSource;
-pub(super) use thresholds::reached;
 pub use thresholds::{
     OPERATIONS_ALERT_ACCOUNT_BUSY_AGE, OPERATIONS_ALERT_LIFECYCLE_GRACE,
     OPERATIONS_ALERT_MAIL_POLL_STALL_AGE, OPERATIONS_ALERT_QUEUE_LATENCY_AGE,

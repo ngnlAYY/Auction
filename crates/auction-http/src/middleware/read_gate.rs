@@ -22,14 +22,12 @@ pub(crate) async fn enforce(
     request: Request,
     next: Next,
 ) -> Response {
-    // 边界中间件已把可信代理链归一化进 ConnectInfo；缺失时退回后续 handler 的原有行为。
-    let Some(address) =
-        request.extensions().get::<ConnectInfo<SocketAddr>>().map(|value| value.0.ip())
-    else {
-        return next.run(request).await;
-    };
-    // 计数只记录已作出的拒绝，判定、许可数、窗口与 Retry-After 都与未注入记录器时相同。
-    if let Some(retry_after) = gate.allow(address) {
+    // TCP peers use the trusted, normalized address for source limits. Unix entry points have no
+    // synthetic peer address, but anonymous reads still share the process-wide concurrency cap.
+    let address = request.extensions().get::<ConnectInfo<SocketAddr>>().map(|value| value.0.ip());
+    if let Some(address) = address
+        && let Some(retry_after) = gate.allow(address)
+    {
         gate.metrics().observe_rate_limit_rejection(HttpRateLimitKind::AnonymousRead);
         return busy_response("rate_limited", "读取请求过于频繁", retry_after);
     }

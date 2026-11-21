@@ -310,17 +310,17 @@ pub fn valid_notification_body(value: Option<&str>) -> bool {
 /// 换季提醒 `external_mail_id` 的固定前缀；其后是冻结的赛季边界。
 const SEASON_REMINDER_MAIL_ID_PREFIX: &str = "season-end:";
 
-/// 换季提醒的 `external_mail_id`：固定前缀加秒精度 UTC RFC 3339 的冻结赛季边界。
+/// 换季提醒的 `external_mail_id`：固定前缀加规范 UTC RFC 3339 边界，秒精度保持既有写法。
 /// 发送围栏与预检退役的 SQL 按这一写法解析边界。
 pub fn season_reminder_mail_id(boundary: Timestamp) -> String {
     format!(
         "{SEASON_REMINDER_MAIL_ID_PREFIX}{}",
-        boundary.to_rfc3339_opts(SecondsFormat::Secs, true)
+        boundary.to_rfc3339_opts(SecondsFormat::AutoSi, true)
     )
 }
 
 /// [`season_reminder_mail_id`] 的唯一规范校验；入队、存储核对、资产冲突排除与发送前解码共用。
-/// 其他时区、小数秒或小写分隔符等写法与 SQL 解析口径不一致，一律失败关闭。
+/// 其他时区、非规范小数精度或小写分隔符等写法一律失败关闭。
 pub fn valid_season_reminder_mail_id(value: &str) -> bool {
     value.strip_prefix(SEASON_REMINDER_MAIL_ID_PREFIX).is_some_and(|boundary| {
         Timestamp::parse_from_rfc3339(boundary)
@@ -575,5 +575,15 @@ mod tests {
         ] {
             assert!(!valid_season_reminder_mail_id(value), "{value}");
         }
+    }
+
+    #[test]
+    fn season_reminder_mail_id_preserves_canonical_subseconds() {
+        let boundary = Timestamp::parse_from_rfc3339("2026-11-01T09:00:00.123456789Z")
+            .expect("含纳秒的边界有效");
+        let canonical = season_reminder_mail_id(boundary);
+        assert_eq!(canonical, "season-end:2026-11-01T09:00:00.123456789Z");
+        assert!(valid_season_reminder_mail_id(&canonical));
+        assert!(!valid_season_reminder_mail_id("season-end:2026-11-01T09:00:00.000Z"));
     }
 }

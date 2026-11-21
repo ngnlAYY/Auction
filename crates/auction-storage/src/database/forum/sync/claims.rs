@@ -7,7 +7,7 @@ use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::super::super::DatabaseStore;
-use super::validation::storage_error;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(super) async fn claim_due_postgres(

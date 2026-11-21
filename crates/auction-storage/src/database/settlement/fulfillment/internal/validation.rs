@@ -228,10 +228,23 @@ pub(super) async fn validate(
             let paid: bool = sqlx::query_scalar(
                 r#"SELECT EXISTS(
                        SELECT 1
-                       FROM public.settlement_internal_commands
-                       WHERE obligation_id=$1
-                         AND action IN ('internal','collected')
-                         AND uid=$2
+                       FROM public.settlement_internal_commands AS command
+                       JOIN public.settlement_obligation_fulfillments AS fulfillment
+                         ON fulfillment.obligation_id=command.obligation_id
+                       WHERE command.obligation_id=$1
+                         AND command.action IN ('internal','collected')
+                         AND command.uid=$2
+                         AND fulfillment.execution_state='satisfied'
+                         AND fulfillment.proof_digest IS NOT NULL
+                         AND (
+                             (command.action='internal'
+                              AND fulfillment.proof_kind='bot_internal_v1'
+                              AND fulfillment.proof_reference=command.command_id::text
+                              AND fulfillment.proof_digest=command.evidence_digest)
+                             OR (command.action='collected'
+                                 AND fulfillment.proof_kind='mooglemail_sent_collected'
+                                 AND fulfillment.proof_reference=command.evidence->'sent'->>'external_mail_id')
+                         )
                    )"#,
             )
             .bind(claim.prerequisite_id.map(auction_domain::SettlementId::as_uuid))

@@ -6,10 +6,10 @@ use auction_web_shared::{
 };
 use dioxus::prelude::*;
 
-use super::commands::{
-    CompetitionCommandHost, PublicSessionChecks, use_competition_commands_provider,
-    use_public_session_checks,
-};
+use super::commands::CompetitionCommandHost;
+use super::commands::session::PublicSessionChecks;
+use super::commands::use_competition_commands_provider;
+use super::commands::use_public_session_checks;
 use super::router::{PUBLIC_LOCALE_CATALOG, Route};
 use super::{
     LiveConnectionState, LotLinkRequest, LotViewRequest, LotViewTarget, PublicBidRefresh,

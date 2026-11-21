@@ -28,7 +28,7 @@ pub fn numbered_query_sql() -> &'static str {
                        count(*) OVER () AS sample_count
                 FROM matching_lots
              ), median_value AS (
-                SELECT COALESCE(avg(price::numeric), 0::numeric) AS exact_price
+                SELECT avg(price::numeric) AS exact_price
                 FROM ranked_prices
                 WHERE price_rank = sample_count / 2 + sample_count % 2
                    OR price_rank = sample_count / 2 + 1
@@ -36,10 +36,10 @@ pub fn numbered_query_sql() -> &'static str {
                 SELECT count(*)::bigint AS total,
                        COALESCE(min(price), 0)::bigint AS minimum_price,
                        COALESCE(max(price), 0)::bigint AS maximum_price,
-                       (SELECT (floor(exact_price) + CASE
+                       COALESCE((SELECT (floor(exact_price) + CASE
                            WHEN exact_price - floor(exact_price) = 0.5
                             AND mod(floor(exact_price), 2) = 1 THEN 1
-                           ELSE 0 END)::bigint FROM median_value) AS median_price,
+                           ELSE 0 END)::bigint FROM median_value), 0) AS median_price,
                        (SELECT trim_scale(exact_price)::text FROM median_value) AS median_exact
                 FROM matching_lots
              ), page_lots AS (
@@ -118,11 +118,7 @@ pub(super) async fn list(
         }
     }
     validate_entries(&entries)?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| storage_error_from(error, "提交公开价格历史读取事务失败"))?;
-    Ok(PublicPriceHistoryPage {
+    let page = PublicPriceHistoryPage {
         entries,
         total: Some(stats.count),
         stats: Some(stats),
@@ -130,7 +126,13 @@ pub(super) async fn list(
         offset: request.offset,
         next_cursor: None,
         has_more: false,
-    })
+    };
+    page.validate(&request).map_err(storage_error)?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交公开价格历史读取事务失败"))?;
+    Ok(page)
 }
 
 fn map_stats(row: &sqlx::postgres::PgRow) -> Result<PublicPriceHistoryStats, ApplicationError> {
@@ -147,9 +149,8 @@ fn map_stats(row: &sqlx::postgres::PgRow) -> Result<PublicPriceHistoryStats, App
         median: row
             .try_get("median_price")
             .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史中位价失败"))?,
-        median_exact: Some(
-            row.try_get("median_exact")
-                .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史精确中位价失败"))?,
-        ),
+        median_exact: row
+            .try_get("median_exact")
+            .map_err(|error| storage_error_from(error, "读取 PostgreSQL 历史精确中位价失败"))?,
     })
 }

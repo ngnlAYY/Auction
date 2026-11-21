@@ -29,7 +29,7 @@ pub(in crate::services::auction::competition) fn replay_accepted(
     persisted_transitions: &[CompetitionProxyTransitionRecord],
     quota_limit: u32,
 ) -> Result<CompetitionCommandOutcome, ApplicationError> {
-    plan.validate().map_err(|error| {
+    plan.validate_for_replay().map_err(|error| {
         record_error(
             DiagnosticLevel::Error,
             error.diagnostic_kind(),

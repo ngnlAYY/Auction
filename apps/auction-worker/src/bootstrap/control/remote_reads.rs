@@ -1,193 +1,22 @@
-//! Worker control socket、后台任务回收与 heartbeat 辅助装配。
+//! Worker 侧装备、Sent、收件箱与论坛只读控制能力。
 
 use std::sync::Arc;
 
-use anyhow::Context;
-use auction_config::AppConfig;
 use auction_domain::SettlementWorld;
-use auction_http::{UnixHttpListener, UnixListenerOptions};
 use auction_integrations::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailGateway, MoogleMailSentLookupRequest,
     MoogleMailWorld,
 };
-use auction_jobs::{WorkerControlHandle, WorkerControlServer, WorkerControlServerConfig};
-use auction_observability::{HeartbeatHealthReader, HeartbeatPublisher, ProcessMetrics};
-use auction_process::TaskGuard;
-use auction_process::join_error_kind;
 use auction_time::Timestamp;
 
-/// Worker control socket 的单实例锁文件名，位于 control runtime 目录内；与 Public/Admin
-/// listener 的锁名不同，即使目录共享也不会互相占用。
-const WORKER_CONTROL_LOCK_FILE_NAME: &str = ".worker-control.lock";
-
-/// 常驻任务退出即撤销 readiness；panic、abort 和首轮 poll 前取消也必须触发同一收口。
-pub(super) struct WorkerRuntimeTaskExit {
-    control: WorkerControlHandle,
-    runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
-    reason: &'static str,
-}
-
-impl WorkerRuntimeTaskExit {
-    pub(super) fn new(
-        control: WorkerControlHandle,
-        runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
-        reason: &'static str,
-    ) -> Self {
-        Self { control, runtime_failure, reason }
-    }
-}
-
-impl Drop for WorkerRuntimeTaskExit {
-    fn drop(&mut self) {
-        self.control.mark_draining();
-        let _ = self.runtime_failure.try_send(self.reason);
-    }
-}
-
-struct WorkerHeartbeatHealth {
-    database: Arc<dyn HeartbeatHealthReader>,
-    control: WorkerControlHandle,
-}
-
-impl HeartbeatHealthReader for WorkerHeartbeatHealth {
-    fn readiness(&self) -> auction_observability::HeartbeatReadinessFuture<'_> {
-        Box::pin(async move { self.database.readiness().await && self.control.is_ready() })
-    }
-
-    fn audit_failure_count(&self) -> i64 {
-        self.database.audit_failure_count()
-    }
-}
-
-pub(super) fn worker_heartbeat_health(
-    database: Arc<dyn HeartbeatHealthReader>,
-    control: WorkerControlHandle,
-) -> Arc<dyn HeartbeatHealthReader> {
-    Arc::new(WorkerHeartbeatHealth { database, control })
-}
-
-fn worker_control_server_config(config: &AppConfig) -> anyhow::Result<WorkerControlServerConfig> {
-    let control = &config.worker.control;
-    WorkerControlServerConfig::new(
-        control.socket_path.clone(),
-        control.runtime_directory.clone(),
-        control.group.clone(),
-        control.allowed_peer_uids.clone(),
-        control.allowed_peer_gids.clone(),
-    )
-    .map_err(|error| anyhow::Error::msg(error.to_string()))
-}
-
-/// 校验 `[worker.control]` 后经 `auction-http` 的 [`UnixHttpListener`] 绑定 socket：runtime
-/// 目录链、单实例锁、stale socket 清理、owner/group/权限与退出时按身份删除都由该 listener
-/// 统一实现；`auction-jobs` 只在其上叠加 peer allowlist 与控制路由。
-pub(super) async fn bind_worker_control_server(
-    config: &AppConfig,
-    control: WorkerControlHandle,
-    metrics: Arc<ProcessMetrics>,
-) -> anyhow::Result<WorkerControlServer<UnixHttpListener>> {
-    let server_config = worker_control_server_config(config)?;
-    let listener = UnixHttpListener::bind(UnixListenerOptions {
-        runtime_directory: server_config.runtime_directory.clone(),
-        socket_path: server_config.socket_path.clone(),
-        group: server_config.group.clone(),
-        lock_file_name: WORKER_CONTROL_LOCK_FILE_NAME,
-    })
-    .await
-    .context("绑定 Worker control socket 失败")?;
-    Ok(WorkerControlServer::new(listener, server_config, control, Some(metrics)))
-}
-
-pub(super) fn abort_worker_task(task: &Option<TaskGuard<()>>) {
-    if let Some(task) = task {
-        task.abort();
-    }
-}
-
-pub(super) async fn join_worker_task(task: &mut Option<TaskGuard<()>>, name: &'static str) {
-    let Some(task) = task else {
-        return;
-    };
-    if let Some(Err(error)) = task.join().await
-        && !error.is_cancelled()
-    {
-        let kind = join_error_kind(&error);
-        tracing::warn!(task = name, kind, "回收 Worker 后台任务失败");
-    }
-}
-
-pub(super) async fn join_worker_control_task<E>(
-    task: &mut Option<TaskGuard<Result<(), E>>>,
-    name: &'static str,
-) -> anyhow::Result<()>
-where
-    E: std::fmt::Display,
-{
-    let Some(task) = task else {
-        return Ok(());
-    };
-    match task.join().await {
-        Some(Ok(Ok(()))) => Ok(()),
-        Some(Ok(Err(error))) => {
-            Err(anyhow::Error::msg(error.to_string())).with_context(|| format!("{name} 运行失败"))
-        }
-        Some(Err(error)) => Err(error).with_context(|| format!("{name} 任务回收失败")),
-        None => Ok(()),
-    }
-}
-
-pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(10));
-        // 心跳只描述当前状态；数据库恢复后跳过漏掉的 tick，避免集中重复发布。
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        ticker.tick().await;
-        loop {
-            ticker.tick().await;
-            if let Err(error) = publisher.publish_current().await {
-                tracing::warn!(error = %error, "发布 Worker 心跳失败");
-            }
-        }
-    })
-}
-
-/// 只在 Worker readiness 正常时向外部服务报到；地址只存在于敏感配置与打卡器内。
-/// 受限客户端在循环外构造一次，每分钟的打卡复用同一连接池与 TLS 根证书库。
-pub(super) fn spawn_external_heartbeat(
-    publisher: Arc<HeartbeatPublisher>,
-    address: String,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let heartbeat = auction_integrations::BackupHeartbeat::new(Some(address.as_str()));
-        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        ticker.tick().await;
-        loop {
-            ticker.tick().await;
-            if !publisher.external_heartbeat_ready() {
-                continue;
-            }
-            let result = heartbeat.send().await;
-            match result.status {
-                auction_integrations::BackupHeartbeatStatus::Sent => {
-                    tracing::debug!("Worker 外部心跳已发送");
-                }
-                auction_integrations::BackupHeartbeatStatus::Failed => {
-                    tracing::warn!(http_status = result.http_status, "Worker 外部心跳发送失败");
-                }
-                auction_integrations::BackupHeartbeatStatus::NotConfigured => return,
-            }
-        }
-    })
-}
-
+use super::super::mail::MailControlRemoteReads;
 /// Worker 侧远端只读执行器。
 /// 复用本进程唯一的装备来源适配器与按世界的 MoogleMail gateway，因此 Admin 装备读取、
 /// CLI Sent 核查与 Worker 自身请求共用同一在途锁、账号熔断与暂停判定；Sent 核查另走邮件
 /// 请求门，装备页只按装备来源策略的最小间隔节流。
 /// 暂停只阻止新请求，已进入 sending 围栏的写入不受影响。
-pub(super) struct WorkerRemoteReads {
-    mail: Option<super::mail::MailControlRemoteReads>,
+pub(in crate::bootstrap) struct WorkerRemoteReads {
+    mail: Option<MailControlRemoteReads>,
     /// 与论坛回帖循环共用的只读主题读取器；未启用论坛时恢复扫描只报告能力不可用。
     forum: Option<Arc<dyn auction_application::forum::ForumTopicReader>>,
     switches: auction_application::runtime_switches::RuntimeSwitches,
@@ -195,8 +24,8 @@ pub(super) struct WorkerRemoteReads {
 
 impl WorkerRemoteReads {
     /// 装配 control 远端读取能力；任一外部读取缺失时只关闭对应能力。
-    pub(super) fn build(
-        mail: Option<super::mail::MailControlRemoteReads>,
+    pub(in crate::bootstrap) fn build(
+        mail: Option<MailControlRemoteReads>,
         forum: Option<Arc<dyn auction_application::forum::ForumTopicReader>>,
         switches: auction_application::runtime_switches::RuntimeSwitches,
     ) -> Arc<dyn auction_application::operations::WorkerRemoteReadPort> {
@@ -205,10 +34,8 @@ impl WorkerRemoteReads {
 
     fn mail(
         &self,
-    ) -> Result<
-        &super::mail::MailControlRemoteReads,
-        auction_application::operations::WorkerRemoteReadError,
-    > {
+    ) -> Result<&MailControlRemoteReads, auction_application::operations::WorkerRemoteReadError>
+    {
         self.mail
             .as_ref()
             .ok_or(auction_application::operations::WorkerRemoteReadError::Unavailable)
@@ -266,6 +93,10 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
             if self.switches.external_access_paused() {
                 return Err(auction_application::operations::WorkerRemoteReadError::Paused);
             }
+            if !request.validate() {
+                return Err(auction_application::operations::WorkerRemoteReadError::Invalid);
+            }
+            let requested_world = request.world.clone();
             let world = MoogleMailWorld::parse(&request.world)
                 .ok_or(auction_application::operations::WorkerRemoteReadError::Invalid)?;
             let mail = self.mail()?;
@@ -276,7 +107,7 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
                     recipient: request.recipient,
                     subject: request.subject,
                     external_equipment_id: request.external_equipment_id,
-                    maximum_pages: mail.maximum_pages,
+                    maximum_pages: mail.maximum_pages.min(gateway.maximum_pages()),
                     deadline: std::time::Instant::now() + mail.fetch_timeout,
                     observed_at: Timestamp::now(),
                 })
@@ -290,7 +121,7 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
                     }
                     _ => auction_application::operations::WorkerRemoteReadError::Unavailable,
                 })?;
-            Ok(auction_application::operations::WorkerSentLookupResponse {
+            let response = auction_application::operations::WorkerSentLookupResponse {
                 status: report.status.label().to_owned(),
                 scan_complete: report.scan_complete,
                 pages_scanned: u32::try_from(report.pages_scanned).unwrap_or(u32::MAX),
@@ -299,6 +130,7 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
                     .candidates
                     .into_iter()
                     .map(|candidate| auction_application::operations::WorkerSentLookupCandidate {
+                        world: requested_world.clone(),
                         external_mail_id: candidate.external_mail_id,
                         recipient: candidate.recipient,
                         subject: candidate.subject,
@@ -310,7 +142,11 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
                         observed_at: candidate.observed_at,
                     })
                     .collect(),
-            })
+            };
+            if !response.validate_for_world(&requested_world) {
+                return Err(auction_application::operations::WorkerRemoteReadError::Incompatible);
+            }
+            Ok(response)
         })
     }
 
@@ -331,9 +167,10 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
             if !self.switches.external_access_paused() {
                 return Err(auction_application::operations::WorkerRemoteReadError::NotPaused);
             }
+            let observed_at = Timestamp::now();
             let mut response = auction_application::operations::WorkerRecoveryScanResponse {
                 status: "complete".to_owned(),
-                observed_at: Timestamp::now(),
+                observed_at,
                 paused: true,
                 sent_complete: true,
                 read_mail_complete: true,
@@ -344,11 +181,16 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
                 sent_details: Vec::new(),
                 forum: Vec::new(),
             };
-            let observed_at = response.observed_at;
-            let maximum_pages = usize::try_from(request.maximum_pages).unwrap_or(usize::MAX);
+            let maximum_pages = request.maximum_pages as usize;
+            let maximum_entries = auction_application::operations::MAX_RECOVERY_SCAN_ENTRIES;
 
             if request.include_sent {
                 for world_id in &request.sent_worlds {
+                    if !self.switches.external_access_paused() {
+                        response.errors.push("external_access_resumed".to_owned());
+                        response.sent_complete = false;
+                        break;
+                    }
                     let Some(world) = MoogleMailWorld::parse(world_id) else {
                         response.errors.push("sent_world_invalid".to_owned());
                         response.sent_complete = false;
@@ -372,7 +214,9 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
                                 u32::try_from(scan.pages_scanned).unwrap_or(u32::MAX),
                             );
                             response.sent_complete &= scan.covers_cutoff;
-                            response.sent.extend(scan.entries.into_iter().map(|entry| {
+                            let mut entries = scan.entries.into_iter();
+                            let remaining = maximum_entries.saturating_sub(response.sent.len());
+                            response.sent.extend(entries.by_ref().take(remaining).map(|entry| {
                                 auction_application::operations::WorkerRecoverySentEntry {
                                     world: world_id.clone(),
                                     external_mail_id: entry.external_mail_id,
@@ -381,6 +225,10 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
                                     sent_at: entry.sent_at,
                                 }
                             }));
+                            if entries.next().is_some() {
+                                response.sent_complete = false;
+                                response.errors.push("recovery_scan_truncated".to_owned());
+                            }
                         }
                         Err(error) => {
                             response.sent_complete = false;
@@ -392,6 +240,11 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
 
             if request.include_read_mail {
                 for world_id in &request.read_mail_worlds {
+                    if !self.switches.external_access_paused() {
+                        response.errors.push("external_access_resumed".to_owned());
+                        response.read_mail_complete = false;
+                        break;
+                    }
                     let Some(world) = MoogleMailWorld::parse(world_id) else {
                         response.errors.push("read_mail_world_invalid".to_owned());
                         response.read_mail_complete = false;
@@ -411,15 +264,24 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
                     {
                         Ok(scan) => {
                             response.read_mail_complete &= scan.covers_cutoff;
-                            response.read_mail.extend(scan.entries.into_iter().map(|entry| {
-                                auction_application::operations::WorkerRecoveryInboundEntry {
-                                    world: world_id.clone(),
-                                    external_mail_id: entry.external_mail_id,
-                                    sender: entry.sender,
-                                    subject: entry.subject,
-                                    received_at: entry.received_at,
-                                }
-                            }));
+                            let mut entries = scan.entries.into_iter();
+                            let remaining =
+                                maximum_entries.saturating_sub(response.read_mail.len());
+                            response.read_mail.extend(entries.by_ref().take(remaining).map(
+                                |entry| {
+                                    auction_application::operations::WorkerRecoveryInboundEntry {
+                                        world: world_id.clone(),
+                                        external_mail_id: entry.external_mail_id,
+                                        sender: entry.sender,
+                                        subject: entry.subject,
+                                        received_at: entry.received_at,
+                                    }
+                                },
+                            ));
+                            if entries.next().is_some() {
+                                response.read_mail_complete = false;
+                                response.errors.push("recovery_scan_truncated".to_owned());
+                            }
                         }
                         Err(error) => {
                             response.read_mail_complete = false;
@@ -430,12 +292,24 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
             }
 
             for detail in &request.sent_details {
+                if response.sent_details.len() >= maximum_entries {
+                    response.sent_complete = false;
+                    response.errors.push("recovery_scan_truncated".to_owned());
+                    break;
+                }
+                if !self.switches.external_access_paused() {
+                    response.sent_complete = false;
+                    response.errors.push("external_access_resumed".to_owned());
+                    break;
+                }
                 let Some(world) = MoogleMailWorld::parse(&detail.world) else {
+                    response.sent_complete = false;
                     response.errors.push("sent_detail_world_invalid".to_owned());
                     continue;
                 };
                 let Some(gateway) = self.mail.as_ref().and_then(|mail| mail.gateways.get(&world))
                 else {
+                    response.sent_complete = false;
                     response.errors.push("sent_capability_unavailable".to_owned());
                     continue;
                 };
@@ -443,6 +317,7 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
                     Ok(snapshot) => {
                         response.sent_details.push(
                             auction_application::operations::WorkerSentLookupCandidate {
+                                world: detail.world.clone(),
                                 external_mail_id: snapshot.external_mail_id,
                                 recipient: snapshot.recipient,
                                 subject: snapshot.subject,
@@ -455,30 +330,69 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
                             },
                         );
                     }
-                    Err(error) => response.errors.push(sent_detail_error_code(&error)),
+                    Err(error) => {
+                        response.sent_complete = false;
+                        response.errors.push(sent_detail_error_code(&error));
+                    }
                 }
             }
 
             if request.include_forum {
                 // 没有目标时不需要读取论坛；未配置能力但有目标时明确报告不可用。
                 if let Some(reader) = self.forum.as_ref() {
-                    for target in &request.forum_threads {
+                    'forum_targets: for target in &request.forum_threads {
+                        if !self.switches.external_access_paused() {
+                            response.errors.push("external_access_resumed".to_owned());
+                            break;
+                        }
                         let Some(world) = SettlementWorld::from_name(&target.world) else {
                             response.errors.push("forum_world_invalid".to_owned());
                             continue;
                         };
-                        match reader.fetch_topic(world, target.thread_id.clone()).await {
-                            Ok(preview) => {
-                                for (index, post) in preview.posts.iter().enumerate() {
-                                    let post_number =
-                                        u32::try_from(index).unwrap_or(u32::MAX).saturating_add(2);
-                                    if post_number > target.after_post_number {
+                        match reader
+                            .fetch_topic_since(
+                                world,
+                                target.thread_id.clone(),
+                                None,
+                                target.after_post_number,
+                            )
+                            .await
+                        {
+                            Ok(scan) => {
+                                if scan.validate().is_err() {
+                                    response.errors.push("forum_scan_invalid".to_owned());
+                                    continue;
+                                }
+                                match (scan.page_count, scan.page_limit) {
+                                    (Some(page_count), Some(page_limit))
+                                        if page_count > page_limit =>
+                                    {
+                                        response.errors.push("forum_scan_truncated".to_owned());
+                                    }
+                                    (Some(_), Some(_)) => {}
+                                    (None, None) => response
+                                        .errors
+                                        .push("forum_scan_incomplete_metadata".to_owned()),
+                                    _ => response
+                                        .errors
+                                        .push("forum_scan_incomplete_metadata".to_owned()),
+                                }
+                                for (post_number, post) in
+                                    scan.post_numbers.iter().zip(&scan.preview.posts)
+                                {
+                                    if *post_number > target.after_post_number {
+                                        if response.forum.len() >= maximum_entries {
+                                            response
+                                                .errors
+                                                .push("recovery_scan_truncated".to_owned());
+                                            break 'forum_targets;
+                                        }
                                         response.forum.push(
                                             auction_application::operations::WorkerRecoveryForumPost {
                                                 world: target.world.clone(),
                                                 thread_id: target.thread_id.clone(),
                                                 post_id: post.post.id.clone(),
-                                                post_number,
+                                                post_number: *post_number,
                                             },
                                         );
                                     }
@@ -499,28 +413,43 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
                 }
             }
 
-            // 截断不会改变任何隔离判断：调用方只使用已返回的条目，并在回执记录不完整。
-            if response.sent.len() > auction_application::operations::MAX_RECOVERY_SCAN_ENTRIES {
-                response.sent.truncate(auction_application::operations::MAX_RECOVERY_SCAN_ENTRIES);
+            // 截断保护同时覆盖逐项入列和最终投影，避免每类结果集合无界增长。
+            if response.sent.len() > maximum_entries {
+                response.sent.truncate(maximum_entries);
                 response.sent_complete = false;
             }
-            if response.read_mail.len() > auction_application::operations::MAX_RECOVERY_SCAN_ENTRIES
-            {
-                response
-                    .read_mail
-                    .truncate(auction_application::operations::MAX_RECOVERY_SCAN_ENTRIES);
+            if response.read_mail.len() > maximum_entries {
+                response.read_mail.truncate(maximum_entries);
                 response.read_mail_complete = false;
+            }
+            if response.sent_details.len() > maximum_entries {
+                response.sent_details.truncate(maximum_entries);
+                response.sent_complete = false;
+            }
+            if response.forum.len() > maximum_entries {
+                response.forum.truncate(maximum_entries);
+                response.errors.push("recovery_scan_truncated".to_owned());
+            }
+            response.paused = self.switches.external_access_paused();
+            if !response.paused {
+                response.errors.push("external_access_resumed".to_owned());
             }
             response.errors.sort();
             response.errors.dedup();
-            response.paused = self.switches.external_access_paused();
-            if !response.paused {
-                response.status = "partial".to_owned();
-                response.errors.push("external_access_resumed".to_owned());
-            } else if !response.errors.is_empty() {
+            // The response contract caps error codes at 16; preserve partial status and flag omitted detail.
+            if response.errors.len() > 16 {
+                response.errors.truncate(15);
+                response.errors.push("recovery_scan_truncated".to_owned());
+                response.errors.sort();
+                response.errors.dedup();
+            }
+            if !response.paused || !response.errors.is_empty() {
                 response.status = "partial".to_owned();
             } else if !response.sent_complete || !response.read_mail_complete {
                 response.status = "truncated".to_owned();
+            }
+            if !response.validate() {
+                return Err(auction_application::operations::WorkerRemoteReadError::Incompatible);
             }
             Ok(response)
         })

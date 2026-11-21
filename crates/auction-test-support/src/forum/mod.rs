@@ -155,7 +155,7 @@ async fn handle(State(state): State<Arc<Mutex<ForumState>>>, method: Method, uri
     let fault = {
         let mut state = state.lock().expect("test state poisoned");
         state.requests.push(uri.to_string());
-        if method == Method::POST {
+        if method == Method::POST && (reply_write || pm_write) {
             state.writes += 1;
         }
         state.fault
@@ -240,7 +240,9 @@ async fn handle(State(state): State<Arc<Mutex<ForumState>>>, method: Method, uri
         if value("CODE") == Some("03") {
             let document = scraper::Html::parse_document(&source);
             let selector = scraper::Selector::parse(".postcolor").expect("constant selector");
-            let node = document.select(&selector).next().expect("captured PM body");
+            let Some(node) = document.select(&selector).next() else {
+                return unsupported("PM detail fixture missing postcolor");
+            };
             source = source.replace(&node.inner_html(), body);
         }
     }

@@ -105,7 +105,22 @@ pub fn group_season_reminders(
 
 /// 由已合并事实生成冻结正文；超出正文预算返回 `None`，不截断义务结果。
 pub fn season_reminder_body(reminder: &SeasonReminder) -> Option<String> {
-    let mut body = String::with_capacity(180 + reminder.items.len() * 96);
+    if reminder.season_boundary.timestamp_nanos_opt().is_none()
+        || !valid_text(&reminder.recipient, 256)
+        || reminder.items.iter().any(|item| {
+            item.lot_id.is_nil()
+                || item.lot_number == 0
+                || item.category_number == 0
+                || !valid_text(&item.obligation_kind, 128)
+                || !valid_text(&item.category, 128)
+                || !valid_text(&item.equipment_name, 512)
+                || item.amount < 0
+        })
+    {
+        return None;
+    }
+    let capacity_items = reminder.items.len().min(MAX_SEASON_REMINDER_ITEMS);
+    let mut body = String::with_capacity(180 + capacity_items * 96);
     body.push_str("The Isekai season change is approaching.\n\n");
     body.push_str(&format!(
         "Isekai closes at {}.\n\n",
@@ -145,16 +160,37 @@ pub fn season_reminder_command(
     body: String,
 ) -> Result<MailDeliveryCommand, PlayerNotificationError> {
     let boundary_epoch = reminder.season_boundary.timestamp();
+    let subsec_nanos = reminder.season_boundary.timestamp_subsec_nanos();
+    // 秒精度身份保持历史字节不变；带小数的边界使用完整 Unix 纳秒，避免同秒边界碰撞。
+    let boundary_identity = if subsec_nanos == 0 {
+        boundary_epoch.to_string()
+    } else {
+        format!(
+            "ns{}",
+            reminder
+                .season_boundary
+                .timestamp_nanos_opt()
+                .ok_or(PlayerNotificationError::Unavailable)?
+        )
+    };
     let notification_id = Uuid::new_v5(
         &Uuid::NAMESPACE_URL,
-        format!("auction/season-reminder-v1/{boundary_epoch}/{}", reminder.recipient).as_bytes(),
+        format!("auction/season-reminder-v1/{boundary_identity}/{}", reminder.recipient).as_bytes(),
     );
-    let origin_id = format!("season_reminder:{boundary_epoch}:{}", reminder.recipient);
-    let request_hash = RequestHash::from_request(
-        "season_reminder_notification",
-        notification_id,
-        &(boundary_epoch, &reminder.recipient, &reminder.items, &body),
-    )
+    let origin_id = format!("season_reminder:{boundary_identity}:{}", reminder.recipient);
+    let request_hash = if subsec_nanos == 0 {
+        RequestHash::from_request(
+            "season_reminder_notification",
+            notification_id,
+            &(boundary_epoch, &reminder.recipient, &reminder.items, &body),
+        )
+    } else {
+        RequestHash::from_request(
+            "season_reminder_notification",
+            notification_id,
+            &(&boundary_identity, &reminder.recipient, &reminder.items, &body),
+        )
+    }
     .map_err(|error| {
         record_error(
             DiagnosticLevel::Warn,
@@ -309,6 +345,30 @@ mod tests {
         assert_eq!(first.origin_id, "season_reminder:1793523600:alice");
         assert_eq!(first.external_mail_id, "season-end:2026-11-01T09:00:00Z");
         assert_eq!(first.world_id, "isekai");
+    }
+
+    #[test]
+    fn subsecond_boundaries_have_distinct_stable_identities() {
+        let mut first_reminder = group_season_reminders(vec![fact("alice", 1, "seller_payout")])
+            .expect("合法事实必须聚合")
+            .remove(0);
+        first_reminder.season_boundary =
+            Timestamp::parse_from_rfc3339("2026-11-01T09:00:00.123456789Z")
+                .expect("含纳秒的边界有效");
+        let mut second_reminder = first_reminder.clone();
+        second_reminder.season_boundary =
+            Timestamp::parse_from_rfc3339("2026-11-01T09:00:00.123456790Z")
+                .expect("相邻纳秒边界有效");
+        let first_body = season_reminder_body(&first_reminder).expect("正文必须可生成");
+        let second_body = season_reminder_body(&second_reminder).expect("正文必须可生成");
+        let first = season_reminder_command(&first_reminder, first_body).expect("命令必须生成");
+        let second = season_reminder_command(&second_reminder, second_body).expect("命令必须生成");
+        assert_ne!(first.command_id, second.command_id);
+        assert_ne!(first.origin_id, second.origin_id);
+        assert_ne!(first.request_hash, second.request_hash);
+        assert_ne!(first.external_mail_id, second.external_mail_id);
+        assert_eq!(first.origin_id, "season_reminder:ns1793523600123456789:alice");
+        assert_eq!(first.external_mail_id, "season-end:2026-11-01T09:00:00.123456789Z");
     }
 
     /// 换季提醒命令落在统一投递判定内：只寄出、规范冻结边界、isekai 与冻结正文。

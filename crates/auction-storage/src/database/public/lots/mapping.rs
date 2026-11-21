@@ -249,12 +249,21 @@ pub(super) fn map_equipment(
         let roll =
             quality.and_then(|range| stat.base.map(|base| public_equipment_roll(base, range)));
         if let Some(roll) = roll {
+            if !roll.is_finite() {
+                return Err(storage_error("公开装备 roll 无效"));
+            }
             roll_total += roll;
+            if !roll_total.is_finite() {
+                return Err(storage_error("公开装备平均 roll 无效"));
+            }
             roll_count += 1;
         }
         stats.insert(stat_name, PublicEquipmentStat { value: stat.value, base: stat.base, roll });
     }
     let avg_roll = (roll_count > 0).then(|| (roll_total / roll_count as f64 * 10.0).round() / 10.0);
+    if avg_roll.is_some_and(|roll| !roll.is_finite()) {
+        return Err(storage_error("公开装备平均 roll 无效"));
+    }
     let path = if world_id == "isekai" {
         format!("/isekai/equip/{external_id}")
     } else {

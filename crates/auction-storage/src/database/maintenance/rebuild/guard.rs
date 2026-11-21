@@ -8,8 +8,9 @@ use super::{
         PostgresRebuildError, PostgresRebuildPreflight, PostgresRebuildResult,
         TargetDatabaseDefinition,
     },
-    sql::{create_database_sql, quote_identifier, validate_database_name},
+    sql::{create_database_sql, validate_database_name},
 };
+use crate::database::quote_identifier;
 
 pub(crate) const DATABASE_ADVISORY_LOCK_PREFIX: &str = "auction-postgres-database:";
 

@@ -335,6 +335,23 @@ async fn postgres_return_take_unknown_completed_observation_settles_like_take_pr
         true,
     )
     .await;
+
+    // 模拟过期 Sending 的隔离推进 CAS fence；原 Taking attempt 仍只追加在较低 fence。
+    let current_fencing_version: i64 = sqlx::query_scalar(
+        "UPDATE public.deliveries
+         SET fencing_version = fencing_version + 1, updated_at = now()
+         WHERE id = $1 AND status = 'manual_reconcile' AND fencing_version = $2
+         RETURNING fencing_version",
+    )
+    .bind(take.take_delivery)
+    .bind(take.fencing_version)
+    .fetch_one(pool)
+    .await
+    .expect("推进过期 Take 的 delivery CAS fence");
+    assert!(
+        current_fencing_version > take.fencing_version,
+        "当前 CAS fence 必须高于原 Taking fence"
+    );
     let before = facts(pool, &take).await;
     assert_eq!(
         (
@@ -364,7 +381,7 @@ async fn postgres_return_take_unknown_completed_observation_settles_like_take_pr
     let recovered = store
         .bind_recovered_action(
             take.take_delivery,
-            take.fencing_version,
+            current_fencing_version,
             take.mid.clone(),
             completed_observation(&take.mid, "take_receipt_proven", PAYOUT),
             &take.expectation,
@@ -406,7 +423,7 @@ async fn postgres_return_take_unknown_completed_observation_settles_like_take_pr
         !store
             .bind_recovered_action(
                 take.take_delivery,
-                take.fencing_version,
+                current_fencing_version,
                 take.mid.clone(),
                 completed_observation(&take.mid, "take_receipt_proven", PAYOUT),
                 &take.expectation,

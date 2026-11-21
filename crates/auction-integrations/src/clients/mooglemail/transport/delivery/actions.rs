@@ -111,7 +111,7 @@ impl MoogleMailDeliveryTransport {
         world: MoogleMailWorld,
         operation: MoogleMailOperation,
         expected: Option<ActionExpectation>,
-        mut session: MoogleMailCredentialSession,
+        session: Arc<MoogleMailCredentialSession>,
     ) -> Result<DeliverySendResult, DeliveryTransportError> {
         let target = self
             .client

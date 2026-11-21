@@ -444,7 +444,21 @@ pub(super) fn RoundOptionsError(on_retry: EventHandler<()>) -> Element {
 fn order_bid_log_auctions(mut auctions: Vec<HistoricalAuction>) -> Vec<HistoricalAuction> {
     // 各状态独立读取，场次在查询之间迁移时只采用已确认的最高版本。
     auctions.sort_by(|left, right| {
-        left.id.cmp(&right.id).then_with(|| right.state_version.cmp(&left.state_version))
+        left.id
+            .cmp(&right.id)
+            .then_with(|| right.state_version.cmp(&left.state_version))
+            .then_with(|| left.world_id.cmp(&right.world_id))
+            .then_with(|| left.sequence.cmp(&right.sequence))
+            .then_with(|| left.status.cmp(&right.status))
+            .then_with(|| left.scheduled_open_at.cmp(&right.scheduled_open_at))
+            .then_with(|| left.opened_at.cmp(&right.opened_at))
+            .then_with(|| left.final_phase_at.cmp(&right.final_phase_at))
+            .then_with(|| left.effective_end_at.cmp(&right.effective_end_at))
+            .then_with(|| left.settled_at.cmp(&right.settled_at))
+            .then_with(|| left.lot_count.cmp(&right.lot_count))
+            .then_with(|| left.sold_count.cmp(&right.sold_count))
+            .then_with(|| left.unsold_count.cmp(&right.unsold_count))
+            .then_with(|| left.sold_amount.cmp(&right.sold_amount))
     });
     auctions.dedup_by(|left, right| left.id == right.id);
     auctions.sort_by(|left, right| {

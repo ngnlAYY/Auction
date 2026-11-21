@@ -26,7 +26,7 @@ impl R2BackupStore {
         if let Some(existing) = self.verify_existing(key, bytes, sha256).await? {
             return Ok(existing);
         }
-        let path = Path::parse(key).map_err(|_| BackupStoreError::Configuration)?;
+        let path = Path::parse(key)?;
         let result = if bytes > MULTIPART_THRESHOLD {
             self.multipart(&path, file, bytes).await
         } else {
@@ -58,7 +58,7 @@ impl R2BackupStore {
         if let Some(existing) = self.verify_existing(key, bytes, &sha256).await? {
             return Ok(existing);
         }
-        let path = Path::parse(key).map_err(|_| BackupStoreError::Configuration)?;
+        let path = Path::parse(key)?;
         let result = self
             .store
             .put_opts(

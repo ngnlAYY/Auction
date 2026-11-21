@@ -55,7 +55,7 @@ mise run verify      # 运行某个入口
 - 这些二进制的 SHA-256 构成工具身份，参与构建环境指纹；`mise.lock` 参与构建输入指纹。同版本工具重装后字节变化也会让已有制品失效。
 - `sccache` 只在环境变量显式设置 `RUSTC_WRAPPER=sccache` 时启用，并换成 mise 安装的版本；Cargo 配置文件里的包装器一律清空。
 - 任一 surface 使用 Solid 时，工具闭集加入 mise 提供的 `bun`（版本与二进制摘要），发布路径直接调用 `web/node_modules/.bin/vite`，不执行 `bun x` 或临时下载。依赖只能经 `mise run web-prepare` 安装；该任务把 `web/bun.lock` 的 SHA-256 与 bun 版本写入 `web/node_modules/.auction-prepared`，`web-bundle.sh` 的 Solid 构建阶段核对该凭据而不扫描安装树，不联网。
-- `build-release`、`build-single`、`release-check`、`package`、`verify-artifacts`、`verify-single` 与 `run-public`/`run-admin` 都经同一份逐 surface 技术栈选择：构建与门禁任务用 `web_cargo_features` 得出 cargo feature，运行任务经 `release.sh run-web public|admin` 先得到 feature；Solid surface 还从 `WEB-BUILD-INFO` 读取 `build_id` 并以 `AUCTION_BUILD_ID` 传给编译。正式发行（`GITHUB_ACTIONS=true` 且 `GITHUB_REF_TYPE=tag`）在任一端为 Solid 时拒绝。
+- `build-release`、`build-single`、`release-check`、`package`、`verify-artifacts`、`verify-single` 与 `run-public`/`run-admin` 都经同一份逐 surface 技术栈选择：构建与门禁任务用 `web_cargo_features` 得出 cargo feature，运行任务经 `release.sh run-web public|admin` 先得到 feature；Solid surface 还从 `WEB-BUILD-INFO` 读取 `build_id` 并以 `AUCTION_BUILD_ID` 传给编译。只有 `GITHUB_ACTIONS=true`、`GITHUB_EVENT_NAME=push`、`GITHUB_REF_TYPE=tag` 同时成立时才按正式发行守卫；任一端为 Solid 时拒绝。
 
 ## 依赖审计的范围
 

@@ -6,11 +6,15 @@ use auction_web_shared::wire::json_has_exact_keys;
 use serde_json::Value;
 
 use super::CommandError;
+use super::session::cookie::lock as lock_cookie_mutation;
+use super::session::identity::{
+    SessionIdentity, SessionIdentityObservation, SessionRefreshReason, broadcast_session_change,
+    observe_public_session_failure, observe_public_session_failure_observed,
+    request_public_session_check,
+};
 use super::session::{
-    PublicSessionApiError, SessionIdentity, SessionIdentityObservation, SessionRefreshReason,
-    SessionRequest, broadcast_session_change, decode_identity_response, invalidate_cookie_sync,
-    lock_cookie_mutation, observe_public_session_failure, publish_cookie_identity,
-    request_public_session_check, send_session_request,
+    PublicSessionApiError, SessionRequest, decode_identity_response, invalidate_cookie_sync,
+    send_session_request,
 };
 
 pub(super) const PATH: &str = "/api/v1/me/session-preference";
@@ -47,26 +51,28 @@ pub(crate) async fn fetch_session_preference(
 pub(crate) async fn set_session_preference(
     user_id: &str,
     command: &PublicSetSessionPreferenceRequest,
+    observation: SessionIdentityObservation,
     ready: impl Fn() -> bool,
 ) -> Result<PublicSessionPreferenceResponse, CommandError> {
     if !ready() {
         request_public_session_check(SessionRefreshReason::CookieChanged);
         return Err(CommandError::before_send());
     }
-    let queued = SessionIdentityObservation::start();
     // 成功、重放和未知结果的重发都须与登录共用原生锁，防止迟到 Set-Cookie 换回旧身份。
     let cookie_lock = lock_cookie_mutation().await.map_err(|code| failure(code, 0))?;
-    if !queued.current() || !ready() {
+    if !observation.current() || !ready() {
         // 复核会申请同一把锁。本次未发送，先退出锁，调用方保留此前的未知命令。
         drop(cookie_lock);
         request_public_session_check(SessionRefreshReason::CookieChanged);
         return Err(CommandError::before_send());
     }
     invalidate_cookie_sync();
+    let mut reconciliation = SessionPreferenceReconciliationGuard::new();
     let response = match send_session_request(SessionRequest::SetPreference(user_id, command)).await
     {
         Ok(response) => response,
         Err(error) => {
+            reconciliation.disarm();
             if error.needs_reconciliation() {
                 broadcast_session_change();
             }
@@ -81,7 +87,7 @@ pub(crate) async fn set_session_preference(
     let body = response.text().await;
     let result = decode(status, body.as_deref(), user_id, Some(command));
     if let Ok(preference) = &result {
-        publish_cookie_identity(SessionIdentity::UserId(preference.user_id.clone()));
+        observation.publish_cookie_write(SessionIdentity::UserId(preference.user_id.clone()));
     }
     let recheck = (200..300).contains(&status)
         || status >= 500
@@ -94,8 +100,9 @@ pub(crate) async fn set_session_preference(
     if recheck {
         request_public_session_check(SessionRefreshReason::CookieChanged);
     } else if let Err(error) = &result {
-        observe_public_session_failure(status, &error.code, Some(user_id));
+        observe_public_session_failure_observed(status, &error.code, Some(user_id), &observation);
     }
+    reconciliation.disarm();
     result
 }
 
@@ -136,6 +143,31 @@ fn decode(
         return Err(failure("invalid_response", status));
     }
     Ok(result)
+}
+
+/// Any cancellation after the request may have reached the server still publishes a
+/// reconciliation signal while the cookie mutation lock is held.
+struct SessionPreferenceReconciliationGuard {
+    armed: bool,
+}
+
+impl SessionPreferenceReconciliationGuard {
+    fn new() -> Self {
+        Self { armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for SessionPreferenceReconciliationGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            broadcast_session_change();
+            request_public_session_check(SessionRefreshReason::CookieChanged);
+        }
+    }
 }
 
 fn failure(code: &str, status: u16) -> CommandError {

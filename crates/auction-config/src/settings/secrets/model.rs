@@ -8,7 +8,7 @@ use serde::Deserialize;
 use super::super::ConfigError;
 use super::data_key::{PreviousDataKeyConfig, RetiredDataKey, retired_keys};
 use super::database::{PostgresConnectionConfig, resolve_database_url};
-use crate::settings::validation::validate_restricted_https_url;
+use crate::settings::validation::url::validate_restricted_https_url;
 
 /// 独立敏感 TOML 的稳定字段集合。新增外部凭据时必须显式扩展，禁止任意键值透传。
 #[derive(Default, Deserialize)]

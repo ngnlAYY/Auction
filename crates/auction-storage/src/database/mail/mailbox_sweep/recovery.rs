@@ -145,7 +145,7 @@ pub(super) async fn bind_send(
         // 列表时间只到分钟：开始围栏按分钟起点比较，歧义检查覆盖整分钟；
         // 同内容、同凭据且时窗与该分钟重叠的任一未绑定尝试都使本次恢复失败关闭。
         let sent_minute = sent_list_minute_start(sent_at);
-        if sent_at < sent_list_minute_start(sending_at)
+        if sent_minute < sent_list_minute_start(sending_at)
             || sent_at > completed_at
             || sent_at > now
             || ambiguous_attempt(

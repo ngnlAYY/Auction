@@ -30,6 +30,7 @@ import {
   decodeAdminReceipt,
   invalidResponseError,
   responseError,
+  writeNotSent,
   writeOutcomeUnknown,
 } from "./failure";
 import {
@@ -127,6 +128,9 @@ export async function fetchMailIntakes(
   pageSize: number,
   signal: AbortSignal,
 ): Promise<Result<AdminMailIntakePage, string>> {
+  if (page < 1n || page > 2_147_483_647n) {
+    return err("invalid_pagination");
+  }
   const requestedPage = Number(page);
   const bounds = validatePagination(requestedPage, pageSize, 100, 2_147_483_647);
   if (!bounds.ok) {
@@ -177,7 +181,11 @@ export async function fetchMailIntakeDetail(
   intakeId: string,
   signal: AbortSignal,
 ): Promise<Result<AdminMailIntakeDetail, string>> {
-  const response = await sendGet(host, `/api/v1/admin/mail/intake/${intakeId}`, signal);
+  const response = await sendGet(
+    host,
+    `/api/v1/admin/mail/intake/${encodeURIComponent(intakeId)}`,
+    signal,
+  );
   if (!response.ok) {
     return err(response.error);
   }
@@ -227,7 +235,8 @@ export function prepareMailPauseCommand(
 ): (commandId: string) => Result<PreparedMailPauseCommand, AdminWriteNotSent> {
   const parameters: AdminMailPauseCommand = Object.freeze({
     mailboxKey,
-    expectedStateVersion,
+    expectedStateVersion:
+      typeof expectedStateVersion === "number" ? expectedStateVersion : Number.NaN,
     paused,
   });
   const prepare = prepareJsonCommandOnce((commandId) => {
@@ -240,6 +249,13 @@ export function prepareMailPauseCommand(
     return command;
   });
   return (commandId) => {
+    if (
+      !Number.isSafeInteger(parameters.expectedStateVersion) ||
+      parameters.expectedStateVersion < 0 ||
+      parameters.expectedStateVersion >= Number.MAX_SAFE_INTEGER
+    ) {
+      return err(writeNotSent("invalid_mail_pause_command"));
+    }
     const prepared = prepare(commandId);
     if (!prepared.ok) {
       return err(prepared.error);

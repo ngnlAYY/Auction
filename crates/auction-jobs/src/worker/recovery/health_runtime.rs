@@ -9,13 +9,26 @@ use auction_time::{TimeDelta, Timestamp};
 
 use crate::worker::diagnostics;
 
-/// 按独立周期触发 recovery health 刷新的 Worker 运行时。
-/// Worker 主轮询可以比 health 周期更频繁；`next_refresh_at` 在开始远端读取前推进，避免
-/// 外部服务慢或失败时并发堆积多个 health 刷新。
+/// 按独立周期触发 recovery health 刷新的 Worker 运行时；同一时刻只允许一次远端读取。
 pub struct RecoveryHealthRuntime {
     refresher: Arc<dyn RecoveryHealthRefreshPort>,
     refresh_interval: std::time::Duration,
-    next_refresh_at: Mutex<Option<Timestamp>>,
+    state: Mutex<RefreshState>,
+}
+
+#[derive(Default)]
+struct RefreshState {
+    next_refresh_at: Option<Timestamp>,
+    in_flight: bool,
+}
+
+struct RefreshInFlight<'a>(&'a Mutex<RefreshState>);
+
+impl Drop for RefreshInFlight<'_> {
+    fn drop(&mut self) {
+        let mut state = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.in_flight = false;
+    }
 }
 
 impl RecoveryHealthRuntime {
@@ -27,7 +40,7 @@ impl RecoveryHealthRuntime {
         if refresh_interval.is_zero() {
             return Err("recovery health 刷新周期必须大于零");
         }
-        Ok(Self { refresher, refresh_interval, next_refresh_at: Mutex::new(None) })
+        Ok(Self { refresher, refresh_interval, state: Mutex::new(RefreshState::default()) })
     }
 
     /// 到期时执行一次刷新；首次调用立即执行。
@@ -42,29 +55,25 @@ impl RecoveryHealthRuntime {
                 "recovery health 下一次刷新时间溢出".to_owned(),
             ))
         })?;
-        let should_refresh = {
-            let mut scheduled = self.next_refresh_at.lock().map_err(|error| {
+        {
+            let mut state = self.state.lock().map_err(|error| {
                 diagnostics::warn(
                     "recovery_health",
                     "lock_schedule",
                     error.diagnostic_kind(),
                     DiagnosticContext::default(),
                 );
-
                 ApplicationError::Repository(RepositoryError::Failed(
                     "recovery health 刷新状态锁损坏".to_owned(),
                 ))
             })?;
-            if scheduled.is_some_and(|value| now < value) {
-                false
-            } else {
-                *scheduled = Some(next_refresh_at);
-                true
+            if state.in_flight || state.next_refresh_at.is_some_and(|value| now < value) {
+                return Ok(false);
             }
-        };
-        if !should_refresh {
-            return Ok(false);
+            state.next_refresh_at = Some(next_refresh_at);
+            state.in_flight = true;
         }
+        let _in_flight = RefreshInFlight(&self.state);
         self.refresher.refresh(now).await?;
         Ok(true)
     }

@@ -3,9 +3,139 @@
 //! 每个闭集取值都有固定的 Fluent 键；解码已拒绝闭集外的值，这里只兜底原样显示。键映射与
 //! 取译文分开，单元测试据此核对契约闭集逐项有译文、五种语言键集合一致。
 
+use auction_contracts::{
+    AdminSettlementReturnAction, AdminSettlementReturnBlocker, AdminSettlementReturnEventKind,
+    AdminSettlementReturnMatchState, AdminSettlementReturnPlan, AdminSettlementReturnReason,
+    AdminSettlementReturnStatus,
+};
 use auction_web_shared::t;
 use serde_json::Value;
 
+pub(super) trait ReturnEnum {
+    fn code(&self) -> &str;
+}
+
+impl ReturnEnum for str {
+    fn code(&self) -> &str {
+        self
+    }
+}
+
+impl ReturnEnum for String {
+    fn code(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl ReturnEnum for AdminSettlementReturnStatus {
+    fn code(&self) -> &str {
+        match self {
+            Self::Quarantined => "quarantined",
+            Self::RecheckPending => "recheck_pending",
+            Self::AwaitingDecision => "awaiting_decision",
+            Self::TakePending => "take_pending",
+            Self::TakeUnknown => "take_unknown",
+            Self::ResendPending => "resend_pending",
+            Self::Held => "held",
+            Self::Resent => "resent",
+            Self::InboxClosed => "inbox_closed",
+            Self::Reviewed => "reviewed",
+        }
+    }
+}
+
+impl ReturnEnum for AdminSettlementReturnMatchState {
+    fn code(&self) -> &str {
+        match self {
+            Self::Untrusted => "untrusted",
+            Self::Unbound => "unbound",
+            Self::FulfillmentTerminal => "fulfillment_terminal",
+            Self::ManualReconcile => "manual_reconcile",
+        }
+    }
+}
+
+impl ReturnEnum for AdminSettlementReturnReason {
+    fn code(&self) -> &str {
+        match self {
+            Self::SourceUnproven => "source_unproven",
+            Self::EvidenceInvalid => "evidence_invalid",
+            Self::ObligationUnknown => "obligation_unknown",
+            Self::SubjectKindMismatch => "subject_kind_mismatch",
+            Self::DeliveryUnsent => "delivery_unsent",
+            Self::WorldMismatch => "world_mismatch",
+            Self::DispatchUnknown => "dispatch_unknown",
+            Self::DispatchAmbiguous => "dispatch_ambiguous",
+            Self::DispatchAlreadyReturned => "dispatch_already_returned",
+            Self::DispatchSuperseded => "dispatch_superseded",
+            Self::BodyUnproven => "body_unproven",
+            Self::ReturnedAssetsMatch => "returned_assets_match",
+            Self::ReturnedAssetsMismatch => "returned_assets_mismatch",
+            Self::ReceivedBeforeSend => "received_before_send",
+        }
+    }
+}
+
+impl ReturnEnum for AdminSettlementReturnAction {
+    fn code(&self) -> &str {
+        match self {
+            Self::ReclaimAndResend => "reclaim_and_resend",
+            Self::ReclaimAndHold => "reclaim_and_hold",
+            Self::ResendFromCustody => "resend_from_custody",
+            Self::CloseInbox => "close_inbox",
+            Self::Acknowledge => "acknowledge",
+            Self::Recheck => "recheck",
+            Self::RetryTake => "retry_take",
+        }
+    }
+}
+
+impl ReturnEnum for AdminSettlementReturnBlocker {
+    fn code(&self) -> &str {
+        match self {
+            Self::Untrusted => "untrusted",
+            Self::Unbound => "unbound",
+            Self::AssetsMismatch => "assets_mismatch",
+            Self::StateConflict => "state_conflict",
+            Self::ResendLimit => "resend_limit",
+            Self::ObligationIneligible => "obligation_ineligible",
+            Self::ProofRequired => "proof_required",
+            Self::SendUnresolved => "send_unresolved",
+            Self::ObservationRequired => "observation_required",
+        }
+    }
+}
+
+impl ReturnEnum for AdminSettlementReturnPlan {
+    fn code(&self) -> &str {
+        match self {
+            Self::Resend => "resend",
+            Self::Hold => "hold",
+        }
+    }
+}
+
+impl ReturnEnum for AdminSettlementReturnEventKind {
+    fn code(&self) -> &str {
+        match self {
+            Self::Opened => "opened",
+            Self::Acknowledged => "acknowledged",
+            Self::RecheckRequested => "recheck_requested",
+            Self::RecheckRebound => "recheck_rebound",
+            Self::RecheckUnchanged => "recheck_unchanged",
+            Self::TakeRequested => "take_requested",
+            Self::TakeActivated => "take_activated",
+            Self::TakeProven => "take_proven",
+            Self::TakeUnknown => "take_unknown",
+            Self::TakeObserved => "take_observed",
+            Self::TakeRetryRequested => "take_retry_requested",
+            Self::Held => "held",
+            Self::ResendAuthorized => "resend_authorized",
+            Self::Resent => "resent",
+            Self::InboxClosed => "inbox_closed",
+        }
+    }
+}
 /// 案件状态的译文键。
 pub(super) fn status_key(value: &str) -> Option<&'static str> {
     Some(match value {
@@ -113,9 +243,8 @@ pub(super) fn location_key(value: &str) -> Option<&'static str> {
     })
 }
 
-/// 补寄案的结案证据只证明寄出；案件不再跟踪后续持有人或领取状态。
-pub(super) fn shows_asset_location(status: &str) -> bool {
-    status != "resent"
+pub(super) fn shows_asset_location<T: ReturnEnum + ?Sized>(status: &T) -> bool {
+    status.code() != "resent"
 }
 
 /// 处理计划的译文键。
@@ -207,8 +336,11 @@ pub(super) fn take_state_key(value: &str) -> Option<&'static str> {
 }
 
 /// 取闭集译文；键缺失（解码已拒绝，理论上不会发生）时原样显示。
-pub(super) fn label(key: fn(&str) -> Option<&'static str>, value: &str) -> String {
-    key(value).map_or_else(|| value.to_owned(), |key| t!(key))
+pub(super) fn label<T: ReturnEnum + ?Sized>(
+    key: fn(&str) -> Option<&'static str>,
+    value: &T,
+) -> String {
+    key(value.code()).map_or_else(|| value.code().to_owned(), |key| t!(key))
 }
 
 /// 事件安全细节的单行文本：按键名排序，只展示标量；嵌套值以省略号代替，不展开任意结构。

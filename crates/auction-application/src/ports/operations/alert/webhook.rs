@@ -55,6 +55,12 @@ pub fn render_webhook_payload(
     count: i64,
     age_seconds: i64,
 ) -> Result<Value, OperationsAlertError> {
+    let scope = serde_json::to_string(scope)
+        .map_err(|_: serde_json::Error| OperationsAlertError::Invalid)?;
+    let source = serde_json::to_string(source)
+        .map_err(|_: serde_json::Error| OperationsAlertError::Invalid)?;
+    let scope = &scope[1..scope.len() - 1];
+    let source = &source[1..source.len() - 1];
     let rendered = template
         .replace("{kind}", kind.as_str())
         .replace("{scope}", scope)

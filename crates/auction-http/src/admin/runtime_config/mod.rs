@@ -210,15 +210,17 @@ fn map_snapshot(
     snapshot: AdminRuntimeSnapshot,
     projection: RuntimeProjection,
 ) -> Result<AdminRuntimeConfigResponse, Box<Response>> {
-    snapshot.validate().map_err(|diagnostic_cause| {
+    if snapshot.document.fingerprint() != snapshot.fingerprint {
         diagnostics::error(
             "admin_runtime",
-            "validate_snapshot",
-            diagnostics::invalid_state(&diagnostic_cause),
+            "validate_snapshot_fingerprint",
+            diagnostics::invalid_state("runtime document fingerprint mismatch"),
             DiagnosticContext::default(),
         );
-        Box::new(internal_error())
-    })?;
+        return Err(Box::new(internal_error()));
+    }
+    // GET preserves stored values beyond current write-validation bounds; write paths still
+    // validate candidates with AdminRuntimeDocument::validate.
     let mut document = snapshot.document;
     // 升级前的 Rust runtime 文件没有旧版三组业务字段。HTTP 投影补齐旧版默认值，使管理端
     // 能立即编辑完整契约；物理文件在首次成功保存前仍保持原指纹，避免破坏 durable 重放。

@@ -19,6 +19,7 @@ import {
   decodeAdminReceipt,
   invalidResponseError,
   responseError,
+  writeNotSent,
   writeOutcomeUnknown,
 } from "../failure";
 import { validate as validatePagination } from "../pagination";
@@ -164,6 +165,15 @@ const DELIVERY_CATEGORIES: readonly string[] = [
 ];
 
 const DELIVERY_WORLDS: readonly string[] = ["main", "isekai"];
+const DELIVERY_STATUSES: readonly string[] = [
+  "prepared",
+  "pending",
+  "claimed",
+  "sending",
+  "succeeded",
+  "failed",
+  "manual_reconcile",
+];
 
 /** 客户端只做格式与上限检查；服务端仍按闭集和精确匹配失败关闭。 */
 function deliverySearchFiltersValid(filters: DeliverySearchFilters): boolean {
@@ -246,10 +256,14 @@ export async function fetchDeliveries(
   if (!bounds.ok) {
     return err(bounds.error);
   }
-  if (!deliverySearchFiltersValid(filters)) {
+  const normalizedStatus = trimRustWhitespace(status);
+  if (
+    (normalizedStatus !== "" && !DELIVERY_STATUSES.includes(normalizedStatus)) ||
+    !deliverySearchFiltersValid(filters)
+  ) {
     return err("invalid_delivery_filter");
   }
-  const url = deliveryListUrl(status, filters, page, pageSize);
+  const url = deliveryListUrl(normalizedStatus, filters, page, pageSize);
   const response = await sendGet(host, url, signal);
   if (!response.ok) {
     return err(response.error);
@@ -279,11 +293,14 @@ export async function executeDelivery(
   commandId: string,
   signal: AbortSignal,
 ): Promise<Result<Delivery, AdminWriteFailure>> {
+  const { deliveryId, action, expectedFencingVersion } = preparation.snapshot;
+  if (!validUuid(deliveryId)) {
+    return err(writeNotSent("invalid_delivery_id"));
+  }
   const prepared = preparation(commandId);
   if (!prepared.ok) {
     return err(prepared.error);
   }
-  const { deliveryId, action, expectedFencingVersion } = preparation.snapshot;
   const url = `/api/v1/admin/deliveries/${deliveryId}/${deliveryActionPath(action)}`;
   const response = await sendPreparedJsonWrite(
     host,

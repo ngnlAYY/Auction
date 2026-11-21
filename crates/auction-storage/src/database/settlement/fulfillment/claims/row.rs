@@ -11,9 +11,10 @@ use sqlx::postgres::PgRow;
 use uuid::Uuid;
 
 use super::pricing;
+use crate::database::repository_error;
 use crate::database::settlement::fulfillment::mapping::{
     ClaimMappingError, fulfillment_delivery_status, map_storage_error, obligation_kind,
-    repository_error, request_hash_from_optional, settlement_world, string_column, uuid_column,
+    request_hash_from_optional, settlement_world, string_column, uuid_column,
 };
 use crate::database::settlement::policy::initial_payment_deadline;
 

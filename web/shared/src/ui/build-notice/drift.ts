@@ -1,6 +1,7 @@
 // 构建号漂移检测：只采信 `no-store` 响应上的 x-auction-build，首次偏差唤醒等待者。
 // 纯逻辑与组件分离，避免测试运行器需要编译 Solid JSX。
 
+import { createPromiseResolvers } from "../../platform/promise";
 import { buildId } from "../bootstrap";
 
 /** 服务端报告构建号的响应头；与 auction-http 的契约保持一致。 */
@@ -71,10 +72,9 @@ export function waitForBuildDrift(): BuildDriftWait {
   if (buildIsStale()) {
     return { promise: Promise.resolve(), cancel: () => undefined };
   }
-  let resolveWaiter: (() => void) | null = null;
-  const promise = new Promise<void>((resolve) => {
-    resolveWaiter = resolve;
-  });
+  const pending = createPromiseResolvers<void>();
+  let resolveWaiter: typeof pending.resolve | null = pending.resolve;
+  const promise = pending.promise;
   const waiter: DriftWaiter = {
     id: nextWaiterId,
     resolve() {

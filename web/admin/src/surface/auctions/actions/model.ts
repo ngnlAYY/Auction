@@ -209,7 +209,7 @@ export function validateLifecycleReason(reason: string): Result<string, Lifecycl
   if (trimmed.length === 0) {
     return err("required");
   }
-  if (utf8ByteLength(reason) > MAX_LIFECYCLE_REASON_BYTES) {
+  if (utf8ByteLength(trimmed) > MAX_LIFECYCLE_REASON_BYTES) {
     return err("too_long");
   }
   if (hasControlCharacter(reason)) {

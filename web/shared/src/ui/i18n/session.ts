@@ -7,7 +7,7 @@ import { createContext, createEffect, useContext } from "solid-js";
 import { setItem } from "../../platform/storage";
 import { type Cell, createCell } from "../../reactive/cell";
 import { createTaskScope, type TaskHandle } from "../../reactive/tasks";
-import { err, ok } from "../../result";
+import { err, ok, type Result } from "../../result";
 import { reportBrowserError } from "../bootstrap";
 import {
   initialLanguage,
@@ -153,10 +153,23 @@ export function createLocaleSession(
   ): void => {
     state.update((previous) => ({ ...previous, pendingLocale: target, error: null }));
     pending = tasks.spawn(async (context) => {
-      const fetched =
-        target === catalog.defaultLocale
-          ? ok<string | null>(null)
-          : await fetchCatalogLocale(catalog, target, context);
+      let fetched: Result<string | null, string>;
+      try {
+        fetched =
+          target === catalog.defaultLocale
+            ? ok<string | null>(null)
+            : await fetchCatalogLocale(catalog, target, context);
+      } catch {
+        if (context.alive() && generation === loadGeneration) {
+          state.update((previous) => ({
+            ...previous,
+            pendingLocale: null,
+            ready: true,
+            error: "language-switch-failed",
+          }));
+        }
+        return;
+      }
       // 同一语言可能被重复选择，只有最新代次能构造并提交译文、错误与偏好。
       if (!context.alive() || generation !== loadGeneration) {
         return;
@@ -173,7 +186,11 @@ export function createLocaleSession(
         });
         activeBundle.set(built.value);
         if (persist) {
-          setItem(LANGUAGE_STORAGE_KEY, target);
+          try {
+            setItem(LANGUAGE_STORAGE_KEY, target);
+          } catch {
+            state.update((previous) => ({ ...previous, error: "language-switch-failed" }));
+          }
         }
         return;
       }
@@ -202,7 +219,11 @@ export function createLocaleSession(
     if (target === state.peek().current) {
       state.update((previous) => ({ ...previous, pendingLocale: null, ready: true, error: null }));
       // 沿用源码：即使传入非法 code，当前已是回退目标时仍原样保存选择值。
-      setItem(LANGUAGE_STORAGE_KEY, code);
+      try {
+        setItem(LANGUAGE_STORAGE_KEY, code);
+      } catch {
+        state.update((previous) => ({ ...previous, error: "language-switch-failed" }));
+      }
       return;
     }
     load(catalog, target, true, generation);

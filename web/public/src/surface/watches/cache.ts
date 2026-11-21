@@ -48,8 +48,20 @@ export function save(page: PublicLotWatchesResponse, revision: string | null): v
   if (revision === null || revision !== publicWatchCacheRevision()) {
     return;
   }
-  // 写入期间其他标签页仍能切换身份；读取时必须按请求发起的代次拒绝旧快照。
-  const value = JSON.stringify({ version: CACHE_VERSION, session_revision: revision, ...page });
+  if (!validWatchCollection(page, page.user_id, page.auction_id)) {
+    return;
+  }
+  const cacheEntry: Record<string, unknown> = {
+    version: CACHE_VERSION,
+    session_revision: revision,
+  };
+  const pageFields = page as unknown as Record<string, unknown>;
+  for (const field of Object.keys(pageFields)) {
+    if (field !== "version" && field !== "session_revision") {
+      cacheEntry[field] = pageFields[field];
+    }
+  }
+  const value = JSON.stringify(cacheEntry);
   const current = key(page.user_id, page.auction_id);
   if (!setItem(current, value)) {
     return;
@@ -64,6 +76,39 @@ export function save(page: PublicLotWatchesResponse, revision: string | null): v
   for (const stale of keys()) {
     if (stale.startsWith(KEY_PREFIX) && !recent.includes(stale)) {
       removeItem(stale);
+    }
+  }
+}
+
+/** 同账号权威读取后的持久期同步失败会发布新会话修订；只迁移该用户在旧修订下的有效快照。 */
+export function rebaseLotWatches(
+  userId: string,
+  fromRevision: string | null,
+  toRevision: string | null,
+): void {
+  if (fromRevision === null || toRevision === null || fromRevision === toRevision) {
+    return;
+  }
+  const prefix = `${KEY_PREFIX}${userId}:`;
+  for (const entryKey of keys()) {
+    if (!entryKey.startsWith(prefix)) {
+      continue;
+    }
+    const page = getParsed(entryKey, (value) => {
+      const entry = object(value);
+      if (entry?.version !== CACHE_VERSION || entry.session_revision !== fromRevision) {
+        return null;
+      }
+      const decoded = decode(PublicLotWatchesResponseSchema, value);
+      return decoded.ok && validWatchCollection(decoded.value, userId, decoded.value.auction_id)
+        ? decoded.value
+        : null;
+    });
+    if (page !== null) {
+      setItem(
+        entryKey,
+        JSON.stringify({ version: CACHE_VERSION, session_revision: toRevision, ...page }),
+      );
     }
   }
 }

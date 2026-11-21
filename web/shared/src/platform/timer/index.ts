@@ -1,5 +1,7 @@
 // 一次性定时原语：到时完成；提前取消会清除底层定时器，不留下迟到的回调。
 
+import { createPromiseResolvers } from "../promise";
+
 /** 浏览器 `setTimeout` 能可靠表达的最大延时（32 位有符号上限）。 */
 const MAX_TIMEOUT_MILLIS = 2_147_483_647;
 
@@ -22,16 +24,14 @@ export interface TimeoutFuture {
 /** 创建一次性定时等待；超过浏览器上限的延时饱和到上限，保持“至少等这么久”。 */
 export function createTimeoutFuture(milliseconds: number): TimeoutFuture {
   let finished = false;
-  let resolveTimeout: (() => void) | null = null;
-  const promise = new Promise<void>((resolve) => {
-    resolveTimeout = resolve;
-  });
+  const timeout = createPromiseResolvers<void>();
+  const promise = timeout.promise;
   const handle = globalThis.setTimeout(() => {
     if (finished) {
       return;
     }
     finished = true;
-    resolveTimeout?.();
+    timeout.resolve();
   }, boundedDelay(milliseconds));
   return {
     promise,

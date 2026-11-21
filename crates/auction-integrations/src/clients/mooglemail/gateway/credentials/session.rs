@@ -169,7 +169,7 @@ impl MoogleMailCredentialSession {
     }
 
     /// 远端确认登录失效后回写状态并从当前进程池移除当前候选。
-    pub(crate) async fn invalidate_current(&mut self) -> Result<(), MoogleMailError> {
+    pub(crate) async fn invalidate_current(&self) -> Result<(), MoogleMailError> {
         self.invalidate_selected().await
     }
 

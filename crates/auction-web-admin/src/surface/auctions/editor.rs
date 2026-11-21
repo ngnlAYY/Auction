@@ -198,12 +198,27 @@ pub(in crate::surface) async fn observe_draft_write<T>(
 /// 从未决区完成的旧命令只收起自己的草稿。
 pub(in crate::surface) fn close_matching_draft<T: 'static>(
     mut draft: Signal<Option<T>>,
-    matches: impl FnOnce(&T) -> bool,
+    matches: impl FnOnce(&T) -> bool + 'static,
 ) {
-    if let Ok(mut current) = draft.try_write()
-        && current.as_ref().is_some_and(matches)
+    let mut predicate = Some(matches);
+    let acquired = draft.try_write().map(|mut current| {
+        if let Some(matches) = predicate.take()
+            && current.as_ref().is_some_and(matches)
+        {
+            *current = None;
+        }
+    });
+    if acquired.is_err()
+        && let Some(matches) = predicate
     {
-        *current = None;
+        spawn(async move {
+            auction_web_shared::timer::TimeoutFuture::new(0).await;
+            if let Ok(mut current) = draft.try_write()
+                && current.as_ref().is_some_and(matches)
+            {
+                *current = None;
+            }
+        });
     }
 }
 

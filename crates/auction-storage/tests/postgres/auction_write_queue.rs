@@ -898,6 +898,7 @@ async fn postgres_final_phase_exhausts_slow_proxy_and_enqueues_pending_reminder(
     .await
     .expect("写入领先竞价");
 
+    let mut proxy_transaction = pool.begin().await.expect("开启代理 fixture 事务");
     let proxy_id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO public.bid_proxy_authorizations
@@ -910,7 +911,7 @@ async fn postgres_final_phase_exhausts_slow_proxy_and_enqueues_pending_reminder(
     .bind(lot_id)
     .bind(slow_user)
     .bind(proxy_command)
-    .execute(pool)
+    .execute(&mut *proxy_transaction)
     .await
     .expect("写入慢速代理授权");
 
@@ -923,9 +924,10 @@ async fn postgres_final_phase_exhausts_slow_proxy_and_enqueues_pending_reminder(
     )
     .bind(proxy_id)
     .bind(proxy_command)
-    .execute(pool)
+    .execute(&mut *proxy_transaction)
     .await
     .expect("写入代理创建转换");
+    proxy_transaction.commit().await.expect("提交代理及创建转换");
 
     sqlx::query(
         "UPDATE public.lots
@@ -1095,6 +1097,7 @@ async fn postgres_ordinary_bid_exhausts_slow_proxy_and_enqueues_pending_in_trans
     .await
     .expect("写入领先竞价");
 
+    let mut proxy_transaction = pool.begin().await.expect("开启代理 fixture 事务");
     let proxy_id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO public.bid_proxy_authorizations
@@ -1107,7 +1110,7 @@ async fn postgres_ordinary_bid_exhausts_slow_proxy_and_enqueues_pending_in_trans
     .bind(lot_id)
     .bind(slow_user)
     .bind(proxy_command)
-    .execute(pool)
+    .execute(&mut *proxy_transaction)
     .await
     .expect("写入慢速代理授权");
     sqlx::query(
@@ -1119,9 +1122,10 @@ async fn postgres_ordinary_bid_exhausts_slow_proxy_and_enqueues_pending_in_trans
     )
     .bind(proxy_id)
     .bind(proxy_command)
-    .execute(pool)
+    .execute(&mut *proxy_transaction)
     .await
     .expect("写入代理创建转换");
+    proxy_transaction.commit().await.expect("提交代理及创建转换");
     sqlx::query(
         "UPDATE public.lots
          SET leader_user_id = $1, current_price = 50000,

@@ -183,7 +183,9 @@ fn is_rule(value: &str) -> bool {
 fn is_table_separator(value: &str) -> bool {
     // split 即使对空文本也产生一个单元格；空行仍由长度校验拒绝。
     split_table_row(value).all(|cell| {
-        cell.len() >= 3 && cell.chars().all(|character| character == '-' || character == ':')
+        cell.len() >= 3
+            && cell.contains('-')
+            && cell.chars().all(|character| character == '-' || character == ':')
     })
 }
 

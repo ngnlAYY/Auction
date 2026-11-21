@@ -1,8 +1,8 @@
 //! 暂存目录扫描与既有文件分类。
 
-use std::fs;
 use std::fs::Metadata;
 use std::path::Path;
+use std::{fs, io::Read};
 
 use anyhow::Context;
 
@@ -15,7 +15,7 @@ use super::paths::{
     manifest_path, valid_segment_name, wal_upload_path,
 };
 use super::{CIPHER_SUFFIX, MANIFEST_SUFFIX, MAX_MANIFEST_BYTES};
-use crate::support::files;
+use crate::support::{digest::sha256_reader, files};
 
 /// 重复归档只认 manifest 与密文的完整证据；任何不一致都失败关闭，不覆盖。
 pub(crate) fn classify(
@@ -27,7 +27,10 @@ pub(crate) fn classify(
     if regular_or_none(&proof)?.is_some() {
         let receipt = read_wal_upload(&proof)?;
         receipt.validate(segment)?;
-        if receipt.source_bytes != source.bytes || receipt.source_mtime_ns != source.mtime_ns {
+        if receipt.source_bytes != source.bytes
+            || receipt.source_mtime_ns != source.mtime_ns
+            || receipt.source_sha256.as_deref() != Some(source.sha256.as_str())
+        {
             anyhow::bail!("同名 WAL 段已有不同源内容的上传证据：{}", proof.display());
         }
         return Ok(Duplicate::Uploaded(receipt));
@@ -45,11 +48,21 @@ pub(crate) fn classify(
         (Some(cipher_metadata), Some(_)) => {
             let record = read_manifest(&manifest)?;
             record.validate(segment)?;
-            if record.source_bytes != source.bytes || record.source_mtime_ns != source.mtime_ns {
+            if record.source_bytes != source.bytes
+                || record.source_mtime_ns != source.mtime_ns
+                || record.source_sha256.as_deref() != Some(source.sha256.as_str())
+            {
                 anyhow::bail!("同名 WAL 段已有不同源内容的归档：{}", cipher.display());
             }
             if cipher_metadata.len() != record.cipher_bytes {
                 anyhow::bail!("WAL 密文长度与 manifest 不一致：{}", cipher.display());
+            }
+            let (cipher_sha256, cipher_bytes) =
+                sha256_reader(files::open_regular(&cipher)?).context("读取 WAL 密文摘要失败")?;
+            if cipher_bytes != record.cipher_bytes
+                || record.cipher_sha256.as_deref() != Some(cipher_sha256.as_str())
+            {
+                anyhow::bail!("WAL 密文 SHA-256 与 manifest 不一致：{}", cipher.display());
             }
             Ok(Duplicate::Confirmed(record))
         }
@@ -95,20 +108,54 @@ pub(crate) fn staged(directory: &Path) -> anyhow::Result<StagedScan> {
     for segment in segments {
         let cipher = cipher_path(directory, &segment);
         let manifest = manifest_path(directory, &segment);
-        let Some(cipher_metadata) = regular_or_none(&cipher)? else {
-            // 只剩 manifest（或枚举后消失）：上传器无法重建密文，只报告不删除。
-            scan.incomplete.push(segment);
-            continue;
+        let cipher_file = match files::open_regular(&cipher) {
+            Ok(file) => file,
+            Err(error)
+                if error.chain().any(|cause| {
+                    cause
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound)
+                }) =>
+            {
+                scan.incomplete.push(segment);
+                continue;
+            }
+            Err(error) => return Err(error),
         };
-        if regular_or_none(&manifest)?.is_none() {
-            // 归档进程先发布密文、再发布 manifest；缺 manifest 表示本次尚未确认。
-            scan.incomplete.push(segment);
+        let cipher_metadata = cipher_file.metadata().context("读取 WAL 密文元数据失败")?;
+        let manifest_file = match files::open_regular(&manifest) {
+            Ok(file) => file,
+            Err(error)
+                if error.chain().any(|cause| {
+                    cause
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound)
+                }) =>
+            {
+                scan.incomplete.push(segment);
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        let manifest_bytes = manifest_file.metadata().context("读取 WAL manifest 元数据失败")?;
+        if manifest_bytes.len() > MAX_MANIFEST_BYTES {
+            scan.invalid.push(InvalidEntry {
+                name: segment,
+                reason: "WAL manifest 超出大小上限".to_owned(),
+            });
             continue;
         }
-        let record = match read_manifest(&manifest).and_then(|record| {
-            record.validate(&segment)?;
-            Ok(record)
-        }) {
+        let mut record_bytes = Vec::with_capacity(manifest_bytes.len() as usize);
+        (&manifest_file)
+            .take(MAX_MANIFEST_BYTES + 1)
+            .read_to_end(&mut record_bytes)
+            .context("读取 WAL 归档 manifest 失败")?;
+        let record: ArchiveManifest = match serde_json::from_slice::<ArchiveManifest>(&record_bytes)
+            .context("解析 WAL 归档 manifest 失败")
+            .and_then(|record| {
+                record.validate(&segment)?;
+                Ok(record)
+            }) {
             Ok(record) => record,
             Err(error) => {
                 scan.invalid.push(InvalidEntry { name: segment, reason: format!("{error:#}") });
@@ -119,6 +166,17 @@ pub(crate) fn staged(directory: &Path) -> anyhow::Result<StagedScan> {
             scan.invalid.push(InvalidEntry {
                 name: segment,
                 reason: "WAL 密文长度与 manifest 不一致".to_owned(),
+            });
+            continue;
+        }
+        let (cipher_sha256, cipher_bytes) =
+            sha256_reader(cipher_file).context("读取 WAL 密文摘要失败")?;
+        if cipher_bytes != record.cipher_bytes
+            || record.cipher_sha256.as_deref() != Some(cipher_sha256.as_str())
+        {
+            scan.invalid.push(InvalidEntry {
+                name: segment,
+                reason: "WAL 密文 SHA-256 与 manifest 不一致".to_owned(),
             });
             continue;
         }

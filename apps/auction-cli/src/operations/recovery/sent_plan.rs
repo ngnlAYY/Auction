@@ -182,14 +182,19 @@ impl SentMatchPlan {
 
     pub(super) fn apply_details(&mut self, details: &[WorkerSentLookupCandidate]) {
         let Some(cutoff_at) = self.cutoff_at else { return };
-        let mut by_mid: BTreeMap<&str, Vec<&WorkerSentLookupCandidate>> = BTreeMap::new();
+        let mut by_world_mid: BTreeMap<(&str, &str), Vec<&WorkerSentLookupCandidate>> =
+            BTreeMap::new();
         for detail in details {
-            by_mid.entry(detail.external_mail_id.as_str()).or_default().push(detail);
+            by_world_mid
+                .entry((detail.world.as_str(), detail.external_mail_id.as_str()))
+                .or_default()
+                .push(detail);
         }
         let pending = std::mem::take(&mut self.pending_details);
         let mut matches = Vec::new();
         for (delivery_index, candidate) in pending {
-            let Some(details) = by_mid.get(candidate.external_mail_id.as_str()) else {
+            let key = (candidate.world_id.as_str(), candidate.external_mail_id.as_str());
+            let Some(details) = by_world_mid.get(&key) else {
                 self.unconfirmed += 1;
                 self.unconfirmed_deliveries.insert(delivery_index);
                 continue;
@@ -252,14 +257,16 @@ impl SentMatchPlan {
                 }
             }
         }
-        // 同一 Sent MID 只能证明一个投递；共用证据时两者都不隔离，而是显式阻塞。
-        let mut mid_counts: BTreeMap<String, usize> = BTreeMap::new();
+        // 同一世界的 Sent MID 只能证明一个投递；跨世界可有相同 MID。
+        let mut mid_counts: BTreeMap<(String, String), usize> = BTreeMap::new();
         for (_, _, detail, _) in &matches {
-            *mid_counts.entry(detail.external_mail_id.clone()).or_default() += 1;
+            *mid_counts
+                .entry((detail.world.clone(), detail.external_mail_id.clone()))
+                .or_default() += 1;
         }
         for (delivery_index, candidate, detail, sent_at) in matches {
-            if mid_counts.get(&detail.external_mail_id).copied().unwrap_or(0) > 1 {
-                self.ambiguous += 1;
+            let detail_key = (detail.world.clone(), detail.external_mail_id.clone());
+            if mid_counts.get(&detail_key).copied().unwrap_or(0) > 1 {
                 self.ambiguous_deliveries.insert(delivery_index);
                 continue;
             }

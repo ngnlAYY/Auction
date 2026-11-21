@@ -80,12 +80,12 @@ impl WorkerRemoteReadClient {
         T: for<'de> Deserialize<'de>,
     {
         let (status, envelope) = self.exchange::<I, T>(path, input).await?;
-        match (status.is_success(), envelope.code.as_str()) {
-            (true, "ok") => envelope.data.ok_or(WorkerRemoteReadError::Incompatible),
-            (_, "paused") => Err(WorkerRemoteReadError::Paused),
-            (_, "not_paused") => Err(WorkerRemoteReadError::NotPaused),
-            (_, "capability_unavailable") => Err(WorkerRemoteReadError::Unavailable),
-            (_, "invalid_command_id") => Err(WorkerRemoteReadError::Invalid),
+        match (status.as_u16(), envelope.code.as_str()) {
+            (200..=299, "ok") => envelope.data.ok_or(WorkerRemoteReadError::Incompatible),
+            (409, "paused") => Err(WorkerRemoteReadError::Paused),
+            (409, "not_paused") => Err(WorkerRemoteReadError::NotPaused),
+            (501 | 503, "capability_unavailable") => Err(WorkerRemoteReadError::Unavailable),
+            (400, "invalid_command_id") => Err(WorkerRemoteReadError::Invalid),
             _ => Err(match status.as_u16() {
                 501 | 503 => WorkerRemoteReadError::Unavailable,
                 504 => WorkerRemoteReadError::Timeout,

@@ -62,7 +62,8 @@ WITH baseline AS (
 ), ordered_movements AS (
     SELECT movement.*,
            lag(closing_balance) OVER w AS previous_balance,
-           lag(closing_version) OVER w AS previous_version
+           lag(closing_version) OVER w AS previous_version,
+           count(*) OVER (PARTITION BY opening_version) AS same_opening_version
     FROM movements movement WINDOW w AS (ORDER BY opening_version, entity_key)
 ), violations AS (
     SELECT ledger.id::text AS entity_key, 'ledger_sequence_or_balance_mismatch'::text AS reason
@@ -83,20 +84,24 @@ WITH baseline AS (
     FROM public.auction_settlements settlement
     LEFT JOIN LATERAL (
         SELECT count(*) AS entries,
+               count(*) FILTER (WHERE movement_kind = 'opening') AS opening_entries,
+               count(*) FILTER (WHERE movement_kind = 'closing') AS closing_entries,
                max(balance_after) FILTER (WHERE movement_kind = 'opening') AS opening,
                max(balance_after) FILTER (WHERE movement_kind = 'closing') AS closing,
                COALESCE(sum(amount::numeric) FILTER (WHERE movement_kind = 'tax'), 0) AS tax,
                -COALESCE(sum(amount::numeric) FILTER (WHERE movement_kind = 'compensation'), 0) AS compensation
         FROM public.compensation_ledger WHERE auction_id = settlement.auction_id
     ) ledger ON true
-    WHERE ledger.entries < 2 OR ledger.opening IS DISTINCT FROM settlement.opening_pool_balance
+    WHERE ledger.entries < 2 OR ledger.opening_entries <> 1 OR ledger.closing_entries <> 1
+       OR ledger.opening IS DISTINCT FROM settlement.opening_pool_balance
        OR ledger.closing IS DISTINCT FROM settlement.closing_pool_balance
        OR ledger.tax <> CASE WHEN settlement.pool_enabled THEN settlement.tax_total ELSE 0 END
        OR ledger.compensation <> CASE WHEN settlement.pool_enabled THEN settlement.compensation_total ELSE 0 END
     UNION ALL
     SELECT movement.entity_key, 'global_pool_movement_chain_mismatch'
     FROM ordered_movements movement CROSS JOIN baseline
-    WHERE movement.opening_version <> COALESCE(movement.previous_version, baseline.version)
+    WHERE movement.same_opening_version <> 1
+       OR movement.opening_version <> COALESCE(movement.previous_version, baseline.version)
        OR movement.opening_balance <> COALESCE(movement.previous_balance, baseline.balance)
        OR movement.closing_version <> movement.opening_version + 1
        OR movement.closing_balance <> movement.opening_balance + movement.delta
@@ -146,7 +151,8 @@ WITH RECURSIVE chain AS (
     LEFT JOIN public.settlement_obligation_fulfillments parent ON parent.obligation_id = obligation.prerequisite_obligation_id
     WHERE obligation.prerequisite_obligation_id IS NOT NULL
       AND ((obligation.business_state = 'ready' AND parent.execution_state IS DISTINCT FROM 'satisfied'
-            AND obligation.obligation_kind <> 'buyer_refund')
+            AND (obligation.obligation_kind <> 'buyer_refund'
+                 OR obligation.prerequisite_obligation_id IS NOT NULL))
            OR (obligation.business_state = 'blocked' AND parent.execution_state = 'satisfied'))
     UNION ALL
     SELECT payment.id::text, 'payment_recovery_chain_missing'
@@ -184,15 +190,16 @@ WITH violations AS (
     LEFT JOIN public.deliveries delivery ON delivery.id = fulfillment.delivery_id
     WHERE (fulfillment.execution_state = 'pending' AND fulfillment.delivery_id IS NOT NULL)
        OR (fulfillment.execution_state IN ('prepared', 'enqueued') AND delivery.id IS NULL)
-       OR (fulfillment.execution_state = 'prepared' AND delivery.status <> 'prepared')
-       OR (fulfillment.execution_state = 'enqueued' AND delivery.status = 'prepared')
+       OR (fulfillment.execution_state = 'prepared' AND delivery.status IS DISTINCT FROM 'prepared')
+       OR (fulfillment.execution_state = 'enqueued'
+           AND (delivery.status IS NULL OR delivery.status = 'prepared'))
        OR (fulfillment.execution_state = 'satisfied' AND fulfillment.proof_digest IS NULL)
        -- 投递成功证明才要求 delivery 成功；内部持有/损失证明可在原投递失败后满足义务。
        OR (fulfillment.execution_state = 'satisfied'
            AND fulfillment.proof_kind = 'mooglemail_sent_collected'
-           AND (delivery.id IS NULL OR delivery.status <> 'succeeded'))
-       OR (fulfillment.delivery_id IS NOT NULL AND (delivery.origin_kind <> 'settlement'
-           OR delivery.origin_id <> fulfillment.obligation_id::text))
+           AND (delivery.id IS NULL OR delivery.status IS DISTINCT FROM 'succeeded'))
+       OR (fulfillment.delivery_id IS NOT NULL AND (delivery.origin_kind IS DISTINCT FROM 'settlement'
+           OR delivery.origin_id IS DISTINCT FROM fulfillment.obligation_id::text))
        OR (obligation.business_state <> 'ready' AND fulfillment.execution_state IN ('prepared', 'enqueued', 'satisfied'))
 )
 SELECT *, count(*) OVER () AS violation_count FROM violations

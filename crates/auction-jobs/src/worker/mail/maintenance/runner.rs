@@ -8,7 +8,9 @@ use auction_observability::WorkerLoop;
 
 use super::super::poll::MailPollRuntime;
 use super::super::{MaintenanceRound, acquire_maintenance_round};
-use super::{metrics::IterationGuard, run_maintenance, run_read_observation};
+use super::metrics::IterationGuard;
+use super::observation::run_read_observation;
+use super::sweep::run_maintenance;
 use crate::worker::diagnostics;
 use crate::worker::runtime::{PersistentWorker, poll_delay};
 

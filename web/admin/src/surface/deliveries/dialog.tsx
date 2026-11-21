@@ -16,7 +16,7 @@ import { createTaskResource } from "@auction/web-shared/reactive/resource";
 import { unreachable } from "@auction/web-shared/result";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createEffect, For, Match, onSettled, Show, Switch } from "solid-js";
+import { createEffect, For, Match, Show, Switch } from "solid-js";
 
 import { fetchDeliveryDetail } from "../../api/delivery";
 import { trimRustWhitespace } from "../../api/session-time";
@@ -236,12 +236,10 @@ function useCancelButtonFocus(secondStep: () => boolean): CancelButtonFocus {
       if (!value || element === null) {
         return;
       }
-      // ref 回调发生在元素进入文档之前；等 DOM 提交后只为仍在文档中的按钮恢复焦点。
-      onSettled(() => {
-        if (element.isConnected) {
-          element.focus();
-        }
-      });
+      // 此用户 effect 在 DOM 提交后运行；只为仍挂载的取消按钮恢复焦点。
+      if (element.isConnected) {
+        element.focus();
+      }
     },
   );
   return {

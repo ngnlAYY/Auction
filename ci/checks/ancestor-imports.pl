@@ -31,7 +31,7 @@ my $non_code = qr{
     (?=[/"'bcr])
     (?: //[^\n]*
     | (?<comment> /\* (?: [^*/]++ | /(?!\*) | \*(?!/) | (?&comment) )* \*/ )
-    | (?:br|cr|r)(?<hashes>\#*)".*?"\k<hashes>
+    | (?:br|cr|r)(?<hashes>\#*)"(?:(?!"\k<hashes>)[\s\S])*"\k<hashes>
     | (?:b|c)?"(?:\\.|[^"\\])*"
     | b?'(?:\\(?:u\{[0-9a-fA-F_]+\}|x[0-9a-fA-F]{2}|.)|[^'\\\n])'
     )
@@ -176,7 +176,8 @@ sub parse_body {
         my $public = 0;
         if ($$text =~ /\Gpub(\s*\([^()]*\))?\s+/gc) {
             my $visibility = $1 // '';
-            $public = $visibility !~ /^\s*\(\s*(?:in\s+)?self\s*\)/;
+            # 受限可见性仍是模块门面；调用方是否处于可见范围由 Rust 编译器验证。
+            $public = $visibility !~ /^\s*\(\s*(?:in\s+)?self\s*\)\s*$/;
             $offset = pos($$text);
         }
         pos($$text) = $offset;
@@ -196,7 +197,7 @@ sub parse_body {
             next;
         }
         pos($$text) = $offset;
-        if ($$text =~ /\Gmod\s+(\w+)\s*;/gc) {
+        if ($$text =~ /\G(?:pub(?:\([^()]*\))?\s+)?mod\s+(\w+)\s*;/gc) {
             my ($name, $end) = ($1, pos($$text));
             $module->{defs}{$name} = 1;
             push @{$module->{pending_children}}, [$name, $module->{pending_test}];
@@ -205,7 +206,7 @@ sub parse_body {
             next;
         }
         pos($$text) = $offset;
-        if ($$text =~ /\Gmod\s+(\w+)\s*\{/gc) {
+        if ($$text =~ /\G(?:pub(?:\([^()]*\))?\s+)?mod\s+(\w+)\s*\{/gc) {
             my ($name, $body) = ($1, pos($$text));
             $module->{defs}{$name} = 1;
             push @{$module->{spans}}, [$span_start, $start];
@@ -322,6 +323,8 @@ sub module_name {
 }
 
 my @inputs = sort grep { length } split /\0/, do { local $/; <STDIN> // '' };
+my @unsupported = grep { !m{^(?:apps|crates)/[^/]+/src/.*\.rs$} } @inputs;
+die "祖先模块私有导入：输入含不支持的 Rust 源路径：@unsupported\n" if @unsupported;
 my @roots = grep { m{^(?:apps|crates)/[^/]+/src/(?:lib|main)\.rs$} } @inputs;
 die "祖先模块私有导入：未找到 crate 根文件\n" unless @roots;
 my %findings;
@@ -351,7 +354,7 @@ for my $root_file (@roots) {
                     $report->($start + $from, join('::', @segments), @segments) if @segments;
                 }
             }
-            while ($chunk =~ /(?<![\w:])((?:super|crate)(?:\s*::\s*(?:super|\w+))+)/g) {
+            while ($chunk =~ /(?<![\w:\$])((?:\$crate|super|crate)(?:\s*::\s*(?:super|\w+))+)/g) {
                 my ($path, $from) = ($1, $-[0]);
                 next if grep { $_->[0] <= $from && $from < $_->[1] } @use_ranges;
                 my @segments = path_segments($path);

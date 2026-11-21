@@ -35,14 +35,6 @@ pub(super) async fn list_webhooks_postgres(
             let status: String = row
                 .try_get("status")
                 .map_err(|error| storage_error_from(error, "读取 webhook 状态失败"))?;
-            if !matches!(
-                status.as_str(),
-                "pending" | "sending" | "succeeded" | "failed" | "manual_reconcile"
-            ) {
-                return Err(ApplicationError::OperationsAlert(
-                    OperationsAlertError::StoredResultCorrupt,
-                ));
-            }
             let kind: String = row
                 .try_get("kind")
                 .map_err(|error| storage_error_from(error, "读取 webhook 种类失败"))?;
@@ -58,13 +50,10 @@ pub(super) async fn list_webhooks_postgres(
             let attempt_count: i32 = row
                 .try_get("attempt_count")
                 .map_err(|error| storage_error_from(error, "读取 webhook 尝试次数失败"))?;
-            if attempt_count < 0 {
-                return Err(ApplicationError::OperationsAlert(
-                    OperationsAlertError::StoredResultCorrupt,
-                ));
-            }
-            let attempt_count = attempt_count as u32;
-            Ok(OperationsAlertWebhookEntry {
+            let attempt_count = u32::try_from(attempt_count).map_err(|_| {
+                ApplicationError::OperationsAlert(OperationsAlertError::StoredResultCorrupt)
+            })?;
+            let entry = OperationsAlertWebhookEntry {
                 delivery_id: row
                     .try_get::<Uuid, _>("id")
                     .map_err(|error| storage_error_from(error, "读取 webhook 标识失败"))?,
@@ -90,7 +79,9 @@ pub(super) async fn list_webhooks_postgres(
                 created_at: row
                     .try_get("created_at")
                     .map_err(|error| storage_error_from(error, "读取 webhook 创建时间失败"))?,
-            })
+            };
+            entry.validate().map_err(ApplicationError::from)?;
+            Ok(entry)
         })
         .collect()
 }

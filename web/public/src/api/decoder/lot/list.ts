@@ -74,7 +74,7 @@ export function validLotList(
     const preview = string(decoded.projection_kind) === "preview";
     const valid = preview
       ? validPreviewLot(lot, auctionId, null, false)
-      : validLiveLot(lot, auctionId, null) &&
+      : validLiveLot(lot, auctionId, null, false) &&
         (string(decoded.auction_status) !== "settled" || object(lot)?.status !== "live");
     // 请求分组、等级和每行服务端判定必须一致；只校验，不把漏筛响应变成残缺页。
     const lotObject = object(lot);

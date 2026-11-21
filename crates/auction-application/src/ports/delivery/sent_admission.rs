@@ -471,10 +471,25 @@ impl SentAdmissionSnapshot {
                     "winner_equipment_cod" => {
                         payload.template == "settlement_winner_equipment_cod"
                             && obligation.amount == expected.cod
+                            && expected.credits == 0
                     }
-                    _ => payload.template == "settlement_equipment_handoff" && expected.cod == 0,
+                    _ => {
+                        payload.template == "settlement_equipment_handoff"
+                            && expected.cod == 0
+                            && expected.credits == 0
+                    }
                 };
-                single_equipment && secret_ref && template_matches
+                let variable_shape_matches = payload.schema_version == 1
+                    && payload.operation == "send"
+                    && payload.variables.reference == Some(obligation.id)
+                    && payload.variables.item_name.as_deref() == Some(equipment.name.as_str())
+                    && if kind == "winner_equipment_cod" {
+                        payload.variables.amount.as_deref()
+                            == Some(expected.cod.to_string().as_str())
+                    } else {
+                        payload.variables.amount.is_none()
+                    };
+                single_equipment && secret_ref && template_matches && variable_shape_matches
             }
             _ => false,
         }

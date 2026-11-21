@@ -52,7 +52,7 @@ pub(super) async fn insert_settlement_claim_event(
             schema_version: 1,
             payload: json!({ "auction_id": auction_id, "state_version": state_version }),
             state_version,
-            origin_command_id: command_id.as_uuid(),
+            origin_command_id: Some(command_id.as_uuid()),
             created_at: Some(occurred_at),
         },
     )

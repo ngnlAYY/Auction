@@ -308,7 +308,8 @@ fn submit_schedule(
             set_if_alive(notice, Some(AdminAuctionNotice::Schedule));
             set_if_alive(feedback, None);
             // 离开本框后从未决区重试时，回执不能关闭操作员新打开的另一份草稿。
-            close_matching_draft(open, |draft| {
+            let submitted_id = submitted_id.clone();
+            close_matching_draft(open, move |draft| {
                 draft.auction_id == submitted_id && draft.state_version == submitted_version
             });
         },

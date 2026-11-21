@@ -9,14 +9,13 @@ use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::acknowledgement::acknowledge_postgres;
-use super::failure::record_failure_postgres;
+use super::failure::record::record_failure_postgres;
 use super::ownership::{OwnedRealtimeBackend, RealtimeConsumerOwnership};
 use super::read::read_postgres;
 use super::stream::list_pending_streams_postgres;
 use super::stream::validate_stream_directory_query;
-use super::validation::{
-    storage_error, validate_cursor_keys, validate_event_position, validate_failure_text,
-};
+use super::validation::{validate_cursor_keys, validate_event_position, validate_failure_text};
+use crate::database::storage_error;
 
 impl RealtimeConsumerOwnership {
     fn validate_owner(&self, consumer_key: &str) -> Result<(), ApplicationError> {

@@ -27,9 +27,10 @@ pub fn MarkdownDocument(markdown: String) -> Element {
 #[component]
 pub fn MarkdownBlocks(markdown: String) -> Element {
     let blocks = blocks::parse_blocks(&markdown);
+    let heading_ids = render::unique_heading_anchors(&blocks);
     rsx! {
         for (index, block) in blocks.into_iter().enumerate() {
-            MarkdownBlockView { key: "{index}", block }
+            MarkdownBlockView { key: "{index}", block, heading_id: heading_ids[index].clone() }
         }
     }
 }

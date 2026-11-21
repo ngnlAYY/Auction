@@ -181,16 +181,16 @@ function redirectAdminAlias(path: string): JSX.Element {
   const hash = hashIndex === -1 ? "" : suffix.slice(hashIndex);
   const target = `${path}${suffix}`;
   createEffect(
-    () => null,
-    () => {
-      if (hash === "") {
-        router.replace(target);
+    () => ({ hash, search, target }),
+    ({ hash: currentHash, search: currentSearch, target: currentTarget }) => {
+      if (currentHash === "") {
+        router.replace(currentTarget);
         return;
       }
       // 共享路由器会把带片段的 replace 登记为待定位落点；Rust 的 WebHistory::replace
       // 只把 URL 片段保留下来，然后滚到页首。先按无片段地址替换条目，再把旧后缀补回。
-      router.replace(`${path}${search}`);
-      writeLocationPreservingScroll(target, "replace");
+      router.replace(`${path}${currentSearch}`);
+      writeLocationPreservingScroll(currentTarget, "replace");
     },
   );
   return null;

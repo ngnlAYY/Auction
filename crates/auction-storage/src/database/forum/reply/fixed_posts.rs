@@ -17,6 +17,12 @@ pub(super) async fn record_fixed_posts_update_postgres(
     updated_at: Timestamp,
     next_scan_at: Timestamp,
 ) -> Result<(), ApplicationError> {
+    let catalog_page_count = topic
+        .catalog_continuation
+        .len()
+        .checked_add(1)
+        .and_then(|pages| i32::try_from(pages).ok())
+        .ok_or_else(|| storage_error("论坛目录页数超出存储范围"))?;
     let mut transaction = store
         .pool()
         .begin()
@@ -69,7 +75,7 @@ pub(super) async fn record_fixed_posts_update_postgres(
     .bind(&topic.content_claim_owner)
     .bind(topic.content_claim_fencing)
     .bind(processed_through_post_number)
-    .bind((topic.catalog_continuation.len() + 1) as i32)
+    .bind(catalog_page_count)
     .bind(topic.confirmed_terminal_version)
     .execute(&mut *transaction)
     .await
@@ -93,6 +99,12 @@ pub(super) async fn record_fixed_posts_progress_postgres(
     processed_through_post_number: i32,
     updated_at: Timestamp,
 ) -> Result<(), ApplicationError> {
+    let catalog_page_count = topic
+        .catalog_continuation
+        .len()
+        .checked_add(1)
+        .and_then(|pages| i32::try_from(pages).ok())
+        .ok_or_else(|| storage_error("论坛目录页数超出存储范围"))?;
     let mut transaction = store
         .pool()
         .begin()
@@ -134,7 +146,7 @@ pub(super) async fn record_fixed_posts_progress_postgres(
     .bind(&topic.content_claim_owner)
     .bind(topic.content_claim_fencing)
     .bind(processed_through_post_number)
-    .bind((topic.catalog_continuation.len() + 1) as i32)
+    .bind(catalog_page_count)
     .execute(&mut *transaction)
     .await
     .map_err(|error| storage_error_from(error, "写入论坛固定楼层暂存进度失败"))?;
@@ -156,6 +168,12 @@ pub(super) async fn finish_topic_scan_postgres(
     scanned_at: Timestamp,
     next_scan_at: Timestamp,
 ) -> Result<(), ApplicationError> {
+    let catalog_page_count = topic
+        .catalog_continuation
+        .len()
+        .checked_add(1)
+        .and_then(|pages| i32::try_from(pages).ok())
+        .ok_or_else(|| storage_error("论坛目录页数超出存储范围"))?;
     let mut transaction = store
         .pool()
         .begin()
@@ -199,7 +217,7 @@ pub(super) async fn finish_topic_scan_postgres(
     .bind(&topic.content_claim_owner)
     .bind(topic.content_claim_fencing)
     .bind(processed_through_post_number)
-    .bind((topic.catalog_continuation.len() + 1) as i32)
+    .bind(catalog_page_count)
     .bind(topic.confirmed_terminal_version)
     .execute(&mut *transaction)
     .await
@@ -271,6 +289,12 @@ pub(super) async fn fail_topic_scan_postgres(
     retry_at: Timestamp,
     failure_code: &str,
 ) -> Result<(), ApplicationError> {
+    let catalog_page_count = topic
+        .catalog_continuation
+        .len()
+        .checked_add(1)
+        .and_then(|pages| i32::try_from(pages).ok())
+        .ok_or_else(|| storage_error("论坛目录页数超出存储范围"))?;
     let result = sqlx::query(
         "UPDATE public.auction_forum_sync
          SET content_next_scan_at = $3,
@@ -283,9 +307,15 @@ pub(super) async fn fail_topic_scan_postgres(
          WHERE auction_id = $1
            AND status = 'published'
            AND thread_id = $5
+           AND catalog_post_id = $10
+           AND system_log_post_id = $11
+           AND catalog_page_count = $12
            AND content_claim_token = $6
            AND content_claim_owner = $7
-           AND content_claim_fencing = $8",
+           AND content_claim_fencing = $8
+           AND content_revision = $9
+           AND content_lease_expires_at > $2
+           AND content_lease_expires_at > clock_timestamp()",
     )
     .bind(topic.auction_id.as_uuid())
     .bind(failed_at)
@@ -295,6 +325,10 @@ pub(super) async fn fail_topic_scan_postgres(
     .bind(topic.content_claim_token)
     .bind(&topic.content_claim_owner)
     .bind(topic.content_claim_fencing)
+    .bind(topic.content_revision)
+    .bind(&topic.catalog_post_id)
+    .bind(&topic.system_log_post_id)
+    .bind(catalog_page_count)
     .execute(store.pool())
     .await
     .map_err(|error| storage_error_from(error, "记录论坛固定楼层扫描失败状态失败"))?;

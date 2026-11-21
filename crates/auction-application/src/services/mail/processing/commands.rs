@@ -12,11 +12,11 @@ use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
-use crate::ports::core::{StoredCommand, decimal_identity};
+use crate::ports::core::{RequestHash, StoredCommand, decimal_identity};
 use crate::ports::mail::{
-    MailAuctionIntakeCommand, MailAuctionIntakeResult, MailDeliveryOperation, MailLoginKey,
-    MailMessage, MailNotificationTemplate, MailProcessingDecision, MailProcessingError,
-    MailUserCommandKind,
+    MailAuctionIntakeCommand, MailAuctionIntakeResult, MailDeliveryCommand, MailDeliveryOperation,
+    MailDeliveryOrigin, MailLoginKey, MailMessage, MailNotificationTemplate,
+    MailProcessingDecision, MailProcessingError, MailUserCommandKind,
 };
 
 pub(super) fn validate_command(command: &MailAuctionIntakeCommand) -> Result<(), ApplicationError> {
@@ -154,9 +154,9 @@ pub(super) fn auction_request_hash(
         level: Option<i32>,
         attributes: &'a Value,
         source_fingerprint: [u8; 32],
+        collected_at: Timestamp,
         start_price: i64,
     }
-    // 保留原数组顺序和 Item 字段编码，借用逐项投影，不为摘要再分配整封附件列表。
     struct Items<'a>(&'a [crate::ports::mail::MailAuctionItem]);
 
     impl Serialize for Items<'_> {
@@ -171,6 +171,7 @@ pub(super) fn auction_request_hash(
                 level: item.level,
                 attributes: &item.attributes,
                 source_fingerprint: item.source_fingerprint,
+                collected_at: item.collected_at,
                 start_price: item.start_price,
             }))
         }
@@ -190,40 +191,83 @@ pub(super) fn auction_request_hash(
     )?)
 }
 
-pub(super) fn delivery_request_hash(
-    command_id: CommandId,
-    message: &MailMessage,
-    operation: MailDeliveryOperation,
-    template: Option<MailNotificationTemplate>,
-    result_code: Option<&str>,
+pub(super) struct DeliveryRequestHashInput<'a> {
+    pub command_id: CommandId,
+    pub message: &'a MailMessage,
+    pub operation: MailDeliveryOperation,
+    pub template: Option<MailNotificationTemplate>,
+    pub result_code: Option<&'a str>,
+    pub user_key_user_id: Option<Uuid>,
+    pub attachment_ids: &'a [String],
+    pub notification_body: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct DeliveryRequest<'a> {
+    operation: &'static str,
+    world_id: &'a str,
+    external_mail_id: &'a str,
+    recipient: &'a str,
+    template: Option<&'static str>,
+    result_code: Option<&'a str>,
     user_key_user_id: Option<Uuid>,
-    attachment_ids: &[String],
-) -> Result<crate::ports::core::RequestHash, ApplicationError> {
-    #[derive(Serialize)]
-    struct Request<'a> {
-        operation: &'static str,
-        world_id: &'a str,
-        external_mail_id: &'a str,
-        recipient: &'a str,
-        template: Option<&'static str>,
-        result_code: Option<&'a str>,
-        user_key_user_id: Option<Uuid>,
-        attachment_ids: &'a [String],
+    attachment_ids: &'a [String],
+    // 保留无冻结正文的已发布摘要编码，新增正文只在有值时参与摘要。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notification_body: Option<&'a str>,
+}
+
+impl DeliveryRequest<'_> {
+    fn hash(&self, command_id: CommandId) -> Result<RequestHash, serde_json::Error> {
+        RequestHash::from_request("mail_delivery", command_id.into(), self)
     }
-    Ok(crate::ports::core::RequestHash::from_request(
-        "mail_delivery",
-        command_id.into(),
-        &Request {
-            operation: operation.as_str(),
-            world_id: &message.world_id,
-            external_mail_id: &message.external_mail_id,
-            recipient: &message.sender,
-            template: template.map(MailNotificationTemplate::as_str),
-            result_code,
-            user_key_user_id,
-            attachment_ids,
-        },
-    )?)
+}
+
+pub(super) fn delivery_request_hash(
+    input: DeliveryRequestHashInput<'_>,
+) -> Result<RequestHash, ApplicationError> {
+    let request = DeliveryRequest {
+        operation: input.operation.as_str(),
+        world_id: &input.message.world_id,
+        external_mail_id: &input.message.external_mail_id,
+        recipient: &input.message.sender,
+        template: input.template.map(MailNotificationTemplate::as_str),
+        result_code: input.result_code,
+        user_key_user_id: input.user_key_user_id,
+        attachment_ids: input.attachment_ids,
+        notification_body: input.notification_body,
+    };
+    Ok(request.hash(input.command_id)?)
+}
+
+impl MailDeliveryCommand {
+    /// 投稿回执原先只在载荷冻结正文。仅在同一投递行的完整载荷已精确匹配后，
+    /// 允许带正文的新摘要重放使用旧摘要的回执。
+    pub fn matches_legacy_submission_receipt_digest(&self, stored_digest: &[u8]) -> bool {
+        if self.origin != MailDeliveryOrigin::MailIntake
+            || self.operation != MailDeliveryOperation::Send
+            || self.template != Some(MailNotificationTemplate::AuctionSubmissionReceipt)
+            || self.notification_body.is_none()
+        {
+            return false;
+        }
+        let mut request = DeliveryRequest {
+            operation: self.operation.as_str(),
+            world_id: &self.world_id,
+            external_mail_id: &self.external_mail_id,
+            recipient: &self.recipient,
+            template: self.template.map(MailNotificationTemplate::as_str),
+            result_code: self.result_code.as_deref(),
+            user_key_user_id: self.user_key_user_id,
+            attachment_ids: &self.attachment_ids,
+            notification_body: None,
+        };
+        if !request.hash(self.command_id).is_ok_and(|legacy| stored_digest == legacy.as_bytes()) {
+            return false;
+        }
+        request.notification_body = self.notification_body.as_deref();
+        request.hash(self.command_id).is_ok_and(|current| current == self.request_hash)
+    }
 }
 
 pub(super) fn user_request_hash(

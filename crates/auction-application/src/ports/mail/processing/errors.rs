@@ -38,7 +38,11 @@ pub enum MailProcessingError {
 
 pub(super) fn clear_string(value: &mut String) {
     let mut bytes = std::mem::take(value).into_bytes();
-    bytes.fill(0);
+    for byte in &mut bytes {
+        // SAFETY: `byte` 指向已初始化且独占的敏感字节；volatile 写避免清零被优化掉。
+        unsafe { std::ptr::write_volatile(byte, 0) };
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
 }
 
 /// 生成 world-scoped MoogleMail 拍卖命令账本聚合标识。

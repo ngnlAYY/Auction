@@ -26,7 +26,7 @@ mod health;
 mod snapshot;
 mod webhook;
 
-use self::errors::storage_error;
+use crate::database::storage_error;
 use claims::claim_postgres;
 use delivery::{
     list_enqueued_postgres, mark_claim_failed_postgres, mark_enqueued_postgres,

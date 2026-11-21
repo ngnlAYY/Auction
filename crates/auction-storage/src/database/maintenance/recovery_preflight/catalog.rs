@@ -1,6 +1,6 @@
 //! 首次初始化和恢复共用的 PostgreSQL 用户对象盘点；不读取敏感 option。
 
-/// 只允许默认系统对象与空 public schema；共享订阅目录必须限定当前数据库。
+/// 只盘点当前数据库的用户对象，包括 database-local FDW、foreign server 与 user mapping。
 pub(crate) const USER_OBJECT_COUNT_SQL: &str = "WITH user_namespaces AS (
                  SELECT oid, nspname
                  FROM pg_catalog.pg_namespace
@@ -74,15 +74,6 @@ pub(crate) const USER_OBJECT_COUNT_SQL: &str = "WITH user_namespaces AS (
                  FROM pg_catalog.pg_extension AS extension_record
                  WHERE extension_record.extname <> 'plpgsql'
                  UNION ALL
-                 SELECT wrapper_record.oid
-                 FROM pg_catalog.pg_foreign_data_wrapper AS wrapper_record
-                 UNION ALL
-                 SELECT server_record.oid
-                 FROM pg_catalog.pg_foreign_server AS server_record
-                 UNION ALL
-                 SELECT mapping_record.umid
-                 FROM pg_catalog.pg_user_mappings AS mapping_record
-                 UNION ALL
                  SELECT trigger_record.oid
                  FROM pg_catalog.pg_event_trigger AS trigger_record
                  UNION ALL
@@ -94,6 +85,15 @@ pub(crate) const USER_OBJECT_COUNT_SQL: &str = "WITH user_namespaces AS (
                  WHERE subscription_record.subdbid = (
                      SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()
                  )
+                 UNION ALL
+                 SELECT wrapper_record.oid
+                 FROM pg_catalog.pg_foreign_data_wrapper AS wrapper_record
+                 UNION ALL
+                 SELECT server_record.oid
+                 FROM pg_catalog.pg_foreign_server AS server_record
+                 UNION ALL
+                 SELECT mapping_record.umid
+                 FROM pg_catalog.pg_user_mappings AS mapping_record
                  UNION ALL
                  SELECT object_record.oid
                  FROM pg_catalog.pg_largeobject_metadata AS object_record

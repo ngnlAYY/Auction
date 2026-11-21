@@ -279,6 +279,7 @@ function validRealtimeEventWorld(value: unknown, expectedWorld: string): boolean
     case "auction.schedule_updated":
       return string(payload.world_id) === expectedWorld;
     default:
+      // 其他已知事件通过上面的 auction_id 绑定；只有带 world 字段的事件需要再核对世界。
       return true;
   }
 }

@@ -608,7 +608,7 @@ mod tests {
 
     use super::{AuditField, AuditFilterState, audit_time_input, page, use_audit_filter_draft};
     use crate::api::{AdminApiFailure, AdminAuditFilter};
-    use crate::surface::auctions::draft_page_tests::{click_button, has_live_text, mount_writer};
+    use crate::surface::auctions::editor::tests::{click_button, has_live_text, mount_writer};
     use crate::surface::query::AuditQuery;
     use crate::surface::realtime::{
         FilterValue, TestPage, get_parameter, selected_options, submit_forms, text_attributes,

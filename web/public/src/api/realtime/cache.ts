@@ -172,6 +172,10 @@ function mergeEvent(state: CacheState, event: RealtimeEvent): EventMerge {
   if (event.stream_sequence <= state.after || seenContains(state.seen, event.event_id)) {
     return { kind: "ignored" };
   }
+  const payload = object(event.payload);
+  if (payload === null || string(payload.auction_id) !== state.auctionId) {
+    return { kind: "gap" };
+  }
   if (event.kind === "lot.bid_accepted") {
     return mergeAcceptedBid(state, event);
   }

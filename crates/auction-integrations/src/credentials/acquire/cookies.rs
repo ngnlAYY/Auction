@@ -1,5 +1,7 @@
 //! Cookie header 与 Set-Cookie 分开解析；游戏凭据只保存两个认证字段，不把论坛会话带到游戏。
 
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
 use auction_application::admin::{
     AdminCredentialError, AdminCredentialKind, AdminCredentialSecret,
     MAX_ADMIN_CREDENTIAL_SECRET_BYTES,
@@ -191,8 +193,8 @@ fn validate_attributes<'a>(
 ) -> Result<bool, ApplicationError> {
     let mut domain_seen = false;
     let mut path_seen = false;
-    let mut max_age_seen = false;
-    let mut deleted = false;
+    let mut max_age_deleted = None;
+    let mut expires_deleted = None;
     for part in parts {
         let part = part.trim_matches(' ');
         if part.is_empty() {
@@ -214,19 +216,87 @@ fn validate_attributes<'a>(
             }
             path_seen = true;
         } else if name.eq_ignore_ascii_case("max-age") {
-            if max_age_seen {
+            if max_age_deleted.is_some() {
                 return Err(unavailable());
             }
             let age = value.and_then(|value| value.parse::<i64>().ok()).ok_or_else(unavailable)?;
-            deleted = age <= 0;
-            max_age_seen = true;
+            max_age_deleted = Some(age <= 0);
+        } else if name.eq_ignore_ascii_case("expires") {
+            if expires_deleted.is_some() {
+                return Err(unavailable());
+            }
+            expires_deleted =
+                Some(expires_in_past(value.ok_or_else(unavailable)?).ok_or_else(unavailable)?);
         } else if (name.eq_ignore_ascii_case("secure") || name.eq_ignore_ascii_case("httponly"))
             && value.is_some()
         {
             return Err(unavailable());
         }
     }
-    Ok(deleted)
+    Ok(max_age_deleted.or(expires_deleted).unwrap_or(false))
+}
+
+fn expires_in_past(value: &str) -> Option<bool> {
+    let mut fields = value.split_ascii_whitespace();
+    let weekday = fields.next()?.strip_suffix(',')?;
+    if !matches!(weekday, "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun") {
+        return None;
+    }
+    let day = fields.next()?.parse::<u32>().ok()?;
+    let month = match fields.next()? {
+        "Jan" => 1,
+        "Feb" => 2,
+        "Mar" => 3,
+        "Apr" => 4,
+        "May" => 5,
+        "Jun" => 6,
+        "Jul" => 7,
+        "Aug" => 8,
+        "Sep" => 9,
+        "Oct" => 10,
+        "Nov" => 11,
+        "Dec" => 12,
+        _ => return None,
+    };
+    let year = fields.next()?.parse::<i64>().ok()?;
+    let time = fields.next()?;
+    if !fields.next()?.eq_ignore_ascii_case("GMT") || fields.next().is_some() {
+        return None;
+    }
+    if year < 1970 {
+        return Some(true);
+    }
+    if year > 9999 {
+        return None;
+    }
+    let mut clock = time.split(':');
+    let hour = clock.next()?.parse::<u64>().ok()?;
+    let minute = clock.next()?.parse::<u64>().ok()?;
+    let second = clock.next()?.parse::<u64>().ok()?;
+    if clock.next().is_some() || hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    if day == 0 || day > days_in_month {
+        return None;
+    }
+    let shifted_year = year - if month <= 2 { 1 } else { 0 };
+    let era = shifted_year.div_euclid(400);
+    let year_of_era = shifted_year - era * 400;
+    let shifted_month = i64::from(month) + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * shifted_month + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    let seconds =
+        u64::try_from(days).ok()?.checked_mul(86_400)? + hour * 3_600 + minute * 60 + second;
+    let expires_at = UNIX_EPOCH.checked_add(Duration::from_secs(seconds))?;
+    Some(SystemTime::now() >= expires_at)
 }
 
 fn valid_domain(value: &str, endpoint: &Url) -> bool {

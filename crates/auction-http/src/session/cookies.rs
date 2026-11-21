@@ -47,7 +47,12 @@ fn read_cookie(headers: &HeaderMap, name: &str, skip_empty_pairs: bool) -> Optio
             if skip_empty_pairs && pair.is_empty() {
                 continue;
             }
-            let (cookie_name, cookie_value) = pair.split_once('=')?;
+            let Some((cookie_name, cookie_value)) = pair.split_once('=') else {
+                if pair == name {
+                    return None;
+                }
+                continue;
+            };
             if cookie_name != name {
                 continue;
             }

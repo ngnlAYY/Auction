@@ -334,7 +334,7 @@ mod tests {
         renewal_failure, use_session,
     };
     use crate::api::{AdminApiFailure, AdminSession};
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         button, click_button, has_live_text, init_i18n, mount_writer, settle_writer, writer_form,
     };
     use crate::surface::auth::login::{AdminLogin, LoginSubmission};

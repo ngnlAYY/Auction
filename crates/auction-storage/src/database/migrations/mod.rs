@@ -10,16 +10,13 @@ use sqlx::{
 
 use super::{DatabaseBackend, StorageError};
 
-mod compatibility;
-mod evidence;
-mod history;
+pub(in crate::database) mod compatibility;
+pub(in crate::database) mod evidence;
+pub(in crate::database) mod history;
 mod readiness;
-pub(super) use compatibility::read_compatibility_suffix;
 pub use compatibility::{
     CompatibleSuffixViolation, MigrationCompatibilityEntry, check_compatible_suffix,
 };
-pub(super) use evidence::{postgres_history_present, read_postgres_history, read_schema_identity};
-pub(super) use history::postgres_history_matches;
 pub(super) use readiness::check_postgres_readiness;
 
 static POSTGRES_MIGRATOR: Migrator = sqlx::migrate!("../../migrations/postgres");

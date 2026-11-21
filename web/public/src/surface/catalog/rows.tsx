@@ -17,20 +17,28 @@ import { equipmentGroupLabel, lotStatusClass, lotStatusLabel } from "./presentat
 
 /** 把一页竞价记录展开成展示行：代理对代理竞争中落败的授权按一次代理出价（金额为其上限）
  * 紧跟在胜者出价之后——降序列表里即在其下方、时间上先于它——说明胜者为何以该价出价。
- * 落败行不领先，也不计入分页总数；键在出价 ID 后加后缀，与真实出价互不冲突。 */
+ * 落败行不领先，也不计入分页总数；合成键会避开本页全部真实出价 ID。 */
 export function bidHistoryRows(
   bids: readonly PublicBidLogEntryResponse[],
 ): PublicBidLogEntryResponse[] {
   const rows: PublicBidLogEntryResponse[] = [];
+  const usedIds = new Set(bids.map((bid) => bid.id));
   for (const bid of bids) {
     // 输入数组可能由调用方持有，必须克隆行而不是改写原条目。
     const winner: PublicBidLogEntryResponse = { ...bid, defeated_proxy: null };
     rows.push(winner);
     const defeated = bid.defeated_proxy;
     if (defeated != null) {
+      let id = `${bid.id}-defeated`;
+      let suffix = 0;
+      while (usedIds.has(id)) {
+        suffix += 1;
+        id = `${bid.id}-defeated-${suffix}`;
+      }
+      usedIds.add(id);
       rows.push({
         ...winner,
-        id: `${bid.id}-defeated`,
+        id,
         bidder_name: defeated.bidder_name,
         amount: defeated.maximum_amount,
         source: "proxy",
@@ -90,7 +98,19 @@ export function BidHistoryParticipant(props: {
       if (postNumber === null) {
         return null;
       }
-      return { postNumber, url: props.sourcePostUrl ?? null };
+      const rawUrl = props.sourcePostUrl ?? null;
+      let url: string | null = null;
+      if (rawUrl !== null) {
+        try {
+          const parsed = new URL(rawUrl);
+          if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+            url = rawUrl;
+          }
+        } catch {
+          // A non-absolute or malformed forum URL remains plain text.
+        }
+      }
+      return { postNumber, url };
     },
   );
   const forumUnknown = createValueMemo(() => props.source === "forum" && forumSource() === null);

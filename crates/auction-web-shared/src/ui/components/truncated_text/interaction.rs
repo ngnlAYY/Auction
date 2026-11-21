@@ -3,9 +3,13 @@
 use std::cell::RefCell;
 
 use dioxus::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use web_sys::HtmlElement as PortalElement;
 
 use super::TooltipPosition;
-use super::document::{self, Document, PortalElement};
+use super::document::{self, Document};
+#[cfg(not(target_arch = "wasm32"))]
+use super::host_document::DomPortal as PortalElement;
 #[cfg(any(target_arch = "wasm32", test))]
 use super::tracking::AnchorFrames;
 use crate::a11y::{EscapeUnsubscribe, use_document_escape};

@@ -159,7 +159,19 @@ async fn run_service(
             tracing::error!(reason, "Worker 运行时故障，开始排空");
             shutdown_runtime.close();
             let _ = shutdown_sender.send(());
-            shutdown_runtime.drain(signals, &mut worker, auction_observability::ShutdownReason::RuntimeFailure, forced).await.context("运行失败后排空 Worker 失败")?;
+            if let Err(drain_error) = shutdown_runtime
+                .drain(
+                    signals,
+                    &mut worker,
+                    auction_observability::ShutdownReason::RuntimeFailure,
+                    forced,
+                )
+                .await
+            {
+                return Err(anyhow::anyhow!(
+                    "Worker 运行时故障 `{reason}`；排空失败：{drain_error:#}"
+                ));
+            }
             if reason == "control_server_stopped" {
                 return Err(anyhow::anyhow!("Worker control 服务已停止；需要重启 Worker"));
             }
@@ -173,11 +185,34 @@ async fn run_service(
             Err(anyhow::anyhow!("凭据运行所有权已被撤销；需要重启 Worker"))
         }
         signal = signals.recv() => {
-            let signal = signal.context("接收 Worker 终止信号失败")?;
-            tracing::info!(signal = %signal, "Worker 开始排空");
+            let (received_signal, signal_error) = match signal {
+                Ok(signal) => (Some(signal), None),
+                Err(error) => (None, Some(error)),
+            };
+            if let Some(signal) = received_signal {
+                tracing::info!(signal = %signal, "Worker 开始排空");
+            } else if let Some(error) = signal_error.as_ref() {
+                tracing::warn!(error = %error, "接收 Worker 终止信号失败，仍将排空");
+            }
             shutdown_runtime.close();
             let _ = shutdown_sender.send(());
-            shutdown_runtime.drain(signals, &mut worker, auction_observability::ShutdownReason::Signal, forced).await
+            let drain_result = shutdown_runtime
+                .drain(
+                    signals,
+                    &mut worker,
+                    auction_observability::ShutdownReason::Signal,
+                    forced,
+                )
+                .await;
+            match (signal_error, drain_result) {
+                (Some(signal_error), Ok(())) => {
+                    Err(anyhow::Error::new(signal_error).context("接收 Worker 终止信号失败"))
+                }
+                (Some(signal_error), Err(drain_error)) => Err(anyhow::anyhow!(
+                    "接收 Worker 终止信号失败：{signal_error}; Worker 排空也失败：{drain_error:#}"
+                )),
+                (None, result) => result,
+            }
         }
     };
     if result.is_ok() {

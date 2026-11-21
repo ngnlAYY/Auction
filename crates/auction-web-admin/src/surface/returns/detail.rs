@@ -3,6 +3,7 @@
 //! 字段全部来自服务端安全投影；按钮只按服务端给出的 `allowed_actions` 展示，命令事务仍会锁内
 //! 复核。页面明确区分“已寄出”（邮件发出）、“退回仍在收件箱”、“已领回”与“代管”。
 
+use auction_contracts::AdminSettlementReturnStatus;
 #[cfg(target_arch = "wasm32")]
 use auction_web_shared::a11y::{focus_element_by_id, top_modal};
 #[cfg(target_arch = "wasm32")]
@@ -154,7 +155,7 @@ fn ReturnDetailPage(return_id: String) -> Element {
                     if shows_asset_location(&detail.summary.status) {
                         TakeSection {
                             take: detail.take.clone(),
-                            status: detail.summary.status.clone(),
+                            status: detail.summary.status,
                             unknown_reason: detail.take_unknown_reason.clone(),
                         }
                         if let Some(custody) = detail.custody.clone() {
@@ -177,7 +178,7 @@ fn ReturnDetailPage(return_id: String) -> Element {
 fn SummarySection(summary: SettlementReturnSummary) -> Element {
     let empty = || t!("value-empty");
     let kind = summary.obligation_kind.as_deref().map_or_else(empty, |kind| label(kind_key, kind));
-    let plan = summary.plan.as_deref().map_or_else(empty, |plan| label(plan_key, plan));
+    let plan = summary.plan.as_ref().map_or_else(empty, |plan| label(plan_key, plan));
     let resends = summary.resends_used.map_or_else(empty, |used| {
         t!("settlement-return-resends-value", used: used.to_string(), limit: summary.resend_limit.to_string())
     });
@@ -255,14 +256,14 @@ fn SummarySection(summary: SettlementReturnSummary) -> Element {
 #[component]
 fn TakeSection(
     take: Option<SettlementReturnTake>,
-    status: String,
+    status: AdminSettlementReturnStatus,
     unknown_reason: Option<String>,
 ) -> Element {
     let empty = || t!("value-empty");
     rsx! {
         section { class: "admin-panel", aria_labelledby: "settlement-return-take-title",
             h2 { id: "settlement-return-take-title", {t!("settlement-return-take-title")} }
-            if status == "take_unknown" {
+            if status == AdminSettlementReturnStatus::TakeUnknown {
                 p { class: "action-feedback action-feedback--error", role: "note",
                     {t!("settlement-return-take-unknown-warning")}
                 }

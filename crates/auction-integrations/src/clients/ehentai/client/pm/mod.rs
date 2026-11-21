@@ -227,6 +227,7 @@ impl EhentaiClient {
             "check_read_owner",
             || ForumPmError::Unavailable,
         ))?;
+        let _cookie_use = cookie.lock_for_use().await.ok_or(ForumPmError::Unavailable)?;
         let request_metrics = ForumRequestGuard::start(
             std::sync::Arc::clone(&self.external_metrics),
             metrics_world,
@@ -336,6 +337,7 @@ impl EhentaiClient {
             "check_send_owner",
             || ForumPmError::Unavailable,
         ))?;
+        let _cookie_use = cookie.lock_for_use().await.ok_or(ForumPmError::Unavailable)?;
         // 复用已有 URL 编码器，不为 PM 额外开启 reqwest feature。
         let encoded = url::form_urlencoded::Serializer::new(String::new())
             .extend_pairs(form.values.iter().map(|(name, value)| (name.as_str(), value.as_str())))

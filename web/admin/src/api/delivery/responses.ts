@@ -82,6 +82,15 @@ export function decodeDetailWithActions(
 ): Result<AdminDeliveryDetailWithActionsResponse, null> {
   const data = payload.data;
   if (
+    data === null ||
+    typeof data !== "object" ||
+    data.detail === null ||
+    typeof data.detail !== "object" ||
+    data.detail.delivery === null ||
+    typeof data.detail.delivery !== "object" ||
+    !Array.isArray(data.detail.attempts) ||
+    !Array.isArray(data.detail.evidence) ||
+    !Array.isArray(data.detail.dispositions) ||
     data.detail.delivery.id !== deliveryId ||
     !validSuccessCode(payload.code) ||
     payload.message.length === 0
@@ -103,6 +112,9 @@ export function decodePreview(
     return err(null);
   }
   const preview = payload.data;
+  if (preview === null || typeof preview !== "object" || !Array.isArray(preview.blockers)) {
+    return err(null);
+  }
   const priorAttempts = preview.prior_unbound_attempts ?? null;
   const beforeCurrent = preview.sent_before_current_attempt ?? null;
   if (priorAttempts === null || beforeCurrent === null) {

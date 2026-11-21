@@ -7,10 +7,8 @@ use gloo_net::http::Request;
 use serde_json::Value;
 
 use super::clock::{HttpResponse, send_response};
-use super::session::{
-    SessionIdentity, SessionIdentityObservation, decode_account_identity_response,
-    decode_observed_account_read,
-};
+use super::session::identity::{SessionIdentity, SessionIdentityObservation};
+use super::session::transport::{decode_account_identity_response, decode_observed_account_read};
 use super::{CommandError, TransportError};
 
 const PATH: &str = "/api/v1/me/lot-watch-preference";
@@ -44,6 +42,7 @@ pub(crate) async fn fetch_lot_watch_preference(
     user_id: &str,
 ) -> Result<PublicLotWatchPreferenceResponse, CommandError> {
     let observation = SessionIdentityObservation::start();
+    let owner_observation = SessionIdentityObservation::user_owner();
     let response = send_response(
         |abort_signal| {
             Request::get(PATH)
@@ -56,7 +55,7 @@ pub(crate) async fn fetch_lot_watch_preference(
     )
     .await
     .map_err(|error| failure(error.code(), 0))?;
-    decode(response, user_id, None, observation).await
+    decode(response, user_id, None, observation, owner_observation).await
 }
 
 /// 未知结果重试必须传入原 DTO，不能改写命令 ID、渠道或 CAS 版本。
@@ -65,6 +64,7 @@ pub(crate) async fn set_lot_watch_preference(
     command: &PublicSetLotWatchPreferenceRequest,
 ) -> Result<PublicLotWatchPreferenceResponse, CommandError> {
     let observation = SessionIdentityObservation::start();
+    let owner_observation = SessionIdentityObservation::user_owner();
     let response = send_response(
         |abort_signal| {
             Request::put(PATH)
@@ -78,7 +78,7 @@ pub(crate) async fn set_lot_watch_preference(
     )
     .await
     .map_err(|error| failure(error.code(), 0))?;
-    decode(response, user_id, Some(command), observation).await
+    decode(response, user_id, Some(command), observation, owner_observation).await
 }
 
 async fn decode(
@@ -86,6 +86,7 @@ async fn decode(
     user_id: &str,
     command: Option<&PublicSetLotWatchPreferenceRequest>,
     observation: SessionIdentityObservation,
+    owner_observation: SessionIdentityObservation,
 ) -> Result<PublicLotWatchPreferenceResponse, CommandError> {
     let status = response.status();
     let valid = |value: &Value| {
@@ -93,7 +94,7 @@ async fn decode(
             && value.get("version").and_then(Value::as_i64).is_some_and(|version| version > 0)
     };
     let result: PublicLotWatchPreferenceResponse = if command.is_some() {
-        decode_account_identity_response(response, Some(user_id), valid).await?
+        decode_account_identity_response(response, Some(user_id), &owner_observation, valid).await?
     } else {
         decode_observed_account_read(response, || observation.cookie_current(), valid).await?
     };

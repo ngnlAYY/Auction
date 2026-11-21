@@ -115,11 +115,11 @@ auction-cli backup scope-extract \
    archive_command = '/opt/auction/bin/auction-cli wal archive --staging-dir /var/lib/auction/wal-staging --recipient age1<收件人公钥> %p %f'
    ```
 
-   命令把 zstd 流经 `age --encrypt` 写入 `<段名>.zst.age`，fsync 文件与目录后发布 `<段名>.zst.age.manifest.json`（`auction-wal-archive.v1`）。失败返回非零由 PostgreSQL 重试；同段源字节数与 mtime 一致时直接成功，不重复加密；源内容或密文长度不符时失败关闭。
+   命令把 zstd 流经 `age --encrypt` 写入 `<段名>.zst.age`，fsync 文件与目录后发布 `<段名>.zst.age.manifest.json`（`auction-wal-archive.v2`：段名、源字节数/mtime/SHA-256、密文长度/SHA-256、归档时刻）。失败返回非零由 PostgreSQL 重试；同段源字节数、mtime 与源 SHA-256 全部一致时才输出 `already_archived`，不重复加密。v1 manifest 仍可解析，但缺少源摘要，不能证明重复身份；已有 v1 证据遇到同名段时失败关闭，须由操作者核对后处理。
 
 2. `auction-base-backup.timer` 每周以 postgres 账号执行 `wal base-backup`，运行 `pg_basebackup --pgdata=- --format=tar --wal-method=fetch --checkpoint=fast --no-password`（本机 socket、peer 认证；账号须有 `REPLICATION` 或超级用户；集群不能有额外表空间），tar 流经 zstd + age 写入 `base-<UTC时刻>.tar.zst.age` 并发布 `auction-base-backup.v1` manifest（备份 ID、起止时刻、压缩前/密文字节与 SHA-256）。外部程序非零即失败关闭，不发布半成品。
 
-3. `auction-wal-upload.timer` 每 5 分钟以 auction 账号运行 `wal upload --budget-seconds 300`：WAL 按段名上传，校验后先写 `<段名>.wal-upload.json` 证据再删本地密文与 manifest；基础备份上传到 `<prefix>/base/<备份 ID>/`，顺序为密文、manifest、`completed.json`（`auction-base-upload.v1`），完成记录取备份完成时刻，响应丢失后重试生成相同字节。远端同长度与完整 SHA-256 的对象视为成功（bucket lock 下重传 409）。单份密文无法在预算内上传时同时调大 `--budget-seconds` 与 service `TimeoutStartSec`。
+3. `auction-wal-upload.timer` 每 5 分钟以 auction 账号运行 `wal upload --budget-seconds 300`：WAL 按段名上传，校验密文 SHA-256 与 manifest 一致后，先写 `<段名>.wal-upload.json` 持久证据（`auction-wal-upload.v2`，含源字节/mtime/SHA-256、密文长度/SHA-256、远端键），再删本地密文与 manifest；基础备份上传到 `<prefix>/base/<备份 ID>/`，顺序为密文、manifest、`completed.json`（`auction-base-upload.v1`），完成记录取备份完成时刻，响应丢失后重试生成相同字节。远端同长度与完整 SHA-256 的对象视为成功（bucket lock 下重传 409）。v1 WAL 上传证据仍可解析，但缺少源摘要，不能作为重复证明；v1 暂存 manifest 缺少密文摘要，上传器在网络发送前失败关闭；这两类旧证据都须由操作者核对后处理。单份密文无法在预算内上传时同时调大 `--budget-seconds` 与 service `TimeoutStartSec`。
 
 4. 基础备份上传成功后写本机 `base-<ID>.upload.json`（`auction-base-receipt.v1`），后续运行在目标身份一致时跳过重算与远端回读；证据缺失、无效或目标变化时按未上传处理。每次运行末尾按备份 ID 倒序保留最新 3 组完整暂存项，删除更旧组的本机证据、manifest 与密文；上传失败的旧项不删除，不完整的暂存项只报告 `incomplete`。异机关闭时保留策略照常执行，报告 `outcome = skipped`。
 
@@ -383,7 +383,7 @@ auction-cli --config-dir /etc/auction backup restore --database auction \
   --manifest /var/backups/auction/auction-<时间>.dump.manifest --dry-run
 ```
 
-`restore_preflight_passed = true` 只表示目标空库、无连接、可写主节点，不代表备份可用；dry-run 同时校验 archive。两者都不能阻止外部客户端在检查后重连。
+`restore_preflight_passed = true` 只表示目标空库、无连接、可写主节点，不代表备份可用；dry-run 同时校验 archive。预检与 dry-run 都是时点检查，不能阻止外部客户端之后重连。CLI 不临时撤销数据库 `CONNECT`：当前没有持久化门禁状态及启动恢复路径，进程被强制终止可能使正常客户端访问一直被拒绝。操作者必须从实际恢复前最后一次预检开始，持续阻止所有普通目标客户端连接，直至 `pg_restore` 完成。
 
 ### 4. 恢复
 

@@ -104,6 +104,8 @@ where
             response_envelope: Some(value.envelope.clone()),
             envelope: value.envelope,
         });
+        let next_version =
+            command.expected_state_version.checked_add(1).ok_or(AdminUserError::InvalidRequest)?;
         let result = self
             .store
             .mutate(AdminUserMutationWrite {
@@ -121,8 +123,6 @@ where
                 now: command.now,
             })
             .await?;
-        let next_version =
-            command.expected_state_version.checked_add(1).ok_or(AdminUserError::InvalidRequest)?;
         let action_result_valid = match command.action {
             AdminUserMutationAction::Rename => {
                 result.user.username == expected_username.as_deref().unwrap_or_default()

@@ -62,10 +62,8 @@ impl EquipmentSourceAdapter {
                 },
             });
         };
-        let mut session = credentials
-            .begin_read(world, MoogleMailOperation::Equipment)
-            .await
-            .map_err(|diagnostic_cause| {
+        let session = credentials.begin_read(world, MoogleMailOperation::Equipment).await.map_err(
+            |diagnostic_cause| {
                 safe_diagnostics::warn(
                     "equipment_fetch",
                     "acquire_observed_session",
@@ -81,7 +79,8 @@ impl EquipmentSourceAdapter {
                     elapsed_millis: None,
                     body: None,
                 }
-            })?;
+            },
+        )?;
         self.await_request_slot().await;
         let status_slot = Arc::new(AtomicU16::new(0));
         let started = std::time::Instant::now();

@@ -9,7 +9,8 @@ use auction_web_shared::{AsyncState, AsyncStateKind, QueryState, Time, Truncated
 use dioxus::prelude::*;
 
 use super::labels::{
-    kind_key, label, location_key, match_key, reason_key, shows_asset_location, status_key,
+    ReturnEnum, kind_key, label, location_key, match_key, reason_key, shows_asset_location,
+    status_key,
 };
 use crate::api::{
     SettlementReturnPage, SettlementReturnSummary, fetch_settlement_returns, valid_uuid,
@@ -306,8 +307,8 @@ pub(super) fn assets_text(item: &SettlementReturnSummary) -> String {
 }
 
 /// 状态徽标：未结案按是否需要人工核对分级，已结案为中性。
-fn status_badge(status: &str) -> &'static str {
-    match status {
+fn status_badge<T: ReturnEnum + ?Sized>(status: &T) -> &'static str {
+    match status.code() {
         "quarantined" | "take_unknown" => "admin-dashboard-badge admin-dashboard-badge--error",
         "awaiting_decision" | "recheck_pending" | "take_pending" | "resend_pending" => {
             "admin-dashboard-badge admin-dashboard-badge--warn"

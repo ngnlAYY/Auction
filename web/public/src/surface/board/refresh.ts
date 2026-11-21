@@ -190,7 +190,21 @@ export function useBidRefresh<T>(
   // 与源码的 use_reactive 一样按值去重；关闭后必须立即退订，不再随每次竞价执行空刷新。
   const enabledValue = createValueMemo(enabled);
   const selectedAuction = createValueMemo(() => auctionId?.() ?? null);
-  const consumed = createCell(refresh.revision.peek());
+  const consumedGlobal = createCell(refresh.revision.peek());
+  const consumedByAuction = new Map<string, number>();
+  const consumedFor = (selected: string | null, fallback: number): number => {
+    if (auctionId === undefined || selected === null) {
+      return consumedGlobal.peek();
+    }
+    return consumedByAuction.get(selected) ?? fallback;
+  };
+  const consume = (selected: string | null, value: number): void => {
+    if (auctionId !== undefined && selected !== null) {
+      consumedByAuction.set(selected, value);
+    } else {
+      consumedGlobal.set(value);
+    }
+  };
   let scheduled: { readonly auctionId: string | null; readonly task: TaskHandle } | null = null;
   const tasks = createTaskScope();
   const revision = createValueMemo(() => {
@@ -204,10 +218,13 @@ export function useBidRefresh<T>(
       if (!enabledValue()) {
         return { enabled: false } as const;
       }
+      const selected = selectedAuction();
+      const currentRevision = revision();
       return {
         enabled: true,
-        auctionId: selectedAuction(),
-        revision: revision(),
+        auctionId: selected,
+        revision: currentRevision,
+        consumedRevision: consumedFor(selected, currentRevision),
         // 先读资源状态以订阅它就绪/重新挂起的变化，再按纯函数决定是否排定。
         state: resource.state(),
       } as const;
@@ -220,17 +237,22 @@ export function useBidRefresh<T>(
       }
       if (!current.enabled) {
         // 闭合的代理面板不订阅竞价或资源状态，避免每行随通知执行空刷新。
-        consumed.set(refresh.revision.peek());
+        consumedGlobal.set(refresh.revision.peek());
         return;
+      }
+      if (auctionId !== undefined && current.auctionId !== null) {
+        if (!consumedByAuction.has(current.auctionId)) {
+          consumedByAuction.set(current.auctionId, current.consumedRevision);
+        }
       }
       if (!documentIsVisible()) {
         // 外壳恢复可见时会做权威刷新；隐藏期间保留事件游标，合并掉普通竞价读。
-        consumed.set(refresh.revision.peek());
+        consume(current.auctionId, current.revision);
         return;
       }
       const decision = planBidRefresh(
         current.revision,
-        consumed.peek(),
+        current.consumedRevision,
         scheduled !== null,
         current.state === "ready",
       );
@@ -249,16 +271,16 @@ export function useBidRefresh<T>(
         if (untrack(selectedAuction) !== current.auctionId) return;
         const latest = untrack(revision);
         if (!documentIsVisible()) {
-          consumed.set(refresh.revision.peek());
+          consume(current.auctionId, latest);
           return;
         }
         // 等待期间可能切换查询、关闭代理面板或触发全局刷新；只重启空闲资源。
         if (
           untrack(enabledValue) &&
-          latest > consumed.peek() &&
+          latest > consumedFor(current.auctionId, latest) &&
           untrack(() => resource.state()) === "ready"
         ) {
-          consumed.set(latest);
+          consume(current.auctionId, latest);
           resource.restart();
         }
       });

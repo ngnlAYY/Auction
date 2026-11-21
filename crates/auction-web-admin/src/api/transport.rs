@@ -34,6 +34,33 @@ impl AdminResponse {
         Self { response, invalidation }
     }
 
+    /// 解码需要限制正文大小的投影；测试替身也使用相同的字节上限。
+    pub(super) async fn json_bounded<T: serde::de::DeserializeOwned>(
+        &self,
+        max_bytes: usize,
+    ) -> Result<T, gloo_net::Error> {
+        #[cfg(test)]
+        if let TestResponse::Json(bytes) = &self.response {
+            if bytes.len() > max_bytes {
+                return Err(gloo_net::Error::GlooError("响应正文超过大小上限".to_owned()));
+            }
+            return Ok(serde_json::from_slice(bytes)?);
+        }
+        if self
+            .headers()
+            .get("content-length")
+            .and_then(|value| value.parse::<usize>().ok())
+            .is_some_and(|length| length > max_bytes)
+        {
+            return Err(gloo_net::Error::GlooError("响应正文超过大小上限".to_owned()));
+        }
+        let body = self.text().await?;
+        if body.len() > max_bytes {
+            return Err(gloo_net::Error::GlooError("响应正文超过大小上限".to_owned()));
+        }
+        Ok(serde_json::from_str(&body)?)
+    }
+
     /// 仅由错误解码器在确认收到可信的 401 后调用。
     pub(super) fn report_session_invalidation(self) {
         if let Some(invalidation) = self.invalidation {

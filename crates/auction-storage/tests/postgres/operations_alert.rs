@@ -1129,6 +1129,7 @@ async fn postgres_operations_alert_webhook_ledger_claims_and_finishes_independen
         .await
         .expect("领取第二 webhook")
         .expect("第二 signal 到期");
+    let unknown_delivery_id = unknown_dispatch.delivery_id;
     store
         .finish_webhook(
             unknown_dispatch,
@@ -1167,41 +1168,51 @@ async fn postgres_operations_alert_webhook_ledger_claims_and_finishes_independen
     .await
     .expect("写入租约过期 signal");
     let now = Timestamp::now();
+    let expires_at = now + auction_time::Duration::seconds(120);
     let stale_dispatch = store
         .claim_due_webhook(auction_application::operations::OperationsAlertWebhookClaimRequest {
             now,
-            lease_until: now + auction_time::Duration::seconds(120),
+            lease_until: expires_at,
             template: auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
                 .to_owned(),
         })
         .await
         .expect("领取租约过期 signal")
         .expect("第三 signal 到期");
-    sqlx::query(
-        "UPDATE public.operations_alert_webhook_deliveries
-         SET claim_expires_at = now() - interval '1 second' WHERE id = $1",
-    )
-    .bind(stale_dispatch.delivery_id)
-    .execute(store.postgres_pool())
-    .await
-    .expect("提前租约");
-    let _ = store
+    let claimed_after_expiry = store
         .claim_due_webhook(auction_application::operations::OperationsAlertWebhookClaimRequest {
-            now: Timestamp::now(),
-            lease_until: Timestamp::now() + auction_time::Duration::seconds(120),
+            now: expires_at,
+            lease_until: expires_at + auction_time::Duration::seconds(120),
             template: auction_application::operations::DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE
                 .to_owned(),
         })
         .await
         .expect("触发过期收口");
-    let stale_status: String = sqlx::query_scalar(
-        "SELECT status FROM public.operations_alert_webhook_deliveries WHERE id = $1",
-    )
-    .bind(stale_dispatch.delivery_id)
-    .fetch_one(store.postgres_pool())
-    .await
-    .expect("读取过期状态");
-    assert_eq!(stale_status, "manual_reconcile");
+    assert!(claimed_after_expiry.is_none(), "过期 webhook 不得再次领取");
+
+    let entries = store.list_webhook_deliveries(10).await.expect("读取 Admin webhook 视图");
+    assert_eq!(entries.len(), 3);
+    let expired = entries
+        .iter()
+        .find(|entry| entry.delivery_id == stale_dispatch.delivery_id)
+        .expect("过期投递必须保留在运营视图中");
+    let explicit = entries
+        .iter()
+        .find(|entry| entry.delivery_id == unknown_delivery_id)
+        .expect("显式完成的未知投递必须保留在运营视图中");
+    for entry in [expired, explicit] {
+        assert_eq!(entry.status, "manual_reconcile");
+        assert_eq!(entry.failure_code.as_deref(), Some("outcome_unknown"));
+        assert_eq!(entry.attempt_count, 1);
+        assert_eq!(entry.next_attempt_at, None);
+        assert!(entry.completed_at.is_some());
+    }
+    assert_eq!(expired.sending_at.map(Timestamp::timestamp_micros), Some(now.timestamp_micros()));
+    assert_eq!(
+        expired.completed_at.map(Timestamp::timestamp_micros),
+        Some(expires_at.timestamp_micros()),
+    );
+    assert_eq!(explicit.sending_at, None);
 
     store.postgres_pool().close().await;
 }
@@ -1548,8 +1559,13 @@ async fn postgres_mail_poller_paused_since_ignores_forced_poll_updates() {
     .await
     .expect("写入暂停命令");
     let snapshot = store.dashboard_snapshot().await.expect("读取邮件 dashboard");
+    let poller = snapshot
+        .pollers
+        .iter()
+        .find(|poller| poller.mailbox_key == "main-mailbox")
+        .expect("main-mailbox poller");
     assert_eq!(
-        snapshot.pollers[0].paused_since.expect("暂停时间").timestamp_micros(),
+        poller.paused_since.expect("暂停时间").timestamp_micros(),
         paused_at.timestamp_micros()
     );
 
@@ -1562,8 +1578,13 @@ async fn postgres_mail_poller_paused_since_ignores_forced_poll_updates() {
     .await
     .expect("模拟强制轮询更新时间");
     let snapshot = store.dashboard_snapshot().await.expect("再次读取邮件 dashboard");
+    let poller = snapshot
+        .pollers
+        .iter()
+        .find(|poller| poller.mailbox_key == "main-mailbox")
+        .expect("main-mailbox poller");
     assert_eq!(
-        snapshot.pollers[0].paused_since.expect("暂停时间").timestamp_micros(),
+        poller.paused_since.expect("暂停时间").timestamp_micros(),
         paused_at.timestamp_micros()
     );
     store.postgres_pool().close().await;
@@ -2007,6 +2028,7 @@ async fn postgres_operations_alert_actions_bind_to_the_observed_incident() {
     observe(false, 2).await.expect("观察到恢复");
     let resolved = read_alert().await;
     assert!(!resolved.active);
+    assert_eq!(resolved.silenced_until, None);
     assert_eq!(resolved.incident_generation, generation);
     observe(true, 3).await.expect("观察到复发");
     let current = read_alert().await;

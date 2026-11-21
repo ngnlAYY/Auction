@@ -75,7 +75,9 @@ fn decode_thread(body: &str, auction_id: &str) -> Result<PublicForumResponse, St
         || thread.thread_url.as_deref().is_some_and(|value| {
             !url::Url::parse(value).is_ok_and(|url| {
                 url.scheme() == "https"
-                    && url.host_str().is_some()
+                    && url.host_str() == Some("forums.e-hentai.org")
+                    && url.path() == "/index.php"
+                    && url.port_or_known_default() == Some(443)
                     && url.username().is_empty()
                     && url.password().is_none()
             })

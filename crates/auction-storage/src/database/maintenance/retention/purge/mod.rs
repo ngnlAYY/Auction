@@ -3,20 +3,23 @@
 //! 与写入未知诊断永不在删除范围；每批一个事务，失败时已提交批次保留并在回执中精确计数。
 
 use auction_time::Timestamp;
-use sqlx::Row;
 use uuid::Uuid;
 
 use crate::database::DatabaseStore;
-use crate::database::TrackedPool;
 use crate::database::maintenance::retention::inventory::{
     load_embedded_retention_policy, retention_policy_sha256,
 };
-use crate::database::operations::audit_health::AuditWriteResult as _;
 
+pub(super) mod database;
+mod filesystem;
 mod model;
 mod tables;
 mod validation;
-
+use self::database::{
+    add, append_audit, delete_batch, execution_rank, log_purge_failure, purge_failure_code,
+    verify_target,
+};
+use self::filesystem::{consume_filesystem_artifact, load_filesystem_artifact};
 use self::tables::{RemainingCandidates, count_remaining, delete_statement};
 pub use model::*;
 use validation::validate_request;
@@ -44,8 +47,8 @@ struct ValidatedFamily {
 
 impl DatabaseStore {
     /// 在任何变更前完成全部预校验：政策/令牌/计数/新鲜度与数据库身份、迁移前缀。
-    /// 文件族批准要求 `request.filesystem` 存在，因此调用方可先传零值占位结果完成预检，
-    /// 执行实际文件清理后再以真实结果执行。
+    /// 文件族预检只验证批准与政策绑定；执行入口要求实际文件清理生成的 artifact reference。
+    /// CLI 通过根身份已绑定的批准令牌证明其预检时使用的配置根。
     pub async fn preflight_retention_purge(
         &self,
         request: &RetentionPurgeRequest,
@@ -66,58 +69,108 @@ impl DatabaseStore {
             .map_err(|_: crate::RetentionInventoryError| RetentionPurgeError::PolicyInvalid)?;
         let validated = validate_request(&request, &policy)?;
         verify_target(self, &request.database_name).await?;
+        let mut filesystem_artifact_consume_failed = false;
+        let filesystem = if let Some(family) =
+            validated.iter().find(|family| family.retention_kind == "filesystem")
+        {
+            let approval = request
+                .approvals
+                .iter()
+                .find(|approval| approval.dataset_family == family.dataset_family)
+                .ok_or(RetentionPurgeError::FilesystemInvalid)?;
+            let reference = request
+                .filesystem_artifact
+                .as_ref()
+                .ok_or(RetentionPurgeError::FilesystemInvalid)?;
+            let reference = reference.clone();
+            let request_for_read = request.clone();
+            let policy_for_read = policy.clone();
+            let approval_for_read = approval.clone();
+            let (run_id, result) = tokio::task::spawn_blocking(move || {
+                load_filesystem_artifact(
+                    &reference,
+                    &request_for_read,
+                    &policy_for_read,
+                    &approval_for_read,
+                )
+            })
+            .await
+            .map_err(|error| {
+                tracing::warn!(
+                    cancelled = error.is_cancelled(),
+                    panicked = error.is_panic(),
+                    "读取保留清理文件回执的后台任务失败"
+                );
+                RetentionPurgeError::FilesystemInvalid
+            })??;
+            if let Err(error) =
+                consume_filesystem_artifact(self.pool(), run_id, &request, &result).await
+            {
+                if matches!(&error, RetentionPurgeError::FilesystemArtifactReplay) {
+                    return Err(error);
+                }
+                log_purge_failure(&error, "保留清理文件回执消费失败");
+                filesystem_artifact_consume_failed = true;
+            }
+            Some((run_id, result))
+        } else {
+            if request.filesystem_artifact.is_some() {
+                return Err(RetentionPurgeError::FilesystemInvalid);
+            }
+            None
+        };
         // 先清理已解决的推送失败，再清理事件：删除失败记录可能解除事件的 RESTRICT 引用，
         // 使同一批批准上限内的事件候选取值单调收敛；反向顺序会留下只能靠下一轮演练清理的行。
         let mut order = (0..validated.len()).collect::<Vec<_>>();
         order.sort_by_key(|index| execution_rank(&validated[*index].dataset_family));
 
-        let run_id = Uuid::new_v4();
+        let run_id = filesystem.as_ref().map_or_else(Uuid::new_v4, |(run_id, _)| *run_id);
         let started_at = Timestamp::now();
         // 文件族可能已由调用方在预校验之后删除；即使后续数据库批次失败，也必须如实计入。
         let mut mutation_executed =
-            request.filesystem.as_ref().is_some_and(|filesystem| filesystem.deleted_files > 0);
-        let mut failure_code: Option<&'static str> = None;
+            filesystem.as_ref().is_some_and(|(_, result)| result.deleted_files > 0);
+        let mut failure_code: Option<&'static str> =
+            filesystem_artifact_consume_failed.then_some("filesystem_artifact_audit_failed");
         let mut families = Vec::with_capacity(validated.len());
         let mut skipped = Vec::new();
         let mut unknown_remaining = Vec::new();
 
-        for (position, index) in order.iter().enumerate() {
-            if failure_code.is_some() {
-                skipped.extend(
-                    order[position..].iter().map(|index| validated[*index].dataset_family.clone()),
-                );
-                break;
-            }
+        for index in &order {
             let family = &validated[*index];
+            if family.retention_kind != "filesystem" && failure_code.is_some() {
+                skipped.push(family.dataset_family.clone());
+                continue;
+            }
             if family.retention_kind == "filesystem" {
                 // 文件族已在调用方按批准上限执行；这里只把实际 unlink 计数并入回执与审计。
-                if let Some(result) = &request.filesystem {
-                    mutation_executed = mutation_executed || result.deleted_files > 0;
-                    if result.failure_code.is_some() {
-                        failure_code = Some("filesystem_purge_failed");
-                    }
-                    let outcome = if result.failure_code.is_some() {
-                        RetentionPurgeOutcome::Failed
-                    } else if result.limit_reached {
-                        RetentionPurgeOutcome::PartialLimitReached
-                    } else {
-                        RetentionPurgeOutcome::Complete
-                    };
-                    families.push(RetentionPurgeFamilyResult {
-                        dataset_family: family.dataset_family.clone(),
-                        retention_kind: family.retention_kind.clone(),
-                        approved_rows: family.candidate_rows,
-                        approved_bytes: family.candidate_bytes,
-                        deleted_rows: i64::try_from(result.deleted_files).map_err(
-                            |_: std::num::TryFromIntError| RetentionPurgeError::CountOverflow,
-                        )?,
-                        deleted_bytes: i64::try_from(result.deleted_bytes).map_err(
-                            |_: std::num::TryFromIntError| RetentionPurgeError::CountOverflow,
-                        )?,
-                        tables: Vec::new(),
-                        outcome,
-                    });
+                let result = filesystem
+                    .as_ref()
+                    .map(|(_, result)| result)
+                    .ok_or(RetentionPurgeError::FilesystemInvalid)?;
+                if result.failure_code.is_some() {
+                    failure_code.get_or_insert("filesystem_purge_failed");
                 }
+                let outcome = if result.failure_code.is_some() {
+                    RetentionPurgeOutcome::Failed
+                } else if result.limit_reached {
+                    RetentionPurgeOutcome::PartialLimitReached
+                } else {
+                    RetentionPurgeOutcome::Complete
+                };
+                families.push(RetentionPurgeFamilyResult {
+                    dataset_family: family.dataset_family.clone(),
+                    retention_kind: family.retention_kind.clone(),
+                    approved_rows: family.candidate_rows,
+                    approved_bytes: family.candidate_bytes,
+                    deleted_rows: i64::try_from(result.deleted_files).map_err(
+                        |_: std::num::TryFromIntError| RetentionPurgeError::CountOverflow,
+                    )?,
+                    deleted_bytes: i64::try_from(result.deleted_bytes).map_err(
+                        |_: std::num::TryFromIntError| RetentionPurgeError::CountOverflow,
+                    )?,
+                    tables: Vec::new(),
+                    outcome,
+                });
                 continue;
             }
 
@@ -190,29 +243,34 @@ impl DatabaseStore {
             if failure_code.is_some() {
                 family_outcome = RetentionPurgeOutcome::Failed;
             }
+            let deleted_rows = table_results
+                .iter()
+                .try_fold(0_i64, |total, table| add(total, table.deleted_rows))?;
+            let deleted_bytes = table_results
+                .iter()
+                .try_fold(0_i64, |total, table| add(total, table.deleted_row_bytes))?;
             families.push(RetentionPurgeFamilyResult {
                 dataset_family: family.dataset_family.clone(),
                 retention_kind: family.retention_kind.clone(),
                 approved_rows: family.candidate_rows,
                 approved_bytes: family.candidate_bytes,
-                deleted_rows: table_results.iter().map(|table| table.deleted_rows).sum(),
-                deleted_bytes: table_results.iter().map(|table| table.deleted_row_bytes).sum(),
+                deleted_rows,
+                deleted_bytes,
                 tables: table_results,
                 outcome: family_outcome,
             });
         }
 
         // 顶层计数只汇总数据库行；文件族的文件数/字节只在 `filesystem` 与族结果中报告。
-        let deleted_rows = families
+        let (deleted_rows, deleted_row_bytes) = families
             .iter()
             .filter(|family| family.retention_kind == "database_rows")
-            .map(|family| family.deleted_rows)
-            .sum();
-        let deleted_row_bytes = families
-            .iter()
-            .filter(|family| family.retention_kind == "database_rows")
-            .map(|family| family.deleted_bytes)
-            .sum();
+            .try_fold((0_i64, 0_i64), |(rows, bytes), family| {
+                Ok::<_, RetentionPurgeError>((
+                    add(rows, family.deleted_rows)?,
+                    add(bytes, family.deleted_bytes)?,
+                ))
+            })?;
         let outcome = if failure_code.is_some() {
             RetentionPurgeOutcome::Failed
         } else if families
@@ -258,7 +316,7 @@ impl DatabaseStore {
             families,
             deleted_rows,
             deleted_row_bytes,
-            filesystem: request.filesystem.clone(),
+            filesystem: filesystem.map(|(_, result)| result),
             audit_id: None,
             mutation_executed,
             deletion_authorized: true,
@@ -276,196 +334,6 @@ impl DatabaseStore {
         report.finished_at = Timestamp::now();
         Ok(report)
     }
-}
-
-/// 执行次序：先清理可能解除事件外键阻断的失败记录，再清理事件，其他族保持政策顺序。
-fn execution_rank(dataset_family: &str) -> u8 {
-    match dataset_family {
-        "realtime_failures" => 0,
-        "realtime_events" => 2,
-        _ => 1,
-    }
-}
-
-fn purge_failure_code(error: &RetentionPurgeError) -> &'static str {
-    match error {
-        RetentionPurgeError::Query { stage, .. } => match *stage {
-            "begin_batch" => "batch_begin_failed",
-            "delete_batch" => "delete_batch_failed",
-            "count_remaining" => "remaining_count_failed",
-            _ => "query_failed",
-        },
-        RetentionPurgeError::Commit { .. } => "batch_commit_failed",
-        RetentionPurgeError::CountOverflow => "count_overflow",
-        _ => "purge_failed",
-    }
-}
-
-async fn verify_target(
-    store: &DatabaseStore,
-    database_name: &str,
-) -> Result<(), RetentionPurgeError> {
-    let actual: String = sqlx::query_scalar("SELECT current_database()")
-        .fetch_one(store.pool())
-        .await
-        .map_err(|source| RetentionPurgeError::Query { stage: "database_identity", source })?;
-    if actual != database_name {
-        return Err(RetentionPurgeError::DatabaseMismatch {
-            expected: database_name.to_owned(),
-            actual,
-        });
-    }
-    require_current_migrations(store.pool()).await
-}
-
-async fn require_current_migrations(
-    pool: &TrackedPool<sqlx::Postgres>,
-) -> Result<(), RetentionPurgeError> {
-    let expected_version = crate::database::postgres_expected_migration_version();
-    let marker_exists = crate::database::migrations::postgres_history_present(pool)
-        .await
-        .map_err(|source| RetentionPurgeError::Query { stage: "migration_marker", source })?;
-    if !marker_exists {
-        return Err(RetentionPurgeError::MigrationNotCurrent);
-    }
-    let migrations = crate::database::migrations::read_postgres_history(pool)
-        .await
-        .map_err(|source| RetentionPurgeError::Query { stage: "migration_identity", source })?;
-    if !crate::database::migrations::postgres_history_matches(&migrations, expected_version) {
-        return Err(RetentionPurgeError::MigrationNotCurrent);
-    }
-    Ok(())
-}
-
-async fn delete_batch(
-    store: &DatabaseStore,
-    statement: &'static str,
-    cutoff: Timestamp,
-    limit: i64,
-) -> Result<(i64, i64), RetentionPurgeError> {
-    let mut transaction = store
-        .pool()
-        .begin()
-        .await
-        .map_err(|source| RetentionPurgeError::Query { stage: "begin_batch", source })?;
-    sqlx::query(sqlx::AssertSqlSafe(format!(
-        "SET LOCAL statement_timeout = '{STATEMENT_TIMEOUT}'"
-    )))
-    .execute(&mut *transaction)
-    .await
-    .map_err(|source| RetentionPurgeError::Query { stage: "statement_timeout", source })?;
-    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'")))
-        .execute(&mut *transaction)
-        .await
-        .map_err(|source| RetentionPurgeError::Query { stage: "lock_timeout", source })?;
-    let row = sqlx::query(sqlx::AssertSqlSafe(statement))
-        .bind(cutoff)
-        .bind(limit)
-        .fetch_one(&mut *transaction)
-        .await
-        .map_err(|source| RetentionPurgeError::Query { stage: "delete_batch", source })?;
-    let rows: i64 = row
-        .try_get("deleted_rows")
-        .map_err(|source| RetentionPurgeError::Query { stage: "delete_batch", source })?;
-    let bytes: i64 = row
-        .try_get("deleted_bytes")
-        .map_err(|source| RetentionPurgeError::Query { stage: "delete_batch", source })?;
-    transaction
-        .commit()
-        .await
-        .map_err(|source| RetentionPurgeError::Commit { stage: "commit_batch", source })?;
-    Ok((rows, bytes))
-}
-
-/// 追加清理审计。维护类审计保持 `actor_type='system'`、`source='system'`；CLI 发起时只把主机
-/// 操作者身份并入 metadata，使唯一删除业务库行的命令可追溯到主机账号。
-async fn append_audit(
-    pool: &TrackedPool<sqlx::Postgres>,
-    report: &RetentionPurgeReport,
-    operator_identity: Option<&auction_application::core::CliOperatorIdentity>,
-) -> Result<Uuid, RetentionPurgeError> {
-    let id = Uuid::new_v4();
-    let families = report
-        .families
-        .iter()
-        .map(|family| {
-            serde_json::json!({
-                "dataset_family": family.dataset_family,
-                "retention_kind": family.retention_kind,
-                "approved_rows": family.approved_rows,
-                "approved_bytes": family.approved_bytes,
-                "deleted_rows": family.deleted_rows,
-                "deleted_bytes": family.deleted_bytes,
-                "outcome": family.outcome,
-                "tables": family.tables,
-            })
-        })
-        .collect::<Vec<_>>();
-    let metadata = auction_application::core::cli_audit_metadata(
-        operator_identity,
-        serde_json::json!({
-            "database_name": report.database_name,
-            "dry_run_run_id": report.dry_run_run_id,
-            "purge_run_id": report.run_id,
-            "policy_version": report.policy_version,
-            "policy_sha256": report.policy_sha256,
-            "batch_size": report.batch_size,
-            "outcome": report.outcome,
-            "failure_code": report.failure_code,
-            "families": families,
-            "deleted_rows": report.deleted_rows,
-            "deleted_row_bytes": report.deleted_row_bytes,
-            "filesystem": report.filesystem,
-            "mutation_executed": report.mutation_executed,
-        }),
-    );
-    let mut transaction = pool
-        .begin()
-        .await
-        .map_err(|source| RetentionPurgeError::Query { stage: "audit_begin", source })?;
-    sqlx::query(sqlx::AssertSqlSafe(format!(
-        "SET LOCAL statement_timeout = '{AUDIT_STATEMENT_TIMEOUT}'"
-    )))
-    .execute(&mut *transaction)
-    .await
-    .map_err(|source| RetentionPurgeError::Query { stage: "audit_timeout", source })?;
-    sqlx::query(
-        "INSERT INTO public.audit_records
-             (id, actor_type, actor_id, action, entity_type, entity_id, result, source, metadata)
-         VALUES ($1, 'system', 'auction-cli', 'auction.retention.purge',
-                 'retention_purge', $2, $3, 'system', $4)",
-    )
-    .bind(id)
-    .bind(report.run_id.to_string())
-    .bind(if report.outcome == RetentionPurgeOutcome::Complete { "success" } else { "failure" })
-    .bind(metadata)
-    .execute(&mut *transaction)
-    .await
-    .record_audit_failure()
-    .map_err(|source| RetentionPurgeError::Query { stage: "audit_insert", source })?;
-    transaction
-        .commit()
-        .await
-        .map_err(|source| RetentionPurgeError::Commit { stage: "audit_commit", source })?;
-    Ok(id)
-}
-
-/// 回执只保留失败码；数据库错误的阶段、SQLSTATE、约束与表名等安全投影进日志，驱动原文不进日志。
-fn log_purge_failure(error: &RetentionPurgeError, context: &'static str) {
-    match error {
-        RetentionPurgeError::Query { stage, source }
-        | RetentionPurgeError::Commit { stage, source } => {
-            let context = crate::database::sql_error_context(source, context);
-            tracing::warn!(kind = "retention_purge_failed", stage, context, "保留清理步骤失败");
-        }
-        other => {
-            tracing::warn!(kind = "retention_purge_failed", error = %other, context, "保留清理步骤失败");
-        }
-    }
-}
-
-fn add(left: i64, right: i64) -> Result<i64, RetentionPurgeError> {
-    left.checked_add(right).ok_or(RetentionPurgeError::CountOverflow)
 }
 
 #[cfg(test)]

@@ -218,6 +218,12 @@ function fluentEscapeEnd(text: string, backslash: number): number | null {
   if (escaped === "\\" || escaped === '"') {
     return backslash + 2;
   }
+  if (escaped === "\n") {
+    return backslash + 2;
+  }
+  if (escaped === "\r") {
+    return backslash + (text.charAt(backslash + 2) === "\n" ? 3 : 2);
+  }
   if (escaped === "u" && isHexSlice(text, backslash + 2, 4)) {
     return backslash + 6;
   }

@@ -144,19 +144,24 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 ## 升级
 
-**只部署 GitHub Release 资产。** 从 `main` 上 `v<版本>` tag 产生的 Release 下载 `*.tar.gz`、`SHA256SUMS` 与 `DEPENDENCIES.md`，部署前运行 `bash ci/release/verify-deployment-package.sh <归档> --tag <v版本>`（或 `mise run verify-package …`）核对摘要、包内清单、构建提交可从 tag 到达与来源证明。普通 CI 候选 artifact、本地 `mise run release-check` 产物与 `-dirty` 包均不可部署；未通过校验的包不得安装、停止服务或迁移。正式发行只产出 Rust 版页面；`AUCTION_WEB_STACK=solid` 只用于本地与分支上的手动候选构建，发布脚本在 `GITHUB_ACTIONS=true` 且 `GITHUB_REF_TYPE=tag` 的 CI 运行中选择 Solid 会直接拒绝。
+**只部署 GitHub Release 资产。** 从 `main` 上 `v<版本>` tag 产生的 Release 下载 `*.tar.gz`、`SHA256SUMS` 与 `DEPENDENCIES.md`，部署前运行 `bash ci/release/verify-deployment-package.sh <归档> --tag <v版本>`（或 `mise run verify-package …`）核对摘要、包内清单、构建提交可从 tag 到达与来源证明。普通 CI 候选 artifact、本地 `mise run release-check` 产物、`-candidate`/`-dirty` 包与 `solid-release` 页面都不可部署；未通过校验的包不得安装、停止服务或迁移。正式发行只产出 Rust 版页面；`AUCTION_WEB_STACK=solid` 只用于本地与分支上的手动候选构建，正式 tag push 上选择 Solid 会直接拒绝。
 
-分体部署用发布包内的 `auction-cli deploy` 完成严格预检、时段门禁、演练回执核对、磁盘空间与在途发送门禁、停机备份与新旧 CLI 校验、保留旧程序、逐个原子替换程序（中途失败时换回已替换的程序）、迁移与顺序启动、运行摘要复核并追加回执。含迁移的版本必须先用候选制品完成[迁移演练](deploy/MIGRATION-DRILL.md)并传入回执：
+分体部署用发布包内的 `auction-cli deploy` 完成严格预检、时段门禁、演练回执核对、磁盘空间与在途发送门禁、停机备份与新旧 CLI 校验、保留旧程序、逐个原子替换程序（中途失败时换回已替换的程序）、迁移与顺序启动、运行摘要复核并追加回执。含迁移的版本必须先用候选制品完成[迁移演练](deploy/MIGRATION-DRILL.md)并传入回执与外层 tarball 摘要。
+
+来源校验通过后，对同一 Release tar.gz 计算并保留摘要；不要对解压目录重新计算来代替外层包摘要：
+
+```bash
+VERIFIED_RELEASE_TARBALL_SHA256=$(sha256sum "$RELEASE_TARBALL" | awk '{print $1}')
+```
 
 ```bash
 /opt/auction-run/<发布包>/bin/auction-cli --config-dir /etc/auction deploy /opt/auction-run/<发布包> \
   --owner-secrets /etc/auction/owner/postgres.toml --backup-dir /var/backups/auction \
+  --package-sha256 "$VERIFIED_RELEASE_TARBALL_SHA256" \
   --migration-drill-receipt /srv/auction-drill/receipts/<drill>.json
 # 停机前查看计划
-... deploy /opt/auction-run/<发布包> --dry-run
+... deploy /opt/auction-run/<发布包> --package-sha256 "$VERIFIED_RELEASE_TARBALL_SHA256" --dry-run
 ```
-
-命令必须在制品目录内运行该包的 CLI（迁移集合与期望 schema 来自它）。`--dry-run` 不备份、不停机、不安装、不写回执，但同样校验 `--backup-dir` 并输出停机后写入的磁盘空间估算（`gates.disk_space`）。主要门禁与默认值：`--drill-max-age-days` 7、`--send-gate-timeout-seconds` 30、`--startup-timeout-seconds` 30、`--protection-window-minutes` 60。磁盘空间门禁的估算依据见[apps/auction-cli/README.md#制品部署与回退](../apps/auction-cli/README.md#制品部署与回退)第 5 步；含迁移时回执的准入条件见[ops/deploy/MIGRATION-DRILL.md#回执结论与后续门禁](deploy/MIGRATION-DRILL.md#回执结论与后续门禁)。
 
 **失败与未知结果**（各步骤的系统状态见[apps/auction-cli/README.md#制品部署与回退](../apps/auction-cli/README.md#制品部署与回退)）：
 

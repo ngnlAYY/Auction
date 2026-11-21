@@ -315,7 +315,7 @@ fn rekey_sends_the_new_key_and_uses_the_account_cadence_template() {
 }
 
 #[test]
-fn exhausted_account_window_still_records_the_command_without_mailing() {
+fn suppressed_account_notice_still_records_the_command_without_mailing() {
     let service = service(true);
     let decision = run(&service, message("rekey", "ReKeyPlayer", 0));
 
@@ -327,7 +327,7 @@ fn exhausted_account_window_still_records_the_command_without_mailing() {
 }
 
 #[test]
-fn explanation_cap_keeps_the_asset_return_without_the_notice() {
+fn suppressed_explanation_keeps_the_asset_return_without_the_notice() {
     let service = service(true);
     let decision = run(&service, message("rebind", "AssetSender", 100));
 
@@ -446,5 +446,8 @@ fn rekey_service_writes_a_fresh_envelope_under_the_locked_user_id() {
     let write = store.write.lock().unwrap().take().expect("store must receive rekey write");
     assert_eq!(write.user_id, Uuid::from_u128(9));
     assert_eq!(write.public_key_hash, [42; 32]);
-    assert!(write.envelope.ciphertext().len() >= 16);
+    assert_eq!(write.envelope.ciphertext(), &[1; 24]);
+    assert_eq!(write.envelope.nonce(), &[2; 12]);
+    assert_eq!(write.envelope.encryption_key_id(), "test-key");
+    assert_eq!(write.envelope.fingerprint(), "fingerprint");
 }

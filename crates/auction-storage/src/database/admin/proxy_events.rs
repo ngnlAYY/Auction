@@ -198,6 +198,7 @@ async fn list_postgres(
              JOIN public.bid_proxy_authorizations AS proxy_authorization
                ON proxy_authorization.authorization_id = transition.authorization_id
               AND proxy_authorization.lot_id = command.aggregate_id
+             JOIN public.users AS users ON users.id = proxy_authorization.user_id
              WHERE command.aggregate_id = $1
                AND (
                   (command.command_kind IN ('create_proxy', 'lower_proxy')

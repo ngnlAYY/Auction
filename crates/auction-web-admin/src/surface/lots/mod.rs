@@ -8,5 +8,5 @@ mod row;
 mod state;
 mod table;
 
-pub(super) use page::page;
-pub(super) use presentation::{MAX_START_PRICE, admin_lot_code_for, parse_start_price};
+pub(crate) use page::page;
+pub(in crate::surface) use presentation::{MAX_START_PRICE, admin_lot_code_for, parse_start_price};

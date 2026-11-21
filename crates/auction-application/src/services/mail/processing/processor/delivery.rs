@@ -3,7 +3,9 @@
 use serde_json::json;
 use uuid::Uuid;
 
-use super::super::commands::{decision, delivery_request_hash, stable_command_id};
+use super::super::commands::{
+    DeliveryRequestHashInput, decision, delivery_request_hash, stable_command_id,
+};
 use super::{
     DELIVERY_NOTICE_OPERATION, DELIVERY_RETURN_OPERATION, DELIVERY_TAKE_OPERATION,
     MailProcessorService,
@@ -237,15 +239,16 @@ where
             |value| format!("{command_operation}:{}", value.as_str()),
         );
         let command_id = stable_command_id(message, &suffix);
-        let request_hash = delivery_request_hash(
+        let request_hash = delivery_request_hash(DeliveryRequestHashInput {
             command_id,
             message,
             operation,
             template,
-            result_code.as_deref(),
+            result_code: result_code.as_deref(),
             user_key_user_id,
-            &attachment_ids,
-        )?;
+            attachment_ids: &attachment_ids,
+            notification_body: notification_body.as_deref(),
+        })?;
         Ok(MailDeliveryCommand {
             command_id,
             request_hash,

@@ -58,7 +58,7 @@ pub(super) async fn append_admin_intake_record_inner(
                 record.result.preview_revision,
             ),
             state_version: record.result.auction_state_version,
-            origin_command_id: record.command_id.as_uuid(),
+            origin_command_id: Some(record.command_id.as_uuid()),
             created_at: None,
         },
     )

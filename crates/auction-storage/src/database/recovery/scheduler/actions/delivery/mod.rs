@@ -5,13 +5,9 @@ use sqlx::Postgres;
 
 use crate::database::recovery::scheduler::actions::RecoveryActionTransactionFuture;
 
-mod activation;
-mod observation;
-mod prepare;
-
-pub(crate) use activation::mark_action_enqueued_postgres;
-pub(crate) use observation::observe_action_postgres;
-pub(crate) use prepare::link_action_postgres;
+pub(in crate::database::recovery::scheduler) mod activation;
+pub(in crate::database::recovery::scheduler) mod observation;
+pub(in crate::database::recovery::scheduler) mod prepare;
 
 /// 原生观察回调仍借用外层受跟踪的同一事务，不另取连接或复制重试循环。
 async fn run_serializable_action_transaction<T, F>(

@@ -10,12 +10,20 @@ use crate::{
 };
 
 impl CompetitionPlan {
-    /// 校验事实顺序、版本、代理转换链及其与最终快照的一致性。
-    /// 历史重放只携带局部快照；不要求未变更授权出现，也不对已接受金额重套新输入上限。
+    /// 校验新计划的事实、转换链和最终快照，活动授权须有对应快照。
     pub fn validate(&self) -> Result<(), DomainError> {
+        self.validate_plan(true)
+    }
+
+    /// 校验历史计划；旧账本可省略未变更活动授权的快照，所有转换仍须有对应快照。
+    pub fn validate_for_replay(&self) -> Result<(), DomainError> {
+        self.validate_plan(false)
+    }
+
+    fn validate_plan(&self, require_active_snapshot: bool) -> Result<(), DomainError> {
         self.final_lot.validate()?;
         let command_id = self.validate_public_bids()?;
-        self.validate_proxy_changes(command_id)?;
+        self.validate_proxy_changes(command_id, require_active_snapshot)?;
         if self.soft_close_applied && self.public_bids.is_empty() {
             return Err(DomainError::InvalidBidState("无竞价事实不能触发软截止"));
         }
@@ -81,7 +89,11 @@ impl CompetitionPlan {
         Ok(command_id)
     }
 
-    fn validate_proxy_changes(&self, mut command_id: Option<CommandId>) -> Result<(), DomainError> {
+    fn validate_proxy_changes(
+        &self,
+        mut command_id: Option<CommandId>,
+        require_active_snapshot: bool,
+    ) -> Result<(), DomainError> {
         let mut states = HashMap::with_capacity(self.proxy_states.len());
         for state in &self.proxy_states {
             state.validate()?;
@@ -140,6 +152,11 @@ impl CompetitionPlan {
         }
         if last_transitions.keys().any(|authorization_id| !states.contains_key(authorization_id)) {
             return Err(DomainError::InvalidBidState("代理转换缺少对应的最终快照"));
+        }
+        if require_active_snapshot
+            && self.active_proxy_id.is_some_and(|active_id| !states.contains_key(&active_id))
+        {
+            return Err(DomainError::InvalidBidState("活动代理标识缺少最终快照"));
         }
         if self.active_proxy_id.is_some_and(ProxyAuthorizationId::is_nil) {
             return Err(DomainError::InvalidBidState("活动代理标识不能是 nil UUID"));

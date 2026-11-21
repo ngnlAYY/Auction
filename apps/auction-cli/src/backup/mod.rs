@@ -1,6 +1,11 @@
 //! PostgreSQL 备份、离线校验与单事务恢复；外部 pg_dump/pg_restore 由部署环境提供。
 
-use std::path::{Path, PathBuf};
+use std::{
+    fs::{self, File, OpenOptions},
+    io::{Seek, SeekFrom},
+    os::unix::fs::OpenOptionsExt,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Context;
 
@@ -33,6 +38,8 @@ pub(crate) fn object_key(prefix: &str, tail: &str) -> String {
 pub(crate) struct VerifiedBackup {
     pub(crate) manifest: BackupManifest,
     pub(crate) archive: PathBuf,
+    /// Owner-only unlinked copy; pg_restore consumes exactly the bytes whose digest was checked.
+    pub(crate) archive_file: File,
     pub(crate) manifest_sha256: String,
     /// 备份范围 sidecar 存在时一并校验；旧恢复点没有 sidecar 时为 None。
     pub(crate) scope: Option<scope::VerifiedScope>,
@@ -107,13 +114,47 @@ pub(crate) async fn verify_pair(
     }
     let (manifest, manifest_sha256) = BackupManifest::read(manifest_path)?;
     let archive = manifest.validate(manifest_path, database)?;
-    if crate::support::digest::sha256_file(&archive).await? != manifest.archive_sha256 {
-        anyhow::bail!("archive 的 SHA-256 与 manifest 不一致：{}", archive.display());
-    }
-    libpq::list_archive(&archive).await?;
+    let archive_file = verified_archive_snapshot(&archive, &manifest.archive_sha256)?;
+    libpq::list_archive(&archive_file).await?;
     // 范围 sidecar 只与 archive 配对；存在时必须通过摘要校验，缺失则按旧恢复点处理。
     let scope = scope::verify(&archive, &manifest.archive_file_name).await?;
-    Ok(VerifiedBackup { manifest, archive, manifest_sha256, scope })
+    Ok(VerifiedBackup { manifest, archive, archive_file, manifest_sha256, scope })
+}
+
+fn verified_archive_snapshot(path: &Path, expected_sha256: &str) -> anyhow::Result<File> {
+    let mut source = crate::support::files::open_regular(path)?;
+    let directory = std::env::temp_dir();
+    let (snapshot_path, mut snapshot) = (0..8)
+        .find_map(|_| {
+            let candidate =
+                directory.join(format!("auction-restore-{}.partial", uuid::Uuid::new_v4()));
+            match OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+                .open(&candidate)
+            {
+                Ok(file) => Some(Ok((candidate, file))),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .context("无法分配唯一的恢复 archive 快照")??;
+    let result = (|| -> anyhow::Result<File> {
+        std::io::copy(&mut source, &mut snapshot).context("复制已打开的恢复 archive 失败")?;
+        snapshot.sync_all().context("同步恢复 archive 快照失败")?;
+        snapshot.seek(SeekFrom::Start(0)).context("定位恢复 archive 快照失败")?;
+        let (actual_sha256, _) = crate::support::digest::sha256_reader(&mut snapshot)?;
+        if actual_sha256 != expected_sha256 {
+            anyhow::bail!("archive 的 SHA-256 与 manifest 不一致：{}", path.display());
+        }
+        snapshot.seek(SeekFrom::Start(0)).context("重置恢复 archive 快照位置失败")?;
+        Ok(snapshot)
+    })();
+    let _ = fs::remove_file(snapshot_path);
+    result
 }
 
 /// 备份源必须带有完整成功的迁移历史；返回其最高版本。

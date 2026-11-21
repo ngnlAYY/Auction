@@ -42,7 +42,7 @@ impl AdminLoginDefense {
     }
 
     pub(super) fn allow(&self) -> Option<u64> {
-        let Ok(mut state) = self.state.lock() else { return Some(1) };
+        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         self.allow_at(&mut state, Instant::now())
     }
 
@@ -68,7 +68,7 @@ impl AdminLoginDefense {
     }
 
     pub(super) fn failed(&self) {
-        let Ok(mut state) = self.state.lock() else { return };
+        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let now = Instant::now();
         if self.failed_at(&mut state, now) {
             tracing::warn!(
@@ -95,7 +95,7 @@ impl AdminLoginDefense {
     }
 
     pub(super) fn succeeded(&self) {
-        let Ok(mut state) = self.state.lock() else { return };
+        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         state.failures = 0;
         state.last_failure = None;
         state.blocked_until = None;

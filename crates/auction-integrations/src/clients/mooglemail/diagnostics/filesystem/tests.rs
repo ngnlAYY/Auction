@@ -243,6 +243,7 @@ fn purge_deletes_only_approved_ordinary_evidence_and_is_idempotent() {
         Duration::from_secs(90 * 86_400),
         now,
         1,
+        older_len,
     )
     .expect("清理候选");
     assert!(first.directory_present);
@@ -255,12 +256,27 @@ fn purge_deletes_only_approved_ordinary_evidence_and_is_idempotent() {
     assert!(!older.exists(), "最早的普通证据被删除");
     assert!(newer.exists() && held.exists() && over_hold.exists() && retained.exists());
 
+    let blocked_by_bytes = super::purge_ordinary_expired(
+        &directory,
+        Duration::from_secs(7 * 86_400),
+        Duration::from_secs(90 * 86_400),
+        now,
+        10,
+        0,
+    )
+    .expect("批准字节上限必须阻止超额 unlink");
+    assert_eq!(blocked_by_bytes.deleted_files, 0);
+    assert_eq!(blocked_by_bytes.deleted_bytes, 0);
+    assert_eq!(blocked_by_bytes.failure_code, Some("evidence_file_changed"));
+    assert!(newer.exists());
+
     let second = super::purge_ordinary_expired(
         &directory,
         Duration::from_secs(7 * 86_400),
         Duration::from_secs(90 * 86_400),
         now,
         10,
+        newer_len,
     )
     .expect("再次清理候选");
     assert_eq!(second.deleted_files, 1);
@@ -277,6 +293,7 @@ fn purge_deletes_only_approved_ordinary_evidence_and_is_idempotent() {
         Duration::from_secs(90 * 86_400),
         now,
         10,
+        0,
     )
     .expect("无候选重跑");
     assert_eq!(third.deleted_files, 0);

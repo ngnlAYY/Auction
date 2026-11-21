@@ -9,7 +9,7 @@ use crate::database::PostgresMigrationInventory;
 pub(super) async fn read_migration_inventory(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
 ) -> Result<PostgresMigrationInventory, RecoveryPreflightError> {
-    let rows = crate::database::migrations::read_postgres_history(&mut **transaction)
+    let rows = crate::database::migrations::evidence::read_postgres_history(&mut **transaction)
         .await
         .map_err(|source| query_error("migration_identity", source))?;
     let latest_version = rows
@@ -17,7 +17,7 @@ pub(super) async fn read_migration_inventory(
         .map_or(Ok(0_i64), |row| row.try_get("version"))
         .map_err(|source| query_error("migration_summary", source))?;
     // preflight 同时用于备份与恢复后验；缺项、额外版本或未知 checksum 必须阻断成功回执。
-    if !crate::database::migrations::postgres_history_matches(&rows, latest_version) {
+    if !crate::database::migrations::history::postgres_history_matches(&rows, latest_version) {
         return Err(RecoveryPreflightError::MigrationHistoryInvalid);
     }
     // 完整前缀校验已逐行确认 success；摘要复用同一批历史，不另行查询。

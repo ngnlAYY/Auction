@@ -152,8 +152,8 @@ auction-cli service --state-dir /var/lib/auction/deployment receipt show <receip
 | `started_at` / `finished_at` | UTC 时间；完成时间不得早于开始时间 |
 | `actor` / `actor_uid` | 操作者名称与有效 UID；名称来自 `--actor` 或环境，缺省 `uid:<euid>` |
 | `backup_id` | `--backup-id` 原值；未提供为 `null`，不触发备份或恢复 |
-| `migration` | `before_version`/`after_version`/`expected_version`/`applied`；未执行迁移（含 `already_running`）为 `null` |
-| `artifacts` | 实际运行角色的 `/proc/<pid>/exe` 路径与 SHA-256/字节数；进程不可读时摘要与字节数为 `null`，不伪造已验证身份 |
+| `migration` | `before_version`/`after_version`/`expected_version`/`applied`；未执行迁移（含 `already_running` 与 `rollback`）为 `null`；发布 v2 成功 `deploy` 回执须记录迁移结果，即使 `applied = 0` |
+| `artifacts` | 实际运行角色的 `/proc/<pid>/exe` 路径与 SHA-256/字节数；发布成功 `deploy` 或 `rollback` 回执须包含 Worker、Admin、Public 的完整观测。服务启停及失败回执可用 `null` 表示无法核验的身份，历史回执按旧格式读取 |
 | `failure` | 失败摘要（≤1024 字符的单行文本）；成功时为 `null` |
 
 回执只追加：目录以 0700 创建，内容先写入 0600 临时文件并 fsync，再以 `RENAME_NOREPLACE` 发布；同一 `receipt_id` 不覆盖，更正只能形成新回执。写入与定时备份状态共用同一私有目录实现，回执目录经持锁时固定的状态目录描述符打开，不重新解析路径。目录默认 `<state-dir>/receipts`；把 `common.toml [backup.scope].deployment_receipts_dir` 指向该目录即可随备份范围加密归档。回执不参与启停决策，也没有独立状态机；`service stop` 不写回执。
@@ -177,19 +177,22 @@ auction-cli service --state-dir /var/lib/auction/deployment receipt show <receip
 
 ## 制品部署与回退
 
-`deploy` 把一份解压后的 CI 发布包换成线上运行程序，只支持分体部署；合并部署的支持另行决定。命令必须由制品内的 `auction-cli` 执行：迁移集合与期望 schema 版本来自正在运行的二进制，因此运行程序的 SHA-256 必须等于制品 `bin/auction-cli`，否则在任何停机前拒绝。
+`deploy` 把一份解压后的 CI 发布包换成线上运行程序，只支持分体部署；合并部署的支持另行决定。命令必须由制品内的 `auction-cli` 执行。含迁移时还必须传 `--package-sha256`：这是由 `ci/release/verify-deployment-package.sh` 校验来源后、对该次 Release 外层 tar.gz 计算的 64 位小写 SHA-256，解压目录本身不能代替此摘要。`artifact.previous_version` 必须等于当前安装的三个角色 SHA-256 匹配到的最新成功 deploy/rollback 身份回执中的 `deploy.roles.package`；它表示停机测量时的旧角色制品包，不是 schema 版本或 CLI package。找不到匹配的旧角色身份时含迁移部署失败关闭。迁移集合与期望 schema 版本仍来自正在运行的二进制，因此运行程序 SHA-256 必须等于制品 `bin/auction-cli`，否则在任何停机前拒绝。
+
+把通过来源校验的同一外层 tar.gz 的 `sha256sum` 第一列放入 `VERIFIED_RELEASE_TARBALL_SHA256`；迁移演练回执也须绑定这一摘要。
 
 ```bash
 # 先演练：制品、--backup-dir、配置、unit 绑定、时段门禁、迁移版本与演练回执、磁盘空间、在途发送全部核对，输出计划
 /opt/auction-run/auction-rust-<版本>-<提交>/bin/auction-cli --config-dir /etc/auction deploy \
   /opt/auction-run/auction-rust-<版本>-<提交> \
   --owner-secrets /etc/auction/owner/postgres.toml \
-  --backup-dir /var/backups/auction --dry-run
+  --package-sha256 "$VERIFIED_RELEASE_TARBALL_SHA256" --backup-dir /var/backups/auction --dry-run
 
 # 正式执行（含迁移时必须提供本次制品对应的迁移演练回执）
 /opt/auction-run/auction-rust-<版本>-<提交>/bin/auction-cli --config-dir /etc/auction deploy \
   /opt/auction-run/auction-rust-<版本>-<提交> \
   --owner-secrets /etc/auction/owner/postgres.toml \
+  --package-sha256 "$VERIFIED_RELEASE_TARBALL_SHA256" \
   --migration-drill-receipt /srv/auction-drill/receipts/<drill>.json
 ```
 
@@ -197,7 +200,7 @@ auction-cli service --state-dir /var/lib/auction/deployment receipt show <receip
 
 执行顺序：
 
-1. **制品静态校验**（离线）：`RELEASE-MANIFEST.v1`（schema、包名、来源提交/指纹、`files=` 白名单与权限）、`SHA256SUMS`（除自身外的全部成员摘要）、`docs/DEPENDENCIES.md`（来源提交与 `Source worktree: clean`）、`docs/WEB-{PUBLIC,ADMIN}-SHA256` 与 `docs/WEB-*-MANIFEST.v1`（`payload_sha256` 必须等于摘要清单文件的 SHA-256，双端不得相同），以及四个程序的 0755/非空/摘要。符号链接、特殊文件、白名单外的文件、`-dirty`/`-single` 包名一律拒绝。
+1. **制品静态校验**（离线）：`RELEASE-MANIFEST.v1`（schema、包名、来源提交/指纹、`files=` 白名单与权限）、`SHA256SUMS`（除自身外的全部成员摘要）、`docs/DEPENDENCIES.md`（来源提交与 `Source worktree: clean`）、`docs/WEB-{PUBLIC,ADMIN}-SHA256` 与 `docs/WEB-*-MANIFEST.v1`（payload profile 必须为 `wasm-release`，`payload_sha256` 必须等于摘要清单文件的 SHA-256，双端不得相同），以及四个程序的 0755/非空/摘要。符号链接、特殊文件、白名单外的文件、`-dirty`/`-single`/`-candidate` 包名一律拒绝；来源 tag 与 GitHub attestation 由部署前的 `ci/release/verify-deployment-package.sh` 校验，CLI 不替代该步骤。
 2. **严格预检与安装目录信任**：与 `service restart` 相同（配置、unit 装载与 `AUCTION_CONFIG_FILE` 绑定、Admin runtime 属主、`[database_roles] owner` 声明）；合并部署 `owner.lock` 存在时拒绝。安装目录缺省由三个运行进程的 `/proc/<pid>/exe` 推导，三者必须同目录；都已停止时必须显式传 `--install-dir`。随后只读核对[安装目录信任](#安装目录信任)，不满足即拒绝。
 3. **停机时段门禁**：与 `service stop/restart` 同一只读证据与 `--force --reason` 语义，`action=deploy`。
 4. **版本与迁移演练回执**：读取数据库版本。制品期望版本低于数据库时拒绝（回退请用 `rollback`）；高于数据库时必须提供 `--migration-drill-receipt`，并按[ops/deploy/MIGRATION-DRILL.md#回执结论与后续门禁](../../ops/deploy/MIGRATION-DRILL.md#回执结论与后续门禁)的准入条件逐项核对（含本次 `--protection-window-minutes` 不低于回执记录的窗口下限），任一不符即拒绝。
@@ -207,14 +210,14 @@ auction-cli service --state-dir /var/lib/auction/deployment receipt show <receip
 8. **保留旧程序**：把当前四个程序连同 SHA-256/字节数写入 `<state-dir>/rollback/<deploy_receipt_id>/`（记录格式 `auction-deploy-rollback.v2`），分开记录停机前观测到的数据库版本、本次制品的内嵌 schema，以及按保留副本的摘要从回执绑定的旧角色身份与旧 CLI 身份（找不到摘要一致的成功回执时为 `null`，不从数据库版本或新包推测）；记录只追加，不覆盖。
 9. **安装与迁移**：按 Worker → Admin → Public → CLI 逐个以同目录临时文件 + `rename` 替换 `--install-dir` 中的程序（每个程序的替换是原子的，四个程序整体不是）。临时文件经同一个以 `O_NOFOLLOW` 固定的目录描述符创建，属主 root:root、权限 0755（非 root 运行时为当前账号），替换前后都复核属主、权限与摘要。任一程序替换失败时，立即把本次已替换的程序从第 8 步的回滚记录换回，再按记录复核全部四个程序的摘要；换回发生在迁移之前，不启动服务，换回本身失败时不重试。全部替换成功后执行与 `service start` 相同的迁移与 Worker → Admin → Public 顺序启动/readiness。
 10. **运行时核对**：三角色 `/proc/<pid>/exe` 的 SHA-256 必须等于制品对应程序，这也是内嵌 Web payload 已生效的证明。
-11. **回执**：停机后每次调用最多追加一条回执，成功为 `action=deploy`、`outcome=succeeded`。第 8 步成功之后的失败（安装、启动、运行核对或成功回执写入）以回滚记录同一标识发布 `failed` 回执，带 `deploy` 段与 `rollback_record_id`；停机后、第 8 步完成前的失败追加一条不带 `deploy` 段的 `failed` 回执；回执本身写不进去时错误末尾注明“部署回执也未写入”。除第 9 步安装中途失败时换回本次已替换的程序外，命令不自动回滚、不重启；含迁移的版本回退必须经过下节（回退）的区间判定。
+11. **回执**：停机后每次调用最多追加一条回执，成功为 `action=deploy`、`outcome=succeeded`。第 8 步成功之后的失败（安装、启动、运行核对或成功回执写入）以回滚记录同一标识发布 `failed` 回执，带 `deploy` 段与 `rollback_record_id`；停机后、第 8 步完成前的失败追加一条不带 `deploy` 段的 `failed` 回执。保留后失败回执写入失败时，错误保留原始原因并核对同一标识的现有回执；状态仍无法确认时先人工检查该 `receipt_id`，不要重试或回退。除第 9 步安装中途失败时换回本次已替换的程序外，命令不自动回滚、不重启；含迁移的版本回退必须经过下节（回退）的区间判定。
 
 `--dry-run` 只执行第 1–6 步（含只读数据库门禁与磁盘空间估算），输出 `outcome=planned`、`planned_steps` 与 `gates.disk_space`，不创建备份、不停机、不安装、不写回执、不调用 `systemctl start/stop`。
 
 停机后失败时，错误文本说明当时的系统状态，处置按失败所在步骤区分：
 
 - **停机完成后、第 9 步之前失败**（停机备份、双 CLI 校验、保留旧程序）：三角色已停止，安装目录仍是旧程序，迁移尚未执行。恢复旧版用安装目录中的 CLI 执行 `<install-dir>/auction-cli service start`（沿用本次的 `--config-dir`、`--owner-secrets`、`--state-dir` 与 unit 参数；漏传 `--state-dir` 会让部署锁与回执落到默认目录）；**不要用制品 CLI**，它会先把 schema 迁到新版本，而安装目录仍是旧程序。
-- **第 9 步安装中途失败**：三角色已停止，迁移尚未执行，命令已尝试把本次替换的程序从回滚记录换回；失败回执的 `artifacts` 记录安装目录中实际文件的摘要，`deploy` 段仍是尝试安装的制品，不能作为已安装程序的身份（见[部署回执扩展](#部署回执扩展)）。
+- **第 9 步安装中途失败**：三角色已停止，迁移尚未执行，命令已尝试把本次替换的程序从回滚记录换回；失败回执的 `artifacts` 对可读取文件记录安装目录中的实际摘要与字节数，不可读取的目标只记录绝对路径，`sha256` 和 `bytes` 为 `null`，不能据此认定程序身份；`deploy` 段仍是尝试安装的制品，不能作为已安装程序的身份（见[部署回执扩展](#部署回执扩展)）。
   - 错误含“已复核为部署前的旧程序”：四个程序已复核为部署前的旧程序，处置与上一条相同，用安装目录中的 CLI 执行 `service start`，不要用制品 CLI。安装目录核对会通过（失败回执记录的就是这些旧程序），但本次回滚记录保留的也正是它们，`rollback` 会因目标与当前程序相同而在停机前拒绝。
   - 错误含“自动换回未完成”：换回本身失败，错误点名失败的程序并列出各程序的当前摘要，安装目录可能新旧混合。旧程序完整保留在 `<state-dir>/rollback/<deploy_receipt_id>/bin/`，摘要见同一记录目录下的 `record.json`；按[ops/deploy/RECOVERY.md#安装中途失败的手工换回](../../ops/deploy/RECOVERY.md#安装中途失败的手工换回)逐个换回并核对摘要后，用安装目录中的 CLI 启动，同样不要用制品 CLI 启动。安装目录恢复为一致的旧程序之前不要重跑 `deploy`：新的回滚记录会把混合程序当作旧版本保留。
 - **启动或运行核对失败**：新程序已安装、迁移可能已提交；按错误文本给出的 `rollback --receipt-id` 或[ops/README.md#升级](../../ops/README.md#升级)处理。失败发生在迁移完成之前（启动阶段的端口检查或迁移失败）时，安装目录的新 CLI 比数据库新，`rollback` 会在停机前拒绝：修复原因后用安装目录的 CLI 执行 `service start --owner-secrets …` 完成升级，或按[ops/deploy/RECOVERY.md#安装中途失败的手工换回](../../ops/deploy/RECOVERY.md#安装中途失败的手工换回)用本次回滚记录把四个程序整体换回。
@@ -226,10 +229,10 @@ root 与 postgres 都会执行安装目录中的 `auction-cli`（`auction-stack`
 - 安装目录本身：非符号链接目录，归运行 CLI 的账号所有（以 root 运行即 root），禁止 group/other 写入；
 - 它的每一级祖先：非符号链接目录，归 root 或当前账号所有，禁止 group/other 写入（root 拥有的 sticky 目录除外）；
 - 其中四个程序：非符号链接普通文件，归 root 所有（非 root 运行时也可归当前账号），禁止 group/other 写入；
-- 三角色 unit 的运行账号（`User=`，空为 root，`DynamicUser=yes` 时 UID 不固定）：必须能穿越安装目录与它的每一级祖先，并能执行各自的角色程序。账号是属主时看属主执行位，否则 group 与 other 都须有执行位（不解析组成员关系）；标准布局 root:root 0755 满足，root 0700 的目录或缺执行位的程序会在停机、替换之后才让启动失败，因此在这里拒绝。
-- 执行本命令的账号（部署执行账号）：必须能执行安装目录中的 `auction-cli`。三角色停止之后才会用到它：`deploy` 用它校验停机备份，停机后失败的恢复指引也用它执行 `service start`；执行不了时服务已停才失败。这是当前进程自己的权限，由内核按它的有效身份判定（`faccessat` 的 `X_OK` 与 `AT_EACCESS`，与之后启动它时的检查同源：组成员、ACL 与 noexec 挂载都计入，root 也要求至少一个执行位）；标准 0755 满足，只缺执行位的 0644 在这里拒绝。
+- 三角色 unit 的运行账号（`User=`，空为 root，`DynamicUser=yes` 时 UID 不固定）：必须能穿越安装目录与它的每一级祖先，并能执行各自的角色程序。属主 UID 使用属主执行位；其他 UID 必须同时满足 group 与 other 执行位，门禁不解析组成员关系，避免误放行。安装目录祖先通过逐级 `openat(O_DIRECTORY | O_NOFOLLOW)` 固定描述符后核验；路径组件不能在检查后把打开的目录重定向到另一棵树。访问 ACL 与目录默认 ACL 一律失败关闭；程序文件的挂载 `noexec` 也拒绝，因此 ACL 或 `noexec` 布局不能在替换后才令服务无法启动。标准 `root:root 0755` 通过。
+- 执行本命令的账号（部署执行账号）：同样按其有效 UID 以保守的 owner/group/other 执行位规则核对安装目录中的 `auction-cli`，并拒绝 ACL 与 `noexec` 布局。三角色停止之后才会用它：`deploy` 校验停机备份，停机后失败的恢复指引也用它执行 `service start`；只缺执行位的 0644 在这里拒绝。
 
-任一不满足即拒绝并点名路径（运行账号不满足时还点名角色与 UID，部署执行账号不满足时点名 UID 与系统错误）。命令**不会**自动 `chown`/`chmod` 修补：旧版 `deploy` 曾把程序改归服务账号，这样的程序无法证明没被改写，须按[ops/deploy/RECOVERY.md#重建安装目录信任](../../ops/deploy/RECOVERY.md#重建安装目录信任)用已验证的 Release 重装后再部署；属主与写权限可信、只缺执行位时补回标准 0755 即可。安装与换回写出的程序一律 root:root 0755，每个程序替换前后都在同一个固定的目录描述符上复核属主、权限与摘要。非 root 运行只用于不跨账号的隔离环境：可信属主放宽为当前账号，新程序归当前账号 0755，不对服务账号做任何属主变更。
+任一不满足即拒绝并点名路径（运行账号不满足时还点名角色与 UID，部署执行账号不满足时点名 UID）；POSIX ACL、NFSv4 ACL、RichACL 或 `noexec` 文件系统都失败关闭。探测 ACL 属性时，只有文件系统类型明确为 ext2/3/4、XFS、Btrfs、tmpfs、overlayfs、ramfs 或 F2FS，且对应 xattr 返回 `EOPNOTSUPP`，才视为该 ACL 命名空间不适用；未知类型与网络文件系统（包括 NFS）无法证明服务端 ACL 不存在时拒绝。命令**不会**自动 `chown`/`chmod` 修补：旧版 `deploy` 曾把程序改归服务账号，这样的程序无法证明没被改写，须按[ops/deploy/RECOVERY.md#重建安装目录信任](../../ops/deploy/RECOVERY.md#重建安装目录信任)用已验证的 Release 重装为 root:root 0755 后重试；属主与写权限可信、只缺执行位时补回标准 0755 即可。安装与换回写出的程序一律 root:root 0755，每个程序替换前后都在同一个固定的目录描述符上复核属主、权限与摘要。非 root 运行只用于不跨账号的隔离环境：可信属主放宽为当前账号，新程序归当前账号 0755，不对服务账号做任何属主变更。
 
 ### 回滚记录与停机备份的容量
 
@@ -257,7 +260,7 @@ root 与 postgres 都会执行安装目录中的 `auction-cli`（`auction-stack`
 - 时段门禁与在途发送门禁与 `deploy` 相同。磁盘空间门禁没有停机备份需求，只估算反向回滚记录（安装目录当前三个角色程序）与安装临时文件（口径同第 5 步，只计三个角色），余量**不使用** `[backup]` 的 `min_free_bytes`/`min_free_percent`：扣除实际写入/替换字节后每个文件系统至少还留 64 MiB 即可（应急回退不被定时备份的 1 GiB/10% 拦住），不足即在停机前拒绝，估算与 `policy=rollback_fixed_margin` 写入输出的 `gates.disk_space`。
 - 回退目标角色的内嵌 schema（`E`）取自回滚记录；记录不知道时（v1 记录，或部署时找不到摘要一致的成功回执）按创建记录时观测到的数据库版本假设，`gates.versions.target_role_schema_source` 标明 `recorded` 或 `assumed_observed_database_version`。来源为 `assumed_observed_database_version` 时只允许 `D = E`，数据库版本不同即在停机前拒绝并提示恢复升级前备份：假设可能与旧程序的真实 schema 不同，而 readiness 是最后一道门、不证明没有副作用——CLI 先启动 Worker 再等待就绪，Worker 标记 serving 后立即开始投递轮次、PM 任务也独立启动，旧 Worker 在就绪判定失败、被 CLI 停止之前可能已领取或处理任务。`E` 已记录且数据库版本 `D` 高于 `E` 时，按[ops/deploy/RECOVERY.md#程序回退](../../ops/deploy/RECOVERY.md#程序回退)的区间规则核对 `(E, D]`，不满足即拒绝并提示恢复升级前备份；区间成立时还要求三个角色的有效配置 `[readiness] migration_compatibility_mode` 都显式为 `compatible`、且目标程序不早于迁移 075（才有兼容判定），否则在停机前拒绝并点名不满足的角色——默认 `shadow` 下旧程序面对超前数据库必然无法就绪。这些门禁成立时同样存在上述残余风险：跨迁移回退依赖兼容登记与 compatible 判定的正确性，旧 Worker 在就绪前已开始工作。rollback 不修改配置；`D = E` 时不要求任何模式。判定写入输出的 `gates.readiness`。
 - 安装前会把当前三个角色程序保留为**新的**回滚记录（不含 CLI），因此回退本身可以再前进；新记录的身份与 `deploy` 保留旧程序同一口径，按保留副本的摘要从成功回执重新绑定，部署回执失败时不取它的 `deploy` 段，无法证明时为 `null`。回退成功后追加 `action=rollback` 回执，`deploy` 段的角色身份取自目标回滚记录（未知项为 `null`），CLI 身份是被保留的实际程序，`database_version` 是当前数据库版本，不继承被回退版本的制品证据。回执口径与 `deploy` 相同：停机后每次调用最多一条（写不进去时错误注明），保留当前程序之后的失败以新回滚记录的标识发布。保留当前程序失败时三角色已停止、安装目录仍是回退前的程序、数据库未变；保留的 CLI 已在停机前核对为与数据库同版本，因此可用安装目录中的 CLI 执行 `service start --owner-secrets …`（沿用 `--config-dir`、`--state-dir` 与 unit 参数，迁移为空操作）恢复原状，或修复原因后用 `rollback --receipt-id <原记录 ID>` 重试。本次未写完的反向回滚记录目录（错误中点名）没有对应的部署回执，不能作为回退目标：缺少 `record.json` 时省略 `--receipt-id` 的 `rollback` 会跳过它；`record.json` 已写出时会选中它并因读不到部署回执而拒绝。重试时显式指定 `--receipt-id`，并在人工核对后按[回滚记录与停机备份的容量](#回滚记录与停机备份的容量)整目录删除它。
-- 安装旧角色程序与 `deploy` 第 9 步相同，逐个以同目录临时文件 + `rename` 替换三个角色（整体不是原子的）。任一程序替换失败时，立即把本次已替换的程序从刚保留的反向回滚记录逆序换回，再按反向记录复核三个角色的摘要；回退不执行迁移，换回发生在启动服务之前，换回本身失败时不重试。换回成功后启动前还会核对 `auction-cli` 的摘要与停机前相同。失败回执以反向记录的标识发布，`artifacts` 记录安装目录中实际文件的摘要。
+- 安装旧角色程序与 `deploy` 第 9 步相同，逐个以同目录临时文件 + `rename` 替换三个角色（整体不是原子的）。任一程序替换失败时，立即把本次已替换的程序从刚保留的反向回滚记录逆序换回，再按反向记录复核三个角色的摘要；回退不执行迁移，换回发生在启动服务之前，换回本身失败时不重试。换回成功后启动前还会核对 `auction-cli` 的摘要与停机前相同。失败回执以反向记录的标识发布，`artifacts` 对可读程序记录安装目录中的实际摘要与字节数；不可读取的角色只记录绝对路径，摘要与字节数为 `null`。
   - 错误含“已复核为回退前的程序”：安装目录仍是回退前的程序、数据库未变，按上一条处置（错误同样给出对应的命令）。反向记录已带失败回执，它的 `artifacts` 就是当前程序（安装目录核对会通过），保留的也正是当前程序：省略 `--receipt-id` 的 `rollback` 会选中它并因目标与当前程序相同而在停机前拒绝，重试时显式指定原记录 ID。
   - 错误含“自动换回未完成”：换回本身失败，错误点名失败的程序并列出各角色程序的当前摘要，安装目录可能新旧混合。回退前的角色程序完整保留在 `<state-dir>/rollback/<反向记录 ID>/bin/`，摘要见同一记录目录下的 `record.json`；按[ops/deploy/RECOVERY.md#安装中途失败的手工换回](../../ops/deploy/RECOVERY.md#安装中途失败的手工换回)换回并核对摘要后再处置，换回前不要启动服务。
 - `--actor` 与 `deploy` 相同；不接受 `--backup-id`，回退回执的 `backup_id` 为 `null`。
@@ -279,7 +282,7 @@ root 与 postgres 都会执行安装目录中的 `auction-cli`（`auction-stack`
 | `backup_archive` / `backup_manifest` | 停机恢复点的绝对路径；回退与部分失败回执为 `null` |
 | `rollback_record_id` | 本次保留的旧程序记录；回退回执为“再次前进”的记录 |
 
-`deploy` 段描述本次操作要安装的目标，回执的 `artifacts` 才是实际安装或运行的程序摘要：成功回执经运行摘要核对两者一致；失败回执（例如安装第三个程序失败、已换回旧程序）的 `deploy` 段仍是尝试安装的目标，不能证明任何组件的身份。
+`deploy` 段描述本次操作要安装的目标，回执的 `artifacts` 记录实际运行或安装程序的观测：成功回执经运行摘要核对；失败回执按安装目录实际可读文件记录摘要与字节数，无法读取时只记录路径、摘要与字节数为 `null`，不能据此认定身份。失败回执的 `deploy` 段仍是尝试安装的目标，不能证明任何组件的身份。
 
 v1 回执的 `deploy` 段是平铺字段（`artifact_directory`、`package`、`source_commit`、`source_fingerprint`、`cli_sha256`、`install_directory`、两个 payload 摘要与同名证据字段），原样兼容读取；其中 v1 `rollback` 回执的平铺段混有被回退版本的制品证据，不被当作已安装程序的身份。`deploy` 保留旧程序、`rollback` 保留反向记录时，都按保留副本的程序摘要在全部“成功且含部署身份”的回执中（先过滤再取最新，大量 `service start/restart` 回执不会把它挤出窗口）查找身份，失败回执从不作为来源，跳过这类 v1 回执继续向前，找不到时为 `null`。`service start/restart` 回执不得出现 `deploy` 字段。
 
@@ -396,7 +399,7 @@ auction-cli backup scope-extract --manifest /var/backups/auction/auction-2026103
 - `create` 在 `[backup.scope]` 启用时还会收集运行配置、邮件诊断证据与部署回执，打包为 `<archive>.scope.bundle.age` 并写下 `<archive>.scope.json`；这一步失败时 archive/manifest 保留但不带范围 sidecar。
 - `verify`：不连接数据库，校验 manifest 字段闭集、库名摘要、archive SHA-256 与 archive 目录；存在备份范围 sidecar 时同时校验配对名称、密文字节数与 SHA-256，并在 `scope` 字段输出不含路径的投影。
 - `scope-extract`：`[backup.scope]` 启用时生成的数据库之外材料（运行配置、加密邮件诊断证据、部署回执）。先用 `--identity` 指定的离线 age 私钥解密 `<archive>.scope.bundle.age` 到输出目录内的私有临时文件，核对 sidecar 的整体摘要、文件数与逐条摘要，确认无误后才把每个文件以 0600 写入全新目录；目标目录必须不存在或为空，拒绝覆盖与符号链接，临时明文在校验后删除；中途失败可能留下已写文件，不要把它们混入生产目录。与 `verify` 一样需要 PATH 中有 `pg_restore`。回执格式 `auction-backup-scope-extract.v1` 只含摘要、来源类型、文件数与目录。
-- `restore`：通过停机门禁；备份 schema 版本不得高于当前二进制；目标必须是同名空库（零其他会话、可写主节点、无用户对象、无 schema 身份与迁移历史，可先用 `db rebuild --mode empty-for-restore` 准备）。恢复前再次校验恢复点，以 `pg_restore --single-transaction --exit-on-error --no-owner --no-privileges` 执行，完成后核对 schema 身份与迁移版本等于备份版本，再写入 `auction-postgres-restore.v1` 回执。恢复较旧备份后按提示执行 `db migrate --owner-secrets`。
+- `restore`：通过停机门禁；备份 schema 版本不得高于当前二进制；目标必须是同名空库（零其他会话、可写主节点、无用户对象、无 schema 身份与迁移历史，可先用 `db rebuild --mode empty-for-restore` 准备）。零连接检查只是时点预检，操作者须从最后一次预检开始阻止普通目标客户端重连，直至 `pg_restore` 完成；完整操作要求见[灾备流程](../../ops/deploy/RECOVERY.md#3-预检与演练)。恢复前再次校验恢复点，以 `pg_restore --single-transaction --exit-on-error --no-owner --no-privileges` 执行，完成后核对 schema 身份与迁移版本等于备份版本，再写入 `auction-postgres-restore.v1` 回执。恢复较旧备份后按提示执行 `db migrate --owner-secrets`。
 - 恢复以 `--no-owner --no-privileges` 执行，对象 owner 与 ACL 都不在 dump 中：恢复后对象归迁移 owner，回执的 `ownership_restored=false`。备份版本已含`000081` 时命令会在核对 schema 后重放运行账号授权并记录 `runtime_privileges_applied=true`；缺失授权函数或以旧版本恢复时保持停机并提示先 `db migrate`。
 
 完整的灾备流程见[ops/deploy/RECOVERY.md](../../ops/deploy/RECOVERY.md)。
@@ -467,13 +470,13 @@ auction-cli --config-dir /etc/auction wal upload \
   --staging-dir /var/lib/auction/wal-staging --budget-seconds 300
 ```
 
-`wal archive` 的 `SOURCE`（PostgreSQL `%p`）与 `NAME`（`%f`）都是位置参数，`NAME` 必须等于 `SOURCE` 的文件名；段名只接受 24 位十六进制 WAL 段、`<8 位十六进制>.history` 与 `<24 位>.backup`。命令校验收件人公钥形状（62 字节 `age1` + bech32）、暂存目录（绝对路径、非符号链接、禁止 other 写入）与源文件（普通文件）。随后按 `zstd -q -T1 -c -- <源>` → `age --encrypt --recipient <公钥>` 的顺序压缩与加密，写入 `<段名>.zst.age` 临时文件；两个子进程都退出 0 后才 `fsync` 文件、设为 0640、改名发布，再 `fsync` 目录并写入 `<段名>.zst.age.manifest.json`（`auction-wal-archive.v1`：段名、源字节数与 mtime、密文长度、归档时刻）。任一步失败都以退出码 3 结束并清理本次临时文件，由 PostgreSQL 重试同一段；失败原因只含固定阶段与有界 stderr 文本，不含密钥。
+`wal archive` 的 `SOURCE`（PostgreSQL `%p`）与 `NAME`（`%f`）都是位置参数，`NAME` 必须等于 `SOURCE` 的文件名；段名只接受 24 位十六进制 WAL 段、`<8 位十六进制>.history` 与 `<24 位>.backup`。命令校验收件人公钥形状（62 字节 `age1` + bech32）、暂存目录（绝对路径、非符号链接、禁止 other 写入）与源文件（无符号链接的普通文件），并对已打开源文件计算 SHA-256。随后按 `zstd -q -T1 -c -- <源>` → `age --encrypt --recipient <公钥>` 的顺序压缩与加密，写入 `<段名>.zst.age` 临时文件；两个子进程都退出 0 后才 `fsync` 文件、设为 0640、改名发布，再 `fsync` 目录并写入 `<段名>.zst.age.manifest.json`（`auction-wal-archive.v2`：段名、源字节数/mtime/SHA-256、密文长度/SHA-256、归档时刻）。任一步失败都以退出码 3 结束并清理本次临时文件，由 PostgreSQL 重试同一段；失败原因只含固定阶段与有界 stderr 文本，不含密钥。
 
-重复归档只认 manifest：同一段已有 manifest 且源字节数与 mtime 一致时输出 `already_archived` 并退出 0，不重复加密；只有密文而没有 manifest 表示上次在发布前中断，删除该密文后重新归档（PostgreSQL 从未收到成功退出）；manifest 存在而密文缺失、源内容不同或密文长度与 manifest 不符时失败关闭，不覆盖既有证据。
+重复归档只认 manifest 或上传回执：源字节数、mtime 与源 SHA-256 必须全部一致才输出 `already_archived` 并退出 0，不重复加密；本地密文还须匹配 manifest 中的长度和 SHA-256。旧 v1 manifest/回执虽可解析，但没有源摘要，不能证明同名内容相同，遇到时失败关闭，须由操作者核对后处理；只有密文而没有 manifest 表示上次在发布前中断，删除该密文后重新归档（PostgreSQL 从未收到成功退出）；manifest 存在而密文缺失或任一身份/摘要不符时失败关闭，不覆盖既有证据。
 
 `wal base-backup` 生成每周物理基础备份，按 postgres 账号运行且不读敏感 TOML。它执行 `pg_basebackup --pgdata=- --format=tar --wal-method=fetch --checkpoint=fast --label <备份 ID> --no-password`，连接使用 libpq 默认值（本机 socket、peer 认证），因此执行账号必须有 `REPLICATION` 权限或为超级用户；`-D -` 要求集群没有额外表空间，`-X fetch` 把所需 WAL 并入同一个 `base.tar` 流。tar 流经 `zstd -q -T1 -c` 与 `age --encrypt --recipient` 写入 `<备份 ID>.tar.zst.age`（0640），`fsync` 文件与目录后发布 `<备份 ID>.tar.zst.age.manifest.json`（`auction-base-backup.v1`：备份 ID、开始/结束时刻、压缩前后字节数、密文 SHA-256）。备份 ID 固定为 `base-YYYYMMDDTHHMMSSZ`（UTC）；任一外部程序非零退出都以退出码 3 结束并清理临时文件，不发布任何一方；同一秒内重跑返回 `already_created`，只有密文而没有 manifest 时清理后重新生成。
 
-`wal upload` 读取 Worker 配置，`[backup.offsite] enabled = false` 时执行本地基础备份保留清理，输出 `outcome = skipped` 并退出 0（清理失败时为 `failed`）；否则在暂存目录内取 `wal-upload.lock` 互斥锁，按段名顺序把 `<段名>.zst.age` 上传到 `<prefix>/wal/<段名>.zst.age`，再按备份 ID 顺序把每组基础备份上传到 `<prefix>/base/<备份 ID>/`：先密文、再 manifest，最后发布字节固定的 `completed.json`（`auction-base-upload.v1`）。远端已有相同长度与完整 SHA-256 的对象记 `already_present`（bucket lock 下重传返回 409）；WAL 校验通过后先写 `<段名>.wal-upload.json` 持久证据（源字节/mtime、密文长度与 SHA-256、远端键），再删除本地密文与 manifest 并 `fsync` 目录；PostgreSQL 重试同一段时据此判定已归档，避免重新加密后摘要不一致。基础备份成功上传后写入本机证据 `<备份 ID>.upload.json`（`auction-base-receipt.v1`，含目标身份），只有 endpoint、bucket 与前缀仍一致时后续运行才据此跳过重复回读（`base.already_verified`），证据缺失、无效或目标变化按未上传处理；本地保留最新 3 组完整暂存项，更旧的组依次删除本机证据、manifest 与密文，本次上传失败的组不参与删除。失败、冲突或预算耗尽保留本地文件并以退出码 3 结束。stdout 报告含 WAL 的 `uploaded/already_present/failed/invalid/incomplete/remaining` 与 `base.uploaded/base.already_present/base.already_verified/base.failed/base.retained/base.removed`：`invalid` 是 manifest 无效或长度不符的项，`incomplete` 是创建进程尚未发布完成的项（WAL 段名或基础备份 ID），两者都不删除本地文件。
+`wal upload` 读取 Worker 配置，`[backup.offsite] enabled = false` 时执行本地基础备份保留清理，输出 `outcome = skipped` 并退出 0（清理失败时为 `failed`）；否则在暂存目录内取 `wal-upload.lock` 互斥锁，按段名顺序把 `<段名>.zst.age` 上传到 `<prefix>/wal/<段名>.zst.age`，再按备份 ID 顺序把每组基础备份上传到 `<prefix>/base/<备份 ID>/`：先密文、再 manifest，最后发布字节固定的 `completed.json`（`auction-base-upload.v1`）。远端已有相同长度与完整 SHA-256 的对象记 `already_present`（bucket lock 下重传返回 409）；WAL 上传前重算本地密文 SHA-256 并与 manifest 比对，校验通过后先写 `<段名>.wal-upload.json` 持久证据（`auction-wal-upload.v2`，源字节/mtime/SHA-256、密文长度/SHA-256、远端键），再删除本地密文与 manifest 并 `fsync` 目录；PostgreSQL 重试同一段时必须匹配源摘要才能据此判定已归档。旧 v1 上传证据缺少源摘要，不能证明重复身份；v1 暂存 manifest 缺少密文 SHA-256，虽可解析并列为待上传项，上传器仍会在网络发送前失败关闭。两类旧证据均须由操作者核对后处理。基础备份成功上传后写入本机证据 `<备份 ID>.upload.json`（`auction-base-receipt.v1`，含目标身份），只有 endpoint、bucket 与前缀仍一致时后续运行才据此跳过重复回读（`base.already_verified`），证据缺失、无效或目标变化按未上传处理；本地保留最新 3 组完整暂存项，更旧的组依次删除本机证据、manifest 与密文，本次上传失败的组不参与删除。失败、冲突或预算耗尽保留本地文件并以退出码 3 结束。stdout 报告含 WAL 的 `uploaded/already_present/failed/invalid/incomplete/remaining` 与 `base.uploaded/base.already_present/base.already_verified/base.failed/base.retained/base.removed`：`invalid` 是 manifest 无效或长度不符的项，`incomplete` 是创建进程尚未发布完成的项（WAL 段名或基础备份 ID），两者都不删除本地文件。
 
 归档密文是 age 公钥加密结果、manifest 无秘密，因此发布为 0640 并依赖暂存目录的 setgid 组共享（`postgres:auction`、`2770`）；上传器与归档命令使用不同账号时不要改成 0700。启用顺序、停机时段门禁、验证查询与时间点恢复见[ops/deploy/RECOVERY.md#wal-归档与时间点恢复](../../ops/deploy/RECOVERY.md#wal-归档与时间点恢复)。`archive_mode` 默认仍为 `off`；本仓库尚未在隔离实例演练时间点恢复。
 

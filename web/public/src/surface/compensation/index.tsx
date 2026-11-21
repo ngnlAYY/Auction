@@ -296,7 +296,11 @@ export function signedAmount(amount: number): string {
 
 /** 实际兑付率：补偿支出占名义折扣需求的比例，精确到 0.01%；没有需求时不适用。 */
 export function coverageLabel(compensationOut: number, discountDemand: number): string {
-  if (discountDemand <= 0) {
+  if (
+    !Number.isSafeInteger(compensationOut) ||
+    !Number.isSafeInteger(discountDemand) ||
+    discountDemand <= 0
+  ) {
     return "—";
   }
   const ppm =

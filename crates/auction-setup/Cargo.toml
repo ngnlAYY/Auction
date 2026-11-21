@@ -12,6 +12,7 @@ auction-contracts.workspace = true
 auction-http.workspace = true
 auction-process.workspace = true
 auction-storage.workspace = true
+libc.workspace = true
 axum.workspace = true
 rust-embed.workspace = true
 subtle.workspace = true

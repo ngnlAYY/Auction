@@ -6,7 +6,8 @@
 
 use std::path::Path;
 
-use super::model::{require_staging_dir, staged};
+use super::model::paths::require_staging_dir;
+use super::model::scan::staged;
 
 /// 尚未上传的 WAL 段水位。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,11 +79,13 @@ mod tests {
             let cipher_path = self.root.join(format!("{name}.zst.age"));
             fs::write(&cipher_path, cipher).expect("写入密文");
             let manifest = json!({
-                "format": "auction-wal-archive.v1",
+                "format": "auction-wal-archive.v2",
                 "segment_name": name,
                 "source_bytes": 16,
                 "source_mtime_ns": 1,
+                "source_sha256": crate::support::digest::sha256_bytes(b"source"),
                 "cipher_bytes": cipher.len(),
+                "cipher_sha256": crate::support::digest::sha256_bytes(cipher),
                 "archived_unix_seconds": archived_unix_seconds,
             });
             fs::write(

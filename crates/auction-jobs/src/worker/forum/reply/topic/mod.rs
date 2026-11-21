@@ -7,8 +7,5 @@
 
 mod layout;
 mod refresh;
-mod scan;
-mod schedule;
-
-pub(super) use scan::process_topic;
-pub(super) use schedule::{FINAL_SCAN_MINIMUM_INTERVAL_SECONDS, retry_scan_at};
+pub(super) mod scan;
+pub(super) mod schedule;

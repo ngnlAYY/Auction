@@ -3,7 +3,7 @@
 use auction_web_shared::{QueryWriteMode, t};
 use dioxus::prelude::*;
 
-use super::page::reset_detail_state;
+use super::page::component::reset_detail_state;
 use super::query::{SettlementLocation, SettlementQuery};
 use super::recovery::RecoveryConfirmationDraft;
 use crate::api::{AdminSettlementCatalogEntry, AdminSettlementCatalogPage};

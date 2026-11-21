@@ -1,6 +1,6 @@
 //! Admin Mail owner 的轮询状态和入站邮件安全投影。
 
-use auction_domain::valid_optional_text;
+use auction_domain::{valid_optional_text, valid_text};
 use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -9,7 +9,7 @@ use super::errors::AdminMailError;
 use super::limits::{
     MAX_ADMIN_MAIL_DECISION_BYTES, MAX_ADMIN_MAIL_OFFSET, MAX_ADMIN_MAIL_PAGE_SIZE,
     MAX_ADMIN_MAIL_POLLER_COUNT, MAX_ADMIN_MAILBOX_KEY_BYTES, valid_kind, valid_status,
-    valid_string_list, valid_text,
+    valid_string_list,
 };
 use crate::ports::mail::MailDisplaySnapshot;
 
@@ -59,12 +59,13 @@ impl AdminMailPollerSnapshot {
     /// 校验轮询器摘要的时间、版本和文本边界。
     pub fn validate(&self) -> bool {
         valid_text(&self.mailbox_key, MAX_ADMIN_MAILBOX_KEY_BYTES)
-            && !self.last_poll_at.timestamp_nanos_opt().is_none()
-            && !self.next_poll_at.timestamp_nanos_opt().is_none()
+            && self.last_poll_at.timestamp_nanos_opt().is_some()
+            && self.next_poll_at.timestamp_nanos_opt().is_some()
             && self.next_poll_at >= self.last_poll_at
             && self.consecutive_failures >= 0
             && self.state_version > 0
-            && !self.updated_at.timestamp_nanos_opt().is_none()
+            && self.updated_at.timestamp_nanos_opt().is_some()
+            && self.paused_since.is_none_or(|value| value.timestamp_nanos_opt().is_some())
     }
 }
 
@@ -254,6 +255,7 @@ impl AdminMailIntakeDelivery {
                     | "manual_reconcile"
             )
             && self.fencing_version >= 0
+            && self.attempt_count <= i32::MAX as u32
             && self.failure_code.as_deref().is_none_or(|value| valid_text(value, 512))
             && self.reason_code.as_deref().is_none_or(|value| valid_text(value, 512))
             && self.external_reference.as_deref().is_none_or(|value| valid_text(value, 512))

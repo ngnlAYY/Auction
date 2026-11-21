@@ -124,6 +124,7 @@ impl InternalEvidenceRequest {
             && self.purpose.validate()
             && self.equipment.as_ref().is_none_or(|target| {
                 !target.equipment_id.is_nil()
+                    && target.world == self.world
                     && valid_external_positive_id(&target.external_equipment_id)
             })
             && self.deadline > Instant::now()

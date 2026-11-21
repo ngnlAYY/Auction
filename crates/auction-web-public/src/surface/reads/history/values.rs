@@ -2,8 +2,8 @@
 
 use auction_time::{Duration, Timestamp, parse_date};
 
-use super::filters::history_name_value;
-use super::filters::{HistoryErrors, HistoryField, HistoryFilterError, HistoryPriceUnit};
+use super::filters::model::{HistoryErrors, HistoryField, HistoryFilterError, HistoryPriceUnit};
+use super::filters::validation::history_name_value;
 use crate::api::PriceHistoryQuery;
 use crate::surface::{PublicBoardQuery, public_page_within_offset, query_values};
 
@@ -239,7 +239,7 @@ pub(crate) fn history_active_filter_count(query: &PriceHistoryQuery) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::super::filters::{HistoryField, HistoryFilterError};
+    use super::super::filters::model::{HistoryField, HistoryFilterError};
     use super::HistoryAddress;
     use crate::surface::PublicBoardQuery;
 
