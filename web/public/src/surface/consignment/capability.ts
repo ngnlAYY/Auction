@@ -2,7 +2,7 @@
 
 import type { ConsignmentStatus } from "@auction/contracts/dto/public/consignment/catalog";
 import { createTaskResource, type TaskResource } from "@auction/web-shared/reactive/resource";
-import { createRoot, onCleanup } from "solid-js";
+import { createRoot, onCleanup, runWithOwner } from "solid-js";
 
 import { type ConsignmentReadError, fetchConsignmentStatus } from "../../api/consignment-status";
 
@@ -27,20 +27,23 @@ let shared: CapabilityOwner | null = null;
 
 /** 在 Solid 组件内调用；最后一个订阅离开时取消能力请求并释放快照。 */
 export function useConsignmentCapability(): ConsignmentCapabilityReader {
-  shared ??= createRoot((dispose) => ({
-    resource: createTaskResource(
-      () => null,
-      async (_, context): Promise<ConsignmentCapability> => {
-        const result = await fetchConsignmentStatus(context.signal);
-        if (!result.ok) return { kind: "failed", error: result.error };
-        const status = result.value;
-        if (!status.enabled) return { kind: "disabled", status };
-        return { kind: status.registration_ready ? "ready" : "read-only", status };
-      },
-    ),
-    dispose,
-    readers: 0,
-  }));
+  // 资源由订阅计数持有，不能随创建它的第一个组件卸载。
+  shared ??= runWithOwner(null, () =>
+    createRoot((dispose) => ({
+      resource: createTaskResource(
+        () => null,
+        async (_, context): Promise<ConsignmentCapability> => {
+          const result = await fetchConsignmentStatus(context.signal);
+          if (!result.ok) return { kind: "failed", error: result.error };
+          const status = result.value;
+          if (!status.enabled) return { kind: "disabled", status };
+          return { kind: status.registration_ready ? "ready" : "read-only", status };
+        },
+      ),
+      dispose,
+      readers: 0,
+    })),
+  );
   const owner = shared;
 
   owner.readers += 1;

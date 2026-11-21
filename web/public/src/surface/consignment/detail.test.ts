@@ -5,6 +5,8 @@ import { createCell } from "@auction/web-shared/reactive/cell";
 import { createComponent, flush } from "solid-js";
 
 import {
+  controlEvent,
+  DOMText,
   detail,
   failure,
   fakeClock,
@@ -19,6 +21,68 @@ import {
   status,
 } from "./read-fixture.test";
 import { loadDetail } from "./render-fixture.test";
+
+test.each([
+  ["关闭", () => response(status(false)), "The fixed-price listing service is disabled"],
+  [
+    "查询失败",
+    () => failure(503, "consignment_unavailable"),
+    "The fixed-price listing service is temporarily unavailable",
+  ],
+] as const)("能力%s时详情零读取", async (_, statusReply, text) => {
+  const { PublicDetail } = await loadDetail();
+  const transport = fakeFetch(({ url }) =>
+    url.pathname === STATUS_PATH ? statusReply() : response(detail()),
+  );
+  const page = await mountConsignment(`/consignment/listings/${LISTING_A}`, () =>
+    createComponent(PublicDetail, { params: { listing_id: LISTING_A }, query: {} }),
+  );
+  try {
+    await settle();
+    expect(transport.requests.filter(({ url }) => url.pathname.startsWith(LISTINGS_PATH))).toEqual(
+      [],
+    );
+    expect(transport.requests.map(({ url }) => url.pathname)).toEqual([STATUS_PATH]);
+    expect(page.text()).toContain(text);
+  } finally {
+    page.dispose();
+    transport.restore();
+  }
+});
+
+test.each(["listing_not_found", "consignment_disabled"] as const)(
+  "缺字段的 404 %s 显示暂不可用且可以重试",
+  async (code) => {
+    const { PublicDetail } = await loadDetail();
+    let retry = false;
+    const transport = fakeFetch(({ url }) => {
+      if (url.pathname === STATUS_PATH) return response(status(true));
+      return retry
+        ? response(detail())
+        : Response.json({ code, message: "fake server message" }, { status: 404 });
+    });
+    const page = await mountConsignment(`/consignment/listings/${LISTING_A}`, () =>
+      createComponent(PublicDetail, { params: { listing_id: LISTING_A }, query: {} }),
+    );
+    try {
+      await settle();
+      expect(page.text()).toContain("The fixed-price listing service is temporarily unavailable");
+      expect(page.text()).not.toContain("no longer displayed");
+      expect(page.text()).not.toContain("service is disabled");
+      expect(page.text()).not.toContain("fake server message");
+      retry = true;
+      controlEvent(
+        page.find((node) => node.tag === "button" && DOMText(node) === "Retry"),
+        "onClick",
+      );
+      await settle();
+      expect(page.text()).toContain("Fake Oak Staff");
+    } finally {
+      page.dispose();
+      transport.restore();
+    }
+  },
+);
 
 test("详情只显示公开安全投影，刷新收到 404 后清空装备与卖家", async () => {
   const { PublicDetail } = await loadDetail();

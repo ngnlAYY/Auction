@@ -55,3 +55,10 @@ test.each([
 ])("拒绝非法寄售查询 %s", (search) => {
   expect(parse(search)).toBeNull();
 });
+
+test.each(["://", "/EqUiP/", "/EqUip?", "kEy="])("名称与分类均拒绝内嵌凭证片段 %s", (fragment) => {
+  for (const key of ["consignment_q", "consignment_category"]) {
+    const query = new URLSearchParams({ [key]: `before${fragment}after` });
+    expect(parse(query.toString()) === null).toBe(true);
+  }
+});

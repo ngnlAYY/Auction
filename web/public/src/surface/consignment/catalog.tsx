@@ -54,7 +54,14 @@ export function ConsignmentCatalog(): JSX.Element {
   const session = useContext(PublicSessionResourceContext);
   const enabled = createValueMemo(() => consignmentEnabled(capability()));
   const location = useConsignmentCatalogQuery();
-  const query = createValueMemo(() => location.state());
+  const query = createValueMemo(() => {
+    const selected = location.state();
+    return typeof selected === "string" ? null : selected;
+  });
+  const rejected = () => {
+    const selected = location.state();
+    return typeof selected === "string" ? selected : null;
+  };
   const request = createValueMemo(() => {
     const selected = query();
     return enabled() && selected !== null ? { query: selected } : null;
@@ -88,7 +95,12 @@ export function ConsignmentCatalog(): JSX.Element {
             <Link href="/consignment/me">{t("consignment-mine")}</Link>
           </Show>
         </nav>
-        <Filters query={query()} onApply={(next) => location.push(next)} />
+        <Filters
+          query={query()}
+          rejected={rejected()}
+          onApply={(next) => location.push(next)}
+          onReject={(field) => location.state.set(field)}
+        />
         <Switch fallback={<AsyncState kind="loading" title={t("data-loading")} detail="" />}>
           <Match when={query() === null}>
             <ConsignmentReadNotice error={{ kind: "invalid-query" }} onRetry={clearFilters} />

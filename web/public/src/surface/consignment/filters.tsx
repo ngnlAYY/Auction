@@ -3,7 +3,7 @@
 import { consignmentTextSchema } from "@auction/contracts/dto/public/consignment/scalar";
 import { MAX_PUBLIC_PAGE_SIZE } from "@auction/contracts/dto/public/pagination";
 import { decode } from "@auction/contracts/wire";
-import { type QueryPair, useQueryState } from "@auction/web-shared/net/query";
+import { type QueryPair, useQueryState, writeQueryPairs } from "@auction/web-shared/net/query";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
@@ -35,6 +35,13 @@ export const DEFAULT_CONSIGNMENT_QUERY: ConsignmentCatalogQuery = {
 
 const CATEGORY = consignmentTextSchema(128);
 const SEARCH = consignmentTextSchema(320);
+const TEXT_KEYS = ["consignment_category", "consignment_q"];
+type TextFilter = "category" | "q";
+
+function hasCredentialFragment(value: string): boolean {
+  // 不变量 7：沿用下架说明的 ASCII 片段检查，并拦截其他带协议的链接。
+  return /:\/\/|\/equip[/?]|key=/i.test(value);
+}
 
 function validCategory(category: string): boolean {
   return category === "" || decode(CATEGORY, category).ok;
@@ -64,6 +71,8 @@ export function parseConsignmentQuery(pairs: readonly QueryPair[]): ConsignmentC
   if (
     (world !== null && world !== "main" && world !== "isekai") ||
     (mode !== null && mode !== "direct" && mode !== "consigned") ||
+    hasCredentialFragment(category) ||
+    hasCredentialFragment(q) ||
     !validCategory(category) ||
     !validSearch(q) ||
     pageSize < 1 ||
@@ -76,8 +85,8 @@ export function parseConsignmentQuery(pairs: readonly QueryPair[]): ConsignmentC
   return { world, mode, category, q, page, pageSize };
 }
 
-function serialize(query: ConsignmentCatalogQuery | null): readonly QueryPair[] {
-  if (query === null) return [];
+function serialize(query: ConsignmentCatalogQuery | TextFilter | null): readonly QueryPair[] {
+  if (query === null || typeof query === "string") return [];
   const pairs: QueryPair[] = [];
   if (query.world !== null) pairs.push(["consignment_world", query.world]);
   if (query.mode !== null) pairs.push(["consignment_mode", query.mode]);
@@ -92,7 +101,21 @@ function serialize(query: ConsignmentCatalogQuery | null): readonly QueryPair[] 
 
 /** 读取、写回寄售筛选并在浏览器前进、后退时恢复。 */
 export function useConsignmentCatalogQuery() {
-  return useQueryState(KEYS, parseConsignmentQuery, serialize);
+  return useQueryState(
+    KEYS,
+    (pairs): ConsignmentCatalogQuery | TextFilter | null => {
+      const query = parseConsignmentQuery(pairs);
+      if (query !== null) return query;
+      const textFilters = pairs.filter(([key]) => TEXT_KEYS.includes(key));
+      const rejected = textFilters.find(([, value]) => hasCredentialFragment(value));
+      if (rejected === undefined) return null;
+      // 书签里的凭证已在地址栏。替换当前历史项，同时保留无效状态供用户清除。
+      const safe = textFilters.filter(([, value]) => !hasCredentialFragment(value));
+      writeQueryPairs(TEXT_KEYS, safe, "replace");
+      return rejected[0] === "consignment_category" ? "category" : "q";
+    },
+    serialize,
+  );
 }
 
 /** 两个世界的既有 Public 译文。 */
@@ -103,10 +126,13 @@ export function consignmentWorldLabel(world: "main" | "isekai"): string {
 /** 以一次表单提交应用筛选并回到第一页。 */
 export function Filters(props: {
   readonly query: ConsignmentCatalogQuery | null;
+  readonly rejected: TextFilter | null;
   readonly onApply: (query: ConsignmentCatalogQuery) => void;
+  readonly onReject: (field: TextFilter) => void;
 }): JSX.Element {
   const draft = createCell(DEFAULT_CONSIGNMENT_QUERY);
-  const invalid = createCell<"category" | "q" | null>(null);
+  const invalid = createCell<TextFilter | null>(null);
+  const invalidField = () => props.rejected ?? invalid();
   createEffect(
     () => props.query,
     (query) => {
@@ -121,7 +147,15 @@ export function Filters(props: {
       onSubmit={(event) => {
         event.preventDefault();
         const query = { ...draft.peek(), page: 1 };
-        if (!validCategory(query.category)) {
+        const rejected = hasCredentialFragment(query.category)
+          ? "category"
+          : hasCredentialFragment(query.q)
+            ? "q"
+            : null;
+        if (rejected !== null) {
+          draft.set(DEFAULT_CONSIGNMENT_QUERY);
+          props.onReject(rejected);
+        } else if (!validCategory(query.category)) {
           invalid.set("category");
         } else if (!validSearch(query.q)) {
           invalid.set("q");
@@ -192,9 +226,9 @@ export function Filters(props: {
         />
       </label>
       <button type="submit">{t("history-filter-apply")}</button>
-      {invalid() !== null && (
+      {invalidField() !== null && (
         <p role="alert">
-          {invalid() === "category"
+          {invalidField() === "category"
             ? t("filter-category-invalid")
             : t("history-filter-error-name-invalid")}
         </p>

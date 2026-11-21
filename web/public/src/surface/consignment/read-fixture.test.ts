@@ -240,6 +240,7 @@ export function mountConsignment(initialUrl: string, render: () => Element, auth
     ({ dispose, router, tree }) => ({
       router,
       location: installed.fake.location,
+      historyWrites: installed.fake.writes,
       go(href: string) {
         router.push(href);
         flush();

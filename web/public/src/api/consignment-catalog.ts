@@ -35,6 +35,14 @@ export async function fetchConsignmentCatalog(
     `/api/v1/consignment/listings?${params}`,
     ListingSummaryPageSchema,
     signal,
+    [
+      ["data", "total"],
+      ["data", "page"],
+      ["data", "page_size"],
+      ["data", "items", null, "version"],
+      ["data", "items", null, "price"],
+      ["data", "items", null, "level", "value"],
+    ],
   );
   if (
     response.ok &&

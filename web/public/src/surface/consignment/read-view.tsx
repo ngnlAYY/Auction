@@ -34,9 +34,8 @@ export function ConsignmentReadNotice(props: {
         // 合同未给通用筛选错误分配专用键，从已有文案提供可执行的清除入口。
         return t("history-filter-settings");
       case "unavailable":
-        return t("consignment-unavailable");
       case "invalid-response":
-        return t("error-invalid-response");
+        return t("consignment-unavailable");
       case "transport":
         return error.error.kind === "timeout" ? t("error-request-timeout") : t("error-network");
       default:

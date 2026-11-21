@@ -119,11 +119,10 @@ test("拒绝错误信封、嵌套重复键、其他挂单和夹带私有字段�
   }
 });
 
-test("能力矛盾、错页及错筛选的成功外壳均被拒绝", async () => {
+test("能力矛盾和错页的成功外壳均被拒绝", async () => {
   const invalidReplies = [
     response({ ...status(false), registration_ready: true }),
     response({ items: [], total: 0, page: 1, page_size: 37 }),
-    response({ items: [summary(LISTING_B)], total: 120, page: 3, page_size: 37 }),
   ];
   const transport = fakeFetch(
     () => invalidReplies.shift() ?? failure(503, "consignment_unavailable"),
@@ -134,16 +133,128 @@ test("能力矛盾、错页及错筛选的成功外壳均被拒绝", async () =>
       ok: false,
       error: { kind: "invalid-response" },
     });
-    for (let index = 0; index < 2; index += 1) {
-      expect(await fetchConsignmentCatalog(QUERY, terminal)).toEqual({
-        ok: false,
-        error: { kind: "invalid-response" },
-      });
-    }
+    expect(await fetchConsignmentCatalog(QUERY, terminal)).toEqual({
+      ok: false,
+      error: { kind: "invalid-response" },
+    });
   } finally {
     transport.restore();
   }
 });
+
+const MATCHED_QUERY = { ...QUERY, q: "Oak" };
+
+test.each([
+  ["页长", MATCHED_QUERY, summary(), 20],
+  ["世界", MATCHED_QUERY, { ...summary(), world_id: "isekai" }, 37],
+  ["模式", { ...MATCHED_QUERY, mode: "consigned" }, summary(), 37],
+  ["分类", MATCHED_QUERY, { ...summary(), category: "Shield" }, 37],
+] as const)("目录响应与请求仅有%s不匹配时拒绝", async (_, query, listing, pageSize) => {
+  const transport = fakeFetch(() =>
+    response({ items: [listing], total: 121, page: 3, page_size: pageSize }),
+  );
+  try {
+    expect(await fetchConsignmentCatalog(query, new AbortController().signal)).toEqual({
+      ok: false,
+      error: { kind: "invalid-response" },
+    });
+  } finally {
+    transport.restore();
+  }
+});
+
+function rawSuccess(data: unknown): string {
+  return JSON.stringify({ code: "ok", message: "ok", data });
+}
+
+const rawStatus = rawSuccess(status(true));
+const rawCatalog = rawSuccess({ items: [summary()], total: 121, page: 3, page_size: 20 });
+const rawDetail = rawSuccess(detail());
+const readCatalog = (signal: AbortSignal) =>
+  fetchConsignmentCatalog({ ...QUERY, pageSize: 20 }, signal);
+const readDetail = (signal: AbortSignal) => fetchConsignmentDetail(LISTING_A, signal);
+
+test.each([
+  ["状态费率", fetchConsignmentStatus, rawStatus, '"fee_bps":500', '"fee_bps":5e2'],
+  ["状态最低价", fetchConsignmentStatus, rawStatus, '"min_price":1', '"min_price":1.0'],
+  ["状态最高价", fetchConsignmentStatus, rawStatus, '"max_price":1000000000', '"max_price":1e9'],
+  ["目录总数", readCatalog, rawCatalog, '"total":121', '"total":121.0'],
+  ["目录页码", readCatalog, rawCatalog, '"page":3', '"page":3.0'],
+  ["目录页长", readCatalog, rawCatalog, '"page_size":20', '"page_size":2e1'],
+  ["目录标价", readCatalog, rawCatalog, '"price":1234', '"price":1234.0'],
+  ["目录版本", readCatalog, rawCatalog, '"version":2', '"version":2.0000000000000001'],
+  ["目录等级", readCatalog, rawCatalog, '"value":42', '"value":42.0'],
+  ["详情标价", readDetail, rawDetail, '"price":1234', '"price":1234.0'],
+  ["详情版本", readDetail, rawDetail, '"version":2', '"version":2.0000000000000001'],
+  ["详情摘要等级", readDetail, rawDetail, '"value":42', '"value":42.0'],
+  ["详情装备等级", readDetail, rawDetail, '"value":42},"tradeable"', '"value":42.0},"tradeable"'],
+] as const)("%s只接受 JSON 整数词法", async (_, read, body, token, replacement) => {
+  const altered = body.replace(token, replacement);
+  expect(altered).not.toBe(body);
+  const transport = fakeFetch(() => new Response(altered));
+  try {
+    expect(await read(new AbortController().signal)).toEqual({
+      ok: false,
+      error: { kind: "invalid-response" },
+    });
+  } finally {
+    transport.restore();
+  }
+});
+
+test("详情装备属性接受小数和指数写法", async () => {
+  const body = rawDetail.replace('"base":0', '"base":1e-3');
+  const transport = fakeFetch(() => new Response(body));
+  try {
+    const result = await readDetail(new AbortController().signal);
+    expect(result.ok && result.value.equipment.stat_groups[0]?.stats[1]).toEqual({
+      name: "Damage",
+      value: -2.25,
+      base: 0.001,
+    });
+  } finally {
+    transport.restore();
+  }
+});
+
+test.each([
+  [200, rawDetail.replaceAll("Fake Oak Staff", "Fake ~ Staff")],
+  [404, '{"code":"listing_not_found","message":"Fake ~ message","data":null,"request_id":null}'],
+] as const)("HTTP %i 的非法 UTF-8 使整份响应无效", async (http, body) => {
+  const bytes = new TextEncoder().encode(body).map((byte) => (byte === 0x7e ? 0xff : byte));
+  const transport = fakeFetch(() => new Response(bytes, { status: http }));
+  try {
+    expect(await readDetail(new AbortController().signal)).toEqual({
+      ok: false,
+      error: { kind: "invalid-response" },
+    });
+  } finally {
+    transport.restore();
+  }
+});
+
+test.each(["code", "message", "data", "request_id"] as const)(
+  "404 错误外壳缺少 %s 时拒绝确定结果",
+  async (missing) => {
+    const envelope = {
+      code: "listing_not_found",
+      message: "fake server message",
+      data: null,
+      request_id: "fake-request-id",
+    };
+    const transport = fakeFetch(() =>
+      Response.json({ ...envelope, [missing]: undefined }, { status: 404 }),
+    );
+    try {
+      expect(await readDetail(new AbortController().signal)).toEqual({
+        ok: false,
+        error: { kind: "invalid-response" },
+      });
+    } finally {
+      transport.restore();
+    }
+  },
+);
 
 test("取消传到 fetch，迟到的成功结果仍作为传输失败退出", async () => {
   const controller = new AbortController();

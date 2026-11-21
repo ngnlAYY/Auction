@@ -4,12 +4,32 @@ import {
   type ConsignmentStatus,
   ConsignmentStatusSchema,
 } from "@auction/contracts/dto/public/consignment/catalog";
-import { ApiErrorResponseSchema, apiResponseSchema } from "@auction/contracts/dto/response";
-import { decode } from "@auction/contracts/wire";
+import { apiResponseSchema } from "@auction/contracts/dto/response";
+import { decode, requiredNullable, struct } from "@auction/contracts/wire";
 import { sendRequestObserved, type TransportError } from "@auction/web-shared/net/transport";
+import { type JsonFieldPolicy, parseJson } from "@auction/web-shared/net/wire";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { reportBrowserError } from "@auction/web-shared/ui/bootstrap";
-import type { GenericSchema } from "valibot";
+import { type GenericSchema, null_, string } from "valibot";
+
+const UTF8 = new TextDecoder("utf-8", { fatal: true });
+const ERROR_ENVELOPE = struct({
+  code: string(),
+  message: string(),
+  data: null_(),
+  request_id: requiredNullable(string()),
+});
+
+function parseConsignmentBody(body: Uint8Array | null, policy: JsonFieldPolicy) {
+  if (body === null) return err("invalid_json");
+  let source: string;
+  try {
+    source = UTF8.decode(body);
+  } catch {
+    return err("invalid_json");
+  }
+  return parseJson(source, policy);
+}
 
 /** 公开读取只保留已确认的分类，不向页面传递响应正文或未知错误码。 */
 export type ConsignmentReadError =
@@ -23,11 +43,12 @@ export type ConsignmentReadError =
     }
   | { readonly kind: "transport"; readonly error: TransportError };
 
-/** 解码 200 成功信封和契约 DTO；匿名读省略凭据，拒绝缓存下架前的快照。 */
+/** 解码契约 DTO；整数路径含信封的 data 层，匿名读省略凭据并禁用缓存。 */
 export async function readPublicConsignment<T>(
   url: string,
   schema: GenericSchema<unknown, T>,
   signal: AbortSignal,
+  integerPaths: NonNullable<JsonFieldPolicy["integerPaths"]> = [],
 ): Promise<Result<T, ConsignmentReadError>> {
   let unavailable = false;
   const sent = await sendRequestObserved(
@@ -53,7 +74,7 @@ export async function readPublicConsignment<T>(
 
   const response = sent.value;
 
-  const payload = response.json({ uniqueKeys: "all" });
+  const payload = parseConsignmentBody(response.body, { uniqueKeys: "all", integerPaths });
   if (response.status === 200) {
     if (payload.ok) {
       const decoded = decode(apiResponseSchema(schema), payload.value);
@@ -65,8 +86,8 @@ export async function readPublicConsignment<T>(
   }
 
   if (!payload.ok) return err({ kind: "invalid-response" });
-  const decoded = decode(ApiErrorResponseSchema, payload.value);
-  if (decoded.ok && decoded.value.data === null) {
+  const decoded = decode(ERROR_ENVELOPE, payload.value);
+  if (decoded.ok) {
     const code = decoded.value.code;
     if (response.status === 404 && code === "consignment_disabled")
       return err({ kind: "disabled" });
@@ -80,5 +101,9 @@ export async function readPublicConsignment<T>(
 export function fetchConsignmentStatus(
   signal: AbortSignal,
 ): Promise<Result<ConsignmentStatus, ConsignmentReadError>> {
-  return readPublicConsignment("/api/v1/consignment/status", ConsignmentStatusSchema, signal);
+  return readPublicConsignment("/api/v1/consignment/status", ConsignmentStatusSchema, signal, [
+    ["data", "fee_bps"],
+    ["data", "min_price"],
+    ["data", "max_price"],
+  ]);
 }

@@ -140,6 +140,140 @@ test("筛选四项由地址恢复、写回和后退，保留拍卖查询与片�
   }
 });
 
+const FAKE_EQUIPMENT_LINK = "HTTPS://example.invalid/EqUiP/42?KeY=0000000042";
+const INVALID_LINK_FILTER = {
+  q: "A keyword contains invalid characters",
+  category: "The equipment type filter is invalid",
+};
+
+test.each(["q", "category"] as const)(
+  "粘贴装备链接提交 %s 时拒绝写历史和读取目录",
+  async (field) => {
+    const { ConsignmentCatalog } = await loadCatalog();
+    const transport = fakeFetch(({ url }) =>
+      url.pathname === STATUS_PATH ? response(status(true)) : pageResponse(url, []),
+    );
+    const page = await mountConsignment("/consignment?world=main&consignment_page=2", () =>
+      createComponent(ConsignmentCatalog, {}),
+    );
+    try {
+      await settle();
+      expect(transport.requests.at(-1)?.url.search).toBe("?page=2&page_size=20");
+      const address = page.location.href;
+      const writes = page.historyWrites.length;
+      const reads = () => transport.requests.filter(({ url }) => url.pathname === LISTINGS_PATH);
+      const readCount = reads().length;
+      controlEvent(
+        page.find((node) => node.attributes.name === field),
+        "onInput",
+        FAKE_EQUIPMENT_LINK,
+      );
+      controlEvent(
+        page.find((node) => node.attributes.class === "public-consignment-filters"),
+        "onSubmit",
+      );
+      await settle();
+      page.focus();
+      await settle();
+      expect(page.location.href === address).toBe(true);
+      expect(page.historyWrites).toHaveLength(writes);
+      expect(reads()).toHaveLength(readCount);
+      expect(transport.requests.some(({ url }) => url.searchParams.has(field))).toBe(false);
+      expect(page.text()).toContain(INVALID_LINK_FILTER[field]);
+      const clear = page.find((node) => node.tag === "button" && DOMText(node) === "Clear");
+      controlEvent(clear, "onClick");
+      await settle();
+      expect(transport.requests.at(-1)?.url.search).toBe("?page=1&page_size=20");
+      expect(page.location.search).toBe("?world=main");
+    } finally {
+      page.dispose();
+      transport.restore();
+    }
+  },
+);
+
+test.each(["q", "category"] as const)(
+  "恢复含装备链接的 %s 书签时清除地址中的凭证且不读取或回显",
+  async (field) => {
+    const { ConsignmentCatalog } = await loadCatalog();
+    const transport = fakeFetch(({ url }) =>
+      url.pathname === STATUS_PATH ? response(status(true)) : pageResponse(url, []),
+    );
+    const key = `consignment_${field}`;
+    const params = new URLSearchParams({ world: "main", [key]: FAKE_EQUIPMENT_LINK });
+    const page = await mountConsignment(`/consignment?${params}#kept`, () =>
+      createComponent(ConsignmentCatalog, {}),
+    );
+    try {
+      await settle();
+      expect(page.location.searchParams.has(key)).toBe(false);
+      expect(page.location.search).toBe("?world=main");
+      expect(page.location.hash).toBe("#kept");
+      expect(transport.requests.map(({ url }) => url.pathname)).toEqual([STATUS_PATH]);
+      expect(transport.requests.some(({ url }) => url.searchParams.has(field))).toBe(false);
+      expect(page.find((node) => node.attributes.name === field)?.attributes.value === "").toBe(
+        true,
+      );
+      expect(page.text().includes(FAKE_EQUIPMENT_LINK)).toBe(false);
+      expect(page.text()).toContain(INVALID_LINK_FILTER[field]);
+      controlEvent(
+        page.find((node) => node.tag === "button" && DOMText(node) === "Clear"),
+        "onClick",
+      );
+      await settle();
+      expect(transport.requests.at(-1)?.url.search).toBe("?page=1&page_size=20");
+    } finally {
+      page.dispose();
+      transport.restore();
+    }
+  },
+);
+
+test("切换筛选和离开目录均中止传给 fetch 的在途请求", async () => {
+  const { ConsignmentCatalog } = await loadCatalog();
+  const pending = Promise.withResolvers<void>();
+  const transport = fakeFetch(({ url }) =>
+    url.pathname === STATUS_PATH
+      ? response(status(true))
+      : pending.promise.then(() => pageResponse(url, [])),
+  );
+  const page = await mountConsignment("/consignment", () =>
+    createComponent(ConsignmentCatalog, {}),
+  );
+  try {
+    await settle();
+    const reads = () => transport.requests.filter(({ url }) => url.pathname === LISTINGS_PATH);
+    expect(reads()).toHaveLength(1);
+    const first = reads()[0]?.init?.signal;
+    expect(first?.aborted).toBe(false);
+    controlEvent(
+      page.find((node) => node.attributes.name === "q"),
+      "onInput",
+      "oak",
+    );
+    controlEvent(
+      page.find((node) => node.attributes.class === "public-consignment-filters"),
+      "onSubmit",
+    );
+    await settle();
+    const abortedOnFilterChange = first?.aborted;
+    expect(reads()).toHaveLength(2);
+    const next = reads()[1];
+    expect(next?.url.searchParams.get("q")).toBe("oak");
+    expect(next?.init?.signal?.aborted).toBe(false);
+    page.dispose();
+    expect({ abortedOnFilterChange, abortedOnLeave: next?.init?.signal?.aborted }).toEqual({
+      abortedOnFilterChange: true,
+      abortedOnLeave: true,
+    });
+  } finally {
+    page.dispose();
+    pending.resolve();
+    await settle();
+    transport.restore();
+  }
+});
+
 test("预设、自定义 37、翻页与非法页长只操作寄售分页", async () => {
   const { ConsignmentCatalog } = await loadCatalog();
   const transport = fakeFetch(({ url }) =>

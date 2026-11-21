@@ -21,6 +21,12 @@ export async function fetchConsignmentDetail(
     `/api/v1/consignment/listings/${listingId}`,
     ListingDetailSchema,
     signal,
+    [
+      ["data", "summary", "version"],
+      ["data", "summary", "price"],
+      ["data", "summary", "level", "value"],
+      ["data", "equipment", "level", "value"],
+    ],
   );
   if (response.ok && response.value.summary.listing_id !== listingId) {
     reportBrowserError("dto_decode");

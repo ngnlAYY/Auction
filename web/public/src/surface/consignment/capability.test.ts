@@ -1,8 +1,9 @@
-// 验证三套导航共用一次能力查询，未访问时不执行两个实际页面加载器。
+// 验证共享能力的订阅生命周期，以及导航的读取与按需加载。
 
 import { expect, test } from "bun:test";
-import { createComponent, type Element } from "solid-js";
+import { createComponent, createRoot, type Element } from "solid-js";
 import { findElement } from "../catalog/command-scope-fixture.test";
+import { useConsignmentCapability } from "./capability";
 import {
   controlEvent,
   failure,
@@ -17,6 +18,54 @@ import {
   summary,
 } from "./read-fixture.test";
 import { createElement, loadedPageChunks, loadNavigation } from "./render-fixture.test";
+
+test("首订阅离开后仍可刷新，末订阅取消在途读取，再订阅重新读取", async () => {
+  const pending = Promise.withResolvers<Response>();
+  let answer: () => Response | Promise<Response> = () => response(status(true));
+  const transport = fakeFetch(() => answer());
+  const subscribe = () => createRoot((dispose) => ({ dispose, read: useConsignmentCapability() }));
+  const first = subscribe();
+  const second = subscribe();
+  try {
+    await settle();
+    expect(transport.requests.map(({ url }) => url.pathname)).toEqual([STATUS_PATH]);
+    expect(first.read()?.kind).toBe("ready");
+    expect(second.read()?.kind).toBe("ready");
+
+    first.dispose();
+    answer = () => response(status(false));
+    second.read.refresh();
+    await settle();
+    expect(transport.requests).toHaveLength(2);
+    expect(second.read()?.kind).toBe("disabled");
+
+    answer = () => pending.promise;
+    second.read.refresh();
+    await settle();
+    expect(transport.requests).toHaveLength(3);
+    const signal = transport.requests[2]?.init?.signal;
+    expect(signal?.aborted).toBe(false);
+    second.dispose();
+    expect(signal?.aborted).toBe(true);
+
+    answer = () => response(status(true, false));
+    const next = subscribe();
+    try {
+      expect(next.read()).toBeUndefined();
+      await settle();
+      expect(transport.requests).toHaveLength(4);
+      expect(next.read()?.kind).toBe("read-only");
+    } finally {
+      next.dispose();
+    }
+  } finally {
+    first.dispose();
+    second.dispose();
+    pending.resolve(response(status(false)));
+    await settle();
+    transport.restore();
+  }
+});
 
 test("关闭和失败时三套导航不占位、原页照常渲染，开启也只在点击后载入目录", async () => {
   const initiallyLoaded = loadedPageChunks();
