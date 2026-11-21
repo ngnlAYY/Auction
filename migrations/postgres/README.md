@@ -183,4 +183,4 @@ VALUES (76, 'breaking');
 | 000128 | 以复合唯一键和外键绑定 lot 分类快照与 equipment 分类，阻止已有 lot 的分类漂移；登记 breaking |
 | 000129 | 新建 buyer_blacklist recovery action 必须有理由，保留历史 NULL 理由；登记 breaking |
 | 000130 | `cod_returned` disposition 绑定同一 recovery 的付款 Send 投递与 fence，身份引用写入后不可改写；登记 breaking |
-| 000131 | 资金来源累计 issue/return 由来源行原子计数并受冻结额度约束，已使用来源金额不可修改；运行账号仅可列级 INSERT 来源，不可写累计计数器，权限重放保持该限制；复合外键绑定补偿冲正的 recovery、auction 与 world，历史不一致时失败关闭；登记 breaking |
+| 000131 | 资金来源累计 issue/return 由来源行原子计数并受冻结额度约束，已使用来源金额不可修改；运行账号仅可列级 INSERT 来源，不可写累计计数器，权限重放保持该限制，入口每次执行都收回授权链各函数的执行权；复合外键绑定补偿冲正的 recovery、auction 与 world，历史不一致时失败关闭；登记 breaking |

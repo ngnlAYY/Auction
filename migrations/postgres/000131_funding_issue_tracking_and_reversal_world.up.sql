@@ -190,6 +190,9 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $function$
+DECLARE
+    function_owner oid;
+    grantee record;
 BEGIN
     PERFORM public.apply_auction_runtime_privileges_000122();
     REVOKE INSERT, UPDATE, DELETE ON TABLE public.settlement_funding_sources FROM auction_runtime;
@@ -197,9 +200,33 @@ BEGIN
         ON TABLE public.settlement_funding_sources FROM auction_runtime;
     GRANT INSERT (id, uid, kind, source_key, amount, proof_digest)
         ON TABLE public.settlement_funding_sources TO auction_runtime;
+
+    -- 不变量：运行账号不能执行授权链上的任何函数。`pg_restore --no-privileges` 恢复默认 ACL 后，
+    -- 重放本入口必须重新收口整条链；否则运行账号可执行旧 SECURITY DEFINER 入口，
+    -- 重新获得收紧前的 settlement_funding_sources 写权限。
+    SELECT procedure.proowner INTO function_owner
+    FROM pg_catalog.pg_proc AS procedure
+    WHERE procedure.oid = 'public.apply_auction_runtime_privileges()'::pg_catalog.regprocedure;
+    REVOKE ALL ON FUNCTION public.apply_auction_runtime_privileges() FROM PUBLIC;
+    REVOKE ALL ON FUNCTION public.apply_auction_runtime_privileges_000122() FROM PUBLIC;
+    FOR grantee IN
+        SELECT role.rolname
+        FROM pg_catalog.pg_roles AS role
+        WHERE role.oid <> function_owner
+    LOOP
+        EXECUTE format(
+            'REVOKE ALL ON FUNCTION public.apply_auction_runtime_privileges() FROM %I',
+            grantee.rolname
+        );
+        EXECUTE format(
+            'REVOKE ALL ON FUNCTION public.apply_auction_runtime_privileges_000122() FROM %I',
+            grantee.rolname
+        );
+    END LOOP;
 END
 $function$;
 REVOKE ALL ON FUNCTION public.apply_auction_runtime_privileges() FROM PUBLIC, auction_runtime;
+REVOKE ALL ON FUNCTION public.apply_auction_runtime_privileges_000122() FROM PUBLIC, auction_runtime;
 SELECT public.apply_auction_runtime_privileges();
 
 INSERT INTO public.schema_migration_compatibility (version, level)

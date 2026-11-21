@@ -229,7 +229,7 @@ Worker 心跳的 `details.worker_cold_config` 为 `{"version":1,"sha256":"<64 �
 迁移 owner 与运行账号分离。owner 是应用数据库 owner，只供 `auction-cli` 的
 `db create`、`db migrate`、`db rebuild`、`backup restore` 与 `service start/restart` 使用，
 凭据固定在 owner-only 的独立敏感 TOML（`--owner-secrets`）。Public、Admin 与 Worker 共用一个
-运行账号 `auction_runtime`，角色本身在集群中预先创建，权限由迁移 `000081` 建立、`000122` 校验并由 `000131` 收紧资金来源写入面：
+运行账号 `auction_runtime`，角色本身在集群中预先创建，权限由迁移 `000081` 建立、`000122` 校验并由 `000131` 收紧资金来源写入面；`000131` 的入口每次执行都收回授权链各函数的执行权，`--no-privileges` 恢复后重放同样重新收口。
 
 | 对象面 | 运行账号权限 |
 | --- | --- |
