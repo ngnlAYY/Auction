@@ -1,9 +1,9 @@
 //! 公开条件、列表窗口、同快照总数及登记可用性。
 
 use auction_application::consignment::{
-    ListingCategoryFilter, ListingCredentialError, ListingNameQuery, ListingPageWindow,
-    ListingRegistrationAvailability, ListingWorld, ListingWorlds, OwnedListingRead,
-    PublicListingQuery, PublicListingRead, PublicListingState, RegistrationInput,
+    ListingCategoryFilter, ListingCredentialError, ListingEquipmentLevel, ListingNameQuery,
+    ListingPageWindow, ListingRegistrationAvailability, ListingWorld, ListingWorlds,
+    OwnedListingRead, PublicListingQuery, PublicListingRead, PublicListingState, RegistrationInput,
     RegistrationReplayCrypto, RegistrationRequestMac, WrappedRegistrationReplayKey,
 };
 use auction_domain::consignment::{ListingMode, ListingReason, ListingState};
@@ -257,7 +257,7 @@ async fn postgres_public_filters_world_mode_category_and_literal_names() {
 #[tokio::test]
 async fn postgres_public_projection_has_only_safe_fields() {
     let fixture = Fixture::new().await;
-    let [a, _, _] = catalog_fixture(&fixture).await;
+    let [_, b, _] = catalog_fixture(&fixture).await;
     fixture
         .sql(&format!("UPDATE public.users SET username = 'FakeRenamed' WHERE id = '{SELLER}'"))
         .await;
@@ -267,12 +267,35 @@ async fn postgres_public_projection_has_only_safe_fields() {
         .await
         .unwrap();
     assert_eq!((result.window.page_size(), result.total), (37, 3));
-    assert_eq!(result.items[1].state, PublicListingState::AwaitingDeposit);
-    let details = fixture.store.public_detail(a.id).await.unwrap().unwrap();
-    let summary = result.items.iter().find(|item| item.listing_id == a.id).unwrap();
-    assert_eq!(&details.summary, summary);
-    assert_eq!(details.summary.seller_name, "FakeRenamed");
-    assert_eq!(details.equipment.stat_groups()[0].stats[0].value, 4.5);
+    let details = fixture.store.public_detail(b.id).await.unwrap().unwrap();
+    let summary = &details.summary;
+    assert_eq!(summary, &result.items[1]);
+    assert_eq!(summary.listing_id, b.id);
+    assert_eq!(summary.version.value(), 2);
+    assert_eq!(summary.state, PublicListingState::AwaitingDeposit);
+    assert_eq!(summary.identity.world_id(), "isekai");
+    assert_eq!(summary.identity.external_equipment_id(), "42");
+    assert_eq!(summary.name, "Fake Blade");
+    assert_eq!(summary.category, "Armor");
+    assert_eq!(summary.level, ListingEquipmentLevel::Assigned(100));
+    assert_eq!(summary.price.value(), 101);
+    assert_eq!(summary.seller_name, "FakeRenamed");
+    assert_eq!(summary.updated_at, b.published);
+    assert_eq!(summary.expires_at, b.expires);
+    let equipment = &details.equipment;
+    let label = equipment.label();
+    assert_eq!(equipment.observed_at(), b.published);
+    assert_eq!(label.name, "Fake Blade");
+    assert_eq!(label.alt_name.as_deref(), Some("Fake_Plate"));
+    assert_eq!(label.category, "Armor");
+    assert_eq!(label.level, ListingEquipmentLevel::Assigned(100));
+    assert!(label.tradeable);
+    let [group] = equipment.stat_groups() else { panic!("快照应有一个属性组") };
+    assert_eq!(group.name, "Basic");
+    let [stat] = group.stats.as_slice() else { panic!("属性组应有一个属性") };
+    assert_eq!(stat.name, "Power");
+    assert_eq!(stat.value, 4.5);
+    assert_eq!(stat.base, None);
     let text = format!("{:?} {details:?}", result.items);
     for private in [
         SELLER.to_string().as_str(),
@@ -384,14 +407,16 @@ async fn postgres_registration_requires_every_dependency_and_never_initializes_r
     assert_eq!(status(&Replay { generate: false, check: true }).await, both);
     fixture.sql("UPDATE public.consignment_replay_keys SET write_current = false").await;
     assert_eq!(status(&Replay { generate: false, check: true }).await, Unavailable);
+    assert_eq!(status(&Replay { generate: true, check: false }).await, Unavailable);
     assert_eq!(status(&capable).await, both);
-    let n: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM public.consignment_replay_keys WHERE write_current",
+    let counts: (i64, i64) = sqlx::query_as(
+        "SELECT count(*), count(*) FILTER (WHERE write_current)
+         FROM public.consignment_replay_keys",
     )
     .fetch_one(fixture.pool())
     .await
     .unwrap();
-    assert_eq!(n, 0);
+    assert_eq!(counts, (1, 0));
 }
 
 #[tokio::test]

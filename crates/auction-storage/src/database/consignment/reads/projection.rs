@@ -135,7 +135,10 @@ pub(super) fn private(row: &PgRow, paused: bool) -> Result<PrivateListing, Consi
             PrivateListingViewKind::Ineligible { equipment, reason }
         }
         (ListingState::Rejected, Some(reason), None) => {
-            PrivateListingViewKind::LookupFailed { reason, last_lookup_reason: lookup_reason(row)? }
+            // 工作行可能保留上一次暂时失败。只有重试耗尽的挂单展示这一分类。
+            let last_lookup_reason =
+                if reason == ListingReason::LookupExhausted { lookup_reason(row)? } else { None };
+            PrivateListingViewKind::LookupFailed { reason, last_lookup_reason }
         }
         (ListingState::Closed, Some(reason), equipment) => {
             PrivateListingViewKind::Closed { reason, equipment }

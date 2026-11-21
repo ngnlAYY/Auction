@@ -17,7 +17,20 @@ async fn postgres_scan_idle_leaves_control_untouched() {
         .fetch_one(fixture.pool())
     };
     let before = read_control().await.unwrap();
-    let page = fixture.store.scan_consignment_candidates().await.unwrap();
+    // 常规补扫会读取 lot 以判断碰撞，空库的活动挂单存在性检查无需读取 lot。
+    let mut blocker = fixture.pool().begin().await.unwrap();
+    sqlx::query("LOCK TABLE public.lots IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+    let page = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        fixture.store.scan_consignment_candidates(),
+    )
+    .await
+    .expect("空库补扫应在 lot 表仍被锁住时返回")
+    .expect("空库补扫无需读取已锁住的 lot 表");
+    blocker.rollback().await.unwrap();
     assert_eq!((page.scanned, page.scan_after), (0, None));
     assert!(page.candidates.is_empty());
     assert_eq!(read_control().await.unwrap(), before);

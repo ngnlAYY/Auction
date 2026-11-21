@@ -1,13 +1,14 @@
 //! 本人和运营权限、终结时的快照、原命令回执与碰撞排序。
 
 use auction_application::consignment::{
-    AdminListingQuery, AdminListingRead, ListingBusinessRejection, ListingPriceDisposition,
-    ListingWorld, OwnedListingDecision, OwnedListingRead, PrivateListingQuery,
-    PrivateListingViewKind, SellerListingAction, StoredListingDecision,
+    AdminListingQuery, AdminListingRead, ListingBusinessRejection, ListingEquipmentDetails,
+    ListingEquipmentLabel, ListingEquipmentLevel, ListingLookupProgress, ListingPriceDisposition,
+    ListingWorld, LookupTransientReason, OwnedListingDecision, OwnedListingRead,
+    PrivateListingQuery, PrivateListingViewKind, SellerListingAction, StoredListingDecision,
 };
 use auction_domain::consignment::{ListingMode, ListingReason, ListingState};
 use auction_domain::{CommandId, UserId};
-use auction_time::Duration;
+use auction_time::{Duration, Timestamp};
 use uuid::Uuid;
 
 use super::fixture::{Fixture, Listing, OTHER, SELLER, batch, private_query, seller, window};
@@ -177,6 +178,169 @@ async fn postgres_private_terminal_snapshots_and_admin_note() {
     );
     assert!(a_owned.allowed_actions().is_empty());
     assert!(b_owned.allowed_actions().is_empty());
+}
+
+async fn seed_lookup_retry(
+    fixture: &Fixture,
+    listing: &Listing<'_>,
+    attempts: i16,
+    reason: LookupTransientReason,
+) -> Timestamp {
+    let next_attempt_at = fixture.now + Duration::minutes(2);
+    sqlx::query(
+        "UPDATE public.consignment_lookup_work
+         SET attempt_count = $2, fence = $2::smallint, last_reason = $3,
+             next_attempt_at = $4, updated_at = $5
+         WHERE listing_id = $1",
+    )
+    .bind(listing.id)
+    .bind(attempts)
+    .bind(reason.as_str())
+    .bind(next_attempt_at)
+    .bind(fixture.now)
+    .execute(fixture.pool())
+    .await
+    .unwrap();
+    next_attempt_at
+}
+
+async fn finish_rejected_lookup(
+    fixture: &Fixture,
+    listing: &Listing<'_>,
+    attempts: i16,
+    reason: ListingReason,
+    snapshot_id: Option<Uuid>,
+) {
+    let mut tx = fixture.pool().begin().await.unwrap();
+    let listing_id = listing.id;
+    let now = fixture.now + Duration::minutes(3);
+    let deadline = listing.created + Duration::hours(24);
+    let seller_user_id = listing.seller;
+    let command_id = Uuid::new_v4();
+    let reason = reason.as_str();
+    sqlx::query(
+        "UPDATE public.consignment_listings
+         SET state = 'rejected', state_version = 2, reason_code = $2,
+             updated_at = $3, current_snapshot_id = $4 WHERE id = $1",
+    )
+    .bind(listing_id)
+    .bind(reason)
+    .bind(now)
+    .bind(snapshot_id)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    batch(&mut tx, &format!(r#"
+        UPDATE public.consignment_lookup_work SET state = 'done', attempt_count = {attempts},
+            fence = {attempts}, next_attempt_at = NULL, completed_at = '{now}', updated_at = '{now}'
+        WHERE listing_id = '{listing_id}';
+        INSERT INTO public.consignment_commands
+            (command_id,actor_kind,actor_ref,operation,request_target,request_digest,
+             listing_id,result_status,result_code,result_body,created_at)
+        VALUES ('{command_id}','worker','{seller_user_id}','apply_lookup','{listing_id}',
+                decode(repeat('22',32),'hex'),'{listing_id}',200,'ok',
+                jsonb_build_object('command_id','{command_id}','operation','apply_lookup',
+                    'listing_id','{listing_id}','listing_version',2,'state','rejected',
+                    'disposition','rejected','price',101,'expires_at','{deadline:?}','reason_code','{reason}'),
+                '{now}');
+        INSERT INTO public.consignment_events
+            (listing_id,state_version,command_id,actor_kind,event_kind,from_state,to_state,reason_code,price,occurred_at)
+        VALUES ('{listing_id}',2,'{command_id}','worker','rejected','resolving','rejected','{reason}',101,'{now}');
+    "#)).await;
+    tx.commit().await.unwrap();
+}
+
+async fn assert_lookup_views(
+    fixture: &Fixture,
+    listing: &Listing<'_>,
+    expected: PrivateListingViewKind,
+) {
+    let owned = fixture.store.owned_detail(seller(), listing.id).await.expect("本人解析视图");
+    let admin = fixture.store.admin_detail(listing.id).await.expect("Admin 解析视图");
+    assert_eq!(owned.unwrap().listing().view.kind(), &expected, "本人解析视图");
+    assert_eq!(admin.unwrap().record.listing().view.kind(), &expected, "Admin 解析视图");
+}
+
+#[tokio::test]
+async fn postgres_private_lookup_progress_reports_recorded_attempts() {
+    let fixture = Fixture::new().await;
+    let listing = Listing::new(&fixture, 501, "42");
+    listing.seed(&fixture, false, None).await;
+    let last_reason = LookupTransientReason::SourceTimeout;
+    let next_attempt_at = seed_lookup_retry(&fixture, &listing, 3, last_reason).await;
+    let expected = ListingLookupProgress::new(
+        3,
+        Some(next_attempt_at),
+        Some(last_reason),
+        false,
+        listing.created + Duration::hours(24),
+    )
+    .unwrap();
+    assert_lookup_views(&fixture, &listing, PrivateListingViewKind::Resolving(expected)).await;
+}
+
+#[tokio::test]
+async fn postgres_private_not_tradeable_keeps_safe_snapshot() {
+    let fixture = Fixture::new().await;
+    let listing = Listing::new(&fixture, 501, "42");
+    listing.seed(&fixture, false, None).await;
+    let snapshot_id = Uuid::new_v4();
+    let listing_id = listing.id;
+    let observed_at = fixture.now;
+    fixture.sql(&format!(r#"
+        INSERT INTO public.consignment_snapshots
+            (id,listing_id,generation,adapter,observed_at,digest,world_id,external_equipment_id,
+             name,category,alt_name,level_kind,level_number,tradeable,owner_name,stat_groups)
+        VALUES ('{snapshot_id}','{listing_id}',1,'hvdata-equip-v1','{observed_at}',
+                decode(repeat('11',32),'hex'),'main','42','Fake Bound Blade','Weapon','Fake Bound Alias',
+                'soulbound',NULL,false,'FakeThirdPartyOwner','[]');
+    "#)).await;
+    let reason = ListingReason::NotTradeable;
+    finish_rejected_lookup(&fixture, &listing, 1, reason, Some(snapshot_id)).await;
+    let equipment = ListingEquipmentDetails::new(
+        observed_at,
+        ListingEquipmentLabel {
+            name: "Fake Bound Blade".into(),
+            category: "Weapon".into(),
+            alt_name: Some("Fake Bound Alias".into()),
+            level: ListingEquipmentLevel::Soulbound,
+            tradeable: false,
+        },
+        Vec::new(),
+    )
+    .unwrap();
+    assert_lookup_views(
+        &fixture,
+        &listing,
+        PrivateListingViewKind::Ineligible { equipment, reason },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn postgres_private_permanent_lookup_failure_drops_prior_transient_reason() {
+    let fixture = Fixture::new().await;
+    let listing = Listing::new(&fixture, 501, "42");
+    listing.seed(&fixture, false, None).await;
+    seed_lookup_retry(&fixture, &listing, 1, LookupTransientReason::SourceTimeout).await;
+    let reason = ListingReason::EquipmentNotFound;
+    finish_rejected_lookup(&fixture, &listing, 2, reason, None).await;
+    let expected = PrivateListingViewKind::LookupFailed { reason, last_lookup_reason: None };
+    assert_lookup_views(&fixture, &listing, expected).await;
+}
+
+#[tokio::test]
+async fn postgres_private_exhausted_lookup_keeps_last_transient_reason() {
+    let fixture = Fixture::new().await;
+    let listing = Listing::new(&fixture, 501, "42");
+    listing.seed(&fixture, false, None).await;
+    let last_reason = LookupTransientReason::SourceRateLimited;
+    seed_lookup_retry(&fixture, &listing, 5, last_reason).await;
+    let reason = ListingReason::LookupExhausted;
+    finish_rejected_lookup(&fixture, &listing, 6, reason, None).await;
+    let expected =
+        PrivateListingViewKind::LookupFailed { reason, last_lookup_reason: Some(last_reason) };
+    assert_lookup_views(&fixture, &listing, expected).await;
 }
 
 #[tokio::test]
