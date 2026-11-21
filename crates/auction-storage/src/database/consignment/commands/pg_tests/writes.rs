@@ -403,6 +403,8 @@ pub(super) async fn missing_fact_rejected(
     Ok(())
 }
 
+// 审计失败注入：postgres_audit_failure_rolls_back
+// 验证不变量 3、8：审计无法追加时，挂单、回执及事件都不能提交。
 pub(super) async fn audit_failure_rolls_back(
     store: &DatabaseStore,
     maintenance: &DatabaseStore,
