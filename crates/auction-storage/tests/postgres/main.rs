@@ -5,6 +5,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 #![cfg(feature = "test-db")]
 
+mod consignment_eligibility;
 mod consignment_lookup;
 mod consignment_migration;
 mod perf;
