@@ -132,6 +132,7 @@ export async function registerConsignmentListing(
   userId: string,
   command: RegisterListing,
   signal: AbortSignal,
+  onSessionGuardRejected?: () => void,
 ): Promise<WriteResult> {
   const decoded = decode(RegisterListingSchema, command);
   if (!decoded.ok) return err(invalidCommand(command));
@@ -141,7 +142,7 @@ export async function registerConsignmentListing(
   const result = await requestPrivateConsignment(
     userId,
     LISTINGS,
-    { method: "POST", body: decoded.value },
+    { method: "POST", body: decoded.value, onSessionGuardRejected },
     202,
     CommandReceiptSchema,
     signal,
@@ -162,6 +163,7 @@ export async function repriceConsignmentListing(
   listingId: string,
   command: RepriceListing,
   signal: AbortSignal,
+  onSessionGuardRejected?: () => void,
 ): Promise<WriteResult> {
   if (!validConsignmentUuid(listingId)) return err({ status: 400, code: "invalid_listing_id" });
   const decoded = decode(RepriceListingSchema, command);
@@ -169,7 +171,7 @@ export async function repriceConsignmentListing(
   const result = await requestPrivateConsignment(
     userId,
     `${LISTINGS}/${listingId}/price`,
-    { method: "PATCH", body: decoded.value },
+    { method: "PATCH", body: decoded.value, onSessionGuardRejected },
     200,
     CommandReceiptSchema,
     signal,
@@ -191,6 +193,7 @@ export async function withdrawConsignmentListing(
   listingId: string,
   command: WithdrawListing,
   signal: AbortSignal,
+  onSessionGuardRejected?: () => void,
 ): Promise<WriteResult> {
   if (!validConsignmentUuid(listingId)) return err({ status: 400, code: "invalid_listing_id" });
   const decoded = decode(WithdrawListingSchema, command);
@@ -198,7 +201,7 @@ export async function withdrawConsignmentListing(
   const result = await requestPrivateConsignment(
     userId,
     `${LISTINGS}/${listingId}/withdraw`,
-    { method: "POST", body: decoded.value },
+    { method: "POST", body: decoded.value, onSessionGuardRejected },
     200,
     CommandReceiptSchema,
     signal,

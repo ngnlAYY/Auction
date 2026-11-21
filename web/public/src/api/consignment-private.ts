@@ -4,7 +4,7 @@ import { PUBLIC_EXPECTED_USER_ID_HEADER } from "@auction/contracts/dto/public/co
 import { ConsignmentUuidSchema } from "@auction/contracts/dto/public/consignment/scalar";
 import { ApiErrorResponseSchema, apiResponseSchema } from "@auction/contracts/dto/response";
 import { decode } from "@auction/contracts/wire";
-import { transportErrorCode } from "@auction/web-shared/net/transport";
+import { type TransportResponse, transportErrorCode } from "@auction/web-shared/net/transport";
 import { type JsonFieldPolicy, jsonHasExactKeys } from "@auction/web-shared/net/wire";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import type { GenericSchema } from "valibot";
@@ -62,7 +62,11 @@ export function validConsignmentUuid(value: string): boolean {
 
 type Request =
   | { readonly method: "GET" }
-  | { readonly method: "POST" | "PATCH"; readonly body: object };
+  | {
+      readonly method: "POST" | "PATCH";
+      readonly body: object;
+      readonly onSessionGuardRejected: (() => void) | undefined;
+    };
 
 /** 不变量 1、6、7：绑定预期身份，只发送同源请求，不暴露正文或底层异常。 */
 export async function requestPrivateConsignment<T>(
@@ -78,6 +82,8 @@ export async function requestPrivateConsignment<T>(
 
   let dispatched = false;
   let unauthorized = false;
+  const deferUnauthorized =
+    request.method !== "GET" && request.onSessionGuardRejected !== undefined;
   const sent = await sendRequest(
     (requestSignal) => {
       if (requestSignal.aborted) return err({ kind: "network", status: null });
@@ -103,7 +109,7 @@ export async function requestPrivateConsignment<T>(
     (received) => {
       if (received === 401 && !signal.aborted) {
         unauthorized = true;
-        observePublicSessionFailure(received, "unauthenticated", userId);
+        if (!deferUnauthorized) observePublicSessionFailure(received, "unauthenticated", userId);
       }
     },
   );
@@ -112,19 +118,43 @@ export async function requestPrivateConsignment<T>(
   if (unauthorized && request.method === "GET") {
     return err({ status: 401, code: "unauthenticated" });
   }
-  if (!sent.ok)
-    return err({
-      status: sent.error.kind === "network" ? (sent.error.status ?? 0) : 0,
-      code: transportErrorCode(sent.error),
-    });
+  const result = sent.ok
+    ? decodePrivateResponse(sent.value, status, request.method, schema, integerPaths)
+    : err({
+        status: sent.error.kind === "network" ? (sent.error.status ?? 0) : 0,
+        code: transportErrorCode(sent.error),
+      });
+  if (!result.ok) {
+    const { status: rejectedStatus, code } = result.error;
+    const sessionChanged = rejectedStatus === 409 && code === "session_changed";
+    // 不变量 1：只有完整守卫外壳可了结首次写入；通知会话前同步完成，避免宿主卸载取消清理。
+    if (
+      request.method !== "GET" &&
+      (sessionChanged || (rejectedStatus === 401 && code === "unauthenticated"))
+    ) {
+      request.onSessionGuardRejected?.();
+    }
+    if (deferUnauthorized && unauthorized) {
+      observePublicSessionFailure(401, "unauthenticated", userId);
+    } else if (sessionChanged) {
+      observePublicSessionFailure(rejectedStatus, code, userId);
+    }
+  }
+  return result;
+}
 
-  const response = sent.value;
+function decodePrivateResponse<T>(
+  response: TransportResponse,
+  status: 200 | 202,
+  method: Request["method"],
+  schema: GenericSchema<unknown, T>,
+  integerPaths: NonNullable<JsonFieldPolicy["integerPaths"]>,
+): Result<T, ConsignmentPrivateError> {
   const invalid = { status: response.status, code: "invalid_response" };
   const json = response.json({ uniqueKeys: "all", integerPaths });
   if (!json.ok) return err(invalid);
   if (response.status === status) {
-    if (request.method !== "GET" && !jsonHasExactKeys(json.value, SUCCESS_KEYS))
-      return err(invalid);
+    if (method !== "GET" && !jsonHasExactKeys(json.value, SUCCESS_KEYS)) return err(invalid);
     const decoded = decode(apiResponseSchema(schema), json.value);
     return decoded.ok && decoded.value.code === (status === 202 ? "accepted" : "ok")
       ? ok(decoded.value.data)
@@ -132,11 +162,10 @@ export async function requestPrivateConsignment<T>(
   }
   if (response.status < 400) return err(invalid);
   // 不变量 1：写入只有收到完整错误外壳，才可据状态码和协议码判定原命令。
-  if (request.method !== "GET" && !jsonHasExactKeys(json.value, ERROR_KEYS)) return err(invalid);
+  if (method !== "GET" && !jsonHasExactKeys(json.value, ERROR_KEYS)) return err(invalid);
   const decoded = decode(ApiErrorResponseSchema, json.value);
   if (!decoded.ok || decoded.value.data !== null) return err(invalid);
 
   const code = HTTP_ERRORS.has(decoded.value.code) ? decoded.value.code : "unknown_error";
-  if (response.status === 409) observePublicSessionFailure(response.status, code, userId);
   return err({ status: response.status, code });
 }

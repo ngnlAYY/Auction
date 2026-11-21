@@ -24,6 +24,7 @@ import {
   PublicSessionResourceContext,
   type PublicSessionResult,
 } from "../index";
+import type { createPublicShellSession } from "../shell/session";
 import { ALICE, BOB } from "../shell/session-fixture";
 import {
   controlEvent,
@@ -51,6 +52,15 @@ export const FIXTURE_KEY = "012345abcd";
 export const EQUIPMENT_URL = `https://hentaiverse.org/equip/42/${FIXTURE_KEY}`;
 export const ISEKAI_URL = `https://hentaiverse.org/isekai/equip/42/${FIXTURE_KEY}`;
 export const COMMAND_ID = "00000000-0000-4000-8000-000000000010";
+export const NEW = "/consignment/new";
+export const DETAIL = `/consignment/me/${LISTING_A}`;
+export const RETRY = "Retry original request";
+export const REPRICE = "Change asking price";
+export const WITHDRAW = "Cancel listing";
+export const PENDING_KEY = `hv.consignment.pending.${ALICE.user_id}`;
+export const OPERATIONS = ["register", "reprice", "withdraw"] as const;
+/** 寄售卖家的三种写操作。 */
+export type Operation = (typeof OPERATIONS)[number];
 export const TIMES = {
   created: "2026-11-19T00:00:00Z",
   updated: "2026-11-20T00:00:00Z",
@@ -229,10 +239,12 @@ function store(values: Map<string, string>) {
   };
 }
 
+/** 用生产路由挂载本人页，可接入真实会话外壳验证卸载边界。 */
 export async function mountPrivate(
   initialUrl: string,
   initialUser: typeof ALICE | null = ALICE,
   storage = memory(),
+  shell?: Pick<ReturnType<typeof createPublicShellSession>, "session" | "commandOwner">,
 ) {
   const routeModule = `${NAMESPACE}:${resolve(import.meta.dir, "../router/route.ts")}`;
   const outletModule = `${NAMESPACE}:${resolve(import.meta.dir, "../../../../shared/src/router/outlet.tsx")}`;
@@ -258,6 +270,7 @@ export async function mountPrivate(
 
   const installed = installFakeWindow(initialUrl);
   Object.assign(installed.fake, {
+    isSecureContext: shell !== undefined,
     localStorage: store(storage.local),
     sessionStorage: store(storage.session),
   });
@@ -289,10 +302,10 @@ export async function mountPrivate(
             value: router,
             get children() {
               return createComponent(PublicSessionResourceContext, {
-                value: authority,
+                value: shell?.session ?? authority,
                 get children() {
                   return createComponent(PublicCommandOwnerContext, {
-                    value: owner,
+                    value: shell?.commandOwner ?? owner,
                     get children() {
                       return createComponent(RouteOutlet, {
                         pages: PUBLIC_PAGES,
@@ -348,6 +361,27 @@ export async function mountPrivate(
 }
 
 type Page = Awaited<ReturnType<typeof mountPrivate>>;
+
+/** 从本人页的真实表单提交指定的写命令。 */
+export function attemptWrite(page: Page, operation: Operation) {
+  if (operation === "register") {
+    fill(page);
+    submitRegistration(page);
+    return;
+  }
+  const label = operation === "reprice" ? REPRICE : WITHDRAW;
+  controlEvent(page.button(label), "onClick");
+  const form = page.form(label);
+  if (form === null) return;
+  if (operation === "reprice") {
+    controlEvent(
+      page.find((node) => node.attributes.inputmode === "numeric"),
+      "onInput",
+      "102",
+    );
+  }
+  controlEvent(form, "onSubmit");
+}
 
 export function fill(page: Page, mode = "consigned", url = EQUIPMENT_URL, price = "101") {
   controlEvent(

@@ -110,7 +110,12 @@ function originalOutcome(record: Pending, result: StoredCommandResult): Consignm
   return consignmentReceiptMatches(receipt, record.command_id, record) ? ok(receipt) : null;
 }
 
-function send(record: Pending, url: string | null, signal: AbortSignal) {
+function send(
+  record: Pending,
+  url: string | null,
+  signal: AbortSignal,
+  onSessionGuardRejected: (() => void) | undefined,
+) {
   const { command_id, expected_user_id, operation } = record;
   if (operation === "register") {
     if (url === null) return Promise.resolve(err({ status: 400, code: "invalid_equipment_url" }));
@@ -124,6 +129,7 @@ function send(record: Pending, url: string | null, signal: AbortSignal) {
         expected_fee_bps: record.expected_fee_bps,
       },
       signal,
+      onSessionGuardRejected,
     );
   }
   const { listing_id, expected_version } = record;
@@ -133,12 +139,14 @@ function send(record: Pending, url: string | null, signal: AbortSignal) {
         listing_id,
         { command_id, expected_version, price: record.price },
         signal,
+        onSessionGuardRejected,
       )
     : withdrawConsignmentListing(
         expected_user_id,
         listing_id,
         { command_id, expected_version },
         signal,
+        onSessionGuardRejected,
       );
 }
 
@@ -157,13 +165,19 @@ export function useConsignmentPending(
   const error = createCell<ConsignmentPrivateError | null>(restored.ok ? null : restored.error);
   const tasks = createTaskScope();
 
-  function finish(result: ConsignmentOutcome, showOutcome = true) {
+  function clearPending(): boolean {
+    if (pending.peek() === null) return true;
     // 不变量 1：清除标记失败时保留恢复入口，避免刷新后把旧标记误作可继续的新命令。
     if (!setSessionItem(key, "null")) {
       error.set(STORAGE_FAILURE);
-      return;
+      return false;
     }
     pending.set(null);
+    return true;
+  }
+
+  function finish(result: ConsignmentOutcome, showOutcome = true) {
+    if (!clearPending()) return;
     if (showOutcome) {
       error.set(null);
       onOutcome(result);
@@ -213,7 +227,8 @@ export function useConsignmentPending(
     error.set(null);
     tasks.spawn(async (context) => {
       // 不变量 1、7：重送只读取冻结记录；明文链接只交给这一次传输。
-      const result = await send(record, url, context.signal);
+      // 重送被守卫拦截时，原命令仍需恢复；首次发送才在 API 通知会话前了结。
+      const result = await send(record, url, context.signal, retry ? undefined : clearPending);
       if (!context.alive()) return;
       busy.set(false);
       // 不变量 1：前置拒绝只能证明本次重送被拦截，原结果仍需查账本。
