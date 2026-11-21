@@ -19,13 +19,19 @@ export {
 } from "../catalog/command-scope-fixture.test";
 
 const NAMESPACE = "public-consignment-render";
-const loadedSources = new Set<string>();
+const pageChunks = new Map(
+  ["catalog", "detail", "registration", "owned", "owned-detail"].map((page) => [
+    resolve(import.meta.dir, `./${page}.tsx`),
+    page,
+  ]),
+);
+const pageChunkRequests: string[] = [];
 const SOURCES = new Set(
   [
-    "./catalog.tsx",
     "./capability.ts",
-    "./detail.tsx",
     "./filters.tsx",
+    "./pending-view.tsx",
+    "./private-page.tsx",
     "./read-view.tsx",
     "../presentation/index.tsx",
     "../presentation/console.tsx",
@@ -35,9 +41,13 @@ const SOURCES = new Set(
     "../../../../shared/src/router/link.tsx",
     "../../../../shared/src/router/outlet.tsx",
     "../../../../shared/src/ui/components/async-state.tsx",
+    "../../../../shared/src/ui/components/dialog.tsx",
     "../../../../shared/src/ui/components/pager/index.tsx",
     "../../../../shared/src/ui/components/pager/size.tsx",
-  ].map((path) => resolve(import.meta.dir, path)),
+    "../../../../shared/src/ui/components/time.tsx",
+  ]
+    .map((path) => resolve(import.meta.dir, path))
+    .concat([...pageChunks.keys()]),
 );
 const stripTypes = new Bun.Transpiler({ loader: "ts" });
 
@@ -50,7 +60,6 @@ Bun.plugin({
     }));
     build.onLoad({ filter: /.*/u, namespace: NAMESPACE }, ({ path }) => {
       if (!SOURCES.has(path)) throw new Error("寄售测试组件尚未登记");
-      loadedSources.add(path);
       const source = readFileSync(path, "utf8").replace(/^import "[^"\n]+\.css";$/gmu, "");
       const code = path.endsWith(".tsx")
         ? transform(source, { filename: path, generate: "universal", moduleName: import.meta.path })
@@ -58,12 +67,23 @@ Bun.plugin({
         : source;
       const contents = stripTypes
         .transformSync(code)
-        .replace(/(\bfrom |\bimport\()"([^"\n]+)"/gu, (_match, prefix, specifier) => {
-          const dependency = Bun.resolveSync(specifier, dirname(path));
-          const target = SOURCES.has(dependency) ? `${NAMESPACE}:${dependency}` : dependency;
-          return `${prefix}${JSON.stringify(target)}`;
-        });
-      return { contents, loader: "js" };
+        .replace(
+          /\bfrom "([^"\n]+)"|\bimport\("([^"\n]+)"\)/gu,
+          (_match, staticSpecifier, dynamicSpecifier) => {
+            const dependency = Bun.resolveSync(staticSpecifier ?? dynamicSpecifier, dirname(path));
+            const target = JSON.stringify(
+              SOURCES.has(dependency) ? `${NAMESPACE}:${dependency}` : dependency,
+            );
+            if (staticSpecifier !== undefined) return `from ${target}`;
+            const page = pageChunks.get(dependency);
+            if (page === undefined) return `import(${target})`;
+            return `observePageChunk(${JSON.stringify(page)}, () => import(${target}))`;
+          },
+        );
+      return {
+        contents: `import { observePageChunk } from ${JSON.stringify(import.meta.path)};\n${contents}`,
+        loader: "js",
+      };
     });
   },
 });
@@ -108,9 +128,13 @@ export function spread(element: TestElement, sources: readonly Record<string, un
   );
 }
 
-/** 测试加载器观察真实 Solid 路由的两个寄售模板模块。 */
-export function loadedPageChunks(): readonly string[] {
-  return ["catalog", "detail"].filter((file) =>
-    loadedSources.has(resolve(import.meta.dir, `./${file}.tsx`)),
-  );
+/** 每次动态导入请求都计数，包括已经在 Bun 缓存中的页面。 */
+export function observePageChunk<T>(page: string, load: () => Promise<T>): Promise<T> {
+  pageChunkRequests.push(page);
+  return load();
+}
+
+/** 返回截至当前的寄售页面动态导入请求快照。 */
+export function requestedPageChunks(): readonly string[] {
+  return [...pageChunkRequests];
 }

@@ -142,6 +142,18 @@ test("能力矛盾和错页的成功外壳均被拒绝", async () => {
   }
 });
 
+test("HTTP 200 的状态缺少 enabled 时返回 invalid-response", async () => {
+  const transport = fakeFetch(() => response({ ...status(true), enabled: undefined }));
+  try {
+    expect(await fetchConsignmentStatus(new AbortController().signal)).toEqual({
+      ok: false,
+      error: { kind: "invalid-response" },
+    });
+  } finally {
+    transport.restore();
+  }
+});
+
 const MATCHED_QUERY = { ...QUERY, q: "Oak" };
 
 test.each([
