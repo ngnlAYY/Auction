@@ -13,20 +13,42 @@ use uuid::Uuid;
 
 use crate::database::consignment::commands::errors::WriteError;
 use crate::database::consignment::commands::ledger::{
-    Actor, CommandWriter, RequestProof, StoredReceipt, Target,
+    Actor, CommandWriter, RegistrationProof, StoredReceipt, Target,
 };
 use crate::database::consignment::listings::projection::{
     ListingLockIdentity, LockedListing, NewListing, insert, update,
 };
 use crate::database::operations::audit_health::AuditWriteResult as _;
 
+/// 有挂单版本变化的操作。Admin 下架处置必须携带已校验的私有说明。
+#[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
+pub(crate) enum ChangedOperation<'a> {
+    Register,
+    Reprice,
+    Withdraw,
+    ApplyLookup,
+    AutoClose,
+    AdminDelist(&'a ListingDelistReason),
+}
+
+impl ChangedOperation<'_> {
+    const fn operation(&self) -> ListingOperation {
+        match self {
+            Self::Register => ListingOperation::Register,
+            Self::Reprice => ListingOperation::Reprice,
+            Self::Withdraw => ListingOperation::Withdraw,
+            Self::ApplyLookup => ListingOperation::ApplyLookup,
+            Self::AutoClose => ListingOperation::AutoClose,
+            Self::AdminDelist(_) => ListingOperation::AdminDelist,
+        }
+    }
+}
+
 /// 调用方已依据领域模型决定的首次结果，只有固定处置可写入账本。
 #[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
 pub(crate) enum Decision<'a> {
     /// 挂单有新版本。回执取本次版本事件的字段。
-    Changed(Uuid),
-    /// Admin 下架有新版本，说明只进入私有审计。
-    AdminDelisted { listing_id: Uuid, reason: &'a ListingDelistReason },
+    Changed { listing_id: Uuid, operation: ChangedOperation<'a> },
     /// 已核实的同价，无挂单版本变化。
     PriceUnchanged(&'a LockedListing),
     /// 工作重排，无挂单版本变化。
@@ -177,14 +199,33 @@ impl CommandWriter<'_, '_> {
     /// 不变量 1、3、8：任意事实写失败必须向事务 owner 返回错误，不能继续或提交。
     #[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
     pub(crate) async fn finish(
+        self,
+        decision: Decision<'_>,
+        now: Timestamp,
+    ) -> Result<StoredReceipt, WriteError> {
+        self.finish_with_proof(None, decision, now).await
+    }
+
+    /// 首次登记的回执与调用方计算的 MAC 同事务保存。
+    #[allow(dead_code, reason = "由后续任务 2D 调用")]
+    pub(crate) async fn finish_registration(
+        self,
+        proof: RegistrationProof,
+        decision: Decision<'_>,
+        now: Timestamp,
+    ) -> Result<StoredReceipt, WriteError> {
+        self.finish_with_proof(Some(proof), decision, now).await
+    }
+
+    async fn finish_with_proof(
         mut self,
-        proof: RequestProof,
+        registration: Option<RegistrationProof>,
         decision: Decision<'_>,
         now: Timestamp,
     ) -> Result<StoredReceipt, WriteError> {
         let (listing_id, result) = self.receipt(&decision)?;
         let command_id = self.tx.command_id;
-        self.insert_receipt(proof, listing_id, &result, now).await?;
+        self.insert_receipt(registration, listing_id, &result, now).await?;
         for event in &self.events {
             append_event(self.tx.connection, command_id, event).await?;
             if event.actor == "system" && self.actor.kind() != "system" {
@@ -213,7 +254,8 @@ impl CommandWriter<'_, '_> {
             "disposition": result.body["disposition"],
             "reason_code": result.body["reason_code"],
         });
-        if let Decision::AdminDelisted { reason, .. } = decision {
+        if let Decision::Changed { operation: ChangedOperation::AdminDelist(reason), .. } = decision
+        {
             // 不变量 7：仅经过领域端口筛查的私有说明进入审计，不进入账本回执或诊断。
             metadata["admin_delist_reason"] = json!(reason.as_str());
         }
@@ -246,13 +288,24 @@ impl CommandWriter<'_, '_> {
         ) {
             return Err(WriteError::invariant("consignment_private_rejection_target"));
         }
+        // 不变量 3、6：成功决定必须对应已仲裁操作，Admin 下架的说明在类型上必填。
+        let decision_operation = match decision {
+            Decision::Changed { operation, .. } => Some(operation.operation()),
+            Decision::PriceUnchanged(_) => Some(ListingOperation::Reprice),
+            Decision::LookupRescheduled { .. } => Some(ListingOperation::ApplyLookup),
+            Decision::AutoCloseObserved { .. } => Some(ListingOperation::AutoClose),
+            Decision::Rejected { .. } => None,
+        };
+        if decision_operation.is_some_and(|operation| operation != self.operation) {
+            return Err(WriteError::invariant("consignment_command_decision_operation"));
+        }
         let (status, code) = match decision {
             Decision::Rejected { reason, .. } => (reason.status().cast_signed(), reason.code()),
             _ if self.operation == ListingOperation::Register => (202, "accepted"),
             _ => (200, "ok"),
         };
         let (listing_id, disposition, version, state, price, extra) = match decision {
-            Decision::Changed(listing_id) | Decision::AdminDelisted { listing_id, .. } => {
+            Decision::Changed { listing_id, .. } => {
                 let event =
                     self.events.iter().find(|event| event.listing_id == *listing_id).ok_or_else(
                         || WriteError::invariant("consignment_command_version_event"),

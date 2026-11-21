@@ -71,9 +71,9 @@ pub(crate) struct CommandTransaction<'a> {
 }
 
 impl CommandTransaction<'_> {
-    /// 登记重放用此连接读取原逻辑比较钥。首写调用 `finish` 后，可继续追加外键指向账本
+    /// 首写调用 `finish` 或 `finish_registration` 后，可继续追加外键指向账本
     /// 的碰撞关联。保持同一事务，按 `arbitrate → finish → 追加关联` 的顺序访问。
-    #[allow(dead_code, reason = "由后续任务 2D / 2F 读取比较钥或追加碰撞关联")]
+    #[allow(dead_code, reason = "由后续任务 2D / 2F 追加碰撞关联")]
     pub(crate) fn connection(&mut self) -> &mut PgConnection {
         self.connection
     }

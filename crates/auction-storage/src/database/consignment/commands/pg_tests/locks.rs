@@ -17,7 +17,7 @@ use super::fixture::{
 };
 use crate::database::DatabaseStore;
 use crate::database::consignment::commands::errors::WriteError;
-use crate::database::consignment::commands::facts::Decision;
+use crate::database::consignment::commands::facts::{ChangedOperation, Decision};
 use crate::database::consignment::commands::ledger::{
     Actor, Arbitration, RequestProof, StoredReceipt, Target,
 };
@@ -30,7 +30,7 @@ fn bare(command_id: Uuid) -> LockKeys<'static> {
     LockKeys { command_id, sellers: &[], equipment: &[] }
 }
 
-fn digest() -> RequestProof {
+fn digest() -> RequestProof<'static> {
     RequestProof::Digest(RequestHash::new([71; 32]))
 }
 
@@ -68,10 +68,11 @@ async fn reprice(
             Actor::PublicUser(seller),
             ListingOperation::Reprice,
             Target::Listing(listing_id),
+            digest(),
         )
         .await?
     {
-        Arbitration::Replay(replay) => Ok((true, replay.verify(digest())?)),
+        Arbitration::Replay(receipt) => Ok((true, receipt)),
         Arbitration::First(mut writer) => {
             let rows = lock_listings(writer.connection(), &[listing_id]).await?;
             let [current] = rows.as_slice() else {
@@ -91,7 +92,15 @@ async fn reprice(
                     later(),
                 )
                 .await?;
-            Ok((false, writer.finish(digest(), Decision::Changed(listing_id), later()).await?))
+            Ok((
+                false,
+                writer
+                    .finish(
+                        Decision::Changed { listing_id, operation: ChangedOperation::Reprice },
+                        later(),
+                    )
+                    .await?,
+            ))
         }
     }
 }
@@ -331,5 +340,252 @@ pub(super) async fn session_cleanup(
         .await?;
         assert!(!any_lock, "结束后 PostgreSQL 不应持有寄售会话锁");
     }
+    Ok(())
+}
+
+pub(super) async fn listing_row_is_locked(
+    store: &DatabaseStore,
+    maintenance: &DatabaseStore,
+) -> Result<(), WriteError> {
+    seed(maintenance).await?;
+    register(store, COMMAND, LISTING, SELLER, "42").await?;
+    let pool = maintenance.postgres_pool();
+    with_command_transaction(
+        store,
+        LockKeys { command_id: Uuid::from_u128(302), sellers: &[SELLER], equipment: &[equipment("42")] },
+        &pool,
+        |pool, tx| Box::pin(async move {
+            let owner_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+                .fetch_one(&mut *tx.connection).await?;
+            let mut other = pool.acquire().await?;
+            let other_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+                .fetch_one(&mut *other).await?;
+            assert_ne!(owner_pid, other_pid);
+            assert_eq!(lock_listings(tx.connection(), &[LISTING]).await?.len(), 1);
+            let result: Result<Uuid, sqlx::Error> = sqlx::query_scalar(
+                "SELECT id FROM public.consignment_listings WHERE id = $1 FOR UPDATE NOWAIT"
+            ).bind(LISTING).fetch_one(&mut *other).await;
+            assert!(
+                matches!(&result, Err(error) if error.as_database_error().and_then(sqlx::error::DatabaseError::code).as_deref() == Some("55P03")),
+                "独立连接必须因行锁拒绝 NOWAIT：{result:?}"
+            );
+            Ok(())
+        }),
+    ).await?;
+    let row: Uuid = sqlx::query_scalar(
+        "SELECT id FROM public.consignment_listings WHERE id = $1 FOR UPDATE NOWAIT",
+    )
+    .bind(LISTING)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(row, LISTING);
+    Ok(())
+}
+
+const COMMAND_NAMESPACE: i32 = 0x4353_4701;
+const SELLER_NAMESPACE: i32 = 0x4353_4702;
+const EQUIPMENT_NAMESPACE: i32 = 0x4353_4703;
+const FIRST_SELLER: Uuid = Uuid::from_u128(1);
+const SECOND_SELLER: Uuid = Uuid::from_u128(2);
+const SELLER_LOCK: (i32, i32) = (SELLER_NAMESPACE, 1_764_255_177);
+// 固定夹具对应的 PG 两参数锁键，按有符号键的契约顺序列出。
+const BUSINESS_LOCKS: [(i32, i32); 4] = [
+    SELLER_LOCK,
+    (SELLER_NAMESPACE, 2_084_359_440),
+    (EQUIPMENT_NAMESPACE, -1_157_983_326),
+    (EQUIPMENT_NAMESPACE, 1_738_617_678),
+];
+
+#[derive(Debug, PartialEq, Eq)]
+struct WaitingSession {
+    pid: i32,
+    held_command: Option<i32>,
+    lock: (i32, i32),
+}
+
+async fn wait_sessions(pool: &PgPool, expected: usize) -> Result<Vec<WaitingSession>, WriteError> {
+    timeout(Duration::from_millis(850), async {
+        loop {
+            let rows: Vec<(i32, Option<i64>, i32, i64)> = sqlx::query_as(
+                "SELECT waiting.pid, command.objid::bigint, waiting.classid::int,
+                        waiting.objid::bigint
+                   FROM pg_locks waiting
+                   LEFT JOIN pg_locks command ON command.pid = waiting.pid
+                    AND command.locktype = 'advisory' AND command.objsubid = 2
+                    AND command.classid::int = $1 AND command.granted
+                  WHERE waiting.locktype = 'advisory' AND waiting.objsubid = 2
+                    AND waiting.database = (SELECT oid FROM pg_database WHERE datname = current_database())
+                    AND NOT waiting.granted ORDER BY waiting.pid",
+            ).bind(COMMAND_NAMESPACE).fetch_all(pool).await?;
+            if rows.len() == expected {
+                return Ok(rows.into_iter().map(|(pid, held_command, namespace, key)| WaitingSession {
+                    pid,
+                    held_command: held_command.map(|key| u32::try_from(key).unwrap_or_else(|error| panic!("PG 锁键：{error}")).cast_signed()),
+                    lock: (namespace, u32::try_from(key).unwrap_or_else(|error| panic!("PG 锁键：{error}")).cast_signed()),
+                }).collect());
+            }
+            tokio::task::yield_now().await;
+        }
+    }).await.unwrap_or_else(|_elapsed| panic!("PG 应在取锁预算内观察到 {expected} 个等待 PID"))
+}
+
+async fn gate(
+    connection: &mut sqlx::PgConnection,
+    (namespace, key): (i32, i32),
+    locked: bool,
+) -> Result<(), WriteError> {
+    if locked {
+        sqlx::query("SELECT pg_advisory_lock($1, $2)")
+            .bind(namespace)
+            .bind(key)
+            .execute(connection)
+            .await?;
+    } else {
+        let unlocked: bool = sqlx::query_scalar("SELECT pg_advisory_unlock($1, $2)")
+            .bind(namespace)
+            .bind(key)
+            .fetch_one(connection)
+            .await?;
+        assert!(unlocked);
+    }
+    Ok(())
+}
+
+fn ordered_attempt(
+    store: &DatabaseStore,
+    command_id: Uuid,
+    sellers: [Uuid; 2],
+    eids: [&'static str; 2],
+) -> JoinHandle<Result<i32, WriteError>> {
+    let store = store.clone();
+    tokio::spawn(async move {
+        let equipment = eids.map(equipment);
+        with_command_transaction(
+            &store,
+            LockKeys { command_id, sellers: &sellers, equipment: &equipment },
+            &(),
+            |_, tx| {
+                Box::pin(async move {
+                    Ok(sqlx::query_scalar("SELECT pg_backend_pid()")
+                        .fetch_one(tx.connection())
+                        .await?)
+                })
+            },
+        )
+        .await
+    })
+}
+
+pub(super) async fn actual_lock_order(
+    store: &DatabaseStore,
+    maintenance: &DatabaseStore,
+) -> Result<(), WriteError> {
+    let pool = maintenance.postgres_pool();
+    let mut blocker = pool.acquire().await?;
+    blocker.close_on_drop();
+
+    // 先同时堵住两条反向输入的命令，让两条都显示各自实际请求的首把业务锁。
+    for lock in BUSINESS_LOCKS {
+        gate(&mut blocker, lock, true).await?;
+    }
+    let reverse_command = Uuid::from_u128(302);
+    let first = ordered_attempt(store, COMMAND, [FIRST_SELLER, SECOND_SELLER], ["42", "43"]);
+    let second =
+        ordered_attempt(store, reverse_command, [SECOND_SELLER, FIRST_SELLER], ["43", "42"]);
+    let waiting = wait_sessions(pool, 2).await?;
+    assert!(
+        waiting.iter().all(|session| session.lock == BUSINESS_LOCKS[0]),
+        "实际首把业务锁不同：{waiting:?}"
+    );
+    assert_ne!(waiting[0].pid, waiting[1].pid);
+    assert!(waiting.iter().all(|session| session.held_command.is_some()));
+    for lock in BUSINESS_LOCKS {
+        gate(&mut blocker, lock, false).await?;
+    }
+    join(first).await?;
+    join(second).await?;
+
+    // 按实际等待记录逐把放行，防止只检查集合或仅见到闭包里已拿齐的结果。
+    for (command_id, sellers, eids) in [
+        (COMMAND, [FIRST_SELLER, SECOND_SELLER], ["42", "43"]),
+        (reverse_command, [SECOND_SELLER, FIRST_SELLER], ["43", "42"]),
+    ] {
+        for lock in BUSINESS_LOCKS {
+            gate(&mut blocker, lock, true).await?;
+        }
+        let task = ordered_attempt(store, command_id, sellers, eids);
+        let waiting = wait_sessions(pool, 1).await?;
+        let pid = waiting[0].pid;
+        let mut previous = None;
+        for expected in BUSINESS_LOCKS {
+            let running = timeout(Duration::from_millis(800), async {
+                loop {
+                    let sessions = wait_sessions(pool, 1).await?;
+                    // 解锁上一个屏障后，PG 可能仍短暂报告上一把锁的等待记录。
+                    if Some(sessions[0].lock) != previous {
+                        return Ok::<_, WriteError>(sessions);
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap_or_else(|error| panic!("应依序等候下一把业务锁：{error}"))?;
+            assert_eq!(running[0].pid, pid);
+            assert_eq!(running[0].lock, expected, "实际取锁顺序不同");
+            assert!(running[0].held_command.is_some(), "业务锁之前应已经取得命令锁");
+            gate(&mut blocker, expected, false).await?;
+            previous = Some(expected);
+        }
+        assert_eq!(join(task).await?, pid);
+    }
+    Ok(())
+}
+
+pub(super) async fn cancel_while_taking_locks(
+    store: &DatabaseStore,
+    maintenance: &DatabaseStore,
+) -> Result<(), WriteError> {
+    let pool = maintenance.postgres_pool();
+    let mut blocker = pool.acquire().await?;
+    blocker.close_on_drop();
+    let blocker_pid: i32 =
+        sqlx::query_scalar("SELECT pg_backend_pid()").fetch_one(&mut *blocker).await?;
+    gate(&mut blocker, SELLER_LOCK, true).await?;
+    let mut probe = pool.acquire().await?;
+    let task = ordered_attempt(store, COMMAND, [FIRST_SELLER, SECOND_SELLER], ["42", "43"]);
+    let sessions = wait_sessions(pool, 1).await?;
+    let waiting = &sessions[0];
+    assert_eq!(waiting.lock, SELLER_LOCK);
+    let command_key = waiting.held_command.unwrap_or_else(|| panic!("等待卖家锁前必须持有命令锁"));
+    let blocking: Vec<i32> = sqlx::query_scalar("SELECT pg_blocking_pids($1)")
+        .bind(waiting.pid)
+        .fetch_one(&mut *probe)
+        .await?;
+    assert_eq!(blocking, [blocker_pid]);
+
+    task.abort();
+    assert!(matches!(task.await, Err(error) if error.is_cancelled()), "取锁中的 future 应被取消");
+    gate(&mut blocker, SELLER_LOCK, false).await?;
+
+    let probe_pid: i32 =
+        sqlx::query_scalar("SELECT pg_backend_pid()").fetch_one(&mut *probe).await?;
+    assert_ne!(probe_pid, waiting.pid);
+    assert_ne!(probe_pid, blocker_pid);
+    // 探针每次都用非阻塞取锁，只给取消后的物理连接关闭留出调度余量。
+    timeout(Duration::from_millis(750), async {
+        loop {
+            let acquired: bool = sqlx::query_scalar("SELECT pg_try_advisory_xact_lock($1, $2)")
+                .bind(COMMAND_NAMESPACE)
+                .bind(command_key)
+                .fetch_one(&mut *probe)
+                .await?;
+            if acquired {
+                return Ok::<_, WriteError>(());
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap_or_else(|error| panic!("取消途中取锁后，第三条连接应能立即取得同一命令锁：{error}"))?;
     Ok(())
 }

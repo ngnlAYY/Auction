@@ -1,6 +1,5 @@
-//! 寄售写事务的会话仲裁、规范输入、账本及原子事实写入。
+//! 寄售写事务的会话仲裁、账本及原子事实写入。
 
-pub(crate) mod canonical;
 pub(crate) mod errors;
 pub(crate) mod facts;
 pub(crate) mod ledger;

@@ -3,6 +3,7 @@
 mod diagnostics;
 mod fixture;
 mod locks;
+mod replays;
 mod writes;
 
 use crate::database::DatabaseStore;
@@ -22,6 +23,11 @@ impl DatabaseStore {
             "same_equipment" => locks::same_equipment(self, maintenance).await,
             "reversed_keys" => locks::reversed_keys(self, maintenance).await,
             "session_cleanup" => locks::session_cleanup(self, maintenance).await,
+            "listing_row_is_locked" => locks::listing_row_is_locked(self, maintenance).await,
+            "actual_lock_order" => locks::actual_lock_order(self, maintenance).await,
+            "cancel_while_taking_locks" => {
+                locks::cancel_while_taking_locks(self, maintenance).await
+            }
             "retry_policy" => writes::retry_policy(self, maintenance).await,
             "compare_all_fields" => writes::compare_all_fields(self, maintenance).await,
             "atomic_combinations" => writes::atomic_combinations(self, maintenance).await,
@@ -30,7 +36,22 @@ impl DatabaseStore {
             "constraint_mapping" => writes::constraint_mapping(self, maintenance).await,
             "error_detail_absent" => diagnostics::verify(self).await,
             "commit_unknown_sqlstate" => diagnostics::commit_unknown_sqlstate(self).await,
-            "system_identity" => writes::system_identity(),
+            "commit_unknown_recovers_by_replay" => {
+                diagnostics::commit_unknown_recovers_by_replay(self, maintenance).await
+            }
+            "registration_replays_with_old_key" => {
+                replays::registration_replays_with_old_key(self, maintenance).await
+            }
+            "admin_delist_requires_private_reason" => {
+                replays::admin_delist_requires_private_reason(self, maintenance).await
+            }
+            "withdraw_replay" => replays::withdraw_replay(self, maintenance).await,
+            "admin_delist_replay" => replays::admin_delist_replay(self, maintenance).await,
+            "lookup_rescheduled_replay" => {
+                replays::lookup_rescheduled_replay(self, maintenance).await
+            }
+            "auto_close_replay" => replays::auto_close_replay(self, maintenance).await,
+
             _ => return Err("未知寄售测试场景".into()),
         };
         result.map_err(|error| error.to_string())

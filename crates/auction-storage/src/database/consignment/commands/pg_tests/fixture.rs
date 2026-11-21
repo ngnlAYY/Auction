@@ -3,6 +3,7 @@
 use auction_application::consignment::{
     ListingBusinessRejection, ListingOperation, RegistrationRequestMac,
 };
+use auction_application::core::RequestHash;
 use auction_domain::consignment::{
     FeeBps, ListingEquipmentIdentity, ListingMode, ListingPrice, ListingSnapshot, ListingState,
     ListingVersion,
@@ -13,9 +14,9 @@ use uuid::Uuid;
 
 use crate::database::DatabaseStore;
 use crate::database::consignment::commands::errors::WriteError;
-use crate::database::consignment::commands::facts::Decision;
+use crate::database::consignment::commands::facts::{ChangedOperation, Decision};
 use crate::database::consignment::commands::ledger::{
-    Actor, Arbitration, RequestProof, StoredReceipt, Target,
+    Actor, Arbitration, RegistrationProof, RequestProof, StoredReceipt, Target,
 };
 use crate::database::consignment::commands::session::{LockKeys, with_command_transaction};
 use crate::database::consignment::listings::projection::{ListingLockIdentity, NewListing};
@@ -46,8 +47,8 @@ pub(super) fn price(value: i64) -> ListingPrice {
     ListingPrice::new(value).unwrap_or_else(|error| panic!("夹具标价：{error}"))
 }
 
-pub(super) fn registration_proof(replay_key_id: Uuid, marker: u8) -> RequestProof {
-    RequestProof::Registration { replay_key_id, mac: RegistrationRequestMac::new([marker; 32]) }
+pub(super) fn registration_proof(replay_key_id: Uuid, marker: u8) -> RegistrationProof {
+    RegistrationProof { replay_key_id, mac: RegistrationRequestMac::new([marker; 32]) }
 }
 
 pub(super) async fn insert_key(
@@ -58,12 +59,13 @@ pub(super) async fn insert_key(
     sqlx::query(
         "INSERT INTO public.consignment_replay_keys
           (id, write_current, wrapped_key, nonce, encryption_key_id, created_at, updated_at)
-         VALUES ($1, $2, decode(repeat('11',48),'hex'), decode(repeat('22',12),'hex'),
+         VALUES ($1, $2, decode(repeat('11',48),'hex'), $4,
                  'fake-data-key', $3, $3)",
     )
     .bind(replay_key_id)
     .bind(current)
     .bind(start())
+    .bind(if replay_key_id == KEY { [0x22_u8; 12] } else { [0x33; 12] }.as_slice())
     .execute(connection)
     .await?;
     Ok(())
@@ -105,12 +107,20 @@ pub(super) async fn register(
         &identity,
         move |operation_identity, tx| {
             Box::pin(async move {
-                let proof = registration_proof(KEY, 1);
+                let compute_mac =
+                    |_, _: &auction_application::consignment::WrappedRegistrationReplayKey| {
+                        Ok(registration_proof(KEY, 1).mac)
+                    };
                 match tx
-                    .arbitrate(Actor::PublicUser(seller), ListingOperation::Register, Target::New)
+                    .arbitrate(
+                        Actor::PublicUser(seller),
+                        ListingOperation::Register,
+                        Target::New,
+                        RequestProof::Registration(&compute_mac),
+                    )
                     .await?
                 {
-                    Arbitration::Replay(replay) => replay.verify(proof),
+                    Arbitration::Replay(receipt) => Ok(receipt),
                     Arbitration::First(mut writer) => {
                         writer
                             .stage_registration(
@@ -132,7 +142,16 @@ pub(super) async fn register(
                                 start(),
                             )
                             .await?;
-                        writer.finish(proof, Decision::Changed(listing_id), start()).await
+                        writer
+                            .finish_registration(
+                                registration_proof(KEY, 1),
+                                Decision::Changed {
+                                    listing_id,
+                                    operation: ChangedOperation::Register,
+                                },
+                                start(),
+                            )
+                            .await
                     }
                 }
             })
@@ -145,18 +164,22 @@ pub(super) async fn reject(
     tx: &mut super::super::session::CommandTransaction<'_>,
     actor: Uuid,
     listing_id: Uuid,
-    proof: RequestProof,
+    proof: RequestHash,
 ) -> Result<(bool, StoredReceipt), WriteError> {
     match tx
-        .arbitrate(Actor::PublicUser(actor), ListingOperation::Reprice, Target::Listing(listing_id))
+        .arbitrate(
+            Actor::PublicUser(actor),
+            ListingOperation::Reprice,
+            Target::Listing(listing_id),
+            RequestProof::Digest(proof),
+        )
         .await?
     {
-        Arbitration::Replay(replay) => Ok((true, replay.verify(proof)?)),
+        Arbitration::Replay(receipt) => Ok((true, receipt)),
         Arbitration::First(writer) => Ok((
             false,
             writer
                 .finish(
-                    proof,
                     Decision::Rejected {
                         listing_id: None,
                         reason: ListingBusinessRejection::ListingNotFound,

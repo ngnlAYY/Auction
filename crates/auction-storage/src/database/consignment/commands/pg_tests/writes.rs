@@ -3,26 +3,24 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use auction_application::consignment::{
-    AutoCloseCandidate, AutoCloseEvidence, ConsignmentError, ListingBusinessRejection,
-    ListingOperation, LookupFence, LookupObservation,
+    ConsignmentError, ListingBusinessRejection, ListingOperation, WrappedRegistrationReplayKey,
 };
 use auction_application::core::RequestHash;
 use auction_domain::consignment::{
     ListingChange, ListingReason, ListingSnapshot, ListingState, ListingVersion,
 };
+use auction_observability::{AuditFailureKind, AuditSqlstateClass};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
+use super::diagnostics::capture_audit_failure;
 use super::fixture::{
     COMMAND, KEY, LISTING, OTHER_SELLER, SELLER, counts, equipment, insert_key, later, price,
     register, registration_proof, reject, seed, start, time,
 };
 use crate::database::DatabaseStore;
-use crate::database::consignment::commands::canonical::{
-    auto_close_identity, lookup_identity, reprice_hash,
-};
 use crate::database::consignment::commands::errors::WriteError;
-use crate::database::consignment::commands::facts::Decision;
+use crate::database::consignment::commands::facts::{ChangedOperation, Decision};
 use crate::database::consignment::commands::ledger::{
     Actor, Arbitration, RequestProof, StoredReceipt, Target,
 };
@@ -72,7 +70,7 @@ pub(super) async fn retry_policy(
     ] {
         let command_id = Uuid::from_u128(1000 + offset);
         let attempts = AtomicUsize::new(0);
-        let proof = RequestProof::Digest(reprice_hash(LISTING, ListingVersion::FIRST, price(55)));
+        let proof = RequestHash::new([55; 32]);
         let result =
             with_command_transaction(store, command_keys(command_id), &attempts, |attempts, tx| {
                 Box::pin(async move {
@@ -102,10 +100,7 @@ pub(super) async fn retry_policy(
         sqlx::query_scalar("SELECT request_digest FROM public.consignment_commands")
             .fetch_all(maintenance.postgres_pool())
             .await?;
-    assert_eq!(
-        saved,
-        vec![reprice_hash(LISTING, ListingVersion::FIRST, price(55)).as_bytes().to_vec()]
-    );
+    assert_eq!(saved, vec![RequestHash::new([55; 32]).as_bytes().to_vec()]);
     Ok(())
 }
 
@@ -115,7 +110,13 @@ pub(super) async fn compare_all_fields(
 ) -> Result<(), WriteError> {
     seed(maintenance).await?;
     let original = register(store, COMMAND, LISTING, SELLER, "42").await?;
-    let original_proof = registration_proof(KEY, 1);
+    let unexpected_mac =
+        |_, _: &WrappedRegistrationReplayKey| panic!("账本身份不匹配时不能调用登记 MAC");
+    let changed_mac = |key_id, wrapped: &WrappedRegistrationReplayKey| {
+        assert_eq!(key_id, KEY);
+        assert_eq!(wrapped.nonce(), &[0x22; 12]);
+        Ok(registration_proof(KEY, 2).mac)
+    };
     let same_actor_ref = SELLER.to_string();
     let mut unexpected_replays = Vec::new();
     for (field, request) in [
@@ -125,7 +126,7 @@ pub(super) async fn compare_all_fields(
                 Actor::Admin(&same_actor_ref),
                 ListingOperation::Register,
                 Target::New,
-                original_proof,
+                RequestProof::Registration(&unexpected_mac),
             ),
         ),
         (
@@ -134,12 +135,17 @@ pub(super) async fn compare_all_fields(
                 Actor::PublicUser(OTHER_SELLER),
                 ListingOperation::Register,
                 Target::New,
-                original_proof,
+                RequestProof::Registration(&unexpected_mac),
             ),
         ),
         (
             "operation",
-            (Actor::PublicUser(SELLER), ListingOperation::Withdraw, Target::New, original_proof),
+            (
+                Actor::PublicUser(SELLER),
+                ListingOperation::Withdraw,
+                Target::New,
+                RequestProof::Registration(&unexpected_mac),
+            ),
         ),
         (
             "request_target",
@@ -147,7 +153,7 @@ pub(super) async fn compare_all_fields(
                 Actor::PublicUser(SELLER),
                 ListingOperation::Register,
                 Target::Listing(LISTING),
-                original_proof,
+                RequestProof::Registration(&unexpected_mac),
             ),
         ),
         (
@@ -156,16 +162,16 @@ pub(super) async fn compare_all_fields(
                 Actor::PublicUser(SELLER),
                 ListingOperation::Register,
                 Target::New,
-                registration_proof(KEY, 2),
+                RequestProof::Registration(&changed_mac),
             ),
         ),
         (
-            "replay_key_id",
+            "proof_kind",
             (
                 Actor::PublicUser(SELLER),
                 ListingOperation::Register,
                 Target::New,
-                registration_proof(Uuid::from_u128(202), 1),
+                RequestProof::Digest(RequestHash::new([1; 32])),
             ),
         ),
     ] {
@@ -175,13 +181,10 @@ pub(super) async fn compare_all_fields(
             &request,
             |&(actor, operation, target, proof), tx| {
                 Box::pin(async move {
-                    let Arbitration::Replay(replay) =
-                        tx.arbitrate(actor, operation, target).await?
-                    else {
-                        panic!("已有命令不能取得首写能力");
-                    };
-                    assert_eq!(replay.replay_key_id(), Some(KEY));
-                    replay.verify(proof)
+                    match tx.arbitrate(actor, operation, target, proof).await? {
+                        Arbitration::Replay(receipt) => Ok(receipt),
+                        Arbitration::First(_) => panic!("已有命令不能取得首写能力"),
+                    }
                 })
             },
         )
@@ -199,10 +202,10 @@ pub(super) async fn compare_all_fields(
     assert_eq!(original.body["listing_version"], 1);
 
     let repriced_id = Uuid::from_u128(555);
-    let different_hash = reprice_hash(LISTING, ListingVersion::FIRST, price(126));
+    let different_hash = RequestHash::new([126; 32]);
     if !is_conflict(
         with_command_transaction(store, command_keys(repriced_id), &(), |_, tx| {
-            Box::pin(reject(tx, SELLER, LISTING, RequestProof::Digest(different_hash)))
+            Box::pin(reject(tx, SELLER, LISTING, different_hash))
         })
         .await,
     ) {
@@ -231,16 +234,17 @@ async fn manage(
         &(),
         |_, tx| {
             Box::pin(async move {
-                let proof = RequestProof::Digest(reprice_hash(
-                    LISTING,
-                    ListingVersion::FIRST,
-                    price(new_price),
+                let proof = RequestProof::Digest(RequestHash::new(
+                    [u8::try_from(new_price)
+                        .unwrap_or_else(|error| panic!("夹具摘要标记：{error}"));
+                        32],
                 ));
                 let Arbitration::First(mut writer) = tx
                     .arbitrate(
                         Actor::PublicUser(SELLER),
                         ListingOperation::Reprice,
                         Target::Listing(LISTING),
+                        proof,
                     )
                     .await?
                 else {
@@ -268,7 +272,6 @@ async fn manage(
                         .await?;
                     return writer
                         .finish(
-                            proof,
                             Decision::Rejected {
                                 listing_id: Some(LISTING),
                                 reason: ListingBusinessRejection::ListingNotActive,
@@ -278,7 +281,7 @@ async fn manage(
                         .await;
                 }
                 if current.snapshot.price == price(new_price) {
-                    return writer.finish(proof, Decision::PriceUnchanged(current), later()).await;
+                    return writer.finish(Decision::PriceUnchanged(current), later()).await;
                 }
                 assert_eq!(
                     current.require_version(next_version(7)),
@@ -298,7 +301,15 @@ async fn manage(
                         later(),
                     )
                     .await?;
-                writer.finish(proof, Decision::Changed(LISTING), later()).await
+                writer
+                    .finish(
+                        Decision::Changed {
+                            listing_id: LISTING,
+                            operation: ChangedOperation::Reprice,
+                        },
+                        later(),
+                    )
+                    .await
             })
         },
     )
@@ -404,7 +415,23 @@ pub(super) async fn audit_failure_rolls_back(
          CREATE TRIGGER consignment_fake_audit_failure BEFORE INSERT ON public.audit_records
          FOR EACH ROW WHEN (NEW.action = 'consignment.register') EXECUTE FUNCTION public.consignment_fake_audit_failure()",
     ).execute(pool).await?;
-    assert_constraint(register(store, COMMAND, LISTING, SELLER, "42").await, "fake_audit_guard");
+    let metrics = store.audit_metrics_source();
+    let constraints = || {
+        metrics
+            .snapshot()
+            .failures
+            .into_iter()
+            .find(|failure| {
+                matches!(failure.kind, AuditFailureKind::ConstraintViolation)
+                    && matches!(failure.sqlstate_class, AuditSqlstateClass::Constraint)
+            })
+            .map_or(0, |failure| failure.count)
+    };
+    let before = constraints();
+    let result = capture_audit_failure(register(store, COMMAND, LISTING, SELLER, "42")).await;
+    assert_constraint(result, "fake_audit_guard");
+    assert!(constraints() > before, "审计约束失败计数应增加");
+    assert!(metrics.snapshot().readiness_blocked);
     assert_eq!(counts(pool).await?, (0, 0, 0, 0));
     sqlx::query("DROP TRIGGER consignment_fake_audit_failure ON public.audit_records")
         .execute(pool)
@@ -428,7 +455,7 @@ async fn publish(
         &(),
         |_, tx| Box::pin(async move {
             let Arbitration::First(mut writer) = tx.arbitrate(
-                Actor::Worker, ListingOperation::ApplyLookup, Target::Listing(listing_id)
+                Actor::Worker, ListingOperation::ApplyLookup, Target::Listing(listing_id), RequestProof::Digest(RequestHash::new([3;32]))
             ).await? else { panic!("测试命令应是首次"); };
             let rows = lock_listings(writer.connection(), &[listing_id]).await?;
             let [current] = rows.as_slice() else { panic!("测试应锁住挂单"); };
@@ -452,7 +479,7 @@ async fn publish(
                 ListingChange::Published,
                 later(),
             ).await?;
-            writer.finish(RequestProof::Digest(RequestHash::new([3;32])), Decision::Changed(listing_id), later()).await
+            writer.finish(Decision::Changed { listing_id, operation: ChangedOperation::ApplyLookup }, later()).await
         }),
     ).await
 }
@@ -486,46 +513,5 @@ pub(super) async fn constraint_mapping(
             true
         )
     );
-    Ok(())
-}
-
-pub(super) fn system_identity() -> Result<(), WriteError> {
-    let candidate = AutoCloseCandidate {
-        listing_id: LISTING,
-        evidence: AutoCloseEvidence::ServiceDisabled(12),
-    };
-    let stable = auto_close_identity(candidate);
-    assert_eq!(auto_close_identity(candidate), stable);
-    let mut duplicate_evidence = Vec::new();
-    for other in [
-        AutoCloseCandidate { evidence: AutoCloseEvidence::ServiceDisabled(13), ..candidate },
-        AutoCloseCandidate {
-            evidence: AutoCloseEvidence::SellerIneligible(Uuid::from_u128(12)),
-            ..candidate
-        },
-        AutoCloseCandidate { evidence: AutoCloseEvidence::LookupDeadline(later()), ..candidate },
-        AutoCloseCandidate { listing_id: Uuid::from_u128(402), ..candidate },
-    ] {
-        if auto_close_identity(other).0 == stable.0 {
-            duplicate_evidence.push("auto_close");
-        }
-    }
-    let observation = LookupObservation::Failed(
-        auction_application::consignment::ListingEquipmentLookupError::SourceTimeout,
-    );
-    let other_observation = LookupObservation::Failed(
-        auction_application::consignment::ListingEquipmentLookupError::SourceUnavailable,
-    );
-    let fence = LookupFence::new(Uuid::from_u128(51), LISTING, 1, 1, Uuid::from_u128(61))?;
-    let other_fence = LookupFence::new(Uuid::from_u128(51), LISTING, 1, 2, Uuid::from_u128(61))?;
-    let (command_id, hash) = lookup_identity(fence, &observation);
-    assert_eq!(lookup_identity(fence, &observation), (command_id, hash));
-    if lookup_identity(other_fence, &observation).0 == command_id {
-        duplicate_evidence.push("apply_lookup");
-    }
-    assert!(duplicate_evidence.is_empty(), "不同证据重复派生命令 ID：{duplicate_evidence:?}");
-    let (same_command_id, other_hash) = lookup_identity(fence, &other_observation);
-    assert_eq!(same_command_id, command_id);
-    assert_ne!(other_hash, hash);
     Ok(())
 }

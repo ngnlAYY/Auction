@@ -5,7 +5,9 @@ use std::sync::{Arc, Mutex};
 use auction_application::consignment::ConsignmentError;
 use sqlx::PgConnection;
 use tracing::field::{Field, Visit};
+use tracing::instrument::WithSubscriber;
 
+use super::fixture::{COMMAND, LISTING, SELLER, counts, register, seed};
 use crate::database::DatabaseStore;
 use crate::database::consignment::commands::errors::{WriteError, commit_error};
 
@@ -34,7 +36,7 @@ impl tracing::Subscriber for Capture {
     fn exit(&self, _: &tracing::span::Id) {}
 
     fn event(&self, event: &tracing::Event<'_>) {
-        let mut fields = String::new();
+        let mut fields = format!("{} ", event.metadata().target());
         event.record(&mut Fields(&mut fields));
         self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(fields);
     }
@@ -96,4 +98,51 @@ pub(super) async fn commit_unknown_sqlstate(store: &DatabaseStore) -> Result<(),
 pub(super) async fn verify(store: &DatabaseStore) -> Result<(), WriteError> {
     let mut connection = store.postgres_pool().acquire().await?;
     error_detail_absent(&mut connection).await
+}
+
+pub(super) async fn capture_audit_failure<T>(operation: impl Future<Output = T>) -> T {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let result = operation.with_subscriber(Capture(events.clone())).await;
+    let events = events.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    assert!(
+        events.iter().any(|entry| entry.starts_with("auction::storage::audit_health ")
+            && entry.contains("constraint_violation")
+            && entry.contains("blocks_classified_readiness=true")),
+        "审计写入失败必须发出阻断就绪的健康信号"
+    );
+    result
+}
+
+pub(super) async fn commit_unknown_recovers_by_replay(
+    store: &DatabaseStore,
+    maintenance: &DatabaseStore,
+) -> Result<(), WriteError> {
+    seed(maintenance).await?;
+    let pool = maintenance.postgres_pool();
+    sqlx::raw_sql(
+        "CREATE FUNCTION public.consignment_fake_commit_unknown() RETURNS trigger
+         LANGUAGE plpgsql AS $$ BEGIN RAISE statement_completion_unknown; END; $$;
+         CREATE CONSTRAINT TRIGGER consignment_fake_commit_unknown
+         AFTER INSERT ON public.consignment_commands DEFERRABLE INITIALLY DEFERRED
+         FOR EACH ROW EXECUTE FUNCTION public.consignment_fake_commit_unknown()",
+    )
+    .execute(pool)
+    .await?;
+    let result = register(store, COMMAND, LISTING, SELLER, "42").await;
+    assert!(
+        matches!(result, Err(WriteError::Application(ConsignmentError::OutcomeUnknown))),
+        "实际提交返回 40003 时应报告结果未知：{result:?}"
+    );
+    assert_eq!(counts(pool).await?, (0, 0, 0, 0));
+    sqlx::query("DROP TRIGGER consignment_fake_commit_unknown ON public.consignment_commands")
+        .execute(pool)
+        .await?;
+
+    let committed = register(store, COMMAND, LISTING, SELLER, "42").await?;
+    let replayed = register(store, COMMAND, LISTING, SELLER, "42").await?;
+    assert_eq!(committed.status, 202);
+    assert_eq!(committed.body["command_id"], COMMAND.to_string());
+    assert_eq!(committed, replayed);
+    assert_eq!(counts(pool).await?, (1, 1, 1, 1));
+    Ok(())
 }
