@@ -8,7 +8,9 @@ use auction_domain::{CommandId, EquipmentKey, UserId};
 use uuid::Uuid;
 
 use crate::ports::admin::EquipmentKeySealerPort;
-use crate::ports::consignment::test_support::{FakeListingCommands, FakeListingEquipment};
+use crate::ports::consignment::test_support::{
+    FakeListingCommands, FakeListingEquipment, invalid_listing_request_ids,
+};
 use crate::ports::consignment::{
     AdminDelistListingCommand, ApplyListingLookupCommand, AutoCloseListingCommand,
     ConsignmentError, ConsignmentFuture, ListingAutoCloseEffect, ListingBusinessRejection,
@@ -157,17 +159,24 @@ fn register_preserves_request_id_and_mac_input_across_replay() {
     let fixture = RegistrationFixture::new();
     let service = fixture.service(true, true);
     let receipt = ListingRegistered::new(LISTING_ID, price(101)).unwrap();
+    let first_request_id = "Az09-_.x".repeat(8);
     for (mode, fee, request_id, outcome) in [
         (
             ListingMode::Consigned,
             615,
-            Some("fake-register-first"),
+            Some(first_request_id.as_str()),
             ListingCommandOutcome::Accepted(receipt),
         ),
         (
             ListingMode::Consigned,
             615,
             Some("fake-register-retry"),
+            ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(receipt)),
+        ),
+        (
+            ListingMode::Consigned,
+            615,
+            None,
             ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(receipt)),
         ),
         (ListingMode::Direct, 0, None, ListingCommandOutcome::Accepted(receipt)),
@@ -191,7 +200,7 @@ fn register_preserves_request_id_and_mac_input_across_replay() {
         assert_eq!(call.command_id, command_id);
         assert_eq!(call.seller_user_id, UserId::from_uuid(SELLER_ID));
         assert_eq!(call.request_id.as_deref(), request_id);
-        // 同一命令的前两次调用对 MAC 提供相同的五项语义值；凭证由仓储替身在交接时核对。
+        // 登记及两次重放对 MAC 提供相同的五项语义值；凭证由仓储替身在交接时核对。
         assert_eq!(call.identity, identity());
         assert_eq!(call.mode, mode);
         assert_eq!(call.price, price(101));
@@ -200,21 +209,22 @@ fn register_preserves_request_id_and_mac_input_across_replay() {
         assert!(call.sealer && call.replay_crypto);
         assert_ne!(call.listing_id, receipt.listing_id());
     }
-    assert_eq!(fixture.equipment.url.take_calls().len(), 3);
-    assert_eq!(fixture.uuid_calls.load(Ordering::Relaxed), 12);
+    assert_eq!(fixture.equipment.url.take_calls().len(), 4);
+    assert_eq!(fixture.uuid_calls.load(Ordering::Relaxed), 16);
 }
 
 #[test]
 fn register_rejects_invalid_request_ids_before_store() {
     let fixture = RegistrationFixture::new();
     let service = fixture.service(true, true);
-    for request_id in ["界".repeat(43), "fake\nrequest".to_owned()] {
+    for invalid in invalid_listing_request_ids() {
         fixture.url_ok();
         let receipt = ListingRegistered::new(LISTING_ID, price(101)).unwrap();
         fixture.store.0.register.reply(Ok(ListingCommandOutcome::Accepted(receipt)));
         assert_eq!(
-            run(service.register(&seller(), input(), Some(request_id))),
-            Err(ConsignmentError::InvalidListingRequest)
+            run(service.register(&seller(), input(), Some(invalid.clone()))),
+            Err(ConsignmentError::InvalidListingRequest),
+            "登记请求号 {invalid:?}"
         );
         assert!(fixture.store.0.register.take_calls().is_empty());
     }

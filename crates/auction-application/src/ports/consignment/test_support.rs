@@ -94,6 +94,26 @@ type Reply<I, T> = Script<I, Result<T, ConsignmentError>>;
 type CommandReply<I, T> = Reply<I, ListingCommandOutcome<T>>;
 type OwnedQueries = Reply<(UserId, PrivateListingQuery), ListingReadPage<OwnedListingRecord>>;
 
+/// 四个 HTTP 命令用例共用的非法审计关联号样本。
+pub(crate) fn invalid_listing_request_ids() -> impl Iterator<Item = String> {
+    [
+        "fake\u{2028}request",
+        "fake\u{2029}request",
+        "fake-é",
+        "fake request",
+        "fake\trequest",
+        "fake\nrequest",
+        "",
+        " fake-request",
+        "fake-request ",
+        " fake-request ",
+        "fake:request",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .chain(["r".repeat(65), "r".repeat(128), "r".repeat(129)])
+}
+
 /// 仅记录登记的安全参数和能力装配情况。
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct RegistrationCall {

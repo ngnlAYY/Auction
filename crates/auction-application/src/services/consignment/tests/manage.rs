@@ -8,7 +8,7 @@ use auction_domain::UserId;
 use auction_domain::consignment::ListingState;
 use uuid::Uuid;
 
-use crate::ports::consignment::test_support::FakeListingCommands;
+use crate::ports::consignment::test_support::{FakeListingCommands, invalid_listing_request_ids};
 use crate::ports::consignment::{
     ConsignmentError, ListingBusinessRejection, ListingClosed, ListingCommandOutcome,
     ListingCommandRejection, ListingPriceDisposition, ListingPriceReceipt, StoredListingDecision,
@@ -25,7 +25,7 @@ fn reprice_and_withdraw_bind_the_same_authenticated_seller_but_distinct_operatio
     let open = ManageListingService::new(store.clone(), true);
     let closed = ManageListingService::new(store.clone(), false);
     let seller = seller();
-    let first_request_id = "é".repeat(64);
+    let first_request_id = "Az09-_.x".repeat(8);
     let replay_request_id = "fake-manage-retry";
     let repriced = ListingPriceReceipt::new(
         LISTING_ID,
@@ -44,9 +44,11 @@ fn reprice_and_withdraw_bind_the_same_authenticated_seller_but_distinct_operatio
     )
     .unwrap();
     store.reprice.reply(Ok(ListingCommandOutcome::Accepted(repriced)));
-    store
-        .reprice
-        .reply(Ok(ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(repriced))));
+    for _ in 0..2 {
+        store
+            .reprice
+            .reply(Ok(ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(repriced))));
+    }
     store.reprice.reply(Ok(ListingCommandOutcome::Accepted(unchanged)));
     assert_eq!(
         run(open.reprice(
@@ -70,14 +72,20 @@ fn reprice_and_withdraw_bind_the_same_authenticated_seller_but_distinct_operatio
         )),
         Ok(repriced)
     );
+    assert_eq!(run(closed.reprice(&seller, command_id(), LISTING_ID, 2, 101, None)), Ok(repriced));
     let new_command_id = CommandId::from_uuid(Uuid::from_u128(48));
     assert_eq!(run(open.reprice(&seller, new_command_id, LISTING_ID, 3, 101, None)), Ok(unchanged));
-    let [first, replay, same_price] = store.reprice.take_calls().try_into().unwrap();
+    let [first, replay, without_request_id, same_price] =
+        store.reprice.take_calls().try_into().unwrap();
     assert_eq!(first.request_id.as_deref(), Some(first_request_id.as_str()));
     assert_eq!(replay.request_id.as_deref(), Some(replay_request_id));
+    assert_eq!(without_request_id.request_id, None);
     assert_eq!(same_price.request_id, None);
     assert_eq!(first.target, replay.target);
     assert_eq!(first.request_hash, replay.request_hash);
+    assert_eq!(replay.target, without_request_id.target);
+    assert_eq!(replay.price, without_request_id.price);
+    assert_eq!(replay.request_hash, without_request_id.request_hash);
     assert_ne!(first.request_hash, same_price.request_hash);
     assert!(first.enabled);
     assert!(!replay.enabled);
@@ -126,8 +134,9 @@ fn delist_binds_authenticated_actor_and_validated_reason() {
     let service = ManageListingService::new(store.clone(), false);
     let admin = admin();
     let receipt = ListingClosed::new(LISTING_ID, version(3), Some(price(101))).unwrap();
+    let first_request_id = "Az09-_.x".repeat(8);
     for (outcome, reason, request_id) in [
-        (ListingCommandOutcome::Accepted(receipt), "运营测试", Some("fake-admin-first")),
+        (ListingCommandOutcome::Accepted(receipt), "运营测试", Some(first_request_id.as_str())),
         (
             ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(receipt)),
             "运营测试",
@@ -166,16 +175,17 @@ fn delist_binds_authenticated_actor_and_validated_reason() {
     }
     let [first, replay, without_request_id, changed] =
         store.admin_delist.take_calls().try_into().unwrap();
-    assert_eq!(first.request_id.as_deref(), Some("fake-admin-first"));
+    assert_eq!(first.request_id.as_deref(), Some(first_request_id.as_str()));
     assert_eq!(replay.request_id.as_deref(), Some("fake-admin-retry"));
     assert_eq!(without_request_id.request_id, None);
-    assert_eq!(first.command_id, replay.command_id);
-    assert_eq!(first.admin_actor, replay.admin_actor);
-    assert_eq!(first.listing_id, replay.listing_id);
-    assert_eq!(first.expected_version, replay.expected_version);
-    assert_eq!(first.reason, replay.reason);
-    assert_eq!(first.request_hash, replay.request_hash);
-    assert_eq!(first.request_hash, without_request_id.request_hash);
+    for call in [replay, without_request_id] {
+        assert_eq!(first.command_id, call.command_id);
+        assert_eq!(first.admin_actor, call.admin_actor);
+        assert_eq!(first.listing_id, call.listing_id);
+        assert_eq!(first.expected_version, call.expected_version);
+        assert_eq!(first.reason, call.reason);
+        assert_eq!(first.request_hash, call.request_hash);
+    }
     assert_eq!(first.admin_actor, admin.actor);
     assert_eq!(first.reason.as_str(), "运营测试");
     assert_eq!(first.command_id, command_id());
@@ -199,18 +209,20 @@ fn manage_rejects_invalid_request_ids_before_writes() {
         ListingPriceDisposition::Repriced,
     )
     .unwrap();
-    for invalid in ["界".repeat(43), "fake\nrequest".to_owned()] {
+    for invalid in invalid_listing_request_ids() {
         store.reprice.reply(Ok(ListingCommandOutcome::Accepted(repriced)));
         store.withdraw.reply(Ok(ListingCommandOutcome::Accepted(closed)));
         store.admin_delist.reply(Ok(ListingCommandOutcome::Accepted(closed)));
-        let request_id = Some(invalid);
+        let request_id = Some(invalid.clone());
         assert_eq!(
             run(service.reprice(&seller, command_id(), LISTING_ID, 2, 101, request_id.clone())),
-            Err(ConsignmentError::InvalidListingRequest)
+            Err(ConsignmentError::InvalidListingRequest),
+            "改价请求号 {invalid:?}"
         );
         assert_eq!(
             run(service.withdraw(&seller, command_id(), LISTING_ID, 2, request_id.clone())),
-            Err(ConsignmentError::InvalidListingRequest)
+            Err(ConsignmentError::InvalidListingRequest),
+            "取消请求号 {invalid:?}"
         );
         assert_eq!(
             run(service.admin_delist(
@@ -221,7 +233,8 @@ fn manage_rejects_invalid_request_ids_before_writes() {
                 "运营测试".to_owned(),
                 request_id
             )),
-            Err(ConsignmentError::InvalidListingRequest)
+            Err(ConsignmentError::InvalidListingRequest),
+            "下架请求号 {invalid:?}"
         );
         assert!(store.reprice.take_calls().is_empty());
         assert!(store.withdraw.take_calls().is_empty());

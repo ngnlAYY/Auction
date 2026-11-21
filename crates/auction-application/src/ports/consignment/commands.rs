@@ -6,9 +6,7 @@ use auction_domain::consignment::{
     FeeBps, ListingEquipmentIdentity, ListingMode, ListingPrice, ListingPublicationTtls,
 };
 use auction_domain::consignment::{ListingSnapshot, ListingState, ListingVersion};
-use auction_domain::{
-    CommandId, EquipmentId, EquipmentKey, LotId, UserId, valid_optional_text, valid_text,
-};
+use auction_domain::{CommandId, EquipmentId, EquipmentKey, LotId, UserId, valid_text};
 use auction_time::Timestamp;
 use uuid::Uuid;
 
@@ -95,6 +93,7 @@ pub struct RegisterListingCommand<'a> {
     /// 从当前会话取得的卖家。
     pub seller_user_id: UserId,
     /// 仅用于审计关联，不参与摘要、MAC 或重放比较，重放保留首次审计关联号。
+    /// 关联标识，不是秘密，会进入日志与审计；不得把业务输入写进它。
     pub request_id: Option<String>,
     /// 参与重放比较的输入。
     pub input: RegistrationInput<'a>,
@@ -131,6 +130,7 @@ pub struct RepriceListingCommand {
     /// 命令身份和版本。
     pub target: SellerListingTarget,
     /// 仅用于审计关联，不参与摘要、MAC 或重放比较，重放保留首次审计关联号。
+    /// 关联标识，不是秘密，会进入日志与审计；不得把业务输入写进它。
     pub request_id: Option<String>,
     /// 确认的新标价。
     pub price: ListingPrice,
@@ -146,15 +146,22 @@ pub struct WithdrawListingCommand {
     /// 命令身份和版本。
     pub target: SellerListingTarget,
     /// 仅用于审计关联，不参与摘要、MAC 或重放比较，重放保留首次审计关联号。
+    /// 关联标识，不是秘密，会进入日志与审计；不得把业务输入写进它。
     pub request_id: Option<String>,
 }
 
-/// 按现有 Admin 命令的规范文本规则校验审计关联号。
+/// 与 HTTP 边界的请求号规则一致，允许 1–64 字节的 ASCII 字母、数字和 `-_.`。
 pub(crate) fn validate_listing_request_id(
     request_id: Option<&str>,
 ) -> Result<(), ConsignmentError> {
     // 不变量 6、7：拒绝不规范的输入，错误不携带关联号原文。
-    if !valid_optional_text(request_id, 128, false) {
+    let valid = request_id.is_none_or(|value| {
+        (1..=64).contains(&value.len())
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    });
+    if !valid {
         return Err(ConsignmentError::InvalidListingRequest);
     }
     Ok(())
@@ -212,6 +219,7 @@ pub struct AdminDelistListingCommand {
     /// 整个寄售账本内唯一的命令 ID。
     pub command_id: CommandId,
     /// 仅用于审计关联，不参与摘要、MAC 或重放比较，重放保留首次审计关联号。
+    /// 关联标识，不是秘密，会进入日志与审计；不得把业务输入写进它。
     pub request_id: Option<String>,
     /// 目标挂单。
     pub listing_id: Uuid,
