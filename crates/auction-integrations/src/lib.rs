@@ -29,9 +29,10 @@ pub use cryptobox::{
     DataKey, EquipmentKeyOpener, EquipmentKeyOpenerError, EquipmentKeySealer,
     EquipmentKeySealerError,
 };
+pub use equipment::hvdata::{HvDataConfigurationError, HvDataEquipmentReader};
 pub use equipment::{
     EquipmentGameLinkResolver, EquipmentSourceAdapter, EquipmentSourcePolicy,
-    WorkerEquipmentSourceReader, build_equipment_http_client,
+    HentaiVerseListingUrlValidator, WorkerEquipmentSourceReader, build_equipment_http_client,
 };
 pub use forum::{ForumRenderError, ForumThreadRenderer};
 pub use heartbeat::{

@@ -280,6 +280,8 @@ dependencies = [
  "auction-test-support",
  "auction-time",
  "base64 0.23.1",
+ "httpdate",
+ "log",
  "object_store",
  "reqwest 0.13.5",
  "ring",
@@ -292,6 +294,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "url",
  "uuid",
 ]
@@ -430,6 +433,7 @@ name = "auction-test-support"
 version = "0.1.8"
 dependencies = [
  "axum",
+ "futures-util",
  "scraper",
  "tokio",
  "url",

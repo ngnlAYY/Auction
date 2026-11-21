@@ -34,7 +34,7 @@ const MAXIMUM_CONFIGURED_BYTES: usize = 262_144;
 /// 固定来源装配失败，只暴露安全分类。
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum HvDataConfigurationError {
-    /// 解压后字节上限越过配置范围。
+    /// 正文字节上限越过配置范围。
     #[error("寄售装备来源响应上限无效")]
     ResponseLimit,
     /// 固定 HTTPS 客户端不可用。
@@ -50,7 +50,7 @@ pub struct HvDataEquipmentReader {
 }
 
 impl HvDataEquipmentReader {
-    /// 由 Worker 传入已校验的解压后字节上限；请求地址和传输策略在此固定。
+    /// 由 Worker 传入已校验的正文字节上限；请求地址和传输策略在此固定。
     pub fn new(maximum_response_bytes: usize) -> Result<Self, HvDataConfigurationError> {
         if !(4096..=MAXIMUM_CONFIGURED_BYTES).contains(&maximum_response_bytes) {
             return Err(HvDataConfigurationError::ResponseLimit);
@@ -58,8 +58,21 @@ impl HvDataEquipmentReader {
         let Ok(endpoint) = Url::parse(SOURCE_ENDPOINT) else {
             return Err(HvDataConfigurationError::Client);
         };
-        let Ok(client) = equipment_client_builder().dns_resolver(Arc::new(EquipmentDns)).build()
-        else {
+        Self::with_transport(
+            maximum_response_bytes,
+            endpoint,
+            equipment_client_builder(),
+            EquipmentDns::default(),
+        )
+    }
+
+    fn with_transport(
+        maximum_response_bytes: usize,
+        endpoint: Url,
+        builder: ClientBuilder,
+        resolver: EquipmentDns,
+    ) -> Result<Self, HvDataConfigurationError> {
+        let Ok(client) = builder.dns_resolver(Arc::new(resolver)).build() else {
             return Err(HvDataConfigurationError::Client);
         };
         Ok(Self { client, endpoint, maximum_response_bytes })
@@ -82,9 +95,9 @@ impl HvDataEquipmentReader {
         let result = tokio::select! {
             biased;
             () = sleep_until(end) => return Err(ListingEquipmentLookupError::SourceTimeout),
-            result = self.exchange(identity, key) => result,
+            result = self.exchange(identity, key, end) => result,
         };
-        // 超时器无法抢占同步 JSON 解码，返回前再次以同一单调时钟检查截止。
+        // 截止覆盖到正文读完；同步解码有字节和结构预算约束，迟到结果丢弃。
         if Instant::now() >= end {
             return Err(ListingEquipmentLookupError::SourceTimeout);
         }

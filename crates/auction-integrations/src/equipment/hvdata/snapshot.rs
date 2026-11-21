@@ -129,7 +129,7 @@ fn validate_name_parts(object: &Object<'_>) -> Result<(), Reason> {
             return Err(Reason::SourceSchemaInvalid);
         }
     }
-    // 当前应用快照没有 name_parts；拒绝未证实形状，只使用独立给出的 name。
+    // name_parts 只做形态校验，不进入应用快照；名称使用独立的 name 字段。
     Ok(())
 }
 

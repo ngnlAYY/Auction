@@ -2,22 +2,64 @@
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+#[cfg(test)]
+use std::sync::Arc;
 
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 
 use super::SOURCE_HOST;
 
-pub(super) struct EquipmentDns;
+#[derive(Default)]
+pub(super) struct EquipmentDns {
+    #[cfg(test)]
+    pub(super) fixture: Option<DnsFixture>,
+}
+
+#[cfg(test)]
+pub(super) struct DnsFixture {
+    pub(super) host: &'static str,
+    pub(super) answers: Arc<dyn Resolve>,
+    pub(super) map_to_loopback: bool,
+}
 
 impl Resolve for EquipmentDns {
     fn resolve(&self, name: Name) -> Resolving {
+        #[cfg(test)]
+        let fixture = self.fixture.as_ref();
+        let host = SOURCE_HOST;
+        #[cfg(test)]
+        let host = fixture.map_or(host, |fixture| fixture.host);
+        let answers = self.raw_answers(name, host);
+        #[cfg(test)]
+        let use_loopback = fixture.is_some_and(|fixture| fixture.map_to_loopback);
         Box::pin(async move {
-            if name.as_str() != SOURCE_HOST {
-                return Err(resolution_rejected().into());
-            }
-            let addresses = tokio::net::lookup_host((name.as_str(), 0)).await?;
             // 这些是连接器实际收到的 SocketAddr。HTTPS URI 仍持有固定主机，用于 Host 和 TLS 验证。
-            checked_addresses(addresses, public_address).map_err(Into::into)
+            let addresses = checked_addresses(answers.await?, public_address)?;
+            #[cfg(test)]
+            if use_loopback {
+                // 保留每个已校验目标的端口，将回环测试的 TCP 流量留在本机。
+                return Ok(Box::new(
+                    addresses
+                        .map(|address| SocketAddr::from((Ipv4Addr::LOCALHOST, address.port()))),
+                ) as Addrs);
+            }
+            Ok(addresses)
+        })
+    }
+}
+
+impl EquipmentDns {
+    fn raw_answers(&self, name: Name, host: &'static str) -> Resolving {
+        if name.as_str() != host {
+            return Box::pin(async { Err(resolution_rejected().into()) });
+        }
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture {
+            return fixture.answers.resolve(name);
+        }
+        Box::pin(async move {
+            let addresses = tokio::net::lookup_host((host, 0)).await?;
+            Ok(Box::new(addresses) as Addrs)
         })
     }
 }

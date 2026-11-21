@@ -65,6 +65,8 @@ pub struct RequestCheck {
     pub has_expected_query: bool,
     /// 是否出现了 Cookie、Authorization 或 Referer。
     pub has_credentials_or_referer: bool,
+    /// 是否明确要求 identity 编码。
+    pub accepts_identity_encoding: bool,
 }
 
 struct DoubleState {
@@ -149,6 +151,9 @@ async fn handle(
         is_equipment_get,
         has_expected_query,
         has_credentials_or_referer,
+        accepts_identity_encoding: headers.get(header::ACCEPT_ENCODING).is_some_and(|value| {
+            value == "identity" && headers.get_all(header::ACCEPT_ENCODING).iter().count() == 1
+        }),
     });
 
     let script = if is_equipment_get && has_expected_query {
@@ -227,6 +232,7 @@ mod tests {
                     is_equipment_get,
                     has_expected_query,
                     has_credentials_or_referer: false,
+                    accepts_identity_encoding: false,
                 })
             );
         }
