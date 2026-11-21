@@ -243,7 +243,7 @@ async fn scan(pool: &PgPool) -> Vec<StoredKeyEnvelope> {
 }
 
 #[tokio::test]
-async fn equipment_rotation_pages_by_source_and_primary_key() {
+async fn postgres_equipment_rotation_pages_by_source_and_primary_key() {
     let database = TestDatabase::create().await.expect("克隆库");
     let store = database.store().await.expect("连接临时库");
     let pool = store.postgres_pool();
@@ -294,7 +294,7 @@ async fn equipment_rotation_pages_by_source_and_primary_key() {
 }
 
 #[tokio::test]
-async fn equipment_rotation_cas_binds_source_and_primary_key() {
+async fn postgres_equipment_rotation_cas_binds_source_and_primary_key() {
     let database = TestDatabase::create().await.expect("克隆库");
     let store = database.store().await.expect("连接临时库");
     let pool = store.postgres_pool();
@@ -328,7 +328,7 @@ async fn equipment_rotation_cas_binds_source_and_primary_key() {
 }
 
 #[tokio::test]
-async fn equipment_rotation_cas_updates_only_the_selected_table_for_shared_uuid() {
+async fn postgres_equipment_rotation_cas_updates_only_the_selected_table_for_shared_uuid() {
     let database = TestDatabase::create().await.expect("克隆库");
     let store = database.store().await.expect("连接临时库");
     let pool = store.postgres_pool();
@@ -353,7 +353,7 @@ async fn equipment_rotation_cas_updates_only_the_selected_table_for_shared_uuid(
 }
 
 #[tokio::test]
-async fn equipment_rotation_references_count_all_three_sources_but_not_retired_secrets() {
+async fn postgres_equipment_rotation_references_count_all_three_sources_but_not_retired_secrets() {
     let database = TestDatabase::create().await.expect("克隆库");
     let store = database.store().await.expect("连接临时库");
     let pool = store.postgres_pool();
@@ -407,17 +407,17 @@ async fn assert_stale_cas_is_rejected(change_nonce: bool) {
 }
 
 #[tokio::test]
-async fn equipment_rotation_cas_rejects_changed_old_key_id() {
+async fn postgres_equipment_rotation_cas_rejects_changed_old_key_id() {
     assert_stale_cas_is_rejected(false).await;
 }
 
 #[tokio::test]
-async fn equipment_rotation_cas_rejects_changed_nonce() {
+async fn postgres_equipment_rotation_cas_rejects_changed_nonce() {
     assert_stale_cas_is_rejected(true).await;
 }
 
 #[tokio::test]
-async fn equipment_rotation_rechecks_retirement_without_reviving_envelope() {
+async fn postgres_equipment_rotation_rechecks_retirement_without_reviving_envelope() {
     let database = TestDatabase::create().await.expect("克隆库");
     let store = database.store().await.expect("连接临时库");
     let pool = store.postgres_pool();
@@ -448,7 +448,7 @@ async fn equipment_rotation_rechecks_retirement_without_reviving_envelope() {
 }
 
 #[tokio::test]
-async fn equipment_rotation_two_processes_only_one_cas_wins() {
+async fn postgres_equipment_rotation_two_processes_only_one_cas_wins() {
     let database = TestDatabase::create().await.expect("克隆库");
     let first_store = database.store().await.expect("连接临时库");
     let second_store = database.store().await.expect("独立连接池");
@@ -509,7 +509,7 @@ async fn equipment_rotation_two_processes_only_one_cas_wins() {
 }
 
 #[tokio::test]
-async fn equipment_rotation_preserves_both_replay_key_roles_and_macs() {
+async fn postgres_equipment_rotation_preserves_both_replay_key_roles_and_macs() {
     let database = TestDatabase::create().await.expect("克隆库");
     let store = database.store().await.expect("连接临时库");
     let pool = store.postgres_pool();
@@ -557,7 +557,7 @@ async fn equipment_rotation_preserves_both_replay_key_roles_and_macs() {
 }
 
 #[tokio::test]
-async fn equipment_rotation_rewrap_preserves_the_retired_logical_key_and_command_mac() {
+async fn postgres_equipment_rotation_rewrap_preserves_the_retired_logical_key_and_command_mac() {
     let database = TestDatabase::create().await.expect("克隆库");
     let store = database.store().await.expect("连接临时库");
     let pool = store.postgres_pool();
@@ -662,7 +662,7 @@ async fn equipment_rotation_rewrap_preserves_the_retired_logical_key_and_command
 
 // 这些用例通过真实子进程覆盖参数、分派、写库、回执及退出码。先执行
 // `cargo test --locked -p auction-cli` 生成相同构型的二进制，再以 `-- --ignored`
-// 并按 `consignment_key_rotation::cli_` 过滤运行。常规 PG 门禁可以独立运行。
+// 并按 `consignment_key_rotation::postgres_cli_` 过滤运行。常规 PG 门禁可以独立运行。
 struct CliFixture {
     directory: PathBuf,
     binary: PathBuf,
@@ -774,21 +774,29 @@ impl Drop for CliFixture {
     }
 }
 
-// 用表的所有列和所有行比较，包含 CAS 更新的时间戳及不应被改动的逻辑钥角色。
-async fn cli_envelope_tables(pool: &PgPool) -> [(&'static str, Vec<Value>); 3] {
-    let mut tables = [
-        ("equipment_secrets", Vec::new()),
-        ("consignment_registration_secrets", Vec::new()),
-        ("consignment_replay_keys", Vec::new()),
-    ];
-    for ((source, rows), pk) in tables.iter_mut().zip(["equipment_id", "listing_id", "id"]) {
-        let query = format!("SELECT to_jsonb(t) FROM public.{source} t ORDER BY {pk}");
-        *rows = sqlx::query_scalar(sqlx::AssertSqlSafe(query))
-            .fetch_all(pool)
-            .await
-            .expect("读取信封整表");
+// 按主键固定顺序，保留各表的所有列和所有行。
+async fn cli_table_snapshots<const N: usize>(
+    pool: &PgPool,
+    table_keys: [(&'static str, &str); N],
+) -> [(&'static str, Vec<Value>); N] {
+    let mut snapshots = table_keys.map(|(table, _)| (table, Vec::new()));
+    for ((table, rows), (_, pk)) in snapshots.iter_mut().zip(table_keys) {
+        let query = format!("SELECT to_jsonb(t) FROM public.{table} t ORDER BY {pk}");
+        *rows = sqlx::query_scalar(sqlx::AssertSqlSafe(query)).fetch_all(pool).await.expect(table);
     }
-    tables
+    snapshots
+}
+
+async fn cli_envelope_tables(pool: &PgPool) -> [(&'static str, Vec<Value>); 3] {
+    cli_table_snapshots(
+        pool,
+        [
+            ("equipment_secrets", "equipment_id"),
+            ("consignment_registration_secrets", "listing_id"),
+            ("consignment_replay_keys", "id"),
+        ],
+    )
+    .await
 }
 
 async fn cli_seed_envelopes(pool: &PgPool) {
@@ -804,15 +812,27 @@ async fn cli_seed_envelopes(pool: &PgPool) {
 
 #[tokio::test]
 #[ignore = "需要预先构建 auction-cli 二进制"]
-async fn cli_dry_run_preserves_whole_tables_and_reports_actual_scan() {
+async fn postgres_cli_dry_run_preserves_whole_tables_and_reports_actual_scan() {
+    // 装备域三张信封表之外，轮换还能按域改写其他信封并追加审计。
+    let other_tables = [
+        ("audit_records", "id"),
+        ("user_login_key_envelopes", "user_id"),
+        ("user_admin_commands", "command_id"),
+        ("credential_keys", "id"),
+    ];
     let database = TestDatabase::create().await.expect("克隆库");
     let store = database.store().await.expect("连接临时库");
     let pool = store.postgres_pool();
     let cli = CliFixture::new(pool);
     cli_seed_envelopes(pool).await;
     let before = cli_envelope_tables(pool).await;
+    let other_before = cli_table_snapshots(pool, other_tables).await;
     let receipt = cli.reencrypt(false);
     let after = cli_envelope_tables(pool).await;
+    let other_after = cli_table_snapshots(pool, other_tables).await;
+    for ((table, original), (_, persisted)) in other_before.iter().zip(&other_after) {
+        assert!(original == persisted, "演练改写了 {table} 整表快照");
+    }
     let domain = &receipt["domains"]["equipment"];
     for ((source, original), (_, persisted)) in before.iter().zip(&after) {
         assert!(original == persisted, "演练改写了 {source} 整表快照");
@@ -827,7 +847,7 @@ async fn cli_dry_run_preserves_whole_tables_and_reports_actual_scan() {
 
 #[tokio::test]
 #[ignore = "需要预先构建 auction-cli 二进制"]
-async fn cli_apply_reports_changes_in_each_persisted_source() {
+async fn postgres_cli_apply_reports_changes_in_each_persisted_source() {
     let database = TestDatabase::create().await.expect("克隆库");
     let store = database.store().await.expect("连接临时库");
     let pool = store.postgres_pool();
@@ -861,7 +881,7 @@ async fn cli_apply_reports_changes_in_each_persisted_source() {
 
 #[tokio::test]
 #[ignore = "需要预先构建 auction-cli 二进制"]
-async fn cli_retirement_fails_with_a_chinese_reason_when_old_references_remain() {
+async fn postgres_cli_retirement_fails_with_a_chinese_reason_when_old_references_remain() {
     let database = TestDatabase::create().await.expect("克隆库");
     let store = database.store().await.expect("连接临时库");
     let pool = store.postgres_pool();
@@ -877,7 +897,7 @@ async fn cli_retirement_fails_with_a_chinese_reason_when_old_references_remain()
 
 #[tokio::test]
 #[ignore = "需要预先构建 auction-cli 二进制"]
-async fn cli_retirement_opens_replay_wrappers_and_reports_a_chinese_failure() {
+async fn postgres_cli_retirement_opens_replay_wrappers_and_reports_a_chinese_failure() {
     let database = TestDatabase::create().await.expect("克隆库");
     let store = database.store().await.expect("连接临时库");
     let pool = store.postgres_pool();
