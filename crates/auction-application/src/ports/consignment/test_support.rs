@@ -99,6 +99,7 @@ type OwnedQueries = Reply<(UserId, PrivateListingQuery), ListingReadPage<OwnedLi
 pub(crate) struct RegistrationCall {
     pub command_id: CommandId,
     pub seller_user_id: UserId,
+    pub request_id: Option<String>,
     pub identity: ListingEquipmentIdentity,
     pub price: auction_domain::consignment::ListingPrice,
     pub mode: auction_domain::consignment::ListingMode,
@@ -130,6 +131,7 @@ impl ListingCommandStore for FakeListingCommands {
         let outcome = self.register.call(RegistrationCall {
             command_id: command.command_id,
             seller_user_id: command.seller_user_id,
+            request_id: command.request_id,
             identity: command.input.identity.clone(),
             price: command.input.price,
             mode: command.input.mode,

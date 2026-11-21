@@ -10,7 +10,7 @@ use crate::errors::{ApplicationError, SessionError};
 use crate::ports::consignment::{
     AdminDelistListingCommand, ConsignmentError, ListingClosed, ListingCommandStore,
     ListingDelistReason, ListingOperation, ListingPriceReceipt, RepriceListingCommand,
-    SellerListingTarget, WithdrawListingCommand,
+    SellerListingTarget, WithdrawListingCommand, validate_listing_request_id,
 };
 use crate::ports::public::{AdminSessionIdentity, PublicSessionIdentity};
 use crate::services::consignment::encoding::ListingCommandEncoding;
@@ -29,6 +29,7 @@ impl ManageListingService {
     }
 
     /// 改价或取得原回执。所有权、强制终止、版本和期限以同一个存储事务为准。
+    /// 请求号仅用于审计关联。
     pub async fn reprice(
         &self,
         seller: &PublicSessionIdentity,
@@ -36,20 +37,23 @@ impl ManageListingService {
         listing_id: Uuid,
         expected_version: u64,
         price: i64,
+        request_id: Option<String>,
     ) -> Result<ListingPriceReceipt, ConsignmentError> {
         let target = seller_target(seller, command_id, listing_id, expected_version)?;
         let price = ListingPrice::new(price)?;
+        validate_listing_request_id(request_id.as_deref())?;
         let mut input = ListingCommandEncoding::target_version(
             ListingOperation::Reprice,
             listing_id,
             target.expected_version,
         );
         input.bytes(&price.value().to_be_bytes());
-        // 不变量 1、2、3、6、8：关闭开关不入摘要，仓储先仲裁再决定首次准入。
+        // 不变量 1、2、3、6、8：开关和请求号不入摘要，仓储先仲裁再决定首次准入。
         self.store
             .reprice(RepriceListingCommand {
                 request_hash: input.request_hash(),
                 target,
+                request_id,
                 price,
                 enabled: self.reprice_enabled,
             })
@@ -58,14 +62,17 @@ impl ManageListingService {
     }
 
     /// 取消本人挂单，或由同一事务收口强制终止。
+    /// 请求号仅用于审计关联。
     pub async fn withdraw(
         &self,
         seller: &PublicSessionIdentity,
         command_id: CommandId,
         listing_id: Uuid,
         expected_version: u64,
+        request_id: Option<String>,
     ) -> Result<ListingClosed, ConsignmentError> {
         let target = seller_target(seller, command_id, listing_id, expected_version)?;
+        validate_listing_request_id(request_id.as_deref())?;
         let input = ListingCommandEncoding::target_version(
             ListingOperation::Withdraw,
             listing_id,
@@ -73,12 +80,17 @@ impl ManageListingService {
         );
         // 不变量 1、2、3、5、6、7、8：取消与撤销解析、退休信封、回执和审计同提交。
         self.store
-            .withdraw(WithdrawListingCommand { request_hash: input.request_hash(), target })
+            .withdraw(WithdrawListingCommand {
+                request_hash: input.request_hash(),
+                target,
+                request_id,
+            })
             .await?
             .into_result()
     }
 
     /// 用认证守卫返回的固定运营身份下架。私有说明进入规范摘要和存储命令。
+    /// 请求号仅用于审计关联。
     pub async fn admin_delist(
         &self,
         admin: &AdminSessionIdentity,
@@ -86,6 +98,7 @@ impl ManageListingService {
         listing_id: Uuid,
         expected_version: u64,
         reason: String,
+        request_id: Option<String>,
     ) -> Result<ListingClosed, ConsignmentError> {
         validate_admin_actor(&admin.actor).map_err(|error| match error {
             ApplicationError::Session(SessionError::InvalidCredentials) => {
@@ -95,6 +108,7 @@ impl ManageListingService {
         })?;
         let expected_version = validate_target(command_id, listing_id, expected_version)?;
         let reason = ListingDelistReason::new(reason)?;
+        validate_listing_request_id(request_id.as_deref())?;
         let mut input = ListingCommandEncoding::target_version(
             ListingOperation::AdminDelist,
             listing_id,
@@ -107,6 +121,7 @@ impl ManageListingService {
                 admin_actor: admin.actor.clone(),
                 request_hash: input.request_hash(),
                 command_id,
+                request_id,
                 listing_id,
                 expected_version,
                 reason,

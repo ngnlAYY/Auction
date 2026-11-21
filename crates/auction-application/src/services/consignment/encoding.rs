@@ -13,7 +13,8 @@ use crate::ports::consignment::{
 use crate::ports::core::RequestHash;
 
 /// 不变量 1、7：v1 固定字段次序，整数大端，文本使用 u64 长度前缀，
-/// 可空值用单字节 0/1 区分。登记含秘密的 MAC 由比较钥端口负责。
+/// 可空值用单字节 0/1 区分。摘要只编码业务语义字段，审计关联号在编码边界之外。
+/// 登记含秘密的 MAC 由比较钥端口负责。
 pub(super) struct ListingCommandEncoding(Vec<u8>);
 
 impl ListingCommandEncoding {

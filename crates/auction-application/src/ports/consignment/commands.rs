@@ -6,7 +6,9 @@ use auction_domain::consignment::{
     FeeBps, ListingEquipmentIdentity, ListingMode, ListingPrice, ListingPublicationTtls,
 };
 use auction_domain::consignment::{ListingSnapshot, ListingState, ListingVersion};
-use auction_domain::{CommandId, EquipmentId, EquipmentKey, LotId, UserId, valid_text};
+use auction_domain::{
+    CommandId, EquipmentId, EquipmentKey, LotId, UserId, valid_optional_text, valid_text,
+};
 use auction_time::Timestamp;
 use uuid::Uuid;
 
@@ -21,8 +23,8 @@ use crate::ports::consignment::reads::ListingWorlds;
 use crate::ports::consignment::work::LookupFence;
 use crate::ports::core::RequestHash;
 
-// 规范化后的语义字段由账本 owner 定序编码。不变量 1、7：登记使用原逻辑比较钥的 MAC，
-// 其他操作用版本化 SHA-256；派生 UUID、时钟、运行配置与加密随机数不属于登记请求摘要。
+// 不变量 1、7：登记使用原逻辑比较钥的 MAC，其他操作由用例定序编码后用版本化 SHA-256。
+// 请求号、派生 UUID、时钟、运行配置与加密随机数不属于登记请求摘要。
 
 /// 寄售命令账本中的稳定操作闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,7 +57,7 @@ impl ListingOperation {
     }
 }
 
-/// 经 URL 校验后用于登记仲裁的字段。凭证只借用到本次命令结束。
+/// 经 URL 校验后用于登记仲裁和 MAC 的语义字段。凭证只借用到本次命令结束。
 #[derive(Debug)]
 pub struct RegistrationInput<'a> {
     /// 规范世界和 EID。
@@ -92,6 +94,8 @@ pub struct RegisterListingCommand<'a> {
     pub command_id: CommandId,
     /// 从当前会话取得的卖家。
     pub seller_user_id: UserId,
+    /// 仅用于审计关联，不参与摘要、MAC 或重放比较，重放保留首次审计关联号。
+    pub request_id: Option<String>,
     /// 参与重放比较的输入。
     pub input: RegistrationInput<'a>,
     /// 只供首次成功使用的挂单 UUID。
@@ -120,12 +124,14 @@ pub struct SellerListingTarget {
 }
 
 /// 本人改价，配置关闭时只允许重放已受理的决定。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepriceListingCommand {
     /// 目标、预期版本和标价的规范摘要，不含本地开关。
     pub request_hash: RequestHash,
     /// 命令身份和版本。
     pub target: SellerListingTarget,
+    /// 仅用于审计关联，不参与摘要、MAC 或重放比较，重放保留首次审计关联号。
+    pub request_id: Option<String>,
     /// 确认的新标价。
     pub price: ListingPrice,
     /// 本地配置开关，仅用于首次受理。
@@ -133,12 +139,25 @@ pub struct RepriceListingCommand {
 }
 
 /// 本人取消，关闭后仍可触发强制清退。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WithdrawListingCommand {
     /// 目标与预期版本的规范摘要。
     pub request_hash: RequestHash,
     /// 命令身份和版本。
     pub target: SellerListingTarget,
+    /// 仅用于审计关联，不参与摘要、MAC 或重放比较，重放保留首次审计关联号。
+    pub request_id: Option<String>,
+}
+
+/// 按现有 Admin 命令的规范文本规则校验审计关联号。
+pub(crate) fn validate_listing_request_id(
+    request_id: Option<&str>,
+) -> Result<(), ConsignmentError> {
+    // 不变量 6、7：拒绝不规范的输入，错误不携带关联号原文。
+    if !valid_optional_text(request_id, 128, false) {
+        return Err(ConsignmentError::InvalidListingRequest);
+    }
+    Ok(())
 }
 
 /// 运营私有说明，只进入 Admin 私有视图，永不进入公开 DTO。
@@ -192,6 +211,8 @@ pub struct AdminDelistListingCommand {
     pub request_hash: RequestHash,
     /// 整个寄售账本内唯一的命令 ID。
     pub command_id: CommandId,
+    /// 仅用于审计关联，不参与摘要、MAC 或重放比较，重放保留首次审计关联号。
+    pub request_id: Option<String>,
     /// 目标挂单。
     pub listing_id: Uuid,
     /// 运营确认的已提交版本。
@@ -486,6 +507,7 @@ pub struct OwnedListingCommandReceipt {
 
 /// 寄售写入事务。不变量 1、2、3、5、6、7、8：先跨目标仲裁，再锁内核验并原子提交
 /// 投影、事件、审计、账本及适用的工作与凭证变更。重放不重跑业务，不在持锁期间发网。
+/// HTTP 命令的请求号只写入首次决定的 `audit_records.request_id`，重放返回原回执并保留原审计。
 pub trait ListingCommandStore: Send + Sync {
     /// 先比较已存登记用的逻辑钥，再检查新登记准入及可用性。只有首次受理才封装和建工作。
     /// sealer 和比较钥接口只能执行本地、有界密码运算。缺 sealer 不影响同请求回放。

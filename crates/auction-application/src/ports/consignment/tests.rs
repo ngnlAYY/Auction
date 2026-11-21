@@ -1094,6 +1094,7 @@ fn registration_fake_records_every_policy_field() {
         let command = RegisterListingCommand {
             command_id: CommandId::from_uuid(Uuid::from_u128(11)),
             seller_user_id: UserId::from_uuid(Uuid::from_u128(10)),
+            request_id: None,
             input: RegistrationInput {
                 identity: &identity,
                 key: &key,
@@ -1137,6 +1138,7 @@ fn scripted_ports_report_calls_and_preserve_unknown_outcomes() {
     let registration = || RegisterListingCommand {
         command_id,
         seller_user_id,
+        request_id: None,
         input: RegistrationInput {
             identity: &reference.identity,
             key: &reference.key,
