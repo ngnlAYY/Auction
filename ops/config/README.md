@@ -100,7 +100,7 @@
 | `lookup_max_response_bytes` | `65536` | 整数 4096–262144，解压后响应体的字节上限 |
 | `lookup_min_interval_ms` | `1000` | 整数 250–60000 毫秒，全服务两次解析起始许可之间的最小间隔 |
 
-解析尝试次数、退避、24 小时总期限、固定来源和 schema 版本由协议定义。装备数据密钥继续由 `secrets.toml` 管理。
+解析尝试次数、退避、24 小时总期限、固定来源和 schema 版本由协议定义。Public 接受登记需要 `secrets.toml` 中的 `equipment_data_key_id` 与 `equipment_data_key`，用于封装装备读取凭证及核对登记重放。Public 与 Worker 使用同一装备数据密钥环，联合预检还会核对 Admin 的装备数据密钥环。Public 缺少装备数据密钥时仍可启动，开启服务后的状态接口报告 `registration_ready=false`，有效的新登记返回 503。登记就绪还要求数据库准入开启、至少一个世界可登记及 Worker 心跳新鲜。隔离验收见[本地一口价挂单预览](../../docs/development.md#本地一口价挂单预览)。
 
 ### 定时备份策略
 

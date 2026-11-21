@@ -8,9 +8,14 @@ use std::sync::{
 use std::time::Duration;
 
 use anyhow::Context;
+use auction_application::admin::EquipmentKeySealerPort;
 use auction_application::auction::{
     AuctionReader, CompetitionCommandPort, PublicAccountReader, PublicBidLogReader,
     PublicLotReader, PublicPriceHistoryReader, WorldReader,
+};
+use auction_application::consignment::{
+    ListingRegistrationPolicy, ListingWorlds, ManageListingService, RegisterListingService,
+    RegistrationReplayCrypto,
 };
 use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, RepositoryError};
@@ -26,10 +31,12 @@ use auction_application::realtime::{
     RealtimeRelayConfig, RealtimeSequenceAllocator, RealtimeStreamStore,
 };
 use auction_application::sessions::PublicSessionService;
-use auction_config::AppConfig;
-use auction_http::PublicApiState;
-use auction_http::{RealtimeHub, RealtimeHubSink};
-use auction_integrations::{EquipmentGameLinkResolver, EquipmentKeyOpener, build_keyring};
+use auction_config::{AppConfig, ConsignmentActivation, ConsignmentConfig, DataKeyDomain};
+use auction_http::{ConsignmentCapabilities, PublicApiState, RealtimeHub, RealtimeHubSink};
+use auction_integrations::{
+    EquipmentGameLinkResolver, EquipmentKeyOpener, EquipmentKeySealer,
+    HentaiVerseListingUrlValidator, Keyring, build_keyring,
+};
 use auction_observability::ProcessMetrics;
 use auction_observability::{
     HeartbeatHealthReader, HeartbeatPublisher, HeartbeatPublisherConfig, HeartbeatReadinessFuture,
@@ -126,28 +133,90 @@ impl Drop for RealtimeRelayTaskHealthGuard {
     }
 }
 
-fn configure_equipment_links(
-    config: &AppConfig,
-    store: &Arc<DatabaseStore>,
-) -> anyhow::Result<Option<Arc<dyn PublicEquipmentLinkResolver>>> {
-    let keyring = build_keyring(
-        auction_config::DataKeyDomain::Equipment,
-        config.data_key_current(auction_config::DataKeyDomain::Equipment),
+fn equipment_keyring(config: &AppConfig) -> anyhow::Result<Option<Arc<Keyring>>> {
+    build_keyring(
+        DataKeyDomain::Equipment,
+        config.data_key_current(DataKeyDomain::Equipment),
         config
-            .data_key_previous(auction_config::DataKeyDomain::Equipment)
+            .data_key_previous(DataKeyDomain::Equipment)
             .iter()
             .map(|key| (key.id(), key.material())),
     )
-    .map_err(|_| anyhow::anyhow!("Public 真实装备 URL 的数据密钥配置无效"))?;
-    let Some(keyring) = keyring else {
-        return Ok(None);
+    .context("Public 装备数据密钥配置无效")
+}
+
+struct ConsignmentCredentials {
+    sealer: Arc<dyn EquipmentKeySealerPort>,
+    replay_crypto: Arc<dyn RegistrationReplayCrypto>,
+}
+
+impl ConsignmentCredentials {
+    fn from_keyring(keyring: Option<Arc<Keyring>>) -> Option<Self> {
+        keyring.map(|keyring| Self {
+            sealer: Arc::new(EquipmentKeySealer::new(Arc::clone(keyring.current()))),
+            replay_crypto: Arc::new(EquipmentKeyOpener::new(keyring)),
+        })
+    }
+}
+
+async fn configure_consignment(
+    config: &ConsignmentConfig,
+    activation: ConsignmentActivation,
+    store: Option<&Arc<DatabaseStore>>,
+    keyring: Option<Arc<Keyring>>,
+) -> anyhow::Result<ConsignmentCapabilities> {
+    let enabled = activation == ConsignmentActivation::Enabled;
+    let fee_bps = config.fee_bps();
+    let Some(store) = store else {
+        return Ok(ConsignmentCapabilities::without_database(enabled, fee_bps));
     };
-    let secrets: Arc<dyn PublicEquipmentLinkSecretReader> = store.clone();
-    Ok(Some(Arc::new(EquipmentGameLinkResolver::new(secrets, EquipmentKeyOpener::new(keyring)))))
+    let credentials = ConsignmentCredentials::from_keyring(keyring);
+    let sealer = credentials.as_ref().map(|credentials| Arc::clone(&credentials.sealer));
+    let replay_crypto = credentials.map(|credentials| credentials.replay_crypto);
+    // 不变量 1、2、7：初始化由仓储锁定持久准入并仲裁，故障只记录安全分类。
+    // Worker 尚未同步或初始化失败时保留历史能力，登记就绪和首次写入各自重新核验依赖。
+    if enabled
+        && let Some(crypto) = replay_crypto.as_deref()
+        && let Err(error) = store.initialize_listing_replay_key(Uuid::new_v4(), crypto).await
+    {
+        tracing::warn!(error = %error, "Public 启动时未能确认寄售登记比较密钥");
+    }
+    let policy = ListingRegistrationPolicy {
+        enabled: config.enabled(),
+        // 决定 4 对两世界开放，寄售节没有独立世界配置。实际准入由数据库的世界可用性再收紧。
+        worlds: ListingWorlds { main: true, isekai: true },
+        consigned_fee_bps: fee_bps,
+        max_open_per_user: config.max_open_per_user().try_into().context("寄售活动挂单额度无效")?,
+        registrations_per_hour: config
+            .registrations_per_hour()
+            .try_into()
+            .context("寄售每小时登记额度无效")?,
+    };
+    let registration_sealer_available = sealer.is_some();
+    // 不变量 1、6：停用仍交给原命令账本仲裁，首次登记与改价受有效开关约束。
+    Ok(ConsignmentCapabilities {
+        enabled,
+        fee_bps,
+        public_read: Some(store.clone()),
+        owned_read: Some(store.clone()),
+        register: Some(Arc::new(RegisterListingService::new(
+            store.clone(),
+            Arc::new(HentaiVerseListingUrlValidator),
+            sealer,
+            replay_crypto.clone(),
+            policy,
+            enabled,
+            Uuid::new_v4,
+        ))),
+        manage: Some(Arc::new(ManageListingService::new(store.clone(), enabled))),
+        registration_sealer_available,
+        replay_crypto,
+    })
 }
 
 pub(super) async fn configure_state(
     config: &AppConfig,
+    activation: ConsignmentActivation,
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
     switches: auction_application::runtime_switches::RuntimeSwitches,
@@ -159,12 +228,15 @@ pub(super) async fn configure_state(
 )> {
     let security = config::configure_security(config)?;
     let Some(database_url) = config.database_url() else {
+        let consignment =
+            configure_consignment(&config.consignment, activation, None, None).await?;
         return Ok((
             PublicApiState::new(
                 None, None, None, None, None, None, None, None, None, None, None, None, None, None,
                 security,
             )
-            .with_runtime_switch_snapshot(switches),
+            .with_runtime_switch_snapshot(switches)
+            .with_consignment(consignment),
             None,
             None,
             None,
@@ -229,7 +301,19 @@ pub(super) async fn configure_state(
     let auctions: Arc<dyn AuctionReader> = store.clone();
     let lots: Arc<dyn PublicLotReader> =
         Arc::new(store.public_lot_reader(config.equipment_colors.clone()));
-    let equipment_links = configure_equipment_links(config, &store)?;
+    let keyring = equipment_keyring(config)?;
+    let equipment_links: Option<Arc<dyn PublicEquipmentLinkResolver>> =
+        keyring.as_ref().map(|keyring| {
+            let secrets: Arc<dyn PublicEquipmentLinkSecretReader> = store.clone();
+            let resolver: Arc<dyn PublicEquipmentLinkResolver> =
+                Arc::new(EquipmentGameLinkResolver::new(
+                    secrets,
+                    EquipmentKeyOpener::new(Arc::clone(keyring)),
+                ));
+            resolver
+        });
+    let consignment =
+        configure_consignment(&config.consignment, activation, Some(&store), keyring).await?;
     let bid_log: Arc<dyn PublicBidLogReader> = store.clone();
     let price_history: Arc<dyn PublicPriceHistoryReader> = store.clone();
     let realtime: Arc<dyn PublicRealtimeReader> = store.clone();
@@ -311,7 +395,8 @@ pub(super) async fn configure_state(
     .with_lot_watch_preference(store.clone())
     .with_realtime_hub(hub)
     .with_runtime_switch_snapshot(switches)
-    .with_readiness(readiness);
+    .with_readiness(readiness)
+    .with_consignment(consignment);
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "发布 Public ready 心跳失败");
     }
@@ -394,4 +479,71 @@ fn database_profile(
             idle_transaction_millis: value.idle_in_transaction_session_timeout_millis,
         });
     Ok(DatabaseConnectionProfile::service(purpose, config.database_pool.max_connections, timeouts))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use auction_application::consignment::{
+        ListingEquipmentUrlValidator, RegistrationReplayCrypto,
+    };
+    use auction_config::{AppConfig, ConsignmentActivation, DataKeyDomain, Role};
+    use auction_integrations::{EquipmentKeyOpener, HentaiVerseListingUrlValidator, build_keyring};
+    use uuid::Uuid;
+
+    use super::{ConsignmentCredentials, configure_consignment};
+
+    #[tokio::test]
+    async fn consignment_without_database_keeps_config_and_leaves_ports_unavailable() {
+        let directory =
+            std::env::temp_dir().join(format!("auction-public-consignment-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let role_path = directory.join("public.toml");
+        fs::write(&role_path, "common_file = 'common.toml'\nsecrets_file = 'secrets.toml'\n")
+            .unwrap();
+        fs::write(directory.join("common.toml"), "[consignment]\nenabled = true\nfee_bps = 175\n")
+            .unwrap();
+        fs::write(directory.join("secrets.toml"), "").unwrap();
+        let config = AppConfig::load_from_path(Role::Public, &role_path);
+        fs::remove_dir_all(directory).unwrap();
+        let config = config.unwrap();
+
+        let capabilities =
+            configure_consignment(&config.consignment, ConsignmentActivation::Enabled, None, None)
+                .await
+                .unwrap();
+        assert!(capabilities.enabled);
+        assert_eq!(capabilities.fee_bps.value(), 175);
+        assert!(capabilities.public_read.is_none());
+        assert!(capabilities.owned_read.is_none());
+        assert!(capabilities.register.is_none());
+        assert!(capabilities.manage.is_none());
+        assert!(!capabilities.registration_sealer_available);
+        assert!(capabilities.replay_crypto.is_none());
+    }
+
+    #[test]
+    fn consignment_without_equipment_key_has_no_credentials() {
+        assert!(ConsignmentCredentials::from_keyring(None).is_none());
+    }
+
+    #[test]
+    fn consignment_seals_with_current_key_and_checks_previous_replay_key() {
+        let old = ("fixture-previous", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+        let new = ("fixture-current", "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=");
+        let old_ring = build_keyring(DataKeyDomain::Equipment, Some(old), []).unwrap().unwrap();
+        let new_ring = build_keyring(DataKeyDomain::Equipment, Some(new), [old]).unwrap();
+        let credentials = ConsignmentCredentials::from_keyring(new_ring).unwrap();
+        let reference = HentaiVerseListingUrlValidator
+            .validate("https://hentaiverse.org/equip/42/0000000000")
+            .expect("夹具链接应通过本地校验");
+        let envelope = credentials.sealer.seal(Uuid::new_v4().into(), &reference.key).unwrap();
+        assert_eq!(envelope.encryption_key_id(), "fixture-current");
+
+        let replay_key_id = Uuid::new_v4();
+        let wrapped = EquipmentKeyOpener::new(old_ring).generate_wrapped(replay_key_id).unwrap();
+        assert!(credentials.replay_crypto.check_wrapped(replay_key_id, &wrapped).is_ok());
+        assert!(credentials.replay_crypto.check_wrapped(Uuid::new_v4(), &wrapped).is_err());
+    }
 }

@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::Context;
 use auction_application::operations::MigrationCompatibilityMode;
-use auction_config::{AppConfig, Role};
+use auction_config::{AppConfig, CONSIGNMENT_COMPLETE, Role, consignment_activation};
 use auction_storage::{DatabaseBackend, strict_deployment_database_identity};
 use serde::Serialize;
 
@@ -109,6 +109,12 @@ pub(crate) fn check(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<Depl
         let metadata = regular_file(&path, "角色配置")?;
         permissions.not_writable_by_others(&path, "角色配置", &metadata)?;
         let config = config_dir.load(role)?;
+        validate_consignment(
+            config.consignment.enabled(),
+            cfg!(feature = "consignment-dev-preview"),
+            cfg!(debug_assertions),
+        )
+        .with_context(|| format!("校验 {} 一口价挂单配置失败", role.name()))?;
         let common = config.common_config_path.as_deref().context("角色配置缺少 common_file")?;
         let metadata = regular_file(common, "公共配置")?;
         permissions.not_writable_by_others(common, "公共配置", &metadata)?;
@@ -174,6 +180,12 @@ pub(crate) fn check(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<Depl
         warnings: permissions.warnings,
         database_budget,
     })
+}
+
+fn validate_consignment(enabled: bool, preview: bool, debug: bool) -> anyhow::Result<()> {
+    consignment_activation(enabled, CONSIGNMENT_COMPLETE, preview, debug)
+        .context("校验 auction-cli 一口价挂单制品能力失败")?;
+    Ok(())
 }
 
 fn shared_files(public: &AppConfig, admin: &AppConfig, worker: &AppConfig) -> anyhow::Result<()> {
@@ -383,4 +395,57 @@ fn same_retired_keys(
             .collect::<Vec<_>>()
     };
     identity(left) == identity(right)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::os::unix::fs::DirBuilderExt;
+
+    use auction_config::{ConfigError, Role};
+    use uuid::Uuid;
+
+    use super::{check, validate_consignment};
+    use crate::config_dir::ConfigDir;
+
+    #[test]
+    fn consignment_config_check_requires_debug_preview() {
+        for (preview, debug) in [(false, false), (true, false), (false, true)] {
+            let error = validate_consignment(true, preview, debug).unwrap_err();
+            assert!(matches!(
+                error.downcast_ref::<ConfigError>(),
+                Some(ConfigError::ConsignmentPreviewRequired)
+            ));
+        }
+        validate_consignment(true, true, true).unwrap();
+        validate_consignment(false, false, false).unwrap();
+    }
+
+    #[test]
+    fn consignment_config_check_applies_build_gate_to_loaded_common_file() {
+        let directory =
+            std::env::temp_dir().join(format!("auction-cli-consignment-{}", Uuid::new_v4()));
+        fs::DirBuilder::new().mode(0o700).create(&directory).unwrap();
+        fs::write(directory.join("common.toml"), "[consignment]\nenabled = true\n").unwrap();
+        fs::write(directory.join("secrets.toml"), "").unwrap();
+        for role in [Role::Public, Role::Admin, Role::Worker] {
+            fs::write(
+                directory.join(format!("{}.toml", role.name())),
+                "common_file = 'common.toml'\nsecrets_file = 'secrets.toml'\n",
+            )
+            .unwrap();
+        }
+        let result = check(&ConfigDir::new(&directory).unwrap(), false);
+        fs::remove_dir_all(directory).unwrap();
+        let error = result.err().expect("无数据库的目录不能通过联合配置检查");
+        if cfg!(all(feature = "consignment-dev-preview", debug_assertions)) {
+            assert!(error.to_string().contains("配置缺少数据库连接"));
+        } else {
+            assert!(matches!(
+                error.downcast_ref::<ConfigError>(),
+                Some(ConfigError::ConsignmentPreviewRequired)
+            ));
+            assert!(format!("{error:#}").contains("当前制品不能开启"));
+        }
+    }
 }

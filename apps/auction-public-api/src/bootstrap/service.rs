@@ -4,7 +4,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use auction_config::{AppConfig, Role};
+use auction_config::{
+    AppConfig, CONSIGNMENT_COMPLETE, ConsignmentActivation, Role, consignment_activation,
+};
 use auction_observability::{DiagnosticLogOwner, ProcessMetrics, TracingConfig, TracingRuntime};
 use auction_process::{
     DrainOutcome, TaskGuard, TerminationSignals, join_error_kind, wait_for_drain,
@@ -27,6 +29,11 @@ pub async fn run_from_path(path: std::path::PathBuf) -> anyhow::Result<()> {
 }
 
 async fn run_config(config: AppConfig) -> anyhow::Result<()> {
+    let consignment = validate_consignment(
+        config.consignment.enabled(),
+        cfg!(feature = "consignment-dev-preview"),
+        cfg!(debug_assertions),
+    )?;
     let mut signals = TerminationSignals::subscribe().context("订阅 public-api 终止信号失败")?;
     let tracing_config = tracing_config(&config.tracing);
     let telemetry = auction_observability::init_with_config(
@@ -43,7 +50,7 @@ async fn run_config(config: AppConfig) -> anyhow::Result<()> {
     let mut forced = false;
     let result = {
         let diagnostic_logs = DiagnosticLogOwner::install();
-        let body = run_service(&config, &telemetry, &mut signals, &mut forced);
+        let body = run_service(&config, consignment, &telemetry, &mut signals, &mut forced);
         diagnostic_logs.run(body).await
     };
     if !forced {
@@ -52,8 +59,18 @@ async fn run_config(config: AppConfig) -> anyhow::Result<()> {
     result
 }
 
+fn validate_consignment(
+    enabled: bool,
+    preview: bool,
+    debug: bool,
+) -> anyhow::Result<ConsignmentActivation> {
+    consignment_activation(enabled, CONSIGNMENT_COMPLETE, preview, debug)
+        .context("校验 Public 一口价挂单制品能力失败")
+}
+
 async fn run_service(
     config: &AppConfig,
+    consignment: ConsignmentActivation,
     telemetry: &TracingRuntime,
     signals: &mut TerminationSignals,
     forced: &mut bool,
@@ -94,6 +111,7 @@ async fn run_service(
             let listener = listener::bind(config).await?;
             let (state, heartbeat, realtime_relay, refresh_tasks) = state::configure_state(
                 config,
+                consignment,
                 telemetry.health_reader(),
                 Arc::clone(&metrics),
                 switches.clone(),
@@ -283,5 +301,28 @@ fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
         max_export_batch_size: settings.max_export_batch_size as usize,
         sample_ratio: f64::from(settings.sample_ratio_ppm) / 1_000_000.0,
         shutdown_timeout: Duration::from_secs(settings.shutdown_timeout_seconds),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_config::{ConfigError, ConsignmentActivation};
+
+    use super::validate_consignment;
+
+    #[test]
+    fn consignment_startup_requires_debug_preview() {
+        for (preview, debug) in [(false, false), (true, false), (false, true)] {
+            let error = validate_consignment(true, preview, debug).unwrap_err();
+            assert!(matches!(
+                error.downcast_ref::<ConfigError>(),
+                Some(ConfigError::ConsignmentPreviewRequired)
+            ));
+        }
+        assert_eq!(validate_consignment(true, true, true).unwrap(), ConsignmentActivation::Enabled);
+        assert_eq!(
+            validate_consignment(false, false, false).unwrap(),
+            ConsignmentActivation::Disabled
+        );
     }
 }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use auction_config::{AppConfig, Role};
+use auction_config::{AppConfig, CONSIGNMENT_COMPLETE, Role, consignment_activation};
 use auction_observability::{DiagnosticLogOwner, ProcessMetrics, TracingConfig, TracingRuntime};
 use auction_process::{
     DrainOutcome, TaskGuard, TerminationSignals, join_error_kind, wait_for_drain,
@@ -21,6 +21,11 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         None => AppConfig::load(Role::Admin),
     }
     .context("加载 admin-api 配置失败")?;
+    validate_consignment(
+        config.consignment.enabled(),
+        cfg!(feature = "consignment-dev-preview"),
+        cfg!(debug_assertions),
+    )?;
     let mut signals = TerminationSignals::subscribe().context("订阅 admin-api 终止信号失败")?;
     let tracing_config = tracing_config(&config.tracing);
     let telemetry = auction_observability::init_with_config(
@@ -44,6 +49,12 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         auction_observability::shutdown_tracing("admin", telemetry, &mut signals).await;
     }
     result
+}
+
+fn validate_consignment(enabled: bool, preview: bool, debug: bool) -> anyhow::Result<()> {
+    consignment_activation(enabled, CONSIGNMENT_COMPLETE, preview, debug)
+        .context("校验 Admin 一口价挂单制品能力失败")?;
+    Ok(())
 }
 
 async fn run_service(
@@ -250,5 +261,25 @@ fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
         max_export_batch_size: settings.max_export_batch_size as usize,
         sample_ratio: f64::from(settings.sample_ratio_ppm) / 1_000_000.0,
         shutdown_timeout: Duration::from_secs(settings.shutdown_timeout_seconds),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_config::ConfigError;
+
+    use super::validate_consignment;
+
+    #[test]
+    fn consignment_startup_requires_debug_preview() {
+        for (preview, debug) in [(false, false), (true, false), (false, true)] {
+            let error = validate_consignment(true, preview, debug).unwrap_err();
+            assert!(matches!(
+                error.downcast_ref::<ConfigError>(),
+                Some(ConfigError::ConsignmentPreviewRequired)
+            ));
+        }
+        validate_consignment(true, true, true).unwrap();
+        validate_consignment(false, false, false).unwrap();
     }
 }

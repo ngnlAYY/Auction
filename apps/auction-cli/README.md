@@ -86,6 +86,8 @@ auction-cli --config-dir /etc/auction config check --strict
 
 `config check` 联合加载三角色，核对：三个角色文件、`common_file`、`secrets_file`、`runtime_config_file` 均为非符号链接普通文件，且三角色引用同一 `common_file` 与同一（或全部省略的）`runtime_config_file`；三角色数据库为同一 PostgreSQL 目标且 `equipment_data_key` 标识与材料一致；Admin/Worker 的拍卖模板与排期、control socket、四个域的密钥与旧密钥数组一致，Admin 若配置 `worker_config_file` 必须指向本目录的 `worker.toml`；装备规则与 `bot_players` 名单一致；Worker 备份策略范围与可选打卡地址合法，报告只给“是否配置”；Public/Admin 监听合法且不与 Worker control socket 冲突；配置目录与普通文件禁止 group/other 写入、敏感文件仅 owner 可访问，runtime 文件必须是 `0640` 且父目录禁止他人写入。非严格模式把权限类问题放进 JSON `warnings`，`--strict` 直接失败；生产部署门禁必须使用 `--strict`。字段语义与各区块约束由[ops/config/README.md](../../ops/config/README.md)拥有。
 
+三角色从共同的配置文件加载 `[consignment]`。寄售功能完成之前，`config check` 仅在 CLI 同时启用 `consignment-dev-preview` 与调试断言时允许 `enabled = true`，其余构建返回中文配置错误。各服务进程启动时仍校验自己的制品能力。 [本地一口价挂单预览](../../docs/development.md#本地一口价挂单预览)
+
 ## 分体部署编排
 
 `service` 只用于分体 systemd 部署（三个角色各自一个 unit）。合并部署（`auction-server`）由 supervisor 自行编排；`service start/restart` 发现该配置目录对应的 `owner.lock` 时拒绝执行。`status/stop` 仍查询或停止所指定的分体 unit，不能用于管理 supervisor。

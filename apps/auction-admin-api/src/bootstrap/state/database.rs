@@ -14,6 +14,7 @@ use auction_application::admin::{
     DeliverySentProofService, SettlementCatalogReader,
 };
 use auction_application::auction::{AuctionLifecycleCommandPort, AuctionLifecyclePolicy};
+use auction_application::consignment::ManageListingService;
 use auction_application::delivery::{DeliveryAdminPort, DeliverySentConfirmationPort};
 use auction_application::operations::{
     OperationsAlertConsole, OperationsAlertSourceReader, OperationsAlertStore,
@@ -26,7 +27,7 @@ use auction_application::recovery::{
 use auction_application::sessions::AdminSessionService;
 use auction_application::settlement::SettlementReportReader;
 use auction_config::{AppConfig, TomlRuntimeFileStore};
-use auction_http::AdminApiState;
+use auction_http::{AdminApiState, AdminConsignmentCapabilities};
 use auction_integrations::{
     CredentialSealer, CredentialVerifier, EquipmentKeySealer, MoogleMailLoginKeyIssuer,
     MoogleMailLoginKeyReader, build_keyring,
@@ -370,6 +371,14 @@ pub(super) async fn configure_state(
     .with_runtime_switches(store.clone(), switches.clone())
     .with_mail_templates(store.clone())
     .with_runtime_switch_snapshot(switches.clone())
+    // 不变量 1、6：停用仍需读取历史与仲裁原下架命令，首次操作由持久有效态约束。
+    .with_consignment(AdminConsignmentCapabilities {
+        read: Some(store.clone()),
+        manage: Some(Arc::new(ManageListingService::new(
+            store.clone(),
+            config.consignment.enabled(),
+        ))),
+    })
     .with_readiness(Arc::new(
         auction_http::HttpReadinessProbe::new(
             store,

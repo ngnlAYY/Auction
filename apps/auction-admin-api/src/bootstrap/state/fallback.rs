@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use auction_application::operations::WorkerControlPort;
 use auction_config::AppConfig;
-use auction_http::{AdminApiState, AdminHttpSecurity};
+use auction_http::{AdminApiState, AdminConsignmentCapabilities, AdminHttpSecurity};
 
 use super::super::config;
 
@@ -47,4 +47,5 @@ pub(super) fn empty_state(
     .with_operations_alert_policy(config.worker.operations_alert.policy())
     .with_dashboard_mailbox_keys(config::configured_dashboard_mailbox_keys(config))
     .with_runtime_switch_snapshot(switches)
+    .with_consignment(AdminConsignmentCapabilities::default())
 }

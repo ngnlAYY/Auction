@@ -26,7 +26,7 @@ reject_solid_formal_release() {
 
 # 只打印信息的入口不参与正式发行构建判定；运行任务仍受守卫约束。
 case "$command_name" in
-web-feature | web-build-id | verify-web-size | source-fingerprint) ;;
+web-feature | web-build-id | verify-web-size | source-fingerprint | verify-release-features) ;;
 *) reject_solid_formal_release || exit 1 ;;
 esac
 # 本地运行任务按实际技术栈取当前包的 feature 名；这里不解析发布工具，也不产生任何制品。
@@ -105,6 +105,32 @@ if [[ "$command_name" == run-web ]]; then
 	fi
 	exec cargo run --locked -p "auction-$surface-api" --features "$feature"
 fi
+
+assert_release_features() {
+	local features
+	for features in "$@"; do
+		if [[ "$features" =~ (^|[[:space:],/])consignment-dev-preview($|[[:space:],]) ]]; then
+			printf '发布及候选制品禁止启用 consignment-dev-preview。\n' >&2
+			return 1
+		fi
+	done
+}
+
+# PostgreSQL 无条件编译，发布变体的 feature 只用于选择内嵌页面。
+api_only_features=''
+public_features=$(web_cargo_features public-api)
+admin_features=$(web_cargo_features admin-api)
+embedded_features="$public_features,$admin_features"
+single_features=$(web_cargo_features server)
+assert_release_features "$api_only_features" "$embedded_features" "$single_features"
+if [[ "$command_name" == verify-release-features ]]; then
+	if [[ $# -ne 1 ]]; then
+		printf 'verify-release-features 不接受额外参数\n' >&2
+		exit 2
+	fi
+	exit 0
+fi
+
 # 只读的 payload 体积检查不需要 dx/rustc，也不解析发布工具；其余入口仍先确认工具齐全。
 if [[ "$command_name" != verify-web-size ]]; then
 	configure_build_tools
@@ -124,11 +150,6 @@ api_only_admin_root="$repository_root/target/dist/api-only-assets/admin"
 # 体积预算的基线是刻意维护的数据文件；发布门禁只读取，不写回。
 web_size_budget_file="$repository_root/ci/release/web-size-budget.v1"
 assets_missing_message="web assets are not included in this binary; run \`mise run build-release\`"
-# 发布 feature 的唯一来源：PostgreSQL 无条件编译，变体之间只差是否内嵌页面；
-# 内嵌 feature 由两端实际技术栈得出，缺省组合与原有常量逐字符相同。
-api_only_features=''
-embedded_features="$(web_cargo_features public-api),$(web_cargo_features admin-api)"
-single_features=$(web_cargo_features server)
 
 binaries=(
 	auction-public-api
@@ -312,6 +333,7 @@ artifacts_reusable() {
 
 build_variant() (
 	local variant=$1 build_root=$2 artifact_directory=$3 features=$4
+	assert_release_features "$features" || return 1
 	local selected_binaries=("${@:5}")
 	if [[ ${#selected_binaries[@]} -eq 0 ]]; then selected_binaries=("${binaries[@]}"); fi
 	local next="$artifact_root/.${variant}.next.$$"
@@ -458,6 +480,9 @@ verify_build_info() {
 		printf '缺少发布构建信息：%s\n' "$info" >&2
 		return 1
 	fi
+	local features
+	features=$(read_build_info "$info" features) || return 1
+	assert_release_features "$features" || return 1
 	local current_lock current_inputs current_environment current_public_stack='' current_admin_stack=''
 	if web_stack_uses_solid; then
 		current_public_stack=$(web_surface_stack public) || return 1
@@ -1112,6 +1137,7 @@ usage() {
 		'      ci/release/release.sh build-api | build-embedded | verify-artifacts' \
 		'      ci/release/release.sh build-single | verify-single' \
 		'      ci/release/release.sh verify-web-size | source-fingerprint' \
+		'      ci/release/release.sh verify-release-features' \
 		'      ci/release/release.sh web-feature public|admin' \
 		'      ci/release/release.sh web-build-id public|admin' \
 		'      ci/release/release.sh run-web public|admin' >&2

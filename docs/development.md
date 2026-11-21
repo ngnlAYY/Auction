@@ -108,6 +108,36 @@ AUCTION_CONFIG_FILE=$dir/public.toml mise run run-public
 
 也可以用 `auction-server --config-dir <目录>` 一次启动三个角色（需要启用 Worker control 并允许当前 UID）。
 
+### 本地一口价挂单预览
+
+以下步骤用于 Public、Admin、Worker 和 CLI 均已接入 `consignment-dev-preview` 的集成分支。
+
+1. 新建独立 PG18 集群和空库，仅监听回环地址，按[数据库准备](#1-准备数据库)及[分体部署](../ops/README.md#分体部署)创建运行账号和迁移 owner。按[准备配置](#2-准备配置)复制模板到临时私有目录，三个角色都引用该目录内同一份 `common.toml`。使用临时数据库凭据、Admin 凭据和装备数据密钥，核对运行账号与迁移 owner 都指向这个测试库。禁用邮件、论坛、告警等外部集成。
+2. 把公共配置中已有的 `[consignment].enabled` 改为 `true`，配置两个站点的回环监听和对应的 Origin。构建 Solid 页面和四个调试程序，显式给三个服务角色和 CLI 都启用 `consignment-dev-preview`。
+
+```bash
+mise run web-prepare
+export AUCTION_WEB_STACK=solid
+mise run web-build
+AUCTION_BUILD_ID="$(bash ci/release/release.sh web-build-id public)"
+export AUCTION_BUILD_ID
+cargo build --locked -p auction-public-api -p auction-admin-api -p auction-worker -p auction-cli \
+  --features 'auction-public-api/web-solid,auction-admin-api/web-solid,auction-public-api/consignment-dev-preview,auction-admin-api/consignment-dev-preview,auction-worker/consignment-dev-preview,auction-cli/consignment-dev-preview'
+target/debug/auction-cli --config-dir "$dir" config check --strict
+target/debug/auction-cli --config-dir "$dir" db migrate --owner-secrets "$owner_secrets" --no-systemd
+```
+
+3. 使用各自的临时配置启动 Worker、Admin、Public，等 Worker 同步寄售准入并发布心跳后检查 Public 的 `/api/v1/consignment/status`。只验证空库和只读 HTTP 时保持队列为空。需要提交登记并观察解析结果时，先在测试装配注入 `ListingEquipmentLookup` 脱敏替身并限制进程出站。若通过 Admin 建立本地测试卖家并签发登录 key，另配独立的测试 `user_login_data_key` 及其标识。
+
+```bash
+# 各命令在单独终端运行，先启动 Worker。
+AUCTION_CONFIG_FILE="$dir/worker.toml" target/debug/auction-worker
+AUCTION_CONFIG_FILE="$dir/admin.toml" target/debug/auction-admin-api
+AUCTION_CONFIG_FILE="$dir/public.toml" target/debug/auction-public-api
+```
+
+验收停用时先停止三个进程，再把公共开关改回 `false`，从 Worker 开始重新启动。预览数据库及其备份不得作为生产升级输入。
+
 ## 代码约定
 
 详见 [AGENTS.md](../AGENTS.md)，要点：
