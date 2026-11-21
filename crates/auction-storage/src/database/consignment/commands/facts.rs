@@ -15,13 +15,13 @@ use crate::database::consignment::commands::errors::WriteError;
 use crate::database::consignment::commands::ledger::{
     Actor, CommandWriter, RegistrationProof, StoredReceipt, Target,
 };
+use crate::database::consignment::commands::termination::append_collision_sets;
 use crate::database::consignment::listings::projection::{
     ListingLockIdentity, LockedListing, NewListing, insert, update,
 };
 use crate::database::operations::audit_health::AuditWriteResult as _;
 
 /// 有挂单版本变化的操作。Admin 下架处置必须携带已校验的私有说明。
-#[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
 pub(crate) enum ChangedOperation<'a> {
     Register,
     Reprice,
@@ -45,7 +45,6 @@ impl ChangedOperation<'_> {
 }
 
 /// 调用方已依据领域模型决定的首次结果，只有固定处置可写入账本。
-#[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
 pub(crate) enum Decision<'a> {
     /// 挂单有新版本。回执取本次版本事件的字段。
     Changed { listing_id: Uuid, operation: ChangedOperation<'a> },
@@ -74,7 +73,6 @@ pub(super) struct PendingEvent {
 
 impl CommandWriter<'_, '_> {
     /// 首次登记投影。不变量 2、3、10：必须持卖家与装备会话锁，冻结策略与后续回执同提交。
-    #[allow(dead_code, reason = "由后续任务 2D 调用")]
     pub(crate) async fn stage_registration(
         &mut self,
         new: NewListing<'_>,
@@ -102,7 +100,6 @@ impl CommandWriter<'_, '_> {
     }
 
     /// 依据锁内领域迁移更新目标，暂存同版事件；系统触发的关闭使用 `stage_system_closure`。
-    #[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
     pub(crate) async fn stage_change(
         &mut self,
         current: &LockedListing,
@@ -119,7 +116,6 @@ impl CommandWriter<'_, '_> {
     }
 
     /// 内联或独立的系统终结。原操作还须写入自身决定。允许登记或发布清退同件旧单，仅减少占用。
-    #[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
     pub(crate) async fn stage_system_closure(
         &mut self,
         current: &LockedListing,
@@ -197,30 +193,53 @@ impl CommandWriter<'_, '_> {
     /// 写原操作回执、暂存的同版事件和审计。已仲裁拒绝也返回 Ok，交由事务 owner 提交。
     /// 此调用后可在同一事务追加引用本账本行的碰撞关联，再将结果交还事务 owner。
     /// 不变量 1、3、8：任意事实写失败必须向事务 owner 返回错误，不能继续或提交。
-    #[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
     pub(crate) async fn finish(
         self,
         decision: Decision<'_>,
         now: Timestamp,
     ) -> Result<StoredReceipt, WriteError> {
-        self.finish_with_proof(None, decision, now).await
+        self.finish_with_collisions(decision, &[], now).await
     }
 
     /// 首次登记的回执与调用方计算的 MAC 同事务保存。
-    #[allow(dead_code, reason = "由后续任务 2D 调用")]
     pub(crate) async fn finish_registration(
         self,
         proof: RegistrationProof,
         decision: Decision<'_>,
         now: Timestamp,
     ) -> Result<StoredReceipt, WriteError> {
-        self.finish_with_proof(Some(proof), decision, now).await
+        self.finish_with_proof(Some(proof), decision, &[], now).await
+    }
+
+    /// 定案后同步追加碰撞集合，保留原操作的同事务审计。不变量 1、3、8。
+    pub(super) async fn finish_with_collisions(
+        self,
+        decision: Decision<'_>,
+        collisions: &[Uuid],
+        now: Timestamp,
+    ) -> Result<StoredReceipt, WriteError> {
+        self.finish_with_proof(None, decision, collisions, now).await
+    }
+
+    /// 首次登记定案与旧占用碰撞集合同时提交。
+    pub(super) async fn finish_registration_with_collisions(
+        self,
+        proof: RegistrationProof,
+        decision: Decision<'_>,
+        collisions: &[Uuid],
+        now: Timestamp,
+    ) -> Result<StoredReceipt, WriteError> {
+        if collisions.is_empty() {
+            return self.finish_registration(proof, decision, now).await;
+        }
+        self.finish_with_proof(Some(proof), decision, collisions, now).await
     }
 
     async fn finish_with_proof(
         mut self,
         registration: Option<RegistrationProof>,
         decision: Decision<'_>,
+        collisions: &[Uuid],
         now: Timestamp,
     ) -> Result<StoredReceipt, WriteError> {
         let (listing_id, result) = self.receipt(&decision)?;
@@ -233,6 +252,7 @@ impl CommandWriter<'_, '_> {
                     self.tx.connection,
                     Audit {
                         actor: Actor::System,
+                        request_id: None,
                         action: if matches!(event.change, ListingChange::Expired) {
                             "consignment.expired"
                         } else {
@@ -264,6 +284,8 @@ impl CommandWriter<'_, '_> {
             Audit {
                 actor: self.actor,
                 action: operation_action(self.operation),
+                // 2Q 并入后从外层已认证命令人口取请求关联号，不参与账本比较。
+                request_id: None,
                 listing_id,
                 accepted: result.status < 400,
                 now,
@@ -272,6 +294,7 @@ impl CommandWriter<'_, '_> {
             },
         )
         .await?;
+        append_collision_sets(self.tx.connection, command_id, collisions, now).await?;
         Ok(result)
     }
 
@@ -435,6 +458,7 @@ async fn append_event(
 
 struct Audit<'a> {
     actor: Actor<'a>,
+    request_id: Option<&'a str>,
     action: &'static str,
     listing_id: Option<Uuid>,
     accepted: bool,
@@ -448,7 +472,7 @@ async fn audit(connection: &mut PgConnection, audit: Audit<'_>) -> Result<(), Wr
         "INSERT INTO public.audit_records
             (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id, result,
              request_id, source, metadata)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
     )
     .bind(Uuid::new_v4())
     .bind(audit.now)
@@ -458,6 +482,7 @@ async fn audit(connection: &mut PgConnection, audit: Audit<'_>) -> Result<(), Wr
     .bind(if audit.listing_id.is_some() { "consignment_listing" } else { "consignment_command" })
     .bind(audit.listing_id.unwrap_or(audit.command_id).to_string())
     .bind(if audit.accepted { "success" } else { "rejected" })
+    .bind(audit.request_id)
     .bind(audit.actor.audit_source())
     .bind(audit.metadata)
     .execute(connection)

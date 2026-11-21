@@ -73,7 +73,6 @@ pub(crate) struct CommandTransaction<'a> {
 impl CommandTransaction<'_> {
     /// 首写调用 `finish` 或 `finish_registration` 后，可继续追加外键指向账本
     /// 的碰撞关联。保持同一事务，按 `arbitrate → finish → 追加关联` 的顺序访问。
-    #[allow(dead_code, reason = "由后续任务 2D / 2F 追加碰撞关联")]
     pub(crate) fn connection(&mut self) -> &mut PgConnection {
         self.connection
     }
@@ -81,7 +80,6 @@ impl CommandTransaction<'_> {
 
 /// 只在事务内执行有界的本地数据库操作。结果未知时调用方查原命令或原样重试。
 /// 闭包只借用事务连接，不能开启保存点、提交、向外部服务发请求或发布过程内副作用。
-#[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
 pub(crate) async fn with_command_transaction<T, C>(
     store: &DatabaseStore,
     keys: LockKeys<'_>,

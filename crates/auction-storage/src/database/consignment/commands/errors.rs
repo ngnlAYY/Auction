@@ -32,7 +32,6 @@ impl WriteError {
     }
 
     /// 将脱敏的内部错误投影为应用端口错误。
-    #[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
     pub(crate) fn into_application(self) -> ConsignmentError {
         match self {
             Self::Application(error) => error,

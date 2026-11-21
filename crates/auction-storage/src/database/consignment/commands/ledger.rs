@@ -14,7 +14,6 @@ use crate::database::consignment::commands::facts::PendingEvent;
 use crate::database::consignment::commands::session::CommandTransaction;
 
 /// 仅由受信会话或本地装配提供的演员身份。Worker 应使用固定服务身份。
-#[allow(dead_code, reason = "各演员由后续任务 2D / 2F 接线")]
 #[derive(Clone, Copy)]
 pub(crate) enum Actor<'a> {
     PublicUser(Uuid),
@@ -50,7 +49,6 @@ impl Actor<'_> {
 }
 
 /// 登记的固定目标 new 或已存在/待核的挂单 UUID。
-#[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
 #[derive(Clone, Copy)]
 pub(crate) enum Target {
     New,
@@ -75,7 +73,6 @@ pub(crate) type RegistrationMac<'a> = dyn Fn(
     + 'a;
 
 /// 应用层预计算的普通命令摘要，或登记重放所需的本地 MAC 计算。
-#[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
 #[derive(Clone, Copy)]
 pub(crate) enum RequestProof<'a> {
     Digest(RequestHash),
@@ -102,7 +99,6 @@ pub(crate) struct StoredReceipt {
 }
 
 /// 已核实证明的已有命令，或仅限本事务的首次写入能力。
-#[allow(dead_code, reason = "由后续任务 2D / 2F 消费仲裁结果")]
 pub(crate) enum Arbitration<'tx, 'conn> {
     Replay(StoredReceipt),
     First(CommandWriter<'tx, 'conn>),
@@ -121,7 +117,6 @@ pub(crate) struct CommandWriter<'tx, 'conn> {
 impl<'conn> CommandTransaction<'conn> {
     /// 不变量 1、2、6：登记前或目标预读缺失时均先仲裁，不在这里判断归属、业务版本或开关。
     /// 登记的 MAC 回调仅在已有账本行的身份匹配后执行，必须为有界的本地计算。
-    #[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
     pub(crate) async fn arbitrate<'tx>(
         &'tx mut self,
         actor: Actor<'tx>,
@@ -211,7 +206,6 @@ async fn load_replay_key(
 
 impl CommandWriter<'_, '_> {
     /// 供首次业务检查及其它寄售 owner 同事务追加事实。禁止保存点、外部调用或自行提交。
-    #[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
     pub(crate) fn connection(&mut self) -> &mut PgConnection {
         self.tx.connection
     }

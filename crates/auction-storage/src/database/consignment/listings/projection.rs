@@ -53,13 +53,10 @@ pub(crate) struct LockedListing {
     #[allow(dead_code, reason = "由后续任务 2D / 2F 读取锁内投影")]
     /// 登记冻结的费率。
     pub(crate) fee_bps: FeeBps,
-    #[allow(dead_code, reason = "由后续任务 2D / 2F 读取锁内投影")]
     /// 登记时固定的服务代次。
     pub(crate) service_epoch: i64,
-    #[allow(dead_code, reason = "由后续任务 2D / 2F 读取锁内投影")]
     /// 登记时已见的拉黑历史事实数。
     pub(crate) blacklist_count_at_register: i64,
-    #[allow(dead_code, reason = "由后续任务 2D / 2F 读取锁内投影")]
     /// 数据库登记时刻。
     pub(crate) created_at: Timestamp,
     #[allow(dead_code, reason = "由后续任务 2D / 2F 读取锁内投影")]
@@ -113,7 +110,6 @@ impl LockedListing {
 }
 
 /// 在取会话锁前预读锁键。即使目标不存在，调用方也须拿命令锁并完成仲裁。
-#[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
 pub(crate) async fn pre_read_listing_identity(
     store: &DatabaseStore,
     listing_id: Uuid,
@@ -133,7 +129,6 @@ pub(crate) async fn pre_read_listing_identity(
 }
 
 /// 在已取得相应会话锁、锁定当前资格行后，一次按 UUID 升序获取涉及的挂单行锁。
-#[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
 pub(crate) async fn lock_listings(
     connection: &mut PgConnection,
     listing_ids: &[Uuid],
