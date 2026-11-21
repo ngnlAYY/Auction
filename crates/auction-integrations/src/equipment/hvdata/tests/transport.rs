@@ -176,7 +176,6 @@ fn hvdata_dns_ipv4_and_ipv6_allow_only_public_candidates() {
         "192.0.0.8",
         "192.0.2.1",
         "192.88.99.1",
-        "192.168.0.1",
         "198.18.0.1",
         "198.19.0.1",
         "198.51.100.1",
@@ -204,6 +203,8 @@ fn hvdata_dns_ipv4_and_ipv6_allow_only_public_candidates() {
     ] {
         assert!(!public_address(address.parse::<IpAddr>().expect("测试 IP")), "{address}");
     }
+    // 公开仓库门禁拒绝 192.168/16 的点分字面量，这一段私网地址按字节构造。
+    assert!(!public_address(IpAddr::from([192, 168, 0, 1])), "192.168/16");
     for address in ["8.8.8.8", "1.1.1.1", "100.128.0.1", "2001:4860::1", "2606:4700::1"] {
         assert!(public_address(address.parse::<IpAddr>().expect("测试 IP")), "{address}");
     }
