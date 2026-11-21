@@ -20,13 +20,14 @@ use crate::ports::consignment::test_support::{
 use crate::ports::consignment::{
     ConsignmentError, ListingCommandOutcome, ListingCommandRejection, ListingCredentialError,
     ListingEquipmentDetails, ListingEquipmentLabel, ListingEquipmentLevel, ListingEquipmentLookup,
-    ListingEquipmentLookupError, ListingLookupBudget, ListingLookupClaim, ListingLookupEffect,
-    ListingLookupSnapshot, ListingRegistrationSecret, LookupAbandonment, LookupClaimRequest,
-    LookupDispatch, LookupFence, LookupLeaseUpdate, LookupObservation, LookupPermanentReason,
-    LookupPermitStatus, LookupRetryAfter, LookupTransientReason, StoredListingDecision,
-    UnrecordedListingRejection,
+    ListingEquipmentLookupError, ListingEquipmentStat, ListingEquipmentStatGroup,
+    ListingLookupBudget, ListingLookupClaim, ListingLookupEffect, ListingLookupSnapshot,
+    ListingRegistrationSecret, LookupAbandonment, LookupClaimRequest, LookupDispatch, LookupFence,
+    LookupLeaseUpdate, LookupObservation, LookupPermanentReason, LookupPermitStatus,
+    LookupRetryAfter, LookupTransientReason, StoredListingDecision, UnrecordedListingRejection,
 };
 use crate::ports::core::{Clock, TransactionFuture};
+use crate::services::consignment::encoding::lookup_command_identity;
 use crate::services::consignment::tests::{
     FAKE_KEY, LISTING_ID, WORK_ID, identity, price, run, time, version,
 };
@@ -131,6 +132,15 @@ fn claim(
 }
 
 fn snapshot(observed_at: i64, owner: &str, tradeable: bool) -> ListingLookupSnapshot {
+    snapshot_with_stats(observed_at, owner, tradeable, vec![])
+}
+
+fn snapshot_with_stats(
+    observed_at: i64,
+    owner: &str,
+    tradeable: bool,
+    stat_groups: Vec<ListingEquipmentStatGroup>,
+) -> ListingLookupSnapshot {
     let details = ListingEquipmentDetails::new(
         time(observed_at),
         ListingEquipmentLabel {
@@ -144,7 +154,7 @@ fn snapshot(observed_at: i64, owner: &str, tradeable: bool) -> ListingLookupSnap
             },
             tradeable,
         },
-        vec![],
+        stat_groups,
     )
     .unwrap();
     ListingLookupSnapshot::new(identity(), details, owner.to_owned(), &key()).unwrap()
@@ -475,6 +485,32 @@ fn apply_lease_loss_and_conflict_do_not_retry_or_release_later_permit() {
     assert_eq!(fixture.equipment.lookup.take_calls().len(), 2);
     assert_eq!(fixture.commands.apply_lookup.take_calls().len(), 2);
     assert!(fixture.work.abandon.take_calls().is_empty());
+}
+
+#[test]
+fn lookup_stats_change_digest_without_changing_fenced_command_id() {
+    let observation = |value, base| {
+        LookupObservation::Equipment(snapshot_with_stats(
+            3,
+            "测试持有人",
+            true,
+            vec![ListingEquipmentStatGroup {
+                name: "测试属性组".to_owned(),
+                stats: vec![ListingEquipmentStat {
+                    name: "测试属性".to_owned(),
+                    value,
+                    base: Some(base),
+                }],
+            }],
+        ))
+    };
+    let (command_id, original) = lookup_command_identity(fence(), &observation(12.5, 10.0));
+    let (value_id, changed_value) = lookup_command_identity(fence(), &observation(13.5, 10.0));
+    let (base_id, changed_base) = lookup_command_identity(fence(), &observation(12.5, 11.0));
+    assert_eq!(value_id, command_id);
+    assert_eq!(base_id, command_id);
+    assert_ne!(changed_value, original, "value 参与摘要");
+    assert_ne!(changed_base, original, "base 参与摘要");
 }
 
 #[test]

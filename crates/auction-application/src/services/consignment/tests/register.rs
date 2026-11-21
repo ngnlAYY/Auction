@@ -39,13 +39,25 @@ impl RegistrationFixture {
     }
 
     fn service(&self, enabled: bool, capable: bool) -> RegisterListingService {
+        self.service_with(policy(enabled), capable, true, true)
+    }
+
+    fn service_with(
+        &self,
+        policy: ListingRegistrationPolicy,
+        capable: bool,
+        seal_available: bool,
+        replay_crypto_available: bool,
+    ) -> RegisterListingService {
         let uuid_calls = self.uuid_calls.clone();
+        let sealer: Arc<dyn EquipmentKeySealerPort> = self.equipment.clone();
+        let replay_crypto: Arc<dyn RegistrationReplayCrypto> = self.equipment.clone();
         RegisterListingService::new(
             self.store.clone(),
             self.equipment.clone(),
-            Some(self.equipment.clone()),
-            Some(self.equipment.clone()),
-            policy(enabled),
+            seal_available.then_some(sealer),
+            replay_crypto_available.then_some(replay_crypto),
+            policy,
             capable,
             move || Uuid::from_u128(100 + u128::from(uuid_calls.fetch_add(1, Ordering::Relaxed))),
         )
@@ -176,21 +188,22 @@ fn register_checks_policy_and_redacts_command() {
     }
     assert_eq!(fixture.equipment.url.take_calls().len(), 3);
     assert_eq!(fixture.uuid_calls.load(Ordering::Relaxed), 12);
-    assert!(fixture.equipment.seal.take_calls().is_empty());
-    assert!(fixture.equipment.registration_mac.take_calls().is_empty());
 }
 
 #[test]
-fn register_closed_or_unsupported_never_touches_dependencies() {
-    for (enabled, capable) in [(false, true), (true, false), (false, false)] {
-        let fixture = RegistrationFixture::new();
-        let service = fixture.service(enabled, capable);
-        assert_eq!(run(service.register(&seller(), input())), Err(ConsignmentError::Disabled));
-        assert!(fixture.equipment.url.take_calls().is_empty());
-        assert!(fixture.equipment.seal.take_calls().is_empty());
-        assert!(fixture.equipment.registration_mac.take_calls().is_empty());
-        assert!(fixture.store.0.register.take_calls().is_empty());
-        assert_eq!(fixture.uuid_calls.load(Ordering::Relaxed), 0);
+fn register_unsupported_artifact_closes_first_admission_in_store() {
+    let fixture = RegistrationFixture::new();
+    let receipt = ListingRegistered::new(LISTING_ID, price(101)).unwrap();
+    let service = fixture.service(true, false);
+    for (outcome, expected) in [
+        (ListingCommandOutcome::Accepted(receipt), Err(ConsignmentError::Disabled)),
+        (ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(receipt)), Ok(receipt)),
+    ] {
+        fixture.url_ok();
+        fixture.store.0.register.reply(Ok(outcome));
+        assert_eq!(run(service.register(&seller(), input())), expected);
+        let [call] = fixture.store.0.register.take_calls().try_into().unwrap();
+        assert_eq!(call.policy, policy(false));
     }
 }
 
@@ -211,10 +224,8 @@ fn register_stops_on_bad_url_before_credential_work() {
 
 #[test]
 fn register_stops_on_invalid_price_fee_or_identity() {
-    use ListingBusinessRejection::FeeChanged;
-
     let fixture = RegistrationFixture::new();
-    let service = fixture.service(true, true);
+    let service = fixture.service(false, true);
     for (input, error) in [
         (
             RegisterListingInput { command_id: CommandId::from_uuid(Uuid::nil()), ..input() },
@@ -225,8 +236,6 @@ fn register_stops_on_invalid_price_fee_or_identity() {
             RegisterListingInput { expected_fee_bps: 10_000, ..input() },
             ConsignmentError::InvalidListingRequest,
         ),
-        (RegisterListingInput { expected_fee_bps: 500, ..input() }, FeeChanged.into()),
-        (RegisterListingInput { mode: ListingMode::Direct, ..input() }, FeeChanged.into()),
     ] {
         fixture.url_ok();
         assert_eq!(run(service.register(&seller(), input)), Err(error));
@@ -238,10 +247,135 @@ fn register_stops_on_invalid_price_fee_or_identity() {
         run(service.register(&invalid_seller, input())),
         Err(ConsignmentError::InvalidListingRequest)
     );
-    assert_eq!(fixture.equipment.url.take_calls().len(), 6);
+    assert_eq!(fixture.equipment.url.take_calls().len(), 4);
     assert!(fixture.equipment.seal.take_calls().is_empty());
     assert!(fixture.store.0.register.take_calls().is_empty());
     assert_eq!(fixture.uuid_calls.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn register_arbitrates_before_disabled_policy() {
+    check_registration_arbitration(policy(false), (404, "consignment_disabled"));
+}
+
+#[test]
+fn register_arbitrates_before_current_fee() {
+    let changed =
+        ListingRegistrationPolicy { consigned_fee_bps: FeeBps::new(500).unwrap(), ..policy(true) };
+    check_registration_arbitration(changed, (409, "fee_changed"));
+}
+
+fn check_registration_arbitration(
+    changed_policy: ListingRegistrationPolicy,
+    first_rejection: (u16, &'static str),
+) {
+    let fixture = RegistrationFixture::new();
+    let receipt = ListingRegistered::new(LISTING_ID, price(101)).unwrap();
+    fixture.url_ok();
+    fixture.store.0.register.reply(Ok(ListingCommandOutcome::Accepted(receipt)));
+    assert_eq!(run(fixture.service(true, true).register(&seller(), input())), Ok(receipt));
+    assert_eq!(fixture.store.0.register.take_calls().len(), 1);
+
+    for (policy, fresh_id, fresh_result) in [
+        (policy(true), Uuid::from_u128(91), Ok(receipt)),
+        (changed_policy, Uuid::from_u128(92), Err(first_rejection)),
+    ] {
+        let service = fixture.service_with(policy, true, true, true);
+        let fresh = RegisterListingInput { command_id: CommandId::from_uuid(fresh_id), ..input() };
+        for (input, reply, expected) in [
+            (
+                input(),
+                Ok(ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(receipt))),
+                Ok(receipt),
+            ),
+            (
+                RegisterListingInput { price: 102, ..input() },
+                Ok(ListingCommandOutcome::Rejected(ListingCommandRejection::Unrecorded(
+                    UnrecordedListingRejection::CommandIdConflict,
+                ))),
+                Err((409, "command_id_conflict")),
+            ),
+            (input(), Err(ConsignmentError::Unavailable), Err((503, "consignment_unavailable"))),
+            (fresh, Ok(ListingCommandOutcome::Accepted(receipt)), fresh_result),
+        ] {
+            fixture.url_ok();
+            fixture.store.0.register.reply(reply);
+            let command_id = input.command_id;
+            let expected_price = price(input.price);
+            let result = run(service.register(&seller(), input));
+            assert_eq!(result.map_err(|error| error.api_error().unwrap()), expected);
+            let [call] = fixture.store.0.register.take_calls().try_into().unwrap();
+            assert_eq!(call.policy, policy);
+            assert_eq!(call.command_id, command_id);
+            assert_eq!(call.price, expected_price);
+        }
+    }
+}
+
+#[test]
+fn register_maps_missing_credential_capability_to_service_unavailable() {
+    let fixture = RegistrationFixture::new();
+    let receipt = ListingRegistered::new(LISTING_ID, price(101)).unwrap();
+    for (sealer, replay_crypto) in [(false, true), (true, false), (false, false)] {
+        let service = fixture.service_with(policy(true), true, sealer, replay_crypto);
+        fixture.url_ok();
+        fixture.store.0.register.reply(Ok(ListingCommandOutcome::Accepted(receipt)));
+        let result = run(service.register(&seller(), input()));
+        assert_eq!(result.unwrap_err().api_error(), Some((503, "consignment_unavailable")));
+        let [call] = fixture.store.0.register.take_calls().try_into().unwrap();
+        assert_eq!((call.sealer, call.replay_crypto), (sealer, replay_crypto));
+    }
+}
+
+#[test]
+fn register_replays_original_receipt_without_local_credential_capabilities() {
+    let fixture = RegistrationFixture::new();
+    let receipt = ListingRegistered::new(LISTING_ID, price(101)).unwrap();
+    for (sealer, replay_crypto) in [(false, true), (true, false), (false, false)] {
+        let service = fixture.service_with(policy(true), true, sealer, replay_crypto);
+        fixture.url_ok();
+        fixture
+            .store
+            .0
+            .register
+            .reply(Ok(ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(receipt))));
+        let result = run(service.register(&seller(), input()));
+        assert_eq!(result, Ok(receipt));
+        let [call] = fixture.store.0.register.take_calls().try_into().unwrap();
+        assert_eq!((call.sealer, call.replay_crypto), (sealer, replay_crypto));
+        assert_eq!(call.command_id, command_id());
+    }
+}
+
+#[test]
+fn register_rejects_each_nil_candidate_before_store() {
+    let results = std::array::from_fn(|nil_candidate| {
+        let fixture = RegistrationFixture::new();
+        let candidate_index = AtomicU32::new(0);
+        let service = RegisterListingService::new(
+            fixture.store.clone(),
+            fixture.equipment.clone(),
+            Some(fixture.equipment.clone()),
+            Some(fixture.equipment.clone()),
+            policy(true),
+            true,
+            move || {
+                let index = candidate_index.fetch_add(1, Ordering::Relaxed);
+                if index as usize == nil_candidate {
+                    Uuid::nil()
+                } else {
+                    Uuid::from_u128(100 + u128::from(index))
+                }
+            },
+        );
+        fixture.url_ok();
+        // 若坏候选抵达替身，预置回执让测试直接报告越界调用。
+        let receipt = ListingRegistered::new(LISTING_ID, price(101)).unwrap();
+        fixture.store.0.register.reply(Ok(ListingCommandOutcome::Accepted(receipt)));
+        let result = run(service.register(&seller(), input()));
+        (result, fixture.store.0.register.take_calls().len())
+    });
+    assert_eq!(results, [(Err(ConsignmentError::Unavailable), 0); 4]);
 }
 
 #[test]

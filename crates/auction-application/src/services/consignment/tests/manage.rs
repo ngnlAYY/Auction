@@ -35,7 +35,7 @@ fn reprice_and_withdraw_bind_the_same_authenticated_seller_but_distinct_operatio
     .unwrap();
     let unchanged = ListingPriceReceipt::new(
         LISTING_ID,
-        version(2),
+        version(3),
         ListingState::Resolving,
         price(101),
         ListingPriceDisposition::Unchanged,
@@ -48,10 +48,11 @@ fn reprice_and_withdraw_bind_the_same_authenticated_seller_but_distinct_operatio
     store.reprice.reply(Ok(ListingCommandOutcome::Accepted(unchanged)));
     assert_eq!(run(open.reprice(&seller, command_id(), LISTING_ID, 2, 101)), Ok(repriced));
     assert_eq!(run(closed.reprice(&seller, command_id(), LISTING_ID, 2, 101)), Ok(repriced));
-    assert_eq!(run(open.reprice(&seller, command_id(), LISTING_ID, 2, 101)), Ok(unchanged));
+    let new_command_id = CommandId::from_uuid(Uuid::from_u128(48));
+    assert_eq!(run(open.reprice(&seller, new_command_id, LISTING_ID, 3, 101)), Ok(unchanged));
     let [first, replay, same_price] = store.reprice.take_calls().try_into().unwrap();
     assert_eq!(first.request_hash, replay.request_hash);
-    assert_eq!(first.request_hash, same_price.request_hash);
+    assert_ne!(first.request_hash, same_price.request_hash);
     assert!(first.enabled);
     assert!(!replay.enabled);
     assert_eq!(first.price, price(101));
@@ -59,6 +60,9 @@ fn reprice_and_withdraw_bind_the_same_authenticated_seller_but_distinct_operatio
     assert_eq!(first.target.listing_id, LISTING_ID);
     assert_eq!(first.target.seller_user_id, UserId::from_uuid(SELLER_ID));
     assert_eq!(first.target.expected_version, version(2));
+    assert_eq!(same_price.target.command_id, new_command_id);
+    assert_eq!(same_price.target.expected_version, version(3));
+    assert_eq!(same_price.price, first.price);
 
     let receipt = ListingClosed::new(LISTING_ID, version(3), None).unwrap();
     store.withdraw.reply(Ok(ListingCommandOutcome::Accepted(receipt)));

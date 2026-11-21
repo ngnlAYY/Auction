@@ -12,11 +12,20 @@ use crate::ports::consignment::{
     ListingAutoCloseEffect, ListingCommandOutcome, ListingCommandRejection, ListingMaintenancePage,
     StoredListingDecision, UnrecordedListingRejection,
 };
+use crate::services::consignment::encoding::auto_close_command;
 use crate::services::consignment::tests::{LISTING_ID, price, run, time, version};
 use crate::services::consignment::{ListingMaintenanceProgress, ListingMaintenanceService};
 
 fn candidate(evidence: AutoCloseEvidence) -> AutoCloseCandidate {
     AutoCloseCandidate { listing_id: LISTING_ID, evidence }
+}
+
+#[test]
+fn disabled_auto_close_identity_and_digest_depend_on_epoch() {
+    let first = auto_close_command(candidate(AutoCloseEvidence::ServiceDisabled(2)));
+    let next = auto_close_command(candidate(AutoCloseEvidence::ServiceDisabled(3)));
+    assert_ne!(first.command_id, next.command_id);
+    assert_ne!(first.request_hash, next.request_hash);
 }
 
 #[test]

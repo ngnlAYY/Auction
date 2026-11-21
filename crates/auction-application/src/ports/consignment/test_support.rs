@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 use std::sync::{Mutex, MutexGuard};
 
-use auction_domain::consignment::ListingEquipmentIdentity;
+use auction_domain::consignment::{FeeBps, ListingEquipmentIdentity};
 use auction_domain::{CommandId, EquipmentId, EquipmentKey, EquipmentKeyEnvelope, UserId};
 use auction_time::Timestamp;
 use uuid::Uuid;
@@ -11,10 +11,10 @@ use uuid::Uuid;
 use crate::ports::admin::{AdminIntakeError, EquipmentKeySealerPort};
 use crate::ports::consignment::commands::{
     AdminDelistListingCommand, ApplyListingLookupCommand, AutoCloseListingCommand,
-    ListingAutoCloseEffect, ListingClosed, ListingCommandOutcome, ListingCommandStore,
-    ListingLookupEffect, ListingPriceReceipt, ListingRegistered, ListingRegistrationPolicy,
-    OwnedListingCommandReceipt, RegisterListingCommand, RegistrationInput, RepriceListingCommand,
-    WithdrawListingCommand,
+    ListingAutoCloseEffect, ListingClosed, ListingCommandOutcome, ListingCommandRejection,
+    ListingCommandStore, ListingLookupEffect, ListingPriceReceipt, ListingRegistered,
+    ListingRegistrationPolicy, OwnedListingCommandReceipt, RegisterListingCommand,
+    RegistrationInput, RepriceListingCommand, WithdrawListingCommand,
 };
 use crate::ports::consignment::equipment::{
     ListingCredentialError, ListingEquipmentKeyOpener, ListingEquipmentLookup,
@@ -22,7 +22,9 @@ use crate::ports::consignment::equipment::{
     ListingLookupSnapshot, ListingRegistrationSecret, RegistrationReplayCrypto,
     RegistrationRequestMac, WrappedRegistrationReplayKey,
 };
-use crate::ports::consignment::errors::{ConsignmentError, ConsignmentFuture};
+use crate::ports::consignment::errors::{
+    ConsignmentError, ConsignmentFuture, ListingBusinessRejection, UnrecordedListingRejection,
+};
 use crate::ports::consignment::maintenance::{
     ListingAdmission, ListingMaintenance, ListingMaintenancePage,
 };
@@ -107,7 +109,7 @@ pub(crate) struct RegistrationCall {
     pub replay_crypto: bool,
 }
 
-/// 六类命令，可独立注入提交、拒绝、重放和不确定的错误。
+/// 六类命令，可独立注入提交、拒绝、重放和不确定的错误。登记仅在首次决定时核对准入。
 #[derive(Default)]
 pub(crate) struct FakeListingCommands {
     pub register: CommandReply<RegistrationCall, ListingRegistered>,
@@ -125,7 +127,7 @@ impl ListingCommandStore for FakeListingCommands {
         sealer: Option<&'a dyn EquipmentKeySealerPort>,
         replay_crypto: Option<&'a dyn RegistrationReplayCrypto>,
     ) -> ConsignmentFuture<'a, ListingCommandOutcome<ListingRegistered>> {
-        self.register.run(RegistrationCall {
+        let outcome = self.register.call(RegistrationCall {
             command_id: command.command_id,
             seller_user_id: command.seller_user_id,
             identity: command.input.identity.clone(),
@@ -136,7 +138,33 @@ impl ListingCommandStore for FakeListingCommands {
             policy: command.policy,
             sealer: sealer.is_some(),
             replay_crypto: replay_crypto.is_some(),
-        })
+        });
+        Box::pin(std::future::ready(outcome.and_then(|outcome| {
+            // 脚本模拟账本仲裁；重放、冲突及账本错误先返回，再检查首次命令的策略。
+            if matches!(
+                outcome,
+                ListingCommandOutcome::Accepted(_)
+                    | ListingCommandOutcome::Rejected(ListingCommandRejection::Recorded(_))
+            ) {
+                let policy = command.policy;
+                if !policy.enabled {
+                    return Ok(ListingCommandOutcome::Rejected(
+                        ListingCommandRejection::Unrecorded(UnrecordedListingRejection::Disabled),
+                    ));
+                }
+                if command.input.expected_fee_bps
+                    != FeeBps::for_mode(command.input.mode, policy.consigned_fee_bps)
+                {
+                    return Ok(ListingCommandOutcome::Rejected(ListingCommandRejection::Recorded(
+                        ListingBusinessRejection::FeeChanged,
+                    )));
+                }
+                if sealer.is_none() || replay_crypto.is_none() {
+                    return Err(ConsignmentError::Unavailable);
+                }
+            }
+            Ok(outcome)
+        })))
     }
 
     fn reprice(

@@ -1,4 +1,4 @@
-//! 寄售登记的本地准入、输入校验和凭证交接。
+//! 寄售登记的本地输入校验、准入策略与凭证交接。
 
 use std::sync::Arc;
 
@@ -8,9 +8,9 @@ use uuid::Uuid;
 
 use crate::ports::admin::EquipmentKeySealerPort;
 use crate::ports::consignment::{
-    ConsignmentError, ListingBusinessRejection, ListingCommandStore, ListingEquipmentReference,
-    ListingEquipmentUrlValidator, ListingRegistered, ListingRegistrationPolicy,
-    RegisterListingCommand, RegistrationInput, RegistrationReplayCrypto,
+    ConsignmentError, ListingCommandStore, ListingEquipmentReference, ListingEquipmentUrlValidator,
+    ListingRegistered, ListingRegistrationPolicy, RegisterListingCommand, RegistrationInput,
+    RegistrationReplayCrypto,
 };
 use crate::ports::public::PublicSessionIdentity;
 
@@ -35,7 +35,6 @@ pub struct RegisterListingService {
     sealer: Option<Arc<dyn EquipmentKeySealerPort>>,
     replay_crypto: Option<Arc<dyn RegistrationReplayCrypto>>,
     policy: ListingRegistrationPolicy,
-    artifact_capable: bool,
     new_uuid: Arc<dyn Fn() -> Uuid + Send + Sync>,
 }
 
@@ -55,8 +54,10 @@ impl RegisterListingService {
             validator,
             sealer,
             replay_crypto,
-            policy,
-            artifact_capable,
+            policy: ListingRegistrationPolicy {
+                enabled: policy.enabled && artifact_capable,
+                ..policy
+            },
             new_uuid: Arc::new(new_uuid),
         }
     }
@@ -67,11 +68,6 @@ impl RegisterListingService {
         seller: &PublicSessionIdentity,
         input: RegisterListingInput<'_>,
     ) -> Result<ListingRegistered, ConsignmentError> {
-        // 不变量 1、6：此入口的关闭门不访问依赖，也不占命令 ID。2P 未提供按输入
-        // 验证的只重放端口，关停期间的原回执仍可由已认证本人查询。
-        if !self.artifact_capable || !self.policy.enabled {
-            return Err(ConsignmentError::Disabled);
-        }
         let ListingEquipmentReference { identity, key } =
             self.validator.validate(input.equipment_url)?;
         if input.command_id.is_nil() {
@@ -82,11 +78,6 @@ impl RegisterListingService {
         }
         let price = ListingPrice::new(input.price)?;
         let expected_fee_bps = FeeBps::new(input.expected_fee_bps)?;
-        // 不变量 6、10：本地费率不符时拒绝继续处理凭证。2P 未提供可以先重放再做
-        // 本地预检的边界，历史回执仍由本人命令查询提供。
-        if expected_fee_bps != FeeBps::for_mode(input.mode, self.policy.consigned_fee_bps) {
-            return Err(ListingBusinessRejection::FeeChanged.into());
-        }
 
         let [listing_id, work_id, aad_uuid, candidate_replay_key_id] =
             std::array::from_fn(|_| (self.new_uuid)());
@@ -109,8 +100,9 @@ impl RegisterListingService {
             candidate_replay_key_id,
             policy: self.policy,
         };
-        // 不变量 1、2、3、5、7、8：2P 将比较钥选择、MAC 及首次封装放在同一端口内。
-        // 应用只借出脱敏凭证；端口在选定原逻辑比较钥后消费借用，不得持久化明文。
+        // 不变量 1、2、3、5、6、8、10：仓储先仲裁账本，再对首次命令应用准入策略，
+        // 并在同一事务内负责比较钥选择、MAC 和首次封装。缺少本地密码能力按 None 传递。
+        // 不变量 7：明文 key 只借给本次仓储调用，返回即丢弃，不复制、不持久化。
         let outcome = self
             .store
             .register(command, self.sealer.as_deref(), self.replay_crypto.as_deref())

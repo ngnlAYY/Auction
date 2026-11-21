@@ -16,7 +16,7 @@ pub use ports::observability::{
     external_metrics, log_filter, notification_metrics, otlp_headers, sent_baseline, shadow_run,
     sli,
 };
-pub use ports::{consignment, delivery, external_accounts, forum, operations, scheduling};
+pub use ports::{delivery, external_accounts, forum, operations, scheduling};
 pub use services::sessions;
 
 pub mod core {
@@ -39,6 +39,7 @@ macro_rules! merged_contexts {
 merged_contexts!(
     admin,
     auction,
+    consignment,
     mail,
     mail_templates,
     player_notifications,
