@@ -18,8 +18,8 @@
 //! - 恢复推进：付款期限已过但付款邮件未证实寄出时只延后并审计，不创建提醒；
 //! - 人工 Sent 证明：不满足准入的投递只返回阻断项，确认失败关闭且不追加事实。
 //!   准入成功分支需要完整的发送尝试、凭据与资金事实，尚无夹具，留作后续覆盖；
-//! - 装备损失：运行账号按资金锁序取得 generation、world、资金账户与完整财务责任集合后，
-//!   不满足准入的命令失败关闭且不追加事实。
+//! - 装备损失：不满足准入时经运行账号按资金锁序失败关闭；首寄库存只读失败后，按实际推进的
+//!   付款履约版本收口，拒绝持有旧付款版本的命令。
 //!
 //! 仅在 `test-db` feature 下编译，入口见 `mise run test-db`。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -1156,9 +1156,14 @@ async fn postgres_settlement_marks_only_contingent_refund_dormant_and_guards_the
     admin.postgres_pool().close().await;
 }
 
-/// 把成交 lot 的主世界 COD 改写为装备损失可准入的形状：原投递只读过库存、尚未开始写入就转人工
-/// 核对（`not_observed`），付款履约随之停在人工核对；退款与卖方货款保持结算写入的初始状态。
-async fn make_equipment_loss_admissible(pool: &sqlx::PgPool, lot_id: Uuid) {
+/// 经付款履约与投递端口推进首寄，夹具只补入历史库存读取失败结果。
+async fn record_equipment_cod_inventory_failure(store: &DatabaseStore, lot_id: Uuid) -> u64 {
+    use auction_application::delivery::{DeliveryClaimExclusions, DeliveryWorkStore};
+    use auction_application::settlement::{
+        SettlementDeliveryPreparation, SettlementFulfillmentStore,
+    };
+
+    let pool = store.postgres_pool();
     // 夹具在截止之后结算，结算时刻比真实时钟晚约两小时；平移到过去，使处置事务以真实时钟写入的
     // 更新时间不早于创建时间。
     for statement in [
@@ -1175,59 +1180,97 @@ async fn make_equipment_loss_admissible(pool: &sqlx::PgPool, lot_id: Uuid) {
     ] {
         sqlx::query(statement).bind(lot_id).execute(pool).await.expect("平移结算时刻");
     }
-    let (payment, amount, equipment_id): (Uuid, i64, Uuid) = sqlx::query_as(
-        "SELECT id, amount, equipment_id FROM public.settlement_obligations
-         WHERE lot_id = $1 AND obligation_kind = 'winner_equipment_cod'",
+    let now = Timestamp::now();
+    let claim = SettlementFulfillmentStore::claim_due(
+        store,
+        "equipment-loss-fulfillment".to_owned(),
+        now,
+        now + Duration::minutes(5),
+        1,
     )
-    .bind(lot_id)
-    .fetch_one(pool)
     .await
-    .expect("读取 COD 义务");
-    let delivery = Uuid::new_v4();
-    let prepare = Uuid::new_v4();
-    let activate = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO public.deliveries
-            (id, command_id, request_digest, origin_kind, origin_id, recipient, payload, status,
-             fencing_version, attempt_count, claimed_at, sending_at, completed_at, failure_code,
-             result_metadata, created_at, updated_at, activation_command_id,
-             activation_request_digest, activated_at)
-         VALUES ($1, $2, decode(repeat('a7', 32), 'hex'), 'settlement', $3, 'settlement buyer',
-                 jsonb_build_object('schema_version', 1, 'operation', 'send', 'world', 'main',
-                     'template', 'settlement_winner_equipment_cod', 'credits', 0, 'cod', $4,
-                     'variables', jsonb_build_object('reference', $3),
-                     'equipment_secret_refs', jsonb_build_array(jsonb_build_object(
-                         'kind', 'auction_equipment_key', 'id', $5::text))),
-                 'manual_reconcile', 1, 1, now(), NULL, now(), 'not_observed',
-                 '{\"operation\":\"inventory\",\"stage\":\"read\",\"write_started\":false}'::jsonb,
-                 now(), now(), $6, decode(repeat('a8', 32), 'hex'), now())",
+    .expect("领取结算履约")
+    .into_iter()
+    .next()
+    .expect("领取平移后最早的结算履约");
+    assert_eq!(claim.lot_id.as_uuid(), lot_id);
+    assert_eq!(claim.kind, SettlementObligationKind::WinnerEquipmentCod);
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "operation": "send",
+        "world": "main",
+        "template": "settlement_winner_equipment_cod",
+        "credits": 0,
+        "cod": claim.amount,
+        "variables": {
+            "amount": claim.amount.to_string(),
+            "item_name": claim.equipment_name,
+            "reference": claim.obligation_id.to_string(),
+        },
+        "equipment_secret_refs": [{"kind": "auction_equipment_key", "id": claim.equipment_id.as_uuid()}],
+    });
+    let preparation = SettlementDeliveryPreparation {
+        delivery_id: Uuid::new_v4(),
+        prepare_command_id: CommandId::from_uuid(Uuid::new_v4()),
+        request_hash: RequestHash::new([0xa7; 32]),
+        recipient: claim.recipient.clone(),
+        payload,
+    };
+    let prepared = store
+        .prepare_delivery(claim, preparation, Timestamp::now(), None)
+        .await
+        .expect("准备装备 COD 投递");
+    let activated = store
+        .activate_delivery(
+            prepared.next_claim,
+            CommandId::from_uuid(Uuid::new_v4()),
+            RequestHash::new([0xa8; 32]),
+            Timestamp::now(),
+            None,
+        )
+        .await
+        .expect("激活装备 COD 投递");
+
+    let now = Timestamp::now();
+    let grace = std::time::Duration::from_secs(60);
+    DeliveryWorkStore::begin_claim_cycle(store, now, grace).await.expect("领取投递前清理");
+    let delivery = DeliveryWorkStore::claim_due(
+        store,
+        "equipment-loss-delivery".to_owned(),
+        now,
+        now + Duration::minutes(2),
+        grace,
+        DeliveryClaimExclusions::default(),
+        10,
     )
-    .bind(delivery)
-    .bind(prepare)
-    .bind(payment.to_string())
-    .bind(amount)
-    .bind(equipment_id)
-    .bind(activate)
+    .await
+    .expect("领取投递")
+    .into_iter()
+    .find(|claim| claim.delivery_id == activated.delivery_id)
+    .expect("领取原装备 COD 投递");
+    assert_eq!((delivery.attempt_count, delivery.fencing_version), (1, 1));
+    // 保留历史投递只读库存失败的形状，使用真实领取的 attempt 与 fence，且未开始外部发送。
+    let changed = sqlx::query(
+        "UPDATE public.deliveries
+         SET status = 'manual_reconcile', lease_token = NULL, lease_expires_at = NULL,
+             completed_at = statement_timestamp(), updated_at = statement_timestamp(),
+             failure_code = 'not_observed',
+             result_metadata = '{\"operation\":\"inventory\",\"stage\":\"read\",\"write_started\":false}'::jsonb
+         WHERE id = $1 AND status = 'claimed' AND lease_token = $2",
+    )
+    .bind(delivery.delivery_id)
+    .bind(delivery.lease_token)
     .execute(pool)
     .await
-    .expect("写入只读过库存的原 COD 投递");
-    sqlx::query(
-        "UPDATE public.settlement_obligation_fulfillments
-         SET execution_state = 'manual_reconcile', delivery_id = $2, prepare_command_id = $3,
-             prepare_request_digest = decode(repeat('a7', 32), 'hex'), activate_command_id = $4,
-             activate_request_digest = decode(repeat('a8', 32), 'hex'), last_error_code = 'not_observed',
-             claim_token = NULL, claimed_at = NULL, claim_expires_at = NULL,
-             proof_kind = NULL, proof_reference = NULL, proof_digest = NULL, proof_observed_at = NULL,
-             completed_at = updated_at, state_version = 1
-         WHERE obligation_id = $1",
-    )
-    .bind(payment)
-    .bind(delivery)
-    .bind(prepare)
-    .bind(activate)
-    .execute(pool)
-    .await
-    .expect("付款履约转人工核对");
+    .expect("记录原装备 COD 的库存读取失败");
+    assert_eq!(changed.rows_affected(), 1);
+
+    let enqueued_version = activated.next_claim.state_version;
+    store
+        .manual_reconcile(activated.next_claim, "fulfillment_outcome_unknown".to_owned())
+        .await
+        .expect("付款履约转人工核对");
+    enqueued_version + 1
 }
 
 /// 装备损失以线下补偿收口时，把仍是 contingent 的退款履约直接收口为 failed：同事务清除或有未激活
@@ -1248,27 +1291,33 @@ async fn postgres_equipment_loss_closes_dormant_refund_into_the_active_entry() {
     .execute(pool)
     .await
     .expect("写入只记账资金账户");
-    make_equipment_loss_admissible(pool, seeded.sold_lot).await;
+    let payment_version = record_equipment_cod_inventory_failure(&service, seeded.sold_lot).await;
     let refund = contingent_refund(pool, seeded.sold_lot).await;
 
     let preview = service.preview_equipment_loss(seeded.sold_lot).await.expect("预览装备损失");
     assert!(preview.eligible, "夹具应满足装备损失准入：{:?}", preview.blockers);
-    service
-        .resolve_equipment_loss(EquipmentLossCommand {
-            command_id: Uuid::new_v4(),
-            lot_id: seeded.sold_lot,
-            actor: "settlement-test-operator".to_owned(),
-            operator_identity: None,
-            reason: "equipment destroyed before the COD left the inventory".to_owned(),
-            funding_uid: "1001".to_owned(),
-            expected_recovery_version: preview.expected_recovery_version,
-            expected_payment_version: preview.expected_payment_version,
-            expected_delivery_fencing_version: preview.expected_delivery_fencing_version,
-            expected_seller_amount: preview.seller_amount,
-            buyer_compensation_external: true,
-        })
-        .await
-        .expect("装备损失收口带标记的退款");
+    assert!(payment_version > 1);
+    assert_eq!(preview.expected_payment_version, payment_version);
+    let command = EquipmentLossCommand {
+        command_id: Uuid::new_v4(),
+        lot_id: seeded.sold_lot,
+        actor: "settlement-test-operator".to_owned(),
+        operator_identity: None,
+        reason: "equipment destroyed before the COD left the inventory".to_owned(),
+        funding_uid: "1001".to_owned(),
+        expected_recovery_version: preview.expected_recovery_version,
+        expected_payment_version: preview.expected_payment_version,
+        expected_delivery_fencing_version: preview.expected_delivery_fencing_version,
+        expected_seller_amount: preview.seller_amount,
+        buyer_compensation_external: true,
+    };
+    let stale = EquipmentLossCommand { expected_payment_version: 1, ..command.clone() };
+    assert_matches!(
+        service.resolve_equipment_loss(stale).await,
+        Err(ApplicationError::FulfillmentDependencyMismatch),
+        "其余围栏匹配时仍须拒绝旧付款版本"
+    );
+    service.resolve_equipment_loss(command).await.expect("装备损失收口带标记的退款");
     let (payment_id, buyer_amount, compensation_amount): (Uuid, i64, i64) = sqlx::query_as(
         "SELECT payment.id, settlement.buyer_amount, settlement.compensation_amount
          FROM public.settlement_obligations AS payment
@@ -1369,18 +1418,21 @@ async fn postgres_equipment_loss_closes_dormant_refund_into_the_active_entry() {
     .expect("读取损失处置的恢复时间");
     assert!(recovery_clock, "恢复完成与更新必须共用一个时刻");
 
-    let (fulfillment_clock, delivery_clock): (bool, bool) = sqlx::query_as(
-        "SELECT (f.completed_at = f.updated_at AND f.proof_observed_at = f.updated_at) IS TRUE,
-                (d.completed_at = d.updated_at) IS TRUE
-         FROM public.settlement_obligations AS o
-         JOIN public.settlement_obligation_fulfillments AS f ON f.obligation_id = o.id
-         JOIN public.deliveries AS d ON d.id = f.delivery_id
-         WHERE o.lot_id = $1 AND o.obligation_kind = 'winner_equipment_cod'",
-    )
-    .bind(seeded.sold_lot)
-    .fetch_one(pool)
-    .await
-    .expect("读取付款履约与 COD 投递的收口时间");
+    let (current_payment_version, fulfillment_clock, delivery_clock): (i64, bool, bool) =
+        sqlx::query_as(
+            "SELECT f.state_version,
+                    (f.completed_at = f.updated_at AND f.proof_observed_at = f.updated_at) IS TRUE,
+                    (d.completed_at = d.updated_at) IS TRUE
+             FROM public.settlement_obligations AS o
+             JOIN public.settlement_obligation_fulfillments AS f ON f.obligation_id = o.id
+             JOIN public.deliveries AS d ON d.id = f.delivery_id
+             WHERE o.lot_id = $1 AND o.obligation_kind = 'winner_equipment_cod'",
+        )
+        .bind(seeded.sold_lot)
+        .fetch_one(pool)
+        .await
+        .expect("读取付款履约版本与收口时间");
+    assert_eq!(u64::try_from(current_payment_version).expect("付款版本为正"), payment_version + 1);
     assert!(fulfillment_clock, "付款履约的证明、完成与更新必须共用一个时刻");
     assert!(delivery_clock, "COD 投递完成与更新必须共用一个时刻");
 

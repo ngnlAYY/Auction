@@ -143,6 +143,8 @@ Admin 判失败后的 `sent_reference_sighting` 补采复用人工 Sent 准入�
 
 装备损失只能经 `SettlementEquipmentLossPort` 正式运维命令处置。准入为 Main 已结算成交、原 `winner_equipment_cod` 的首次且唯一库存读取失败（`attempt_count=1`、`fencing_version=1`、`not_observed`、`inventory/read/write_started=false`）、无 claim、无 Sent 绑定、无恢复动作或既有处置、无资金 lot 或资产冲突；历史多次尝试缺少逐次未外写证明，失败关闭。账户必须唯一且为 ready/record_only，strict_cash 不支持。
 
+付款履约进入 `manual_reconcile` 后使用当前持久化版本作为围栏。卖方与退款履约必须仍处于未领取的初始待处理状态。
+
 同一 Serializable 事务写入只追加损失事实及审计，CAS 三个期望版本；相同 command ID 同参先重放，异参或其他 ID 重处置拒绝，序列化冲突/死锁最多尝试三次。锁序为 command advisory → runtime generation → worlds → funding scope/account → auctions → recoveries → lots → equipment → users → obligations → recovery actions → deliveries → fulfillments。原 delivery 终结为 failed/equipment_destroyed 并递增 fencing，Admin 所有新动作均拒绝该退休投递。payment 以 `operator_equipment_loss_v1:<command_id>` 及请求摘要满足；这只是人工处置证明。refund 终结为 failed/operator_external_buyer_compensation 并保留同一人工证明，表示其执行责任转由操作者承担，不表示买方已获补偿。
 
 `settlement_funding_lots.source_kind=operator_equipment_loss`；装备损失资金来源 `record_operator_equipment_loss` 只记录操作者承担的冻结 buyer_amount，且须匹配同 UID、付款义务、lot、完整 B/C/S/T 与损失事实摘要；冻结 compensation_amount 由 `record_compensation` 按冻结 B+C=S+T 分配到 seller/tax，不创建 collected_payment 或实收 receipt。相同记录型资金 owner 也允许 `record_internal_purchase` 按冻结 buyer_amount 入账；实收后的 `record_compensation` 必须绑定同 UID、付款义务、lot、冻结 compensation_amount、`collected` 资金 lot 与其 persisted receipt/collected_payment 来源。三类记录型 issue 都只能进入同 UID、同 lot、seller_payout 义务对应的 seller allocation；当前写入还要求该 lot 仍为 seller disposition、allocation 可用，历史迁移校验保留后续改为 retained/refund 的合法发行。Recovery 完成为 completed/resolution=NULL，不触发成交撤销、补偿池冲正、重列或黑名单。卖家只从 blocked 释放为 ready，由原正常 SellerPayout/Worker 流程真实付款；原 lot/auction settlement、补偿账本与冻结策略保持不可变。资金预览仅在损失事实、退休投递、人工证明及资金 lot 完整匹配时识别 refund 的终结和原投递的退休。

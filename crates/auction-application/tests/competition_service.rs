@@ -519,6 +519,7 @@ fn due_slow_proxy_counters_and_records_its_generation() {
     assert_eq!(plan.public_bids.len(), 1);
     assert_eq!(plan.public_bids[0].bidder_id, holder);
     assert_eq!(plan.public_bids[0].amount, amount(126_000));
+    assert_eq!(plan.proxy_states, [waiting]);
     let world = shared.lock().unwrap();
     assert_eq!(world.slow_applied.len(), 1);
     let (applied, context) = &world.slow_applied[0];
@@ -619,6 +620,178 @@ fn slow_proxy_request_hash_must_match_the_stored_command() {
     assert_matches!(
         block_on(service.execute_slow_proxy(forged)),
         Err(ApplicationError::CommandLedger(CommandLedgerError::Conflict))
+    );
+    assert_eq!(shared.lock().unwrap().slow_applied.len(), 1);
+}
+
+// 历史 `accepted` 行以原生计划 JSON 保存未变更的授权标识，并将 `proxy_states` 写为空数组。
+const LEGACY_ORDINARY_BID_PLAN: &[u8] = br#"{
+  "public_bids": [{
+    "id": "0ea5d7d5-4dfb-5f23-a92b-2b9edd46390a",
+    "command_id": "00000000-0000-4000-8000-000000000004",
+    "lot_id": "00000000-0000-4000-8000-000000000001",
+    "bidder_id": "00000000-0000-4000-8000-000000000005",
+    "fact_index": 1,
+    "amount": 120000,
+    "effective_end_at": "2026-01-01T12:00:00Z",
+    "state_version": 2,
+    "mechanism": "Ordinary"
+  }],
+  "proxy_transitions": [],
+  "proxy_states": [],
+  "active_proxy_id": "00000000-0000-4000-8000-000000000002",
+  "final_lot": {
+    "lot_id": "00000000-0000-4000-8000-000000000001",
+    "start_price": 1000,
+    "current_price": 120000,
+    "leader_id": "00000000-0000-4000-8000-000000000005",
+    "leader_proxy_last": false,
+    "material": false,
+    "effective_end_at": "2026-01-01T12:00:00Z",
+    "state_version": 2,
+    "last_proxy_sequence": 1,
+    "slow_generation": 1,
+    "slow_authorization_id": "00000000-0000-4000-8000-000000000002",
+    "slow_due_at": "2026-01-01T10:10:00Z"
+  },
+  "soft_close_applied": false
+}"#;
+
+const LEGACY_SLOW_COUNTER_PLAN: &[u8] = br#"{
+  "public_bids": [{
+    "id": "02771d27-c826-5cdb-a8d9-505d295ac3fc",
+    "command_id": "c25155cc-1077-505f-ac43-fb3dd006fa54",
+    "lot_id": "00000000-0000-4000-8000-000000000001",
+    "bidder_id": "00000000-0000-4000-8000-000000000003",
+    "fact_index": 1,
+    "amount": 126000,
+    "effective_end_at": "2026-01-01T12:00:00Z",
+    "state_version": 3,
+    "mechanism": "Proxy"
+  }],
+  "proxy_transitions": [],
+  "proxy_states": [],
+  "active_proxy_id": "00000000-0000-4000-8000-000000000002",
+  "final_lot": {
+    "lot_id": "00000000-0000-4000-8000-000000000001",
+    "start_price": 1000,
+    "current_price": 126000,
+    "leader_id": "00000000-0000-4000-8000-000000000003",
+    "leader_proxy_last": true,
+    "material": false,
+    "effective_end_at": "2026-01-01T12:00:00Z",
+    "state_version": 3,
+    "last_proxy_sequence": 1,
+    "slow_generation": 2,
+    "slow_authorization_id": null,
+    "slow_due_at": null
+  },
+  "soft_close_applied": false
+}"#;
+
+#[test]
+fn historical_ordinary_and_slow_plans_replay_without_unchanged_proxy_snapshots() {
+    let ordinary: CompetitionPlan = serde_json::from_slice(LEGACY_ORDINARY_BID_PLAN).unwrap();
+    let slow: CompetitionPlan = serde_json::from_slice(LEGACY_SLOW_COUNTER_PLAN).unwrap();
+    let bid = ordinary.public_bids[0];
+    let lot_id = bid.lot_id;
+    let authorization_id = ordinary.active_proxy_id.unwrap();
+    let place = place_bid(bid.command_id, lot_id, bid.bidder_id, bid.amount.value());
+    let counter = slow_command(lot_id, authorization_id, 1, at(10, 10));
+    assert_eq!(counter.command_id, slow.public_bids[0].command_id);
+    assert!(ordinary.validate().is_err());
+    assert!(slow.validate().is_err());
+
+    let mut initial = world(lot_id, 140_000, slow.public_bids[0].bidder_id, None);
+    initial.now = at(13, 0);
+    for (command_id, command_kind, request_hash, payload) in [
+        (place.command_id, PLACE_BID_COMMAND_KIND, place.request_hash, LEGACY_ORDINARY_BID_PLAN),
+        (
+            counter.command_id,
+            SLOW_PROXY_COMMAND_KIND,
+            counter.request_hash,
+            LEGACY_SLOW_COUNTER_PLAN,
+        ),
+    ] {
+        initial.ledger.insert(
+            command_id,
+            StoredCommand {
+                command_id,
+                command_kind: command_kind.to_owned(),
+                aggregate_id: lot_id.as_uuid(),
+                request_hash,
+                result_code: "accepted".to_owned(),
+                result_payload: payload.to_vec(),
+            },
+        );
+    }
+    let original_ledger = initial.ledger.clone();
+    let (service, shared) = service(initial);
+    let replayed_bid = block_on(service.place_bid(place)).expect("必须重放旧普通出价");
+    let replayed_counter =
+        block_on(service.execute_slow_proxy(counter)).expect("必须重放旧慢速反击");
+
+    assert_eq!(replayed_bid.plan, ordinary);
+    assert_eq!(replayed_counter, slow);
+    let world = shared.lock().unwrap();
+    assert_eq!(world.ledger, original_ledger);
+    assert!(world.applied.is_empty());
+    assert!(world.slow_applied.is_empty());
+}
+
+#[test]
+fn historical_slow_plan_replay_rejects_wrong_ids_and_generation() {
+    let expected: CompetitionPlan = serde_json::from_slice(LEGACY_SLOW_COUNTER_PLAN).unwrap();
+    let lot_id = expected.final_lot.lot_id;
+    let command = slow_command(lot_id, expected.active_proxy_id.unwrap(), 1, at(10, 10));
+    let initial = world(lot_id, 140_000, expected.public_bids[0].bidder_id, None);
+    let (service, shared) = service(initial);
+
+    let mut wrong_authorization = expected.clone();
+    wrong_authorization.active_proxy_id = Some(ProxyAuthorizationId::new());
+    let mut wrong_bid_id = expected.clone();
+    wrong_bid_id.public_bids[0].id = auction_domain::BidId::new();
+    let mut wrong_generation = expected;
+    wrong_generation.final_lot.slow_generation += 1;
+
+    for payload in [wrong_authorization, wrong_bid_id, wrong_generation] {
+        shared.lock().unwrap().ledger.insert(
+            command.command_id,
+            StoredCommand {
+                command_id: command.command_id,
+                command_kind: SLOW_PROXY_COMMAND_KIND.to_owned(),
+                aggregate_id: lot_id.as_uuid(),
+                request_hash: command.request_hash,
+                result_code: "accepted".to_owned(),
+                result_payload: serde_json::to_vec(&payload).unwrap(),
+            },
+        );
+        assert_matches!(
+            block_on(service.execute_slow_proxy(command)),
+            Err(ApplicationError::CompetitionTransaction(CompetitionTransactionError::Failed(_)))
+        );
+    }
+    assert!(shared.lock().unwrap().slow_applied.is_empty());
+}
+
+#[test]
+fn slow_proxy_replay_rejects_missing_changed_snapshot() {
+    let lot_id = LotId::new();
+    let holder = UserId::new();
+    let (mut initial, waiting) = waiting_world(lot_id, holder, UserId::new());
+    initial.ineligible.push(holder);
+    let (service, shared) = service(initial);
+    let command = slow_command(lot_id, waiting.id, 1, at(10, 10));
+    let mut plan = block_on(service.execute_slow_proxy(command)).expect("必须冻结失格代理");
+    assert_eq!(block_on(service.execute_slow_proxy(command)).unwrap(), plan);
+
+    plan.proxy_states.clear();
+    assert!(plan.validate_for_replay().is_err());
+    shared.lock().unwrap().ledger.get_mut(&command.command_id).unwrap().result_payload =
+        serde_json::to_vec(&plan).unwrap();
+    assert_matches!(
+        block_on(service.execute_slow_proxy(command)),
+        Err(ApplicationError::CompetitionTransaction(CompetitionTransactionError::Failed(_)))
     );
     assert_eq!(shared.lock().unwrap().slow_applied.len(), 1);
 }

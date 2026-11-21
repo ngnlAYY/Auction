@@ -359,10 +359,9 @@ fn valid_take(take: &SettlementReturnTake) -> bool {
                     && take.proven_at.is_none()
             }
             "enqueued" => {
+                // 投递与案件由不同事务推进；终态投递可以等待 Worker 收口动作。
                 delivery_id
-                    && take.delivery_status.as_deref().is_some_and(|status| {
-                        matches!(status, "prepared" | "pending" | "claimed" | "sending")
-                    })
+                    && take.delivery_status.is_some()
                     && take.failure_code.is_none()
                     && take.proven_at.is_none()
             }
@@ -469,7 +468,7 @@ mod tests {
     use auction_application::settlement::{
         SettlementReturnAssetLocation, SettlementReturnCaseSummary, SettlementReturnDetail,
         SettlementReturnDispatch, SettlementReturnEvent, SettlementReturnMatch,
-        SettlementReturnPage, SettlementReturnReason,
+        SettlementReturnPage, SettlementReturnReason, SettlementReturnTake,
     };
     use auction_contracts::{
         ADMIN_SETTLEMENT_RETURN_ACTIONS, ADMIN_SETTLEMENT_RETURN_ASSET_LOCATIONS,
@@ -837,6 +836,30 @@ mod tests {
         let mut inconsistent = detail();
         inconsistent.take_unavailable = true;
         assert!(map_detail(inconsistent, CASE).is_none(), "待决定案件不能带领回能力不可用");
+    }
+
+    #[test]
+    fn enqueued_take_detail_keeps_unconsumed_terminal_delivery_status() {
+        let mut waiting = detail();
+        waiting.summary.status = SettlementReturnCaseStatus::TakePending;
+        waiting.summary.asset_location = SettlementReturnAssetLocation::TakeInProgress;
+        let take_delivery = Uuid::from_u128(6);
+        for status in ["succeeded", "failed", "manual_reconcile"] {
+            waiting.take = Some(SettlementReturnTake {
+                execution_state: "enqueued".to_owned(),
+                delivery_id: Some(take_delivery),
+                delivery_status: Some(status.to_owned()),
+                failure_code: None,
+                proven_at: None,
+            });
+            let mapped = map_detail(waiting.clone(), CASE).expect("待收口的领回详情");
+            let take = mapped.take.expect("领回动作");
+            assert_eq!(take.execution_state, "enqueued");
+            assert_eq!(take.delivery_status.as_deref(), Some(status));
+            assert_eq!(take.proven_at, None);
+        }
+        waiting.take.as_mut().expect("领回动作").delivery_status = None;
+        assert!(map_detail(waiting, CASE).is_none(), "已入队动作必须有有效投递状态");
     }
 
     /// 结果未知的原因只随 `take_unknown` 输出且必须存在；其他状态带原因或结果未知缺原因都是
