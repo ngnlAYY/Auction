@@ -147,6 +147,10 @@ pub enum ConfigError {
     #[error("invalid auction policy configuration: {0}")]
     InvalidAuctionConfig(&'static str),
 
+    /// 寄售节的形状无效，诊断只包含文件路径和固定的修正提示。
+    #[error("配置文件 {path} 中的 consignment 必须是 TOML 表")]
+    InvalidConsignmentShape { path: PathBuf },
+
     /// 寄售数值超出闭区间，诊断只包含固定字段名与允许范围。
     #[error("[consignment].{field} 必须是 {min}..={max} 范围内的整数")]
     InvalidConsignmentRange { field: &'static str, min: i64, max: i64 },

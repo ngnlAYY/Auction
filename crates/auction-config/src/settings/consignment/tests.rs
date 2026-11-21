@@ -75,78 +75,138 @@ fn omitted_and_empty_consignment_use_contract_defaults() {
 }
 
 #[test]
+fn consignment_requires_a_toml_table() {
+    let fixture = ConfigFixture::new();
+    for contents in [
+        "consignment = []",
+        "consignment = [true]",
+        "consignment = [true, 125, 45, 14, 35, 18, 12, 131072, 2500]",
+        "[[consignment]]\nenabled = true",
+        "consignment = true",
+        "consignment = 1",
+        "consignment = 1.5",
+        "consignment = 2026-11-20",
+        "consignment = 'FAKE-CONSIGNMENT-SCALAR-SECRET'",
+    ] {
+        fixture.write_common(contents);
+        for role in [Role::Public, Role::Admin, Role::Worker] {
+            let error = fixture.load(role).expect_err("寄售节的非表形状应拒绝加载");
+            assert!(matches!(error, ConfigError::InvalidConsignmentShape { .. }), "{role:?}");
+            let message = error.to_string();
+            assert!(message.contains("consignment 必须是 TOML 表"));
+            for diagnostic in [message, format!("{error:?}")] {
+                assert!(!diagnostic.contains(contents));
+                assert!(!diagnostic.contains("FAKE-CONSIGNMENT-SCALAR-SECRET"));
+            }
+        }
+    }
+
+    fixture.write_common("consignment = { enabled = true }");
+    assert!(fixture.load(Role::Public).unwrap().enabled());
+}
+
+#[test]
 fn three_roles_load_the_same_consignment_overrides() {
     let fixture = ConfigFixture::new();
     fixture.write_common(
-        "[consignment]\nenabled = true\nfee_bps = 125\nlookup_timeout_seconds = 12\n",
+        "[consignment]
+enabled = true
+fee_bps = 125
+display_ttl_days = 45
+deposit_ttl_days = 14
+max_open_per_user = 35
+registrations_per_hour = 18
+lookup_timeout_seconds = 12
+lookup_max_response_bytes = 131072
+lookup_min_interval_ms = 2500
+",
     );
-    let public = fixture.load(Role::Public).unwrap();
-    assert!(public.enabled());
-    assert_eq!(public.fee_bps().value(), 125);
-    assert_eq!(public.lookup_timeout_seconds(), 12);
-    assert_eq!(public.lookup_min_interval_ms(), 1_000);
-    assert_eq!(fixture.load(Role::Admin).unwrap(), public);
-    assert_eq!(fixture.load(Role::Worker).unwrap(), public);
+    for role in [Role::Public, Role::Admin, Role::Worker] {
+        let config = fixture.load(role).unwrap();
+        assert!(config.enabled(), "{role:?}");
+        assert_eq!(config.fee_bps().value(), 125, "{role:?}");
+        assert_eq!(
+            config.publication_ttls(),
+            ListingPublicationTtls::new(45, 14).unwrap(),
+            "{role:?}"
+        );
+        assert_eq!(config.max_open_per_user(), 35, "{role:?}");
+        assert_eq!(config.registrations_per_hour(), 18, "{role:?}");
+        assert_eq!(config.lookup_timeout_seconds(), 12, "{role:?}");
+        assert_eq!(config.lookup_max_response_bytes(), 131_072, "{role:?}");
+        assert_eq!(config.lookup_min_interval_ms(), 2_500, "{role:?}");
+    }
 }
 
 #[test]
 fn consignment_numeric_bounds_are_inclusive_and_errors_are_redacted() {
     let fixture = ConfigFixture::new();
-    for (key, min, max) in [
-        ("fee_bps", 0, 9_999),
-        ("display_ttl_days", 1, 90),
-        ("deposit_ttl_days", 1, 30),
-        ("max_open_per_user", 1, 100),
-        ("registrations_per_hour", 1, 100),
-        ("lookup_timeout_seconds", 1, 30),
-        ("lookup_max_response_bytes", 4_096, 262_144),
-        ("lookup_min_interval_ms", 250, 60_000),
-    ] {
-        for value in [min, max] {
-            fixture.write_common(&format!("[consignment]\n{key} = {value}\n"));
-            let config = fixture.load(Role::Worker).unwrap();
-            match key {
-                "fee_bps" => assert_eq!(i64::from(config.fee_bps().value()), value),
-                "display_ttl_days" => assert_eq!(
-                    config.publication_ttls(),
-                    ListingPublicationTtls::new(value, 7).unwrap()
-                ),
-                "deposit_ttl_days" => assert_eq!(
-                    config.publication_ttls(),
-                    ListingPublicationTtls::new(30, value).unwrap()
-                ),
-                "max_open_per_user" => assert_eq!(config.max_open_per_user(), value),
-                "registrations_per_hour" => assert_eq!(config.registrations_per_hour(), value),
-                "lookup_timeout_seconds" => {
-                    assert_eq!(config.lookup_timeout_seconds(), u64::try_from(value).unwrap());
+    for enabled in [false, true] {
+        let section = format!("[consignment]\nenabled = {enabled}\n");
+        for (key, min, max) in [
+            ("fee_bps", 0, 9_999),
+            ("display_ttl_days", 1, 90),
+            ("deposit_ttl_days", 1, 30),
+            ("max_open_per_user", 1, 100),
+            ("registrations_per_hour", 1, 100),
+            ("lookup_timeout_seconds", 1, 30),
+            ("lookup_max_response_bytes", 4_096, 262_144),
+            ("lookup_min_interval_ms", 250, 60_000),
+        ] {
+            for value in [min, max] {
+                fixture.write_common(&format!("{section}{key} = {value}\n"));
+                let config = fixture.load(Role::Worker).unwrap();
+                assert_eq!(config.enabled(), enabled);
+                match key {
+                    "fee_bps" => assert_eq!(i64::from(config.fee_bps().value()), value),
+                    "display_ttl_days" => assert_eq!(
+                        config.publication_ttls(),
+                        ListingPublicationTtls::new(value, 7).unwrap()
+                    ),
+                    "deposit_ttl_days" => assert_eq!(
+                        config.publication_ttls(),
+                        ListingPublicationTtls::new(30, value).unwrap()
+                    ),
+                    "max_open_per_user" => assert_eq!(config.max_open_per_user(), value),
+                    "registrations_per_hour" => assert_eq!(config.registrations_per_hour(), value),
+                    "lookup_timeout_seconds" => {
+                        assert_eq!(config.lookup_timeout_seconds(), u64::try_from(value).unwrap());
+                    }
+                    "lookup_max_response_bytes" => {
+                        assert_eq!(
+                            config.lookup_max_response_bytes(),
+                            usize::try_from(value).unwrap()
+                        );
+                    }
+                    "lookup_min_interval_ms" => {
+                        assert_eq!(config.lookup_min_interval_ms(), u64::try_from(value).unwrap());
+                    }
+                    _ => panic!("未覆盖的寄售配置键 {key}"),
                 }
-                "lookup_max_response_bytes" => {
-                    assert_eq!(config.lookup_max_response_bytes(), usize::try_from(value).unwrap());
-                }
-                "lookup_min_interval_ms" => {
-                    assert_eq!(config.lookup_min_interval_ms(), u64::try_from(value).unwrap());
-                }
-                _ => panic!("未覆盖的寄售配置键 {key}"),
             }
-        }
-        for value in [min - 1, max + 1] {
-            let assignment = format!("{key} = {value}");
-            fixture.write_common(&format!("[consignment]\n{assignment}\n"));
-            let error = fixture.load(Role::Worker).expect_err(&assignment);
-            let message = error.to_string();
-            assert!(message.contains(&format!("[consignment].{key}")), "{message}");
-            assert!(message.contains(&format!("{min}..={max}")), "{message}");
-            assert!(!message.contains(&assignment));
-            assert!(!format!("{error:?}").contains(&assignment));
+            for value in [min - 1, max + 1] {
+                let assignment = format!("{key} = {value}");
+                fixture.write_common(&format!("{section}{assignment}\n"));
+                let error = fixture
+                    .load(Role::Worker)
+                    .expect_err(&format!("enabled = {enabled} 时应拒绝 {assignment}"));
+                let message = error.to_string();
+                assert!(message.contains(&format!("[consignment].{key}")), "{message}");
+                assert!(message.contains(&format!("{min}..={max}")), "{message}");
+                assert!(!message.contains(&assignment));
+                assert!(!format!("{error:?}").contains(&assignment));
+            }
         }
     }
 }
 
 #[test]
 fn unknown_consignment_keys_are_rejected() {
+    const FAKE_SECRET: &str = "FAKE-UNKNOWN-CONSIGNMENT-VALUE-7F83";
     let fixture = ConfigFixture::new();
+    let secret_assignment = format!("fake_unknown_key = '{FAKE_SECRET}'");
     for assignment in [
-        "fake_unknown_key = true",
+        secret_assignment.as_str(),
         "display_only = true",
         "lookup_max_attempts = 6",
         "lookup_backoff_seconds = [30, 120, 600, 1800, 7200]",
@@ -155,9 +215,12 @@ fn unknown_consignment_keys_are_rejected() {
         "lookup_schema_version = 1",
     ] {
         fixture.write_common(&format!("[consignment]\n{assignment}\n"));
-        assert!(
-            matches!(fixture.load(Role::Public), Err(ConfigError::Parse { .. })),
-            "{assignment}"
+        let error = fixture.load(Role::Public).expect_err("未知寄售键应拒绝加载");
+        assert!(matches!(error, ConfigError::Parse { .. }));
+        assert_eq!(
+            (error.to_string().contains(FAKE_SECRET), format!("{error:?}").contains(FAKE_SECRET)),
+            (false, false),
+            "Display / Debug 应隐去未知键的值"
         );
     }
 }

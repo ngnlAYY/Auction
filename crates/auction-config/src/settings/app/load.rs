@@ -10,6 +10,7 @@ use auction_application::admin::{
 };
 use auction_application::core::RequestHash;
 use auction_time::Timestamp;
+use serde::Deserialize;
 
 use super::build::BuildMode;
 use super::model::{AppConfig, BuildInput, CommonFileConfig, FileConfig, PublicSessionFileConfig};
@@ -306,11 +307,21 @@ fn reject_unsupported_role_sections(role: Role, contents: &str) -> Result<(), Co
     Ok(())
 }
 
-/// 公共文件使用独立闭集模型；解析错误只报告路径，避免旧文件中的误放敏感值被回显。
+/// 公共文件使用独立闭集模型；诊断不保留解析器错误或配置原文。
 fn load_common_file(path: &Path) -> Result<CommonFileConfig, ConfigError> {
     let contents = read_toml_file(path)
         .map_err(|source| ConfigError::Read { path: path.to_owned(), source })?;
-    toml::from_str(&contents).map_err(|_| ConfigError::Parse { path: path.to_owned() })
+    let parse_error = |_error| ConfigError::Parse { path: path.to_owned() };
+    let document = toml::de::DeTable::parse(&contents).map_err(parse_error)?;
+    // Serde 的派生结构体也接受位置数组，寄售节必须在解码前确认是表。
+    if document
+        .get_ref()
+        .iter()
+        .any(|(key, value)| key.get_ref() == "consignment" && !value.get_ref().is_table())
+    {
+        return Err(ConfigError::InvalidConsignmentShape { path: path.to_owned() });
+    }
+    CommonFileConfig::deserialize(toml::de::Deserializer::from(document)).map_err(parse_error)
 }
 
 fn load_runtime_worker_source(
