@@ -4,7 +4,10 @@ use std::fmt;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use auction_application::consignment::{ConsignmentError, ListingDelistReason};
+use auction_application::consignment::{
+    ConsignmentError, ListingClosed, ListingCommandOutcome, ListingDelistReason,
+};
+use auction_domain::consignment::ListingVersion;
 use axum::body::Body;
 use axum::http::{HeaderValue, Method, StatusCode};
 use axum::middleware;
@@ -14,7 +17,7 @@ use tracing::span::{Attributes, Id, Record};
 use tracing::{Dispatch, Event, Metadata, Subscriber};
 
 use super::fixture::{
-    Fixture, REASON, body, delist_path, detail_path, failure, headers, response, send,
+    Fixture, LISTING, REASON, body, delist_path, detail_path, failure, headers, response, send,
 };
 use crate::middleware::boundary::{HttpBoundary, enforce};
 
@@ -66,11 +69,16 @@ impl Subscriber for Capture {
 }
 
 #[tokio::test]
-async fn actual_http_traces_and_error_bodies_do_not_contain_private_reasons() {
+async fn actual_http_traces_and_write_bodies_do_not_contain_private_reasons() {
     let mut fixture = Fixture::new(false);
     fixture.read_port_mut().detail.as_mut().unwrap().as_mut().unwrap().record.admin_delist_reason =
         Some(ListingDelistReason::new(REASON.to_owned()).unwrap());
-    fixture.command.results.lock().unwrap().push_back(Err(ConsignmentError::OutcomeUnknown));
+    fixture.command.results.lock().unwrap().extend([
+        Err(ConsignmentError::OutcomeUnknown),
+        Ok(ListingCommandOutcome::Accepted(
+            ListingClosed::new(LISTING, ListingVersion::new(8).unwrap(), None).unwrap(),
+        )),
+    ]);
     let router =
         fixture.router().layer(middleware::from_fn_with_state(HttpBoundary::default(), enforce));
     let dispatch = Dispatch::new(Capture::default());
@@ -101,6 +109,17 @@ async fn actual_http_traces_and_error_bodies_do_not_contain_private_reasons() {
             assert!(!error_body.contains(REASON));
             assert!(!error_body.contains(invalid_marker));
         }
+        let reply = send(
+            router,
+            Method::POST,
+            &delist_path(),
+            headers(),
+            Body::from(body(REASON).to_string()),
+        )
+        .await;
+        let receipt = response(reply, StatusCode::OK).await;
+        assert_eq!(receipt["data"]["disposition"], "closed");
+        assert!(!receipt.to_string().contains(REASON));
     }
     .with_subscriber(dispatch.clone())
     .await;

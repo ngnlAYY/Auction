@@ -17,6 +17,7 @@ use super::boundary::{error, ok};
 use super::input::{delist_request, list_query, listing_target};
 use super::mapping;
 use crate::diagnostics;
+use crate::middleware::boundary::request_id;
 use crate::session::{authenticated_admin_mutation, authenticated_admin_session};
 
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
@@ -99,14 +100,16 @@ pub(super) async fn delist<S: AdminConsignmentState>(
     let Some(service) = state.consignment_manage() else {
         return error(&headers, ConsignmentError::Unavailable);
     };
-    // 当前用例的命令输入没有请求关联号。审计身份来自会话，关联号仍留在 HTTP 诊断上下文。
     let command = service.admin_delist(
         &identity,
         CommandId::from_uuid(input.command_id),
         listing_id,
         input.expected_version.get().cast_unsigned(),
         input.reason,
+        request_id(&headers),
     );
+    // 默认由处理器先到期并返回 503 outcome_unknown。若外层 HTTP 边界先到期，则返回 504 timeout。
+    // 两种响应对写请求都表示结果未知，只能以原命令 ID 和原参数重试。
     let result = match tokio::time::timeout(DELIST_TIMEOUT, command).await {
         Ok(Ok(closed)) => {
             mapping::closed(closed, input.command_id, listing_id, input.expected_version)

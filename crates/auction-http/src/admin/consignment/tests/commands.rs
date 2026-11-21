@@ -1,6 +1,7 @@
 //! Admin 下架 HTTP 解码、命令交接、关闭与回执测试。
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use auction_application::consignment::{
     ConsignmentError, ListingBusinessRejection, ListingClosed, ListingCommandOutcome,
@@ -10,13 +11,15 @@ use auction_application::consignment::{
 use auction_domain::consignment::{ListingPrice, ListingVersion};
 use axum::body::Body;
 use axum::http::{HeaderValue, Method, StatusCode, header};
+use axum::middleware;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 use super::fixture::{
-    ACTOR, COMMAND, Fixture, LIST_PATH, LISTING, REASON, SessionCall, body, delist, delist_path,
-    failure, headers, response, send,
+    ACTOR, COMMAND, CommandPort, Fixture, LIST_PATH, LISTING, REASON, SessionCall, body, delist,
+    delist_path, failure, headers, response, send,
 };
+use crate::middleware::boundary::{HttpBoundary, enforce};
 
 #[tokio::test]
 async fn delist_success_and_closed_replay_return_identical_receipt_with_session_actor() {
@@ -31,7 +34,28 @@ async fn delist_success_and_closed_replay_return_identical_receipt_with_session_
             ListingBusinessRejection::ListingNotActive,
         ))),
     ]);
-    let accepted = response(delist(&fixture, body(REASON)).await, StatusCode::OK).await;
+    let first_request_id = "P3B.Fixture_first-1";
+    let replay_request_id = "P3B.Fixture_replay-2";
+    let post = |fixture: &Fixture, request_id: &'static str| {
+        let router = fixture
+            .router()
+            .layer(middleware::from_fn_with_state(HttpBoundary::default(), enforce));
+        async move {
+            let mut request_headers = headers();
+            request_headers.insert("x-request-id", HeaderValue::from_static(request_id));
+            let reply = send(
+                router,
+                Method::POST,
+                &delist_path(),
+                request_headers,
+                Body::from(body(REASON).to_string()),
+            )
+            .await;
+            assert_eq!(reply.headers().get("x-request-id").unwrap(), request_id);
+            response(reply, StatusCode::OK).await
+        }
+    };
+    let accepted = post(&fixture, first_request_id).await;
     assert_eq!(accepted["code"], "ok");
     assert_eq!(
         accepted["data"],
@@ -46,7 +70,7 @@ async fn delist_success_and_closed_replay_return_identical_receipt_with_session_
     // 保留同一账本端口，切换为停用投影与关闭配置。HTTP 仍应传递原命令。
     fixture.read = Fixture::new(false).read;
     fixture.manage = Some(Arc::new(ManageListingService::new(fixture.command.clone(), false)));
-    let replay = response(delist(&fixture, body(REASON)).await, StatusCode::OK).await;
+    let replay = post(&fixture, replay_request_id).await;
     assert_eq!(accepted, replay);
 
     let mut fresh = body(REASON);
@@ -56,7 +80,10 @@ async fn delist_success_and_closed_replay_return_identical_receipt_with_session_
 
     let commands = fixture.command.calls.lock().unwrap();
     assert_eq!(commands.len(), 3);
-    assert_eq!(commands[0], commands[1]);
+    assert_eq!(commands[0].request_id.as_deref(), Some(first_request_id));
+    let mut original_command = commands[0].clone();
+    original_command.request_id = Some(replay_request_id.to_owned());
+    assert_eq!(commands[1], original_command);
     assert_eq!(commands[0].command_id.as_uuid(), COMMAND);
     assert_eq!(commands[0].listing_id, LISTING);
     assert_eq!(commands[0].expected_version.value(), 7);
@@ -200,6 +227,48 @@ async fn delist_rejects_every_invalid_reason_without_echoing_or_calling_ports() 
 }
 
 #[tokio::test]
+async fn delist_accepts_256_reason_bytes_and_rejects_257() {
+    let fixture = Fixture::new(true);
+    let valid = format!("{}A", "字".repeat(85));
+    let invalid = format!("{valid}B");
+    failure(delist(&fixture, body(&invalid)).await, StatusCode::BAD_REQUEST, "invalid_reason")
+        .await;
+    fixture.assert_no_business_calls();
+
+    fixture.command.results.lock().unwrap().push_back(Ok(ListingCommandOutcome::Accepted(
+        ListingClosed::new(LISTING, ListingVersion::new(8).unwrap(), None).unwrap(),
+    )));
+    let reply = response(delist(&fixture, body(&valid)).await, StatusCode::OK).await;
+    assert_eq!(reply["data"]["disposition"], "closed");
+    let commands = fixture.command.calls.lock().unwrap();
+    assert_eq!(commands.len(), 1);
+    assert!(commands[0].reason.as_str() == valid);
+}
+
+#[tokio::test]
+async fn delist_preserves_reason_case_and_distinguishes_request_hashes() {
+    let fixture = Fixture::new(true);
+    let mixed = "运营夹具 MiXeD";
+    let lower = "运营夹具 mixed";
+    fixture.command.results.lock().unwrap().extend([
+        Ok(ListingCommandOutcome::Accepted(
+            ListingClosed::new(LISTING, ListingVersion::new(8).unwrap(), None).unwrap(),
+        )),
+        Ok(ListingCommandOutcome::Rejected(ListingCommandRejection::Unrecorded(
+            UnrecordedListingRejection::CommandIdConflict,
+        ))),
+    ]);
+    response(delist(&fixture, body(mixed)).await, StatusCode::OK).await;
+    failure(delist(&fixture, body(lower)).await, StatusCode::CONFLICT, "command_id_conflict").await;
+
+    let commands = fixture.command.calls.lock().unwrap();
+    assert_eq!(commands.len(), 2);
+    assert!(commands[0].reason.as_str() == mixed);
+    assert!(commands[1].reason.as_str() == lower);
+    assert_ne!(commands[0].request_hash, commands[1].request_hash);
+}
+
+#[tokio::test]
 async fn delist_rejects_noncanonical_targets_and_strict_json_shape_before_port() {
     let fixture = Fixture::new(true);
     let content = body(REASON);
@@ -320,7 +389,7 @@ async fn delist_wrong_receipt_target_or_version_is_unknown() {
 #[tokio::test]
 async fn delist_timeout_reports_unknown_and_does_not_resubmit() {
     let mut fixture = Fixture::new(false);
-    let port = Arc::new(super::fixture::CommandPort { pending: true, ..Default::default() });
+    let port = Arc::new(CommandPort { pending: true, ..Default::default() });
     fixture.manage = Some(Arc::new(ManageListingService::new(port.clone(), false)));
     failure(
         delist(&fixture, body(REASON)).await,
@@ -328,5 +397,23 @@ async fn delist_timeout_reports_unknown_and_does_not_resubmit() {
         "outcome_unknown",
     )
     .await;
+    assert_eq!(port.calls.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn delist_shorter_http_boundary_returns_standard_504_no_store() {
+    let mut fixture = Fixture::new(false);
+    let port = Arc::new(CommandPort { pending: true, ..Default::default() });
+    fixture.manage = Some(Arc::new(ManageListingService::new(port.clone(), false)));
+    let boundary = HttpBoundary::new(Duration::from_secs(1), &[], false).unwrap();
+    let router = fixture.router().layer(middleware::from_fn_with_state(boundary, enforce));
+    let reply =
+        send(router, Method::POST, &delist_path(), headers(), Body::from(body(REASON).to_string()))
+            .await;
+    assert_eq!(reply.headers().get(header::CONTENT_TYPE).unwrap(), "application/json");
+    let request_id = reply.headers().get("x-request-id").unwrap().to_str().unwrap().to_owned();
+    let error = failure(reply, StatusCode::GATEWAY_TIMEOUT, "timeout").await;
+    assert!(!request_id.is_empty());
+    assert_eq!(error["request_id"], request_id);
     assert_eq!(port.calls.lock().unwrap().len(), 1);
 }

@@ -93,6 +93,32 @@ async fn list_filters_forward_effective_state_and_pagination_accepts_empty_pages
 }
 
 #[tokio::test]
+async fn list_accepts_each_effective_state_filter() {
+    let fixture = Fixture::new(true);
+    for (index, (value, state)) in [
+        ("resolving", ListingState::Resolving),
+        ("displayed", ListingState::Displayed),
+        ("awaiting_deposit", ListingState::AwaitingDeposit),
+        ("rejected", ListingState::Rejected),
+        ("expired", ListingState::Expired),
+        ("closed", ListingState::Closed),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let path = format!("{LIST_PATH}?state={value}");
+        let reply = get(&fixture, &path).await;
+        assert_eq!(reply.status(), StatusCode::OK, "state={value}");
+        let calls = fixture.read_port().calls.lock().unwrap();
+        assert_eq!(calls.len(), index + 1);
+        let ReadCall::List(query) = &calls[index] else {
+            panic!("列表必须调用列表端口");
+        };
+        assert_eq!(query.listings.state, Some(state));
+    }
+}
+
+#[tokio::test]
 async fn each_invalid_duplicate_or_unknown_filter_fails_before_port_selection() {
     let fixture = Fixture::new(true);
     let valid = [
@@ -163,6 +189,12 @@ async fn detail_preserves_conflict_order_truncation_and_private_reason() {
         false,
     )
     .unwrap();
+    fixture.read_port_mut().record = record.clone();
+    let reply = response(get(&fixture, LIST_PATH).await, StatusCode::OK).await;
+    let listed = &reply["data"]["items"][0];
+    assert_eq!(listed["listing"]["effective_reason"], "admin_delisted");
+    assert!(listed["admin_delist_reason"].as_str() == Some(REASON));
+
     for count in [3, 50] {
         let conflicts: Vec<_> = (1..=count)
             .map(|lot| ListingAuctionConflict {
