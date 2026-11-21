@@ -19,10 +19,16 @@ auction-process.workspace = true
 auction-setup = { workspace = true, optional = true }
 rust-embed.workspace = true
 auction-time.workspace = true
+axum.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 libc.workspace = true
+
+[dev-dependencies]
+auction-domain.workspace = true
+serde_json.workspace = true
+tower.workspace = true
 
 [features]
 # 可选：都不启用时只提供 API，不内嵌 Admin 页面，首次设置入口不可用。

@@ -18,9 +18,15 @@ auction-observability.workspace = true
 auction-process.workspace = true
 rust-embed.workspace = true
 auction-time.workspace = true
+axum.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+auction-domain.workspace = true
+serde_json.workspace = true
+tower.workspace = true
 
 [features]
 # 可选：都不启用时只提供 API，不内嵌任何页面资源。

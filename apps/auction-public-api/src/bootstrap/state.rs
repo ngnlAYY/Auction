@@ -14,8 +14,8 @@ use auction_application::auction::{
     PublicLotReader, PublicPriceHistoryReader, WorldReader,
 };
 use auction_application::consignment::{
-    ListingRegistrationPolicy, ListingWorlds, ManageListingService, RegisterListingService,
-    RegistrationReplayCrypto,
+    ListingCommandStore, ListingRegistrationPolicy, ListingWorlds, ManageListingService,
+    OwnedListingRead, PublicListingRead, RegisterListingService, RegistrationReplayCrypto,
 };
 use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, RepositoryError};
@@ -159,28 +159,24 @@ impl ConsignmentCredentials {
     }
 }
 
-async fn configure_consignment(
+fn configure_consignment<
+    S: PublicListingRead + OwnedListingRead + ListingCommandStore + 'static,
+>(
+    state: PublicApiState,
     config: &ConsignmentConfig,
     activation: ConsignmentActivation,
-    store: Option<&Arc<DatabaseStore>>,
-    keyring: Option<Arc<Keyring>>,
-) -> anyhow::Result<ConsignmentCapabilities> {
+    store: Option<&Arc<S>>,
+    credentials: Option<ConsignmentCredentials>,
+) -> anyhow::Result<PublicApiState> {
     let enabled = activation == ConsignmentActivation::Enabled;
     let fee_bps = config.fee_bps();
     let Some(store) = store else {
-        return Ok(ConsignmentCapabilities::without_database(enabled, fee_bps));
+        return Ok(
+            state.with_consignment(ConsignmentCapabilities::without_database(enabled, fee_bps))
+        );
     };
-    let credentials = ConsignmentCredentials::from_keyring(keyring);
     let sealer = credentials.as_ref().map(|credentials| Arc::clone(&credentials.sealer));
     let replay_crypto = credentials.map(|credentials| credentials.replay_crypto);
-    // 不变量 1、2、7：初始化由仓储锁定持久准入并仲裁，故障只记录安全分类。
-    // Worker 尚未同步或初始化失败时保留历史能力，登记就绪和首次写入各自重新核验依赖。
-    if enabled
-        && let Some(crypto) = replay_crypto.as_deref()
-        && let Err(error) = store.initialize_listing_replay_key(Uuid::new_v4(), crypto).await
-    {
-        tracing::warn!(error = %error, "Public 启动时未能确认寄售登记比较密钥");
-    }
     let policy = ListingRegistrationPolicy {
         enabled: config.enabled(),
         // 决定 4 对两世界开放，寄售节没有独立世界配置。实际准入由数据库的世界可用性再收紧。
@@ -194,7 +190,7 @@ async fn configure_consignment(
     };
     let registration_sealer_available = sealer.is_some();
     // 不变量 1、6：停用仍交给原命令账本仲裁，首次登记与改价受有效开关约束。
-    Ok(ConsignmentCapabilities {
+    Ok(state.with_consignment(ConsignmentCapabilities {
         enabled,
         fee_bps,
         public_read: Some(store.clone()),
@@ -211,7 +207,7 @@ async fn configure_consignment(
         manage: Some(Arc::new(ManageListingService::new(store.clone(), enabled))),
         registration_sealer_available,
         replay_crypto,
-    })
+    }))
 }
 
 pub(super) async fn configure_state(
@@ -228,19 +224,19 @@ pub(super) async fn configure_state(
 )> {
     let security = config::configure_security(config)?;
     let Some(database_url) = config.database_url() else {
-        let consignment =
-            configure_consignment(&config.consignment, activation, None, None).await?;
-        return Ok((
-            PublicApiState::new(
-                None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-                security,
-            )
-            .with_runtime_switch_snapshot(switches)
-            .with_consignment(consignment),
+        let state = PublicApiState::new(
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            security,
+        )
+        .with_runtime_switch_snapshot(switches);
+        let state = configure_consignment::<DatabaseStore>(
+            state,
+            &config.consignment,
+            activation,
             None,
             None,
-            None,
-        ));
+        )?;
+        return Ok((state, None, None, None));
     };
 
     // 审计失败按类别向共享影子框架记样本；进程级安装一次。
@@ -312,8 +308,17 @@ pub(super) async fn configure_state(
                 ));
             resolver
         });
-    let consignment =
-        configure_consignment(&config.consignment, activation, Some(&store), keyring).await?;
+    let credentials = ConsignmentCredentials::from_keyring(keyring);
+    // 不变量 1、2、7：初始化由仓储锁定持久准入并仲裁，故障只记录安全分类。
+    // Worker 尚未同步或初始化失败时保留历史能力，登记就绪和首次写入各自重新核验依赖。
+    if activation == ConsignmentActivation::Enabled
+        && let Some(credentials) = &credentials
+        && let Err(error) = store
+            .initialize_listing_replay_key(Uuid::new_v4(), credentials.replay_crypto.as_ref())
+            .await
+    {
+        tracing::warn!(error = %error, "Public 启动时未能确认寄售登记比较密钥");
+    }
     let bid_log: Arc<dyn PublicBidLogReader> = store.clone();
     let price_history: Arc<dyn PublicPriceHistoryReader> = store.clone();
     let realtime: Arc<dyn PublicRealtimeReader> = store.clone();
@@ -395,8 +400,9 @@ pub(super) async fn configure_state(
     .with_lot_watch_preference(store.clone())
     .with_realtime_hub(hub)
     .with_runtime_switch_snapshot(switches)
-    .with_readiness(readiness)
-    .with_consignment(consignment);
+    .with_readiness(readiness);
+    let state =
+        configure_consignment(state, &config.consignment, activation, Some(&store), credentials)?;
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "发布 Public ready 心跳失败");
     }
@@ -484,43 +490,486 @@ fn database_profile(
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::net::SocketAddr;
+    use std::sync::{Arc, Mutex};
 
+    use auction_application::admin::EquipmentKeySealerPort;
     use auction_application::consignment::{
-        ListingEquipmentUrlValidator, RegistrationReplayCrypto,
+        AdminDelistListingCommand, ApplyListingLookupCommand, AutoCloseListingCommand,
+        ConsignmentError, ConsignmentFuture, ListingAutoCloseEffect, ListingClosed,
+        ListingCommandOutcome, ListingCommandStore, ListingEquipmentUrlValidator,
+        ListingLookupEffect, ListingPriceDisposition, ListingPriceReceipt, ListingReadPage,
+        ListingRegistered, ListingRegistrationAvailability, ListingRegistrationPolicy,
+        ListingWorlds, OwnedListingCommandReceipt, OwnedListingDecision, OwnedListingRead,
+        OwnedListingRecord, PrivateListingQuery, PublicListingDetail, PublicListingQuery,
+        PublicListingRead, PublicListingSummary, RegisterListingCommand, RegistrationReplayCrypto,
+        RepriceListingCommand, StoredListingDecision, WithdrawListingCommand,
     };
+    use auction_application::core::ApplicationFuture;
+    use auction_application::public::{
+        PublicLoginResult, PublicSessionIdentity, PublicSessionPort, PublicSessionPreferenceResult,
+        SetPublicSessionPreferenceCommand,
+    };
+    use auction_application::runtime_switches::{RuntimeSwitchRole, RuntimeSwitches};
     use auction_config::{AppConfig, ConsignmentActivation, DataKeyDomain, Role};
+    use auction_domain::consignment::{ListingPrice, ListingState};
+    use auction_domain::{CommandId, UserId};
+    use auction_http::PublicApiState;
     use auction_integrations::{EquipmentKeyOpener, HentaiVerseListingUrlValidator, build_keyring};
+    use auction_observability::{ProcessMetrics, TracingHealth, TracingHealthReader};
+    use auction_time::Timestamp;
+    use axum::Router;
+    use axum::body::{Body, to_bytes};
+    use axum::extract::ConnectInfo;
+    use axum::http::{Request, StatusCode};
+    use serde_json::{Value, json};
+    use tower::ServiceExt;
     use uuid::Uuid;
 
-    use super::{ConsignmentCredentials, configure_consignment};
+    use super::{
+        ConsignmentCredentials, configure_consignment, configure_state, equipment_keyring,
+    };
+    use crate::bootstrap::config::configure_security;
+    use crate::bootstrap::service::configure_router;
 
-    #[tokio::test]
-    async fn consignment_without_database_keeps_config_and_leaves_ports_unavailable() {
+    const STATUS: &str = "/api/v1/consignment/status";
+    const REGISTER: &str = "/api/v1/consignment/listings";
+    const OWNED: &str = "/api/v1/me/consignment/listings";
+    const SELLER: Uuid = Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0001);
+    const LISTING: Uuid = Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0002);
+    const REGISTER_COMMAND: Uuid = Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0003);
+    const REPRICE_COMMAND: Uuid = Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0004);
+    const ORIGIN: &str = "https://public.example.invalid";
+
+    fn load_config(enabled: bool) -> AppConfig {
         let directory =
             std::env::temp_dir().join(format!("auction-public-consignment-{}", Uuid::new_v4()));
         fs::create_dir(&directory).unwrap();
         let role_path = directory.join("public.toml");
         fs::write(&role_path, "common_file = 'common.toml'\nsecrets_file = 'secrets.toml'\n")
             .unwrap();
-        fs::write(directory.join("common.toml"), "[consignment]\nenabled = true\nfee_bps = 175\n")
-            .unwrap();
+        fs::write(
+            directory.join("common.toml"),
+            format!(
+                "[consignment]\nenabled = {enabled}\nfee_bps = 175\nmax_open_per_user = 13\nregistrations_per_hour = 7\n"
+            ),
+        )
+        .unwrap();
         fs::write(directory.join("secrets.toml"), "").unwrap();
         let config = AppConfig::load_from_path(Role::Public, &role_path);
         fs::remove_dir_all(directory).unwrap();
-        let config = config.unwrap();
+        let mut config = config.unwrap();
+        config.http_security.allowed_origins = vec![ORIGIN.to_owned()];
+        config
+    }
 
-        let capabilities =
-            configure_consignment(&config.consignment, ConsignmentActivation::Enabled, None, None)
-                .await
+    struct UnusedTracingHealth;
+
+    impl TracingHealthReader for UnusedTracingHealth {
+        fn snapshot(&self) -> TracingHealth {
+            panic!("无数据库骨架不读取 tracing 健康快照")
+        }
+    }
+
+    #[tokio::test]
+    async fn consignment_without_database_reports_configured_status() {
+        for (enabled, activation) in
+            [(true, ConsignmentActivation::Enabled), (false, ConsignmentActivation::Disabled)]
+        {
+            let config = load_config(enabled);
+            let metrics = Arc::new(
+                ProcessMetrics::new(false, "auction_public_api", "public", "test").unwrap(),
+            );
+            let switches = RuntimeSwitches::new(
+                RuntimeSwitchRole::Public,
+                config.readiness.audit_failure_mode,
+                config.readiness.cache_enabled,
+            );
+            let (state, _, _, _) = configure_state(
+                &config,
+                activation,
+                Arc::new(UnusedTracingHealth),
+                metrics,
+                switches,
+            )
+            .await
+            .unwrap();
+            let status = send(&configure_router(state), "GET", STATUS, None, StatusCode::OK).await;
+            assert_eq!(status["data"]["enabled"], enabled);
+            assert_eq!(status["data"]["fee_bps"], 175);
+            assert_eq!(status["data"]["registration_ready"], false);
+        }
+    }
+
+    #[tokio::test]
+    async fn consignment_without_equipment_key_reports_unready_and_rejects_first_registration() {
+        let config = load_config(true);
+        let store = Arc::new(ConsignmentStore::default());
+        let app = router_with_store(
+            &config,
+            ConsignmentActivation::Enabled,
+            &store,
+            equipment_keyring(&config).unwrap(),
+        );
+        let status = send(&app, "GET", STATUS, None, StatusCode::OK).await;
+        assert_eq!(status["data"]["enabled"], true);
+        assert_eq!(status["data"]["registration_ready"], false);
+        let failure =
+            send(&app, "POST", REGISTER, Some(registration()), StatusCode::SERVICE_UNAVAILABLE)
+                .await;
+        assert_eq!(failure["code"], "consignment_unavailable");
+        let calls = store.registrations.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert!(!calls[0].sealer && !calls[0].replay_crypto);
+    }
+
+    #[tokio::test]
+    async fn consignment_registration_passes_configured_policy_and_credentials() {
+        let config = load_config(true);
+        let store = Arc::new(ConsignmentStore::default());
+        let keyring = build_keyring(
+            DataKeyDomain::Equipment,
+            Some(("fixture-equipment", "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=")),
+            [],
+        )
+        .unwrap();
+        let app = router_with_store(&config, ConsignmentActivation::Enabled, &store, keyring);
+        let status = send(&app, "GET", STATUS, None, StatusCode::OK).await;
+        assert_eq!(status["data"]["registration_ready"], true);
+        assert_eq!(status["data"]["fee_bps"], 175);
+        send(&app, "POST", REGISTER, Some(registration()), StatusCode::ACCEPTED).await;
+        let calls = store.registrations.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        let call = &calls[0];
+        assert!(call.sealer && call.replay_crypto);
+        assert_eq!(call.world, "isekai");
+        assert!(call.policy.enabled);
+        assert_eq!(call.policy.worlds, ListingWorlds { main: true, isekai: true });
+        assert_eq!(call.policy.consigned_fee_bps.value(), 175);
+        assert_eq!(call.policy.max_open_per_user, 13);
+        assert_eq!(call.policy.registrations_per_hour, 7);
+    }
+
+    #[tokio::test]
+    async fn consignment_disabled_preserves_owned_history_and_command_replay() {
+        let config = load_config(false);
+        let store = Arc::new(ConsignmentStore { replay: true, ..Default::default() });
+        let app = router_with_store(&config, ConsignmentActivation::Disabled, &store, None);
+        let history = send(&app, "GET", OWNED, None, StatusCode::OK).await;
+        assert_eq!(history["data"]["items"], json!([]));
+
+        let receipt = send(
+            &app,
+            "GET",
+            &format!("/api/v1/me/consignment/commands/{REGISTER_COMMAND}"),
+            None,
+            StatusCode::OK,
+        )
+        .await;
+        assert_eq!(receipt["data"]["http_status"], 202);
+        assert_eq!(receipt["data"]["receipt"]["listing_id"], LISTING.to_string());
+
+        let replay = send(&app, "POST", REGISTER, Some(registration()), StatusCode::ACCEPTED).await;
+        assert_eq!(replay["data"]["listing_id"], LISTING.to_string());
+        let repriced = send(
+            &app,
+            "PATCH",
+            &format!("{REGISTER}/{LISTING}/price"),
+            Some(json!({"command_id": REPRICE_COMMAND, "expected_version": 1, "price": 102})),
+            StatusCode::OK,
+        )
+        .await;
+        assert_eq!(repriced["data"]["listing_id"], LISTING.to_string());
+    }
+
+    fn router_with_store(
+        config: &AppConfig,
+        activation: ConsignmentActivation,
+        store: &Arc<ConsignmentStore>,
+        keyring: Option<Arc<auction_integrations::Keyring>>,
+    ) -> Router {
+        let state = PublicApiState::new(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(Arc::new(Session)),
+            configure_security(config).unwrap(),
+        );
+        let credentials = ConsignmentCredentials::from_keyring(keyring);
+        let state =
+            configure_consignment(state, &config.consignment, activation, Some(store), credentials)
                 .unwrap();
-        assert!(capabilities.enabled);
-        assert_eq!(capabilities.fee_bps.value(), 175);
-        assert!(capabilities.public_read.is_none());
-        assert!(capabilities.owned_read.is_none());
-        assert!(capabilities.register.is_none());
-        assert!(capabilities.manage.is_none());
-        assert!(!capabilities.registration_sealer_available);
-        assert!(capabilities.replay_crypto.is_none());
+        configure_router(state)
+    }
+
+    fn registration() -> Value {
+        json!({
+            "command_id": REGISTER_COMMAND,
+            "mode": "consigned",
+            "equipment_url": "https://hentaiverse.org/isekai/equip/42/0000000000",
+            "price": 101,
+            "expected_fee_bps": 175,
+        })
+    }
+
+    async fn send(
+        app: &Router,
+        method: &str,
+        uri: &str,
+        input: Option<Value>,
+        expected_status: StatusCode,
+    ) -> Value {
+        let mut request = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("cookie", "auction_public_session=fixture-session")
+            .header("x-auction-expected-user-id", SELLER.to_string());
+        let body = match input {
+            Some(input) => {
+                request =
+                    request.header("origin", ORIGIN).header("content-type", "application/json");
+                Body::from(input.to_string())
+            }
+            None => Body::empty(),
+        };
+        let mut request = request.body(body).unwrap();
+        request.extensions_mut().insert(ConnectInfo(SocketAddr::from(([192, 0, 2, 22], 3123))));
+        let response = app.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 8192).await.unwrap();
+        assert_eq!(status, expected_status, "{method} {uri}: {}", String::from_utf8_lossy(&body));
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    struct Session;
+
+    impl PublicSessionPort for Session {
+        fn current(
+            &self,
+            token: String,
+            _now: Timestamp,
+        ) -> ApplicationFuture<'_, PublicSessionIdentity> {
+            assert_eq!(token, "fixture-session");
+            Box::pin(async {
+                Ok(PublicSessionIdentity {
+                    user_id: SELLER,
+                    username: "fixture-seller".to_owned(),
+                    expires_at: None,
+                    absolute_expires_at: None,
+                })
+            })
+        }
+
+        fn inspect(
+            &self,
+            _token: String,
+            _now: Timestamp,
+        ) -> ApplicationFuture<'_, PublicSessionIdentity> {
+            panic!("测试不读取只读会话快照")
+        }
+
+        fn login(
+            &self,
+            _key: Vec<u8>,
+            _now: Timestamp,
+        ) -> ApplicationFuture<'_, PublicLoginResult> {
+            panic!("测试不登录")
+        }
+
+        fn logout(&self, _token: String, _now: Timestamp) -> ApplicationFuture<'_, ()> {
+            panic!("测试不退出")
+        }
+
+        fn get_preference(
+            &self,
+            _token: String,
+            _now: Timestamp,
+        ) -> ApplicationFuture<'_, PublicSessionPreferenceResult> {
+            panic!("测试不读会话偏好")
+        }
+
+        fn set_preference(
+            &self,
+            _token: String,
+            _command: SetPublicSessionPreferenceCommand,
+            _now: Timestamp,
+        ) -> ApplicationFuture<'_, PublicSessionPreferenceResult> {
+            panic!("测试不写会话偏好")
+        }
+    }
+
+    struct RegistrationCall {
+        policy: ListingRegistrationPolicy,
+        world: &'static str,
+        sealer: bool,
+        replay_crypto: bool,
+    }
+
+    #[derive(Default)]
+    struct ConsignmentStore {
+        registrations: Mutex<Vec<RegistrationCall>>,
+        replay: bool,
+    }
+
+    impl PublicListingRead for ConsignmentStore {
+        fn list_public(
+            &self,
+            _query: PublicListingQuery,
+        ) -> ConsignmentFuture<'_, ListingReadPage<PublicListingSummary>> {
+            panic!("测试不读公开列表")
+        }
+
+        fn public_detail(
+            &self,
+            _listing_id: Uuid,
+        ) -> ConsignmentFuture<'_, Option<PublicListingDetail>> {
+            panic!("测试不读公开详情")
+        }
+
+        fn registration_availability<'a>(
+            &'a self,
+            _crypto: &'a dyn RegistrationReplayCrypto,
+        ) -> ConsignmentFuture<'a, ListingRegistrationAvailability> {
+            Box::pin(async {
+                Ok(ListingRegistrationAvailability::Ready(ListingWorlds {
+                    main: true,
+                    isekai: true,
+                }))
+            })
+        }
+    }
+
+    impl OwnedListingRead for ConsignmentStore {
+        fn list_owned(
+            &self,
+            seller: UserId,
+            query: PrivateListingQuery,
+        ) -> ConsignmentFuture<'_, ListingReadPage<OwnedListingRecord>> {
+            assert_eq!(seller.as_uuid(), SELLER);
+            Box::pin(async move {
+                Ok(ListingReadPage { items: vec![], total: 0, window: query.window })
+            })
+        }
+
+        fn owned_detail(
+            &self,
+            _seller: UserId,
+            _listing_id: Uuid,
+        ) -> ConsignmentFuture<'_, Option<OwnedListingRecord>> {
+            panic!("测试不读本人详情")
+        }
+
+        fn owned_command(
+            &self,
+            seller: UserId,
+            command_id: CommandId,
+        ) -> ConsignmentFuture<'_, Option<OwnedListingCommandReceipt>> {
+            assert_eq!(seller.as_uuid(), SELLER);
+            assert_eq!(command_id.as_uuid(), REGISTER_COMMAND);
+            Box::pin(async move {
+                let registered = ListingRegistered::new(LISTING, ListingPrice::new(101).unwrap())?;
+                Ok(Some(OwnedListingCommandReceipt {
+                    command_id,
+                    decision: OwnedListingDecision::Register(StoredListingDecision::Accepted(
+                        registered,
+                    )),
+                }))
+            })
+        }
+    }
+
+    impl ListingCommandStore for ConsignmentStore {
+        fn register<'a>(
+            &'a self,
+            command: RegisterListingCommand<'a>,
+            sealer: Option<&'a dyn EquipmentKeySealerPort>,
+            replay_crypto: Option<&'a dyn RegistrationReplayCrypto>,
+        ) -> ConsignmentFuture<'a, ListingCommandOutcome<ListingRegistered>> {
+            assert_eq!(command.seller_user_id.as_uuid(), SELLER);
+            assert_eq!(command.command_id.as_uuid(), REGISTER_COMMAND);
+            let sealer = sealer.is_some();
+            let replay_crypto = replay_crypto.is_some();
+            self.registrations.lock().unwrap().push(RegistrationCall {
+                policy: command.policy,
+                world: command.input.identity.world_id(),
+                sealer,
+                replay_crypto,
+            });
+            let price = command.input.price;
+            Box::pin(async move {
+                if self.replay {
+                    assert!(!command.policy.enabled);
+                    let registered = ListingRegistered::new(LISTING, price)?;
+                    return Ok(ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(
+                        registered,
+                    )));
+                }
+                if !sealer || !replay_crypto {
+                    return Err(ConsignmentError::Unavailable);
+                }
+                Ok(ListingCommandOutcome::Accepted(ListingRegistered::new(
+                    command.listing_id,
+                    price,
+                )?))
+            })
+        }
+
+        fn reprice(
+            &self,
+            command: RepriceListingCommand,
+        ) -> ConsignmentFuture<'_, ListingCommandOutcome<ListingPriceReceipt>> {
+            assert!(self.replay && !command.enabled);
+            assert_eq!(command.target.command_id.as_uuid(), REPRICE_COMMAND);
+            assert_eq!(command.target.listing_id, LISTING);
+            Box::pin(async move {
+                let receipt = ListingPriceReceipt::new(
+                    LISTING,
+                    command.target.expected_version,
+                    ListingState::Displayed,
+                    command.price,
+                    ListingPriceDisposition::Unchanged,
+                )?;
+                Ok(ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(receipt)))
+            })
+        }
+
+        fn withdraw(
+            &self,
+            _command: WithdrawListingCommand,
+        ) -> ConsignmentFuture<'_, ListingCommandOutcome<ListingClosed>> {
+            panic!("测试不取消")
+        }
+
+        fn apply_lookup(
+            &self,
+            _command: ApplyListingLookupCommand,
+        ) -> ConsignmentFuture<'_, ListingCommandOutcome<ListingLookupEffect>> {
+            panic!("测试不解析")
+        }
+
+        fn auto_close(
+            &self,
+            _command: AutoCloseListingCommand,
+        ) -> ConsignmentFuture<'_, ListingCommandOutcome<ListingAutoCloseEffect>> {
+            panic!("测试不清退")
+        }
+
+        fn admin_delist(
+            &self,
+            _command: AdminDelistListingCommand,
+        ) -> ConsignmentFuture<'_, ListingCommandOutcome<ListingClosed>> {
+            panic!("Public 不执行下架")
+        }
     }
 
     #[test]

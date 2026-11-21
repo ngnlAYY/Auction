@@ -48,12 +48,14 @@ async fn status(
     strict: bool,
     require_current_equipment: bool,
 ) -> anyhow::Result<()> {
-    super::with_worker_store(
-        config_dir,
+    let config = config_dir.load_worker()?;
+    ConfigDir::validate_consignment(&config)?;
+    super::with_config_store(
+        &config,
         auction_storage::DatabaseConnectionPurpose::CliOperations,
-        async |config, store| {
+        async |store| {
             if require_current_equipment {
-                let keyring = keyring(config, DataKeyDomain::Equipment)?
+                let keyring = keyring(&config, DataKeyDomain::Equipment)?
                     .context("装备域缺少当前数据密钥，无法核对退休条件")?;
                 return print_json(&equipment::verify_current(store.as_ref(), &keyring).await?);
             }
@@ -61,7 +63,7 @@ async fn status(
             let mut domains = serde_json::Map::new();
             let mut failures = Vec::new();
             for domain in DATABASE_DOMAINS {
-                let keyring = keyring(config, domain)?;
+                let keyring = keyring(&config, domain)?;
                 let stored = auction_storage::stored_key_ids(pool, domain)
                     .await
                     .with_context(|| format!("读取 {} 域信封 key ID 失败", domain.as_str()))?;
@@ -111,7 +113,7 @@ async fn status(
                 );
             }
             // 诊断归档使用独立域，但延用 credential/equipment 的历史文件；状态只报告配置。
-            let diagnostics = keyring(config, DataKeyDomain::MailDiagnostics)?;
+            let diagnostics = keyring(&config, DataKeyDomain::MailDiagnostics)?;
             domains.insert(
                 DataKeyDomain::MailDiagnostics.as_str().to_owned(),
                 json!({
@@ -185,6 +187,7 @@ fn plan(args: &KeysReencryptArgs) -> anyhow::Result<ReencryptPlan<'_>> {
 async fn reencrypt(config_dir: &ConfigDir, args: KeysReencryptArgs) -> anyhow::Result<()> {
     let plan = plan(&args)?;
     let config = config_dir.load_worker()?;
+    ConfigDir::validate_consignment(&config)?;
     // 全部域的密钥环在连接数据库之前装配：缺失或无效的配置不能在改写了前一个域之后才暴露。
     let mut keyrings = Vec::with_capacity(plan.domains.len());
     for domain in &plan.domains {

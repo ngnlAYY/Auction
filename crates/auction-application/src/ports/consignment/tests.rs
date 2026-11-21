@@ -47,6 +47,7 @@ use crate::ports::core::RepositoryError;
 
 const WORK_ID: Uuid = Uuid::from_u128(12);
 const LISTING_ID: Uuid = Uuid::from_u128(13);
+const CLIENT_COMMAND_ID: Uuid = uuid!("00000000-0000-4000-8000-00000000000b");
 const FAKE_TOKEN: Uuid = uuid!("12345678-1234-4234-8234-123456789abc");
 const FAKE_EQUIPMENT_KEY: &str = "FA1234FA00";
 
@@ -1092,7 +1093,7 @@ fn registration_fake_records_every_policy_field() {
     for policy in policies {
         commands.register.reply(Err(ConsignmentError::OutcomeUnknown));
         let command = RegisterListingCommand {
-            command_id: CommandId::from_uuid(Uuid::from_u128(11)),
+            command_id: CommandId::from_uuid(CLIENT_COMMAND_ID),
             seller_user_id: UserId::from_uuid(Uuid::from_u128(10)),
             request_id: None,
             input: RegistrationInput {
@@ -1127,7 +1128,7 @@ fn scripted_ports_report_calls_and_preserve_unknown_outcomes() {
     let reads = FakeListingReads::default();
     let work = FakeLookupWork::default();
     let equipment = FakeListingEquipment::default();
-    let command_id = CommandId::from_uuid(Uuid::from_u128(11));
+    let command_id = CommandId::from_uuid(CLIENT_COMMAND_ID);
     let seller_user_id = UserId::from_uuid(Uuid::from_u128(10));
     let price = ListingPrice::new(101).fixture();
     equipment.url.reply(Ok(ListingEquipmentReference {

@@ -74,7 +74,7 @@ async fn delist_success_and_closed_replay_return_identical_receipt_with_session_
     assert_eq!(accepted, replay);
 
     let mut fresh = body(REASON);
-    let new_command = Uuid::from_u128(0xbabe);
+    let new_command = Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_babe);
     fresh["command_id"] = json!(new_command);
     failure(delist(&fixture, fresh).await, StatusCode::CONFLICT, "listing_not_active").await;
 
@@ -291,6 +291,7 @@ async fn delist_rejects_noncanonical_targets_and_strict_json_shape_before_port()
     for command_id in [
         json!("bad-id"),
         json!(Uuid::nil()),
+        json!(Uuid::from_u128(0xcab)),
         json!(COMMAND.to_string().to_uppercase()),
         json!(COMMAND.simple().to_string()),
         json!(1),

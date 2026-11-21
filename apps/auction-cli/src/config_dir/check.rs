@@ -109,12 +109,8 @@ pub(crate) fn check(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<Depl
         let metadata = regular_file(&path, "角色配置")?;
         permissions.not_writable_by_others(&path, "角色配置", &metadata)?;
         let config = config_dir.load(role)?;
-        validate_consignment(
-            config.consignment.enabled(),
-            cfg!(feature = "consignment-dev-preview"),
-            cfg!(debug_assertions),
-        )
-        .with_context(|| format!("校验 {} 一口价挂单配置失败", role.name()))?;
+        ConfigDir::validate_consignment(&config)
+            .with_context(|| format!("校验 {} 一口价挂单配置失败", role.name()))?;
         let common = config.common_config_path.as_deref().context("角色配置缺少 common_file")?;
         let metadata = regular_file(common, "公共配置")?;
         permissions.not_writable_by_others(common, "公共配置", &metadata)?;
@@ -180,6 +176,17 @@ pub(crate) fn check(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<Depl
         warnings: permissions.warnings,
         database_budget,
     })
+}
+
+impl ConfigDir {
+    /// 已加载的配置须通过同一个 CLI 制品门，调用方在连接数据库前校验。
+    pub(crate) fn validate_consignment(config: &AppConfig) -> anyhow::Result<()> {
+        validate_consignment(
+            config.consignment.enabled(),
+            cfg!(feature = "consignment-dev-preview"),
+            cfg!(debug_assertions),
+        )
+    }
 }
 
 fn validate_consignment(enabled: bool, preview: bool, debug: bool) -> anyhow::Result<()> {

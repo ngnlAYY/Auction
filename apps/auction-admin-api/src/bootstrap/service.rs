@@ -6,10 +6,12 @@ use std::time::Duration;
 
 use anyhow::Context;
 use auction_config::{AppConfig, CONSIGNMENT_COMPLETE, Role, consignment_activation};
+use auction_http::AdminApiState;
 use auction_observability::{DiagnosticLogOwner, ProcessMetrics, TracingConfig, TracingRuntime};
 use auction_process::{
     DrainOutcome, TaskGuard, TerminationSignals, join_error_kind, wait_for_drain,
 };
+use axum::Router;
 use tokio::sync::oneshot;
 
 use super::{listener, state};
@@ -21,11 +23,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         None => AppConfig::load(Role::Admin),
     }
     .context("加载 admin-api 配置失败")?;
-    validate_consignment(
-        config.consignment.enabled(),
-        cfg!(feature = "consignment-dev-preview"),
-        cfg!(debug_assertions),
-    )?;
+    startup_preflight(&config, cfg!(feature = "consignment-dev-preview"), cfg!(debug_assertions))?;
     let mut signals = TerminationSignals::subscribe().context("订阅 admin-api 终止信号失败")?;
     let tracing_config = tracing_config(&config.tracing);
     let telemetry = auction_observability::init_with_config(
@@ -51,8 +49,8 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     result
 }
 
-fn validate_consignment(enabled: bool, preview: bool, debug: bool) -> anyhow::Result<()> {
-    consignment_activation(enabled, CONSIGNMENT_COMPLETE, preview, debug)
+fn startup_preflight(config: &AppConfig, preview: bool, debug: bool) -> anyhow::Result<()> {
+    consignment_activation(config.consignment.enabled(), CONSIGNMENT_COMPLETE, preview, debug)
         .context("校验 Admin 一口价挂单制品能力失败")?;
     Ok(())
 }
@@ -115,15 +113,7 @@ async fn run_service(
     let state = state.with_metrics(metrics);
     let mut heartbeat_task =
         heartbeat.as_ref().map(Arc::clone).map(state::spawn_heartbeat).map(TaskGuard::new);
-    // 传入本二进制的版本，健康检查才能报告运行进程的版本而非契约 crate 的版本。
-    let boundary = state.http_boundary();
-    let app =
-        auction_http::admin_router_with_web_script_policy::<crate::web_assets::AdminWebAssets>(
-            env!("CARGO_PKG_VERSION"),
-            boundary,
-            web_script_policy(),
-        )
-        .with_state(state);
+    let app = configure_router(state);
 
     tracing::info!(
         listener = %bound_listener.description(),
@@ -212,6 +202,16 @@ async fn run_service(
     result
 }
 
+pub(super) fn configure_router(state: AdminApiState) -> Router {
+    // 健康检查报告运行进程的版本。
+    auction_http::admin_router_with_web_script_policy::<crate::web_assets::AdminWebAssets>(
+        env!("CARGO_PKG_VERSION"),
+        state.http_boundary(),
+        web_script_policy(),
+    )
+    .with_state(state)
+}
+
 fn abort_heartbeat_task(task: &Option<TaskGuard<()>>) {
     if let Some(task) = task {
         task.abort();
@@ -266,20 +266,40 @@ fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
 
 #[cfg(test)]
 mod tests {
-    use auction_config::ConfigError;
+    use std::fs;
 
-    use super::validate_consignment;
+    use auction_config::{AppConfig, ConfigError, Role};
+    use uuid::Uuid;
+
+    use super::startup_preflight;
 
     #[test]
     fn consignment_startup_requires_debug_preview() {
+        let enabled = load_consignment_config(true);
         for (preview, debug) in [(false, false), (true, false), (false, true)] {
-            let error = validate_consignment(true, preview, debug).unwrap_err();
+            let error = startup_preflight(&enabled, preview, debug).unwrap_err();
             assert!(matches!(
                 error.downcast_ref::<ConfigError>(),
                 Some(ConfigError::ConsignmentPreviewRequired)
             ));
         }
-        validate_consignment(true, true, true).unwrap();
-        validate_consignment(false, false, false).unwrap();
+        startup_preflight(&enabled, true, true).unwrap();
+        let disabled = load_consignment_config(false);
+        startup_preflight(&disabled, false, false).unwrap();
+    }
+
+    fn load_consignment_config(enabled: bool) -> AppConfig {
+        let directory =
+            std::env::temp_dir().join(format!("auction-admin-startup-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let role_path = directory.join("admin.toml");
+        fs::write(&role_path, "common_file = 'common.toml'\nsecrets_file = 'secrets.toml'\n")
+            .unwrap();
+        fs::write(directory.join("common.toml"), format!("[consignment]\nenabled = {enabled}\n"))
+            .unwrap();
+        fs::write(directory.join("secrets.toml"), "").unwrap();
+        let config = AppConfig::load_from_path(Role::Admin, role_path);
+        fs::remove_dir_all(directory).unwrap();
+        config.unwrap()
     }
 }
