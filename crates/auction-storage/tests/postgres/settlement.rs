@@ -39,7 +39,9 @@ use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::delivery::{
     DeliverySentConfirmationPort, ManualSentEvidence, SentConfirmationCommand,
 };
-use auction_application::public::{PublicCompensationLotRequest, PublicCompensationReader};
+use auction_application::public::{
+    PublicCompensationLotRequest, PublicCompensationMovementRequest, PublicCompensationReader,
+};
 use auction_application::realtime::{PublicRealtimeReader, PublicRealtimeRequest};
 use auction_application::recovery::RecoveryWorkStore;
 use auction_application::settlement::{
@@ -782,6 +784,30 @@ async fn postgres_settlement_report_reads_consistent_snapshot_as_runtime_account
         .expect("公开逐件结算包含成交 lot");
     assert_eq!(public_sold.leader_held_nanos, expected_held);
     assert_eq!(public_sold.hold_ppm, sold.hold_ppm);
+
+    let past_end = service
+        .list_public_compensation_lots(
+            seeded.auction_id,
+            PublicCompensationLotRequest { limit: 10, offset: public_lots.total + 10 },
+        )
+        .await
+        .expect("超末页逐件结算")
+        .expect("空页仍属于已结算场次");
+    assert!(past_end.entries.is_empty());
+    assert_eq!(past_end.total, public_lots.total);
+    assert_eq!(past_end.round, public_lots.round);
+
+    let ledger = service
+        .list_public_compensation_movements(
+            seeded.auction_id,
+            PublicCompensationMovementRequest { limit: 10, offset: movements + 10 },
+        )
+        .await
+        .expect("超末页补偿流水")
+        .expect("空页仍属于已结算场次");
+    assert!(ledger.entries.is_empty());
+    assert_eq!(ledger.total, movements);
+    assert_eq!(ledger.round, public_lots.round);
     let unsold = report
         .lots
         .iter()

@@ -172,9 +172,7 @@ impl PublicCompensationMovementPage {
         })?;
         if self.total != self.round.movement_count
             || self.total < 2
-            || entry_count > self.limit
-            || self.offset > self.total
-            || entry_count != self.limit.min(self.total - self.offset)
+            || entry_count != self.total.saturating_sub(self.offset).clamp(0, self.limit)
         {
             return Err("公开补偿账本页无效");
         }

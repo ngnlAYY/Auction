@@ -148,6 +148,8 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/auctions/{auction_id}/forum` | — | 该场论坛主题的公开镜像 |
 | GET, HEAD | `/api/v1/auctions/{auction_id}/countdown/{timer}` | — | 论坛帖内嵌的倒计时 SVG 图片 |
 
+补偿池的单场流水与逐件结算编号页在超出末页时返回空列表，保留同一快照的场次摘要和总数。
+
 成交历史编号页的统计覆盖全部匹配记录。没有匹配时 `rows` 为空，`total`、`stats.count`、`stats.min`、`stats.max` 和 `stats.median` 均为 `0`，省略 `stats.median_exact`。页码超出末页时 `rows` 为空，仍返回匹配集合的总数与统计。
 
 ### 已结算场次摘要
