@@ -5,6 +5,7 @@ import { ConsignmentUuidSchema } from "@auction/contracts/dto/public/consignment
 import { ApiErrorResponseSchema, apiResponseSchema } from "@auction/contracts/dto/response";
 import { decode } from "@auction/contracts/wire";
 import { transportErrorCode } from "@auction/web-shared/net/transport";
+import { type JsonFieldPolicy, jsonHasExactKeys } from "@auction/web-shared/net/wire";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import type { GenericSchema } from "valibot";
 
@@ -43,10 +44,13 @@ const HTTP_ERRORS = new Set([
   "session_changed",
   "stale_version",
   "storage_unavailable",
+  "timeout",
   "unsupported_media_type",
   "unauthenticated",
   "world_unavailable",
 ]);
+const ERROR_KEYS = ["code", "message", "data", "request_id"];
+const SUCCESS_KEYS = ["code", "message", "data"];
 
 /** 只暴露 HTTP 状态及安全的错误分类；保留合同的逐码结果。 */
 export type ConsignmentPrivateError = CommandError;
@@ -68,6 +72,7 @@ export async function requestPrivateConsignment<T>(
   status: 200 | 202,
   schema: GenericSchema<unknown, T>,
   signal: AbortSignal,
+  integerPaths: NonNullable<JsonFieldPolicy["integerPaths"]>,
 ): Promise<Result<T, ConsignmentPrivateError>> {
   if (!validConsignmentUuid(userId)) return err({ status: 400, code: "invalid_expected_user_id" });
 
@@ -104,7 +109,9 @@ export async function requestPrivateConsignment<T>(
   );
   if (!dispatched) return err(COMMAND_NOT_SENT);
   if (signal.aborted) return err({ status: 0, code: "network_error" });
-  if (unauthorized) return err({ status: 401, code: "unauthenticated" });
+  if (unauthorized && request.method === "GET") {
+    return err({ status: 401, code: "unauthenticated" });
+  }
   if (!sent.ok)
     return err({
       status: sent.error.kind === "network" ? (sent.error.status ?? 0) : 0,
@@ -113,15 +120,19 @@ export async function requestPrivateConsignment<T>(
 
   const response = sent.value;
   const invalid = { status: response.status, code: "invalid_response" };
-  const json = response.json({ uniqueKeys: "all" });
+  const json = response.json({ uniqueKeys: "all", integerPaths });
   if (!json.ok) return err(invalid);
   if (response.status === status) {
+    if (request.method !== "GET" && !jsonHasExactKeys(json.value, SUCCESS_KEYS))
+      return err(invalid);
     const decoded = decode(apiResponseSchema(schema), json.value);
     return decoded.ok && decoded.value.code === (status === 202 ? "accepted" : "ok")
       ? ok(decoded.value.data)
       : err(invalid);
   }
   if (response.status < 400) return err(invalid);
+  // 不变量 1：写入只有收到完整错误外壳，才可据状态码和协议码判定原命令。
+  if (request.method !== "GET" && !jsonHasExactKeys(json.value, ERROR_KEYS)) return err(invalid);
   const decoded = decode(ApiErrorResponseSchema, json.value);
   if (!decoded.ok || decoded.value.data !== null) return err(invalid);
 

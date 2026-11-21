@@ -1,6 +1,7 @@
 // 未知结果重放、刷新优先查回执、敏感字段和换号隔离。
 
 import { expect, test } from "bun:test";
+import { parseJson } from "@auction/web-shared/net/wire";
 
 import {
   ALICE,
@@ -26,6 +27,7 @@ import {
   fakeClock,
   fakeFetch,
   LISTING_A,
+  LISTING_B,
   response,
   STATUS_PATH,
   settle,
@@ -35,6 +37,222 @@ import {
 const NEW = "/consignment/new";
 const DETAIL = `/consignment/me/${LISTING_A}`;
 const RETRY = "Retry original request";
+const REPRICE = "Change asking price";
+const WITHDRAW = "Cancel listing";
+const PENDING_KEY = `hv.consignment.pending.${ALICE.user_id}`;
+const OPERATIONS = ["register", "reprice", "withdraw"] as const;
+type Operation = (typeof OPERATIONS)[number];
+
+function attemptWrite(page: Awaited<ReturnType<typeof mountPrivate>>, operation: Operation) {
+  if (operation === "register") {
+    fill(page);
+    submitRegistration(page);
+    return;
+  }
+  const label = operation === "reprice" ? REPRICE : WITHDRAW;
+  controlEvent(page.button(label), "onClick");
+  const form = page.form(label);
+  if (form === null) return;
+  if (operation === "reprice") {
+    controlEvent(
+      page.find((node) => node.attributes.inputmode === "numeric"),
+      "onInput",
+      "102",
+    );
+  }
+  controlEvent(form, "onSubmit");
+}
+
+async function assertWriteRelease(
+  operation: Operation,
+  pretendReply: (commandId: string) => Response,
+  releases: boolean,
+  pausesSession = false,
+) {
+  const storage = memory();
+  const transport = fakeFetch((request) => {
+    if (request.url.pathname === STATUS_PATH) return response(status(true));
+    if (isWrite(request)) return pretendReply(String(requestBody(request).command_id));
+    return response(listing("displayed", { allowed_actions: ["reprice", "withdraw"] }));
+  });
+  const page = await mountPrivate(operation === "register" ? NEW : DETAIL, ALICE, storage);
+  try {
+    await settle();
+    attemptWrite(page, operation);
+    const recorded = storage.session.get(PENDING_KEY);
+    const firstId = requestBody(transport.requests.find(isWrite)).command_id;
+    const marker = parseJson(recorded ?? "");
+    expect(marker).toMatchObject({ ok: true, value: { operation, command_id: firstId } });
+    expect(typeof firstId).toBe("string");
+    await settle();
+    expect(storage.session.get(PENDING_KEY)).toBe(releases ? "null" : recorded);
+    if (pausesSession) {
+      expect(transport.requests.filter(isWrite)).toHaveLength(1);
+      return;
+    }
+    attemptWrite(page, operation);
+    await settle();
+    const writes = transport.requests.filter(isWrite);
+    expect(writes.map((request) => requestBody(request).command_id)).toHaveLength(releases ? 2 : 1);
+    if (releases) expect(requestBody(writes[1]).command_id).not.toBe(firstId);
+  } finally {
+    page.dispose();
+    transport.restore();
+  }
+}
+
+for (const operation of OPERATIONS) {
+  test(`${operation} 成功状态响应头到达后正文断流，保留未决且禁发新 ID`, () =>
+    assertWriteRelease(
+      operation,
+      () =>
+        new Response(
+          new ReadableStream({
+            start(stream) {
+              stream.enqueue(new TextEncoder().encode('{"code":'));
+              stream.error(new Error("测试正文断流"));
+            },
+          }),
+          { status: operation === "register" ? 202 : 200 },
+        ),
+      false,
+    ));
+
+  test(`${operation} 未知 409 保留未决且禁发新 ID`, () =>
+    assertWriteRelease(operation, () => failure(409, "fake_new_rejection"), false));
+
+  test(`${operation} 状态与协议码错配的 429 invalid_price 保留未决且禁发新 ID`, () =>
+    assertWriteRelease(operation, () => failure(429, "invalid_price"), false));
+
+  test(`${operation} 400 invalid_price 缺 data 或 request_id，保留未决且禁发新 ID`, async () => {
+    for (const code of ["invalid_price", "invalid_listing_request"]) {
+      const partial = { code, message: "" };
+      for (const body of [partial, { ...partial, data: null }, { ...partial, request_id: null }]) {
+        await assertWriteRelease(operation, () => Response.json(body, { status: 400 }), false);
+      }
+    }
+  });
+
+  test(`${operation} 路由拒绝与共享守卫须匹配完整状态和协议码`, async () => {
+    const [http, code] =
+      operation === "register"
+        ? ([409, "fee_changed"] as const)
+        : ([409, "stale_version"] as const);
+    await assertWriteRelease(operation, () => failure(http, code), true);
+    await assertWriteRelease(
+      operation,
+      () => failure(409, operation === "register" ? "stale_version" : "fee_changed"),
+      false,
+    );
+    await assertWriteRelease(
+      operation,
+      () => failure(400, "invalid_query"),
+      operation !== "register",
+    );
+    for (const [status, guard] of [
+      [400, "invalid_expected_user_id"],
+      [401, "unauthenticated"],
+      [409, "session_changed"],
+      [429, "rate_limited"],
+    ] as const) {
+      await assertWriteRelease(
+        operation,
+        () => failure(status, guard),
+        true,
+        status === 401 || guard === "session_changed",
+      );
+    }
+  });
+
+  test(`${operation} 5xx 始终保留未决且禁发新 ID`, async () => {
+    for (const [http, code] of [
+      [503, "outcome_unknown"],
+      [503, "consignment_unavailable"],
+      [503, "storage_unavailable"],
+      [504, "timeout"],
+    ] as const) {
+      await assertWriteRelease(operation, () => failure(http, code), false);
+    }
+  });
+
+  test(`${operation} 舍入为合法版本的原始 JSON 回执保留未决且禁发新 ID`, () => {
+    const registration = operation === "register";
+    const withdraw = operation === "withdraw";
+    const version = registration ? 1 : 4;
+    return assertWriteRelease(
+      operation,
+      (commandId) => {
+        const data = receipt(commandId, {
+          operation,
+          listing_version: version,
+          disposition: registration ? "registered" : withdraw ? "closed" : "repriced",
+          state: registration ? "resolving" : withdraw ? "closed" : "displayed",
+          price: registration ? 101 : withdraw ? null : 102,
+        });
+        const body = JSON.stringify({ code: registration ? "accepted" : "ok", message: "", data });
+        return new Response(
+          body.replace(
+            `"listing_version":${version}`,
+            `"listing_version":${version}.00000000000000001`,
+          ),
+          { status: registration ? 202 : 200 },
+        );
+      },
+      false,
+    );
+  });
+}
+
+test("已存拒绝回执必须匹配目标，错挂单仍可查询，正确回执才清除未决", async () => {
+  const storage = memory();
+  let query = 0;
+  const transport = fakeFetch((request) => {
+    if (isWrite(request)) return failure(503, "outcome_unknown");
+    if (request.url.pathname.startsWith(COMMAND_PATH)) {
+      query += 1;
+      const commandId = request.url.pathname.slice(COMMAND_PATH.length + 1);
+      return response({
+        code: "stale_version",
+        http_status: 409,
+        receipt: {
+          ...receipt(commandId, {
+            operation: "reprice",
+            listing_id: query === 1 ? LISTING_B : LISTING_A,
+            listing_version: 4,
+            state: "displayed",
+            price: null,
+          }),
+          disposition: "rejected",
+        },
+      });
+    }
+    return response(listing("displayed", { allowed_actions: ["reprice"] }));
+  });
+  const page = await mountPrivate(DETAIL, ALICE, storage);
+  try {
+    await settle();
+    attemptWrite(page, "reprice");
+    await settle();
+    const recorded = storage.session.get(PENDING_KEY);
+    expect(recorded).toContain(LISTING_A);
+    controlEvent(page.button("Retry"), "onClick");
+    await settle();
+    expect(query).toBe(1);
+    expect(storage.session.get(PENDING_KEY)).toBe(recorded);
+    expect(page.button(REPRICE)?.attributes.disabled).toBe(true);
+    expect(page.button("Retry")).not.toBeNull();
+    attemptWrite(page, "reprice");
+    controlEvent(page.button("Retry"), "onClick");
+    await settle();
+    expect(query).toBe(2);
+    expect(storage.session.get(PENDING_KEY)).toBe("null");
+    expect(page.button(REPRICE)?.attributes.disabled).toBe(false);
+    expect(transport.requests.filter(isWrite)).toHaveLength(1);
+  } finally {
+    page.dispose();
+    transport.restore();
+  }
+});
 
 test("登记超时锁住新 ID；刷新查 404 后重新输入，世界和 EID 不符拒绝，原参数重送", async () => {
   const clock = fakeClock();

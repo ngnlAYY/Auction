@@ -22,6 +22,29 @@ import {
 } from "./consignment-private";
 
 const OWNED = "/api/v1/me/consignment";
+const OWNED_INTEGERS = [
+  ["version"],
+  ["price"],
+  ["pricing_version"],
+  ["fee_bps"],
+  ["estimated_fee"],
+  ["estimated_seller_amount"],
+  ["view", "progress", "attempts"],
+  ["view", "progress", "max_attempts"],
+  ["view", "equipment", "level", "value"],
+] as const;
+const PAGE_INTEGERS = [
+  ["data", "total"],
+  ["data", "page"],
+  ["data", "page_size"],
+  ...OWNED_INTEGERS.map((path) => ["data", "items", null, ...path]),
+];
+const DETAIL_INTEGERS = OWNED_INTEGERS.map((path) => ["data", ...path]);
+const STORED_RECEIPT_INTEGERS = [
+  ["data", "http_status"],
+  ["data", "receipt", "listing_version"],
+  ["data", "receipt", "price"],
+] as const;
 
 /** 本人页的筛选参数，其中 state 始终匹配有效态。 */
 export interface OwnedConsignmentQuery {
@@ -68,6 +91,7 @@ export async function fetchOwnedConsignmentListings(
     200,
     OwnedListingPageSchema,
     signal,
+    PAGE_INTEGERS,
   );
   if (!result.ok) return result;
   const { items, page, page_size } = result.value;
@@ -100,6 +124,7 @@ export async function fetchOwnedConsignmentListing(
     200,
     OwnedListingSchema,
     signal,
+    DETAIL_INTEGERS,
   );
   return result.ok && result.value.listing_id !== listingId
     ? err({ status: 200, code: "invalid_response" })
@@ -120,6 +145,7 @@ export async function fetchConsignmentCommand(
     200,
     StoredCommandResultSchema,
     signal,
+    STORED_RECEIPT_INTEGERS,
   );
   return result.ok &&
     (result.value.receipt.command_id !== commandId ||

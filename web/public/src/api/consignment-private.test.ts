@@ -1,6 +1,7 @@
 // 六条本人 API 的同源传输、闭集解码和错误分类。
 
 import { expect, test } from "bun:test";
+import type { OwnedListing } from "@auction/contracts/dto/public/consignment";
 
 import {
   ALICE,
@@ -246,13 +247,141 @@ test.each(ERRORS)("HTTP %i %s 单独保留安全分类", async (status, code) =>
 
 test("未知错误字符串与来源正文无回显", async () => {
   const transport = fakeFetch(() =>
-    Response.json({ code: FIXTURE_FRAGMENT, message: EQUIPMENT_URL, data: null }, { status: 409 }),
+    Response.json(
+      { code: FIXTURE_FRAGMENT, message: EQUIPMENT_URL, data: null, request_id: null },
+      { status: 409 },
+    ),
   );
   try {
     expect(await registerConsignmentListing(USER, REGISTER, SIGNAL())).toEqual({
       ok: false,
       error: { status: 409, code: "unknown_error" },
     });
+  } finally {
+    transport.restore();
+  }
+});
+
+test("发送前取消由共享传输确认未发送，三条写路由均未发包", async () => {
+  const transport = fakeFetch(() => failure(503, "outcome_unknown"));
+  const signal = AbortSignal.abort();
+  try {
+    for (const send of [
+      () => registerConsignmentListing(USER, REGISTER, signal),
+      () => repriceConsignmentListing(USER, LISTING_A, REPRICE, signal),
+      () => withdrawConsignmentListing(USER, LISTING_A, WITHDRAW, signal),
+    ]) {
+      expect(await send()).toEqual({
+        ok: false,
+        error: { status: 0, code: "command_not_sent" },
+      });
+    }
+    expect(transport.requests).toHaveLength(0);
+  } finally {
+    transport.restore();
+  }
+});
+
+test("同价改价 unchanged 以原版本结案，递增版本的回执无效", async () => {
+  let version = 3;
+  const transport = fakeFetch(() =>
+    response(
+      receipt(COMMAND_ID, {
+        operation: "reprice",
+        state: "displayed",
+        listing_version: version,
+        disposition: "unchanged",
+      }),
+    ),
+  );
+  try {
+    const first = await repriceConsignmentListing(USER, LISTING_A, REPRICE, SIGNAL());
+    expect(first.ok && first.value.disposition === "unchanged" && first.value.listing_version).toBe(
+      3,
+    );
+    version = 4;
+    expect(await repriceConsignmentListing(USER, LISTING_A, REPRICE, SIGNAL())).toEqual({
+      ok: false,
+      error: { status: 200, code: "invalid_response" },
+    });
+  } finally {
+    transport.restore();
+  }
+});
+
+function rawInteger(data: unknown, field: string): Response {
+  const body = JSON.stringify({ code: "ok", message: "", data });
+  const raw = body.replace(
+    new RegExp(`"${field}":(\\d+)`, "u"),
+    (_match, digits) => `"${field}":${digits === "0" ? "-0" : `${digits}.00000000000000001`}`,
+  );
+  if (raw === body) throw new Error("整数词法测试未改写目标字段");
+  return new Response(raw);
+}
+
+test("私有详情和列表逐个拒绝舍入为合法值的整数词法，保留小数装备属性", async () => {
+  const resolving = listing("resolving");
+  const displayed = listing("displayed");
+  if (displayed.view.kind !== "displayed") throw new Error("缺少已展示夹具");
+  const equipment = {
+    ...displayed.view.equipment,
+    level: { kind: "assigned", value: 101 } as const,
+    stat_groups: [{ name: "Damage", stats: [{ name: "Impact", value: 2.5, base: 1.25 }] }],
+  };
+  const published: OwnedListing = { ...displayed, view: { kind: "displayed", equipment } };
+  const fields = [
+    "version",
+    "price",
+    "pricing_version",
+    "fee_bps",
+    "estimated_fee",
+    "estimated_seller_amount",
+    "attempts",
+    "max_attempts",
+    "value",
+  ];
+  let field: string | null = null;
+  const transport = fakeFetch(({ url }) => {
+    const row = field === null || field === "value" ? published : resolving;
+    const data = url.pathname === OWNED_PATH ? pageData(url, [row]) : row;
+    return field === null ? response(data) : rawInteger(data, field);
+  });
+  try {
+    for (const read of [
+      () => fetchOwnedConsignmentListing(USER, LISTING_A, SIGNAL()),
+      () => fetchOwnedConsignmentListings(USER, QUERY, SIGNAL()),
+    ]) {
+      field = null;
+      expect((await read()).ok).toBe(true);
+      for (field of fields) {
+        expect(await read()).toEqual({
+          ok: false,
+          error: { status: 200, code: "invalid_response" },
+        });
+      }
+    }
+    for (field of ["total", "page", "page_size"]) {
+      expect(await fetchOwnedConsignmentListings(USER, QUERY, SIGNAL())).toEqual({
+        ok: false,
+        error: { status: 200, code: "invalid_response" },
+      });
+    }
+  } finally {
+    transport.restore();
+  }
+});
+
+test("账本读取拒绝原状态码、版本和标价的非整数词法", async () => {
+  const stored = { http_status: 202, code: "accepted", receipt: receipt() };
+  let field = "http_status";
+  const transport = fakeFetch(() => rawInteger(stored, field));
+  try {
+    for (field of ["http_status", "listing_version", "price"]) {
+      expect(await fetchConsignmentCommand(USER, COMMAND_ID, SIGNAL())).toEqual({
+        ok: false,
+        error: { status: 200, code: "invalid_response" },
+      });
+    }
   } finally {
     transport.restore();
   }

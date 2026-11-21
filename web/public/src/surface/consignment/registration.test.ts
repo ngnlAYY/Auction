@@ -1,6 +1,7 @@
 // 登记表单的能力、验证、报价、私密输入和提交接线。
 
 import { expect, test } from "bun:test";
+import type { OwnedListing } from "@auction/contracts/dto/public/consignment";
 
 import {
   ALICE,
@@ -21,7 +22,9 @@ import {
   submitRegistration,
 } from "./private-fixture.test";
 import {
+  controlEvent,
   failure,
+  fakeClock,
   fakeFetch,
   LISTING_A,
   LISTINGS_PATH,
@@ -33,6 +36,8 @@ import {
 
 const NEW = "/consignment/new";
 const SUBMIT = "Submit registration";
+const REPRICE = "Change asking price";
+const WITHDRAW = "Cancel listing";
 test("匿名登记沿用登录后返回原页，不启动本人请求", async () => {
   const transport = fakeFetch(() => response(status(true)));
   const page = await mountPrivate(NEW, null);
@@ -151,22 +156,88 @@ test("首读能力未完成时不暴露写入口，完成后可填写", async ()
 });
 
 test.each([
-  ["direct", EQUIPMENT_URL, 0],
-  ["direct", ISEKAI_URL, 0],
-  ["consigned", EQUIPMENT_URL, 500],
-  ["consigned", ISEKAI_URL, 500],
-] as const)("%s 四种组合之一的登记 202 立即进入本人详情", async (mode, url, fee) => {
+  ["main", "direct", EQUIPMENT_URL, 0],
+  ["isekai", "direct", ISEKAI_URL, 0],
+  ["main", "consigned", EQUIPMENT_URL, 500],
+  ["isekai", "consigned", ISEKAI_URL, 500],
+] as const)("%s / %s 同一挂单从登记 202 到改价、取消后只读", async (world, mode, url, fee) => {
+  const clock = fakeClock();
   const lookup = Promise.withResolvers<Response>();
+  const reads: OwnedListing[] = [];
+  const fixture: { listing: OwnedListing | null } = { listing: null };
+  const detailPath = `${OWNED_PATH}/${LISTING_A}`;
+  const worldLabel = world === "main" ? "Main" : "Isekai";
+  const modeLabel = mode === "direct" ? "Direct sale" : "Consignment";
+  const active = mode === "direct" ? "displayed" : "awaiting_deposit";
   const transport = fakeFetch((request) => {
-    if (request.url.pathname === STATUS_PATH) return response(status(true));
-    if (request.url.pathname === LISTINGS_PATH) {
+    const { pathname } = request.url;
+    if (pathname === STATUS_PATH) return response(status(true));
+    if (pathname === LISTINGS_PATH) {
       const body = requestBody(request);
       expect(typeof body.command_id).toBe("string");
       expect(body.equipment_url === url).toBe(true);
       expect([body.mode, body.price, body.expected_fee_bps]).toEqual([mode, 101, fee]);
+      fixture.listing = listing("resolving", {
+        version: 1,
+        world_id: body.equipment_url === ISEKAI_URL ? "isekai" : "main",
+        mode: body.mode === "consigned" ? "consigned" : "direct",
+        fee_bps: fee,
+        estimated_fee: fee === 0 ? 0 : 5,
+        estimated_seller_amount: fee === 0 ? 101 : 96,
+      });
       return acceptedReceipt(receipt(String(body.command_id)));
     }
-    return lookup.promise;
+    const current = fixture.listing;
+    if (current === null) throw new Error("尚无登记记录");
+    if (pathname === detailPath) {
+      reads.push(current);
+      return reads.length === 1 ? lookup.promise : response(current);
+    }
+
+    const body = requestBody(request);
+    expect(body.expected_version).toBe(current.version);
+    if (pathname === `${LISTINGS_PATH}/${current.listing_id}/price`) {
+      expect(body.price).toBe(203);
+      fixture.listing = {
+        ...current,
+        version: 3,
+        price: 203,
+        estimated_fee: fee === 0 ? 0 : 10,
+        estimated_seller_amount: fee === 0 ? 203 : 193,
+      };
+      return response(
+        receipt(String(body.command_id), {
+          operation: "reprice",
+          listing_id: fixture.listing.listing_id,
+          listing_version: fixture.listing.version,
+          state: active,
+          disposition: "repriced",
+          price: fixture.listing.price,
+        }),
+      );
+    }
+
+    expect(pathname).toBe(`${LISTINGS_PATH}/${current.listing_id}/withdraw`);
+    if (current.view.kind !== active) throw new Error("取消前缺少发布投影");
+    fixture.listing = {
+      ...current,
+      version: 4,
+      stored_state: "closed",
+      effective_state: "closed",
+      effective_reason: "seller_cancelled",
+      allowed_actions: [],
+      view: { kind: "closed", reason: "seller_cancelled", equipment: current.view.equipment },
+    };
+    return response(
+      receipt(String(body.command_id), {
+        operation: "withdraw",
+        listing_id: fixture.listing.listing_id,
+        listing_version: fixture.listing.version,
+        state: "closed",
+        disposition: "closed",
+        price: null,
+      }),
+    );
   });
   const page = await mountPrivate(NEW);
   try {
@@ -177,16 +248,89 @@ test.each([
     assertNoSecret(page);
     await settle();
     expect(page.location.pathname).toBe(`/consignment/me/${LISTING_A}`);
-    expect(transport.requests.at(-1)?.url.pathname).toBe(`${OWNED_PATH}/${LISTING_A}`);
+    expect(transport.requests.at(-1)?.url.pathname).toBe(detailPath);
     expect(expectedUser(transport.requests.find(isWrite))).toBe(ALICE.user_id);
     expect(page.text()).toContain("Loading");
     assertNoSecret(page);
-    lookup.resolve(response(listing("resolving")));
+    const current = fixture.listing;
+    if (current === null) throw new Error("首读前缺少登记记录");
+    lookup.resolve(response(current));
     await settle();
     expect(page.text()).toContain("Looking up equipment");
+    expect(page.text()).toContain(`World${worldLabel}`);
+    expect(page.text()).toContain(`Listing mode${modeLabel}`);
+
+    fixture.listing = {
+      ...current,
+      version: 2,
+      stored_state: active,
+      effective_state: active,
+      allowed_actions: ["reprice", "withdraw"],
+      view: listing(active).view,
+    };
+    await clock.advance(30_000);
+    expect(page.text()).toContain(mode === "direct" ? "Listed" : "Awaiting equipment delivery");
+    expect(page.text().includes("Do not send equipment")).toBe(mode === "consigned");
+    expect(page.text()).toContain(`World${worldLabel}`);
+    expect(page.text()).toContain(`Listing mode${modeLabel}`);
+    expect(page.text()).toContain("101c");
+    expect(page.button(REPRICE)?.attributes.disabled).toBe(false);
+    expect(page.button(WITHDRAW)?.attributes.disabled).toBe(false);
+
+    controlEvent(page.button(REPRICE), "onClick");
+    controlEvent(
+      page.find((node) => node.attributes.inputmode === "numeric"),
+      "onInput",
+      "203",
+    );
+    controlEvent(page.form(REPRICE), "onSubmit");
+    await settle();
+    expect(reads.map((row) => row.version)).toEqual([1, 2, 3]);
+    expect(page.text()).toContain("203c");
+    expect(page.text()).toContain(`Estimated seller proceeds${fee === 0 ? 203 : 193}c`);
+    expect(page.text()).toContain(`World${worldLabel}`);
+    expect(page.text()).toContain(`Listing mode${modeLabel}`);
+    expect(page.text().includes("Do not send equipment")).toBe(mode === "consigned");
+
+    controlEvent(page.button(WITHDRAW), "onClick");
+    expect(page.text()).toContain("Cancel this listing?");
+    controlEvent(page.form(WITHDRAW), "onSubmit");
+    await settle();
+    expect(page.text()).toContain("The seller cancelled the listing.");
+    expect(page.text()).toContain(`World${worldLabel}`);
+    expect(page.text()).toContain(`Listing mode${modeLabel}`);
+    expect(page.text()).toContain("203c");
+    expect(page.button(REPRICE)).toBeNull();
+    expect(page.button(WITHDRAW)).toBeNull();
+    expect(page.find((node) => node.attributes.href === NEW)).not.toBeNull();
+    expect(page.location.pathname).toBe(`/consignment/me/${LISTING_A}`);
+    expect(
+      reads.map((row) => [row.listing_id, row.world_id, row.mode, row.version, row.view.kind]),
+    ).toEqual([
+      [LISTING_A, world, mode, 1, "resolving"],
+      [LISTING_A, world, mode, 2, active],
+      [LISTING_A, world, mode, 3, active],
+      [LISTING_A, world, mode, 4, "closed"],
+    ]);
+    const writes = transport.requests.filter(isWrite);
+    expect(writes.map((request) => request.url.pathname)).toEqual([
+      LISTINGS_PATH,
+      `${LISTINGS_PATH}/${LISTING_A}/price`,
+      `${LISTINGS_PATH}/${LISTING_A}/withdraw`,
+    ]);
+    expect(writes.map((request) => requestBody(request).expected_version)).toEqual([
+      undefined,
+      2,
+      3,
+    ]);
+    expect(new Set(writes.map((request) => requestBody(request).command_id)).size).toBe(3);
+    expect(writes.map(expectedUser)).toEqual([ALICE.user_id, ALICE.user_id, ALICE.user_id]);
+    expect(page.errors).toEqual([]);
+    assertNoSecret(page);
   } finally {
     page.dispose();
     transport.restore();
+    clock.restore();
   }
 });
 

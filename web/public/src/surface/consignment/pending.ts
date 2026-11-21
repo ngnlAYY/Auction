@@ -25,11 +25,11 @@ import { err, ok, type Result } from "@auction/web-shared/result";
 import { createEffect, untrack, useContext } from "solid-js";
 import * as v from "valibot";
 
-import { commandErrorOutcomeUncertain } from "../../api/commands";
 import { fetchConsignmentCommand } from "../../api/consignment-owned";
 import type { ConsignmentPrivateError } from "../../api/consignment-private";
 import {
   consignmentReceiptMatches,
+  consignmentWriteRejected,
   registerConsignmentListing,
   repriceConsignmentListing,
   withdrawConsignmentListing,
@@ -157,15 +157,17 @@ export function useConsignmentPending(
   const error = createCell<ConsignmentPrivateError | null>(restored.ok ? null : restored.error);
   const tasks = createTaskScope();
 
-  function finish(result: ConsignmentOutcome) {
+  function finish(result: ConsignmentOutcome, showOutcome = true) {
     // 不变量 1：清除标记失败时保留恢复入口，避免刷新后把旧标记误作可继续的新命令。
     if (!setSessionItem(key, "null")) {
       error.set(STORAGE_FAILURE);
       return;
     }
     pending.set(null);
-    error.set(null);
-    onOutcome(result);
+    if (showOutcome) {
+      error.set(null);
+      onOutcome(result);
+    }
   }
 
   function canApply(result: Result<unknown, ConsignmentPrivateError>): boolean {
@@ -214,17 +216,16 @@ export function useConsignmentPending(
       const result = await send(record, url, context.signal);
       if (!context.alive()) return;
       busy.set(false);
-      if (!canApply(result)) return;
-      if (
-        !result.ok &&
-        (retry ||
-          commandErrorOutcomeUncertain(result.error) ||
-          result.error.code === "outcome_unknown" ||
-          result.error.status === 401)
-      ) {
-        error.set(result.error);
-      } else {
-        finish(result);
+      // 不变量 1：前置拒绝只能证明本次重送被拦截，原结果仍需查账本。
+      const rejected =
+        !result.ok && !retry && consignmentWriteRejected(record.operation, result.error);
+      const canDisplay = canApply(result);
+      if (rejected) {
+        // 会话守卫可立即暂停界面；仍存活的原账号宿主可以结束已确认拒绝的命令。
+        finish(result, canDisplay);
+      } else if (canDisplay) {
+        if (result.ok) finish(result);
+        else error.set(result.error);
       }
     });
   }
