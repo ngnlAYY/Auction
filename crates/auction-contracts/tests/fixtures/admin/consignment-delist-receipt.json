@@ -1,0 +1,13 @@
+{
+  "code": "ok",
+  "message": "挂单已下架",
+  "data": {
+    "command_id": "00000000-0000-4000-8000-000000000069",
+    "operation": "admin_delist",
+    "listing_id": "00000000-0000-4000-8000-000000000008",
+    "listing_version": 3,
+    "state": "closed",
+    "disposition": "closed",
+    "price": 101
+  }
+}

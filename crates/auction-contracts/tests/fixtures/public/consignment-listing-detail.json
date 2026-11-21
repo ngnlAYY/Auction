@@ -1,0 +1,54 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "summary": {
+      "listing_id": "00000000-0000-4000-8000-000000000004",
+      "version": 2,
+      "mode": "direct",
+      "state": "displayed",
+      "world_id": "main",
+      "external_equipment_id": "42424242424242424242424242424242",
+      "name": "Fixture Cotton Robe",
+      "category": "Cloth",
+      "level": {
+        "kind": "assigned",
+        "value": 42
+      },
+      "price": 101,
+      "seller_name": "FixtureSeller",
+      "updated_at": "2026-11-20T18:10:00Z",
+      "expires_at": "2026-12-20T18:10:00Z",
+      "purchasable": false
+    },
+    "equipment": {
+      "name": "Fixture Cotton Robe",
+      "alt_name": null,
+      "category": "Cloth",
+      "level": {
+        "kind": "assigned",
+        "value": 42
+      },
+      "tradeable": true,
+      "stat_groups": [
+        {
+          "name": "Fixture attributes",
+          "stats": [
+            {
+              "name": "Fixture resistance",
+              "value": 12.5,
+              "base": 10.25
+            },
+            {
+              "name": "Fixture weight",
+              "value": -2.5,
+              "base": null
+            }
+          ]
+        }
+      ],
+      "source": "hvdata-equip-v1",
+      "observed_at": "2026-11-20T18:10:00Z"
+    }
+  }
+}

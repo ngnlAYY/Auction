@@ -1,0 +1,17 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "http_status": 202,
+    "code": "accepted",
+    "receipt": {
+      "command_id": "00000000-0000-4000-8000-000000000065",
+      "operation": "register",
+      "listing_id": "00000000-0000-4000-8000-000000000001",
+      "listing_version": 1,
+      "state": "resolving",
+      "disposition": "registered",
+      "price": 101
+    }
+  }
+}

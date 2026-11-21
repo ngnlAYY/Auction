@@ -3,11 +3,13 @@
 mod account;
 mod catalog;
 mod commands;
+pub(super) mod consignment;
 mod pagination;
 
 pub use account::*;
 pub use catalog::*;
 pub use commands::*;
+pub use consignment::*;
 pub use pagination::*;
 
 mod watch;

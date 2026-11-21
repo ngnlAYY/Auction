@@ -1,0 +1,17 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "http_status": 409,
+    "code": "fee_changed",
+    "receipt": {
+      "command_id": "00000000-0000-4000-8000-00000000006a",
+      "operation": "register",
+      "listing_id": null,
+      "listing_version": null,
+      "state": null,
+      "disposition": "rejected",
+      "price": null
+    }
+  }
+}
