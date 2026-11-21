@@ -104,10 +104,18 @@ impl Fixture {
     }
 
     pub(super) async fn history(&self, seller: Uuid) {
+        self.history_at(seller, HISTORY, self.now).await;
+    }
+
+    pub(super) async fn history_at(
+        &self,
+        seller: Uuid,
+        history_id: Uuid,
+        blacklisted_at: Timestamp,
+    ) {
         self.sql(&format!(
             "INSERT INTO public.user_blacklist_history (id,user_id,public_reason,actor,blacklisted_at)
-             VALUES ('{HISTORY}','{seller}','Fake moderation','Fake operator','{}')",
-            self.now,
+             VALUES ('{history_id}','{seller}','Fake moderation','Fake operator','{blacklisted_at}')",
         )).await;
     }
 }
@@ -200,11 +208,17 @@ impl<'a> Listing<'a> {
         let command_id = Uuid::new_v4();
         let fee = if *mode == "direct" { 0 } else { 500 };
         batch(&mut tx, &format!(r#"
+            WITH baseline AS (
+                SELECT ARRAY(SELECT id FROM public.user_blacklist_history WHERE user_id = '{seller}')
+                    AS blacklist_ids
+            )
             INSERT INTO public.consignment_listings
                 (id,seller_user_id,world_id,external_equipment_id,mode,state,price,pricing_version,
-                 fee_bps,state_version,service_epoch,blacklist_count_at_register,created_at,updated_at,expires_at)
-            VALUES ('{id}','{seller}','{world}','{eid}','{mode}','resolving',101,1,
-                    {fee},1,{epoch},0,'{created}','{created}','{deadline}');
+                 fee_bps,state_version,service_epoch,blacklist_count_at_register,blacklist_baseline_ids,
+                 created_at,updated_at,expires_at)
+            SELECT '{id}','{seller}','{world}','{eid}','{mode}','resolving',101,1,
+                   {fee},1,{epoch},cardinality(blacklist_ids),blacklist_ids,'{created}','{created}','{deadline}'
+            FROM baseline;
             INSERT INTO public.consignment_commands
                 (command_id,actor_kind,actor_ref,operation,request_target,request_digest,replay_key_id,
                  listing_id,result_status,result_code,result_body,created_at)
@@ -232,7 +246,7 @@ impl<'a> Listing<'a> {
         }
         let publish_id = if publish {
             let snapshot_id = Uuid::new_v4();
-            let publish_id = Uuid::new_v4();
+            let publish_id = Uuid::new_v5(id, b"apply_lookup");
             let state = self.state();
             let alias_sql = alias.map_or_else(|| "NULL".to_owned(), |value| format!("'{value}'"));
             batch(&mut tx, &format!(r#"

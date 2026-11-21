@@ -32,14 +32,14 @@ async fn postgres_read_access_paths_with_large_history() {
         ALTER TABLE public.consignment_listings DISABLE TRIGGER USER;
         INSERT INTO public.consignment_listings
             (id,seller_user_id,world_id,external_equipment_id,mode,state,price,pricing_version,fee_bps,
-             state_version,service_epoch,blacklist_count_at_register,reason_code,created_at,updated_at,expires_at,
-             registration_xact_id)
+             state_version,service_epoch,blacklist_count_at_register,blacklist_baseline_ids,reason_code,
+             created_at,updated_at,expires_at,registration_xact_id)
         SELECT gen_random_uuid(),CASE WHEN n <= 300 THEN '{SELLER}'::uuid
                    ELSE md5('p2r-seller-' || ((n-1)/300))::uuid END,
                CASE WHEN n <= 400 THEN 'main' ELSE 'isekai' END,
                CASE WHEN n = 1 THEN '42' ELSE (n+50000)::text END,
                CASE WHEN n <= 400 THEN 'direct' ELSE 'consigned' END,
-               'closed',101,1,CASE WHEN n <= 400 THEN 0 ELSE 500 END,2,1,0,'seller_cancelled',
+               'closed',101,1,CASE WHEN n <= 400 THEN 0 ELSE 500 END,2,1,0,ARRAY[]::uuid[],'seller_cancelled',
                statement_timestamp() - interval '1 day',
                statement_timestamp() - n * interval '1 second',
                statement_timestamp() + interval '1 hour', pg_current_xact_id()

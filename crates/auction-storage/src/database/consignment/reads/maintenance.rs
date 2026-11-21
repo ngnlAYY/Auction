@@ -54,13 +54,13 @@ impl DatabaseStore {
             }
         }
 
-        // 拉黑业务时刻可能来自历史恢复命令，登记后的新事实以追加数量为准。
-        // 从变更后的卖家流水选一个稳定引用，由自动清退事务复核资格事实。
+        // 与 auto_close 同样按登记时冻结的 ID 集合取差集。业务时刻只用于稳定排序。
         let mut sql = QueryBuilder::new(concat!(
             "WITH db_clock AS MATERIALIZED (SELECT clock_timestamp() AS at),
              page AS MATERIALIZED (
                  SELECT l.id, l.world_id, l.external_equipment_id, l.seller_user_id,
-                        l.state, l.expires_at, l.service_epoch, l.blacklist_count_at_register
+                        l.state, l.expires_at, l.service_epoch, l.blacklist_count_at_register,
+                        l.blacklist_baseline_ids
                  FROM public.consignment_listings l WHERE ",
             listing_sql!(stored_active),
         ));
@@ -83,12 +83,11 @@ impl DatabaseStore {
                          WHEN l.reason = 'auction_lot_created' THEN (SELECT a.id ",
                 listing_sql!(unbaselined_lots),
                 " ORDER BY a.id LIMIT 1)
-                         WHEN l.reason = 'seller_ineligible' AND (
-                             SELECT count(*) FROM public.user_blacklist_history h WHERE h.user_id = l.seller_user_id
-                         ) > l.blacklist_count_at_register THEN (
+                         WHEN l.reason = 'seller_ineligible' THEN (
                              SELECT h.id FROM public.user_blacklist_history h
                              WHERE h.user_id = l.seller_user_id
-                             ORDER BY h.blacklisted_at DESC, h.id DESC LIMIT 1
+                               AND NOT (h.id = ANY(l.blacklist_baseline_ids))
+                             ORDER BY h.blacklisted_at, h.id LIMIT 1
                          )
                         END AS evidence_id
                  FROM facts l ORDER BY l.id",
@@ -118,7 +117,7 @@ impl DatabaseStore {
                 (Some("display_expired"), _) => AutoCloseEvidence::DisplayExpired(expires_at),
                 (Some("deposit_expired"), _) => AutoCloseEvidence::DepositExpired(expires_at),
                 (Some("seller_ineligible" | "service_disabled"), _) => {
-                    // 端口要求真实拉黑流水或已递增代次；保留有效关闭，继续推进游标。
+                    // 账号停用等事实没有端口要求的拉黑流水 ID。缺证据时保留有效关闭并推进游标。
                     tracing::warn!("寄售补扫发现无法生成证据的强制关闭");
                     continue;
                 }

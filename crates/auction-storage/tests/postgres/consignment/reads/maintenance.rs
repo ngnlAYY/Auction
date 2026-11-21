@@ -1,7 +1,12 @@
 //! 扫描位置持久化、回绕与强制事实的证据优先序。
 
-use auction_application::consignment::AutoCloseEvidence;
-use auction_domain::LotId;
+use auction_application::consignment::{
+    AutoCloseCandidate, AutoCloseEvidence, AutoCloseListingCommand, ListingAutoCloseEffect,
+    ListingCommandStore,
+};
+use auction_application::core::RequestHash;
+use auction_domain::consignment::ListingReason;
+use auction_domain::{CommandId, LotId};
 use auction_time::Duration;
 use uuid::Uuid;
 
@@ -148,6 +153,7 @@ async fn postgres_scan_uses_priority_and_exact_persisted_evidence() {
 #[tokio::test]
 async fn postgres_scan_missing_blacklist_evidence_cannot_fabricate_candidate() {
     let fixture = Fixture::new().await;
+    fixture.history(SELLER).await;
     let a = Listing::new(&fixture, 501, "42");
     a.seed(&fixture, true, None).await;
     fixture
@@ -156,14 +162,81 @@ async fn postgres_scan_missing_blacklist_evidence_cannot_fabricate_candidate() {
     let page = fixture.store.scan_consignment_candidates().await.unwrap();
     assert_eq!(page.scanned, 1);
     assert!(page.candidates.is_empty());
-    // 恢复动作可追加业务时刻早于登记的流水，持久计数仍能证明新事实。
-    fixture
-        .sql(&format!(
-        "INSERT INTO public.user_blacklist_history (id,user_id,public_reason,actor,blacklisted_at)
-         VALUES ('{HISTORY}','{SELLER}','Fake reason','Fake operator','{}')",
-        a.created - Duration::days(1),
-    ))
-        .await;
+    // 恢复动作可追加业务时刻早于登记的流水；基线内的事实仍不可作证。
+    let recovered = Uuid::from_u128(401);
+    fixture.history_at(SELLER, recovered, a.created - Duration::days(1)).await;
     let page = fixture.store.scan_consignment_candidates().await.unwrap();
-    assert_eq!(page.candidates[0].evidence, AutoCloseEvidence::SellerIneligible(HISTORY));
+    assert_eq!(page.candidates[0].evidence, AutoCloseEvidence::SellerIneligible(recovered));
+}
+
+#[tokio::test]
+async fn postgres_scan_blacklist_same_time_lower_uuid_closes_with_new_evidence() {
+    let fixture = Fixture::new().await;
+    fixture.history(SELLER).await;
+    let listing = Listing::new(&fixture, 501, "42");
+    listing.seed(&fixture, true, None).await;
+    let baseline: (i64, Vec<Uuid>) = sqlx::query_as(
+        "SELECT blacklist_count_at_register, blacklist_baseline_ids
+         FROM public.consignment_listings WHERE id = $1",
+    )
+    .bind(listing.id)
+    .fetch_one(fixture.pool())
+    .await
+    .unwrap();
+    assert_eq!(baseline, (1, vec![HISTORY]));
+    let new_fact = Uuid::from_u128(399);
+    fixture.history_at(SELLER, new_fact, fixture.now).await;
+    let page = fixture.store.scan_consignment_candidates().await.unwrap();
+    assert_eq!(
+        page.candidates,
+        [AutoCloseCandidate {
+            listing_id: listing.id,
+            evidence: AutoCloseEvidence::SellerIneligible(new_fact),
+        }]
+    );
+
+    let command = AutoCloseListingCommand {
+        request_hash: RequestHash::from_canonical_bytes(b"fake scan evidence verification"),
+        command_id: CommandId::from_uuid(Uuid::new_v5(&listing.id, new_fact.as_bytes())),
+        candidate: page.candidates[0],
+    };
+    let outcome = fixture.store.auto_close(command).await.unwrap().into_result().unwrap();
+    assert!(matches!(
+        outcome, ListingAutoCloseEffect::Terminated(snapshot)
+            if snapshot.reason == Some(ListingReason::SellerIneligible)
+    ));
+    let closed: (String, i64, String) = sqlx::query_as(
+        "SELECT state, state_version, reason_code FROM public.consignment_listings WHERE id = $1",
+    )
+    .bind(listing.id)
+    .fetch_one(fixture.pool())
+    .await
+    .unwrap();
+    assert_eq!(closed, ("closed".into(), 3, "seller_ineligible".into()));
+}
+
+#[tokio::test]
+async fn postgres_scan_blacklist_orders_new_evidence_by_time_then_uuid() {
+    let fixture = Fixture::new().await;
+    let listing = Listing::new(&fixture, 501, "42");
+    listing.seed(&fixture, false, None).await;
+
+    let earlier_time = fixture.now - Duration::minutes(1);
+    let earlier = Uuid::from_u128(403);
+    fixture.history_at(SELLER, HISTORY, fixture.now).await;
+    fixture.history_at(SELLER, earlier, earlier_time).await;
+    let scan = async || fixture.store.scan_consignment_candidates().await.unwrap().candidates;
+    let expected = |fact| {
+        [AutoCloseCandidate {
+            listing_id: listing.id,
+            evidence: AutoCloseEvidence::SellerIneligible(fact),
+        }]
+    };
+    assert_eq!(scan().await, expected(earlier));
+
+    let tied_lower = Uuid::from_u128(402);
+    fixture.history_at(SELLER, tied_lower, earlier_time).await;
+    for _ in 0..2 {
+        assert_eq!(scan().await, expected(tied_lower));
+    }
 }

@@ -257,7 +257,7 @@ async fn postgres_public_filters_world_mode_category_and_literal_names() {
 #[tokio::test]
 async fn postgres_public_projection_has_only_safe_fields() {
     let fixture = Fixture::new().await;
-    let [_, b, _] = catalog_fixture(&fixture).await;
+    let [a, b, _] = catalog_fixture(&fixture).await;
     fixture
         .sql(&format!("UPDATE public.users SET username = 'FakeRenamed' WHERE id = '{SELLER}'"))
         .await;
@@ -267,6 +267,12 @@ async fn postgres_public_projection_has_only_safe_fields() {
         .await
         .unwrap();
     assert_eq!((result.window.page_size(), result.total), (37, 3));
+    let displayed = fixture.store.public_detail(a.id).await.unwrap().unwrap();
+    let catalog_item = result.items.iter().find(|item| item.listing_id == a.id).unwrap();
+    assert_eq!(displayed.summary.state, PublicListingState::Displayed);
+    assert_eq!(displayed.summary.seller_name, "FakeRenamed");
+    assert_eq!(&displayed.summary, catalog_item);
+    assert_eq!(displayed.equipment.stat_groups()[0].stats[0].value, 4.5);
     let details = fixture.store.public_detail(b.id).await.unwrap().unwrap();
     let summary = &details.summary;
     assert_eq!(summary, &result.items[1]);
@@ -296,7 +302,7 @@ async fn postgres_public_projection_has_only_safe_fields() {
     assert_eq!(stat.name, "Power");
     assert_eq!(stat.value, 4.5);
     assert_eq!(stat.base, None);
-    let text = format!("{:?} {details:?}", result.items);
+    let text = format!("{:?} {displayed:?} {details:?}", result.items);
     for private in [
         SELLER.to_string().as_str(),
         "seller_user_id",

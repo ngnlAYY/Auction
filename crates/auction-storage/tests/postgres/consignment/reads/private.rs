@@ -216,7 +216,7 @@ async fn finish_rejected_lookup(
     let now = fixture.now + Duration::minutes(3);
     let deadline = listing.created + Duration::hours(24);
     let seller_user_id = listing.seller;
-    let command_id = Uuid::new_v4();
+    let command_id = Uuid::new_v5(&listing_id, b"apply_lookup");
     let reason = reason.as_str();
     sqlx::query(
         "UPDATE public.consignment_listings
@@ -350,7 +350,7 @@ async fn postgres_owned_receipt_preserves_original_decisions_and_actor() {
     let (register, worker) = listing.seed(&fixture, true, None).await;
     let reprice = Uuid::new_v4();
     let rejected = Uuid::new_v4();
-    let system = Uuid::new_v4();
+    let system = Uuid::new_v5(&listing.id, b"auto_close");
     fixture.sql(&format!(r#"
         INSERT INTO public.consignment_commands
             (command_id,actor_kind,actor_ref,operation,request_target,request_digest,
@@ -404,7 +404,7 @@ async fn postgres_admin_conflicts_sort_and_truncate_only_after_50() {
     let fixture = Fixture::new().await;
     let listing = Listing::new(&fixture, 502, "43");
     listing.seed(&fixture, true, None).await;
-    let command_id = Uuid::new_v4();
+    let command_id = Uuid::new_v5(&listing.id, b"auto_close");
     let listing_id = listing.id;
     let now = fixture.now;
     fixture.sql(&format!(r#"
