@@ -388,7 +388,9 @@ fn error(status: StatusCode, code: &'static str) -> (StatusCode, Json<SetupError
 mod tests {
     use std::{borrow::Cow, net::SocketAddr, sync::Arc, time::Duration};
 
-    use auction_contracts::{SetupDatabaseRequest, SetupRequest, SetupScheduleRequest};
+    use auction_contracts::{
+        ApiErrorResponse, SetupDatabaseRequest, SetupRequest, SetupScheduleRequest,
+    };
     use auction_http::WebScriptPolicy;
     use axum::{
         Json,
@@ -593,6 +595,59 @@ mod tests {
                 Some("no-store"),
                 "{web_script_policy:?}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn setup_router_excludes_formal_admin_consignment() {
+        let state = setup_state();
+        for (method, path, api) in [
+            ("GET", "/consignment", false),
+            ("GET", "/consignment/listings/00000000-0000-4000-8000-000000000008", false),
+            ("GET", "/api/v1/admin/consignment/listings", true),
+            (
+                "GET",
+                "/api/v1/admin/consignment/listings/00000000-0000-4000-8000-000000000008",
+                true,
+            ),
+            (
+                "POST",
+                "/api/v1/admin/consignment/listings/00000000-0000-4000-8000-000000000008/delist",
+                true,
+            ),
+        ] {
+            let request = format!(
+                "{method} {path} HTTP/1.1\r\nhost: 127.0.0.1:8091\r\naccept: text/html\r\nconnection: close\r\n\r\n"
+            );
+            let response = raw_setup_response::<SolidSetupAssets>(
+                Arc::clone(&state),
+                WebScriptPolicy::Solid,
+                &request,
+            )
+            .await;
+            assert_eq!(
+                response_status(&response),
+                StatusCode::NOT_FOUND.as_u16(),
+                "{method} {path}"
+            );
+            if api {
+                assert_eq!(
+                    response_header(&response, "content-type"),
+                    Some("application/json"),
+                    "{path}"
+                );
+                let (_, body) = response.split_once("\r\n\r\n").expect("API 错误正文");
+                let Json(error) =
+                    Json::<ApiErrorResponse>::from_bytes(body.as_bytes()).expect("API 错误外壳");
+                assert_eq!(error.code, "not_found", "{path}");
+                assert_eq!(error.data, None, "{path}");
+            } else {
+                assert_eq!(
+                    response_header(&response, "content-type"),
+                    Some("text/html; charset=utf-8"),
+                    "{path}"
+                );
+            }
         }
     }
 

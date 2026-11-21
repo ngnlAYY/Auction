@@ -558,7 +558,7 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     use auction_application::auction::{
         AuctionReader, CurrentAuctionSnapshot, PublicAccountReader, PublicAuctionCountdown,
@@ -791,13 +791,15 @@ mod tests {
         }
     }
 
-    struct EmptyAdminConsignment;
+    #[derive(Default)]
+    struct EmptyAdminConsignment(Mutex<Vec<AdminListingQuery>>);
 
     impl AdminListingRead for EmptyAdminConsignment {
         fn list_admin(
             &self,
             query: AdminListingQuery,
         ) -> ConsignmentFuture<'_, ListingReadPage<AdminListingRecord>> {
+            self.0.lock().expect("Admin 读取调用").push(query);
             Box::pin(async move {
                 Ok(ListingReadPage { items: Vec::new(), total: 0, window: query.listings.window })
             })
@@ -821,8 +823,9 @@ mod tests {
             "consignment_unavailable",
         );
 
+        let reader = Arc::new(EmptyAdminConsignment::default());
         let state = admin_state().with_consignment(AdminConsignmentCapabilities {
-            read: Some(Arc::new(EmptyAdminConsignment)),
+            read: Some(reader.clone()),
             ..AdminConsignmentCapabilities::default()
         });
         let response =
@@ -832,6 +835,10 @@ mod tests {
             consignment_json(StatusCode::OK, response).await["data"],
             serde_json::json!({"items":[],"total":0,"page":2,"page_size":37}),
         );
+        let queries = reader.0.lock().expect("Admin 读取调用").clone();
+        assert_eq!(queries.len(), 1);
+        assert_eq!(queries[0].listings.window.page(), 2);
+        assert_eq!(queries[0].listings.window.page_size(), 37);
 
         let response = admin_get(
             state.clone(),
@@ -878,6 +885,650 @@ mod tests {
 
         let response = admin_get(admin_state(), "/api/v1/consignment/status").await;
         assert_eq!(consignment_json(StatusCode::NOT_FOUND, response).await["code"], "not_found");
+    }
+
+    mod consignment {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::{Arc, Mutex};
+
+        use auction_application::admin::{AdminIntakeError, EquipmentKeySealerPort};
+        use auction_application::consignment::{
+            AdminDelistListingCommand, ApplyListingLookupCommand, AutoCloseListingCommand,
+            ConsignmentError, ConsignmentFuture, ListingAutoCloseEffect, ListingClosed,
+            ListingCommandOutcome, ListingCommandStore, ListingCredentialError,
+            ListingEquipmentLevel, ListingEquipmentReference, ListingEquipmentUrlValidator,
+            ListingLookupEffect, ListingLookupProgress, ListingPriceDisposition,
+            ListingPriceReceipt, ListingReadPage, ListingRegistered,
+            ListingRegistrationAvailability, ListingRegistrationPolicy, ListingWorld,
+            ListingWorlds, ManageListingService, OwnedListingCommandReceipt, OwnedListingRead,
+            OwnedListingRecord, PrivateListing, PrivateListingQuery, PrivateListingView,
+            PrivateListingViewKind, PublicListingDetail, PublicListingQuery, PublicListingRead,
+            PublicListingState, PublicListingSummary, RegisterListingCommand,
+            RegisterListingService, RegistrationInput, RegistrationReplayCrypto,
+            RegistrationRequestMac, RepriceListingCommand, SellerListingAction,
+            SellerListingTarget, StoredListingDecision, WithdrawListingCommand,
+            WrappedRegistrationReplayKey,
+        };
+        use auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER;
+        use auction_domain::consignment::{
+            FeeBps, ListingEquipmentIdentity, ListingMode, ListingPrice, ListingReason,
+            ListingState, ListingVersion,
+        };
+        use auction_domain::{CommandId, EquipmentId, EquipmentKey, EquipmentKeyEnvelope, UserId};
+        use auction_time::Timestamp;
+        use axum::body::Body;
+        use axum::extract::ConnectInfo;
+        use axum::http::{Method, Request, StatusCode, header};
+        use axum::{Router, response::Response};
+        use serde_json::{Value, json};
+        use tower::ServiceExt;
+        use uuid::Uuid;
+
+        use super::{
+            NoAssets, PUBLIC_SESSION_USER_ID, consignment_json, public_state_with_session,
+        };
+        use crate::server::contract_fixtures::{
+            admin_request, admin_state, assert_wire, wire_fixture,
+        };
+        use crate::server::surfaces::public_router;
+        use crate::{AdminConsignmentCapabilities, ConsignmentCapabilities};
+
+        const LISTINGS: &str = "/api/v1/consignment/listings";
+        const OWNED: &str = "/api/v1/me/consignment/listings";
+        const FAKE_LINK: &str = "https://fixture.invalid/equip/42/deadbeef00";
+
+        const fn fixture_uuid(suffix: u64) -> Uuid {
+            Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0000 + suffix as u128)
+        }
+
+        const LISTING_ID: Uuid = fixture_uuid(1);
+        const ADMIN_LISTING_ID: Uuid = fixture_uuid(8);
+
+        #[derive(Debug, PartialEq, Eq)]
+        enum Call {
+            Availability,
+            Catalog(PublicListingQuery),
+            OwnedDetail(UserId, Uuid),
+            Register(UserId, CommandId, ListingMode, i64, u16, bool),
+            Reprice(RepriceListingCommand),
+            Withdraw(SellerListingTarget),
+            Delist(String, CommandId, Uuid, u64, String),
+        }
+
+        #[derive(Default)]
+        struct Ports {
+            calls: Mutex<Vec<Call>>,
+            history_closed: bool,
+            reprice_receipt: Mutex<Option<ListingPriceReceipt>>,
+        }
+
+        impl Ports {
+            fn record(&self, call: Call) {
+                self.calls.lock().expect("寄售端口调用").push(call);
+            }
+
+            fn take_calls(&self) -> Vec<Call> {
+                std::mem::take(&mut *self.calls.lock().expect("寄售端口调用"))
+            }
+        }
+
+        fn amount(value: i64) -> ListingPrice {
+            ListingPrice::new(value).expect("夹具标价")
+        }
+
+        fn version(value: u64) -> ListingVersion {
+            ListingVersion::new(value).expect("夹具版本")
+        }
+
+        fn timestamp(value: &str) -> Timestamp {
+            Timestamp::parse_from_rfc3339(value).expect("夹具时间")
+        }
+
+        impl PublicListingRead for Ports {
+            fn list_public(
+                &self,
+                query: PublicListingQuery,
+            ) -> ConsignmentFuture<'_, ListingReadPage<PublicListingSummary>> {
+                let window = query.window;
+                self.record(Call::Catalog(query));
+                Box::pin(async move {
+                    Ok(ListingReadPage {
+                        items: vec![PublicListingSummary {
+                            listing_id: fixture_uuid(5),
+                            version: version(2),
+                            state: PublicListingState::AwaitingDeposit,
+                            identity: ListingEquipmentIdentity::new("isekai", "43")
+                                .expect("夹具装备"),
+                            name: "Fixture Oak Staff".to_owned(),
+                            category: "Staff".to_owned(),
+                            level: ListingEquipmentLevel::Unassigned,
+                            price: amount(101),
+                            seller_name: "FixtureSeller".to_owned(),
+                            updated_at: timestamp("2026-11-20T18:10:00Z"),
+                            expires_at: timestamp("2026-11-27T18:10:00Z"),
+                        }],
+                        total: 1,
+                        window,
+                    })
+                })
+            }
+
+            fn public_detail(
+                &self,
+                _listing_id: Uuid,
+            ) -> ConsignmentFuture<'_, Option<PublicListingDetail>> {
+                panic!("正式接线夹具只提供公开目录")
+            }
+
+            fn registration_availability<'a>(
+                &'a self,
+                _crypto: &'a dyn RegistrationReplayCrypto,
+            ) -> ConsignmentFuture<'a, ListingRegistrationAvailability> {
+                self.record(Call::Availability);
+                Box::pin(async {
+                    Ok(ListingRegistrationAvailability::Ready(ListingWorlds {
+                        main: true,
+                        isekai: true,
+                    }))
+                })
+            }
+        }
+
+        impl OwnedListingRead for Ports {
+            fn list_owned(
+                &self,
+                _seller: UserId,
+                _query: PrivateListingQuery,
+            ) -> ConsignmentFuture<'_, ListingReadPage<OwnedListingRecord>> {
+                panic!("正式接线夹具只提供本人详情")
+            }
+
+            fn owned_detail(
+                &self,
+                seller: UserId,
+                listing_id: Uuid,
+            ) -> ConsignmentFuture<'_, Option<OwnedListingRecord>> {
+                self.record(Call::OwnedDetail(seller, listing_id));
+                Box::pin(async {
+                    let created_at = timestamp("2026-11-20T18:00:00Z");
+                    let expires_at = timestamp("2026-11-21T18:00:00Z");
+                    let (view, actions) = if self.history_closed {
+                        (
+                            PrivateListingViewKind::Closed {
+                                reason: ListingReason::ServiceDisabled,
+                                equipment: None,
+                            },
+                            vec![],
+                        )
+                    } else {
+                        (
+                            PrivateListingViewKind::Resolving(
+                                ListingLookupProgress::new(
+                                    0,
+                                    Some(created_at),
+                                    None,
+                                    false,
+                                    expires_at,
+                                )
+                                .expect("夹具解析进度"),
+                            ),
+                            vec![SellerListingAction::Reprice, SellerListingAction::Withdraw],
+                        )
+                    };
+                    let listing = PrivateListing {
+                        listing_id: LISTING_ID,
+                        version: version(1),
+                        identity: ListingEquipmentIdentity::new("main", "42").expect("夹具装备"),
+                        price: amount(101),
+                        pricing_version: 1,
+                        fee_bps: FeeBps::DEFAULT_CONSIGNED,
+                        created_at,
+                        updated_at: created_at,
+                        expires_at,
+                        view: PrivateListingView::new(
+                            ListingMode::Consigned,
+                            ListingState::Resolving,
+                            view,
+                        )
+                        .expect("夹具本人视图"),
+                    };
+                    Ok(Some(OwnedListingRecord::new(listing, actions).expect("夹具本人详情")))
+                })
+            }
+
+            fn owned_command(
+                &self,
+                _seller: UserId,
+                _command_id: CommandId,
+            ) -> ConsignmentFuture<'_, Option<OwnedListingCommandReceipt>> {
+                panic!("正式接线夹具只提供本人详情")
+            }
+        }
+
+        impl ListingCommandStore for Ports {
+            fn register<'a>(
+                &'a self,
+                command: RegisterListingCommand<'a>,
+                sealer: Option<&'a dyn EquipmentKeySealerPort>,
+                crypto: Option<&'a dyn RegistrationReplayCrypto>,
+            ) -> ConsignmentFuture<'a, ListingCommandOutcome<ListingRegistered>> {
+                assert!(sealer.is_some());
+                assert!(crypto.is_some());
+                self.record(Call::Register(
+                    command.seller_user_id,
+                    command.command_id,
+                    command.input.mode,
+                    command.input.price.value(),
+                    command.input.expected_fee_bps.value(),
+                    command.policy.enabled,
+                ));
+                Box::pin(async move {
+                    ListingRegistered::new(command.listing_id, command.input.price)
+                        .map(ListingCommandOutcome::Accepted)
+                })
+            }
+
+            fn reprice(
+                &self,
+                command: RepriceListingCommand,
+            ) -> ConsignmentFuture<'_, ListingCommandOutcome<ListingPriceReceipt>> {
+                let RepriceListingCommand { target, price, enabled, .. } = command;
+                self.record(Call::Reprice(command));
+                Box::pin(async move {
+                    let mut stored = self.reprice_receipt.lock().expect("夹具改价回执");
+                    if !enabled {
+                        let receipt = stored.expect("停用重放需要此前的回执");
+                        return Ok(ListingCommandOutcome::Replayed(
+                            StoredListingDecision::Accepted(receipt),
+                        ));
+                    }
+                    let receipt = ListingPriceReceipt::new(
+                        target.listing_id,
+                        version(2),
+                        ListingState::Resolving,
+                        price,
+                        ListingPriceDisposition::Repriced,
+                    )?;
+                    *stored = Some(receipt);
+                    Ok(ListingCommandOutcome::Accepted(receipt))
+                })
+            }
+
+            fn withdraw(
+                &self,
+                command: WithdrawListingCommand,
+            ) -> ConsignmentFuture<'_, ListingCommandOutcome<ListingClosed>> {
+                self.record(Call::Withdraw(command.target));
+                Box::pin(async move {
+                    ListingClosed::new(command.target.listing_id, version(3), Some(amount(102)))
+                        .map(ListingCommandOutcome::Accepted)
+                })
+            }
+
+            fn admin_delist(
+                &self,
+                command: AdminDelistListingCommand,
+            ) -> ConsignmentFuture<'_, ListingCommandOutcome<ListingClosed>> {
+                self.record(Call::Delist(
+                    command.admin_actor,
+                    command.command_id,
+                    command.listing_id,
+                    command.expected_version.value(),
+                    command.reason.as_str().to_owned(),
+                ));
+                Box::pin(async move {
+                    ListingClosed::new(command.listing_id, version(3), Some(amount(101)))
+                        .map(ListingCommandOutcome::Accepted)
+                })
+            }
+
+            fn apply_lookup(
+                &self,
+                _command: ApplyListingLookupCommand,
+            ) -> ConsignmentFuture<'_, ListingCommandOutcome<ListingLookupEffect>> {
+                panic!("HTTP 不提交解析")
+            }
+
+            fn auto_close(
+                &self,
+                _command: AutoCloseListingCommand,
+            ) -> ConsignmentFuture<'_, ListingCommandOutcome<ListingAutoCloseEffect>> {
+                panic!("HTTP 不提交补扫")
+            }
+        }
+
+        impl ListingEquipmentUrlValidator for Ports {
+            fn validate(&self, url: &str) -> Result<ListingEquipmentReference, ConsignmentError> {
+                if url != FAKE_LINK {
+                    return Err(ConsignmentError::InvalidEquipmentUrl);
+                }
+                Ok(ListingEquipmentReference {
+                    identity: ListingEquipmentIdentity::new("main", "42")?,
+                    key: EquipmentKey::new("deadbeef00").expect("假装备凭证"),
+                })
+            }
+        }
+
+        impl EquipmentKeySealerPort for Ports {
+            fn seal(
+                &self,
+                _equipment_id: EquipmentId,
+                _key: &EquipmentKey,
+            ) -> Result<EquipmentKeyEnvelope, AdminIntakeError> {
+                panic!("正式接线夹具不封装凭证")
+            }
+        }
+
+        impl RegistrationReplayCrypto for Ports {
+            fn generate_wrapped(
+                &self,
+                _replay_key_id: Uuid,
+            ) -> Result<WrappedRegistrationReplayKey, ListingCredentialError> {
+                panic!("正式接线夹具不生成比较钥")
+            }
+
+            fn check_wrapped(
+                &self,
+                _replay_key_id: Uuid,
+                _wrapped: &WrappedRegistrationReplayKey,
+            ) -> Result<(), ListingCredentialError> {
+                panic!("正式接线夹具不检查比较钥")
+            }
+
+            fn registration_mac(
+                &self,
+                _replay_key_id: Uuid,
+                _wrapped: &WrappedRegistrationReplayKey,
+                _input: &RegistrationInput<'_>,
+            ) -> Result<RegistrationRequestMac, ListingCredentialError> {
+                panic!("正式接线夹具不计算登记摘要")
+            }
+
+            fn rewrap(
+                &self,
+                _replay_key_id: Uuid,
+                _wrapped: &WrappedRegistrationReplayKey,
+            ) -> Result<WrappedRegistrationReplayKey, ListingCredentialError> {
+                panic!("正式接线夹具不重封比较钥")
+            }
+        }
+
+        fn public_app(ports: &Arc<Ports>, enabled: bool) -> Router {
+            let next_uuid = AtomicU64::new(1);
+            let fee_bps = FeeBps::DEFAULT_CONSIGNED;
+            let state = public_state_with_session().with_consignment(ConsignmentCapabilities {
+                enabled,
+                fee_bps,
+                public_read: Some(ports.clone()),
+                owned_read: Some(ports.clone()),
+                register: Some(Arc::new(RegisterListingService::new(
+                    ports.clone(),
+                    ports.clone(),
+                    Some(ports.clone()),
+                    Some(ports.clone()),
+                    ListingRegistrationPolicy {
+                        enabled,
+                        worlds: ListingWorlds { main: true, isekai: true },
+                        consigned_fee_bps: fee_bps,
+                        max_open_per_user: 20,
+                        registrations_per_hour: 10,
+                    },
+                    true,
+                    move || fixture_uuid(next_uuid.fetch_add(1, Ordering::Relaxed)),
+                ))),
+                manage: Some(Arc::new(ManageListingService::new(ports.clone(), enabled))),
+                registration_sealer_available: true,
+                replay_crypto: Some(ports.clone()),
+            });
+            public_router::<NoAssets>("fixture", state.http_boundary(), state.anonymous_read_gate())
+                .with_state(state)
+        }
+
+        async fn public_request(
+            app: Router,
+            method: Method,
+            path: &str,
+            body: Body,
+            signed_in: bool,
+        ) -> Response {
+            let mut request = Request::builder().method(method).uri(path);
+            if signed_in {
+                request = request
+                    .header(header::COOKIE, "auction_public_session=fixture-placeholder")
+                    .header(PUBLIC_EXPECTED_USER_ID_HEADER, PUBLIC_SESSION_USER_ID.to_string())
+                    .header(header::CONTENT_TYPE, "application/json");
+            }
+            let mut request = request.body(body).expect("Public 寄售请求");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(std::net::SocketAddr::from(([192, 0, 2, 21], 3000))));
+            app.oneshot(request).await.expect("Public 寄售响应")
+        }
+
+        #[tokio::test]
+        async fn public_catalog_uses_injected_reader() {
+            let ports = Arc::new(Ports::default());
+            let response = public_request(
+                public_app(&ports, true),
+                Method::GET,
+                "/api/v1/consignment/listings?world=isekai&page_size=37",
+                Body::empty(),
+                false,
+            )
+            .await;
+            let mut expected = wire_fixture("public/consignment-listings");
+            let page = &mut expected["data"];
+            page["items"].as_array_mut().expect("目录样本").truncate(1);
+            page["total"] = json!(1);
+            assert_eq!(consignment_json(StatusCode::OK, response).await, expected);
+            let calls = ports.take_calls();
+            let [Call::Catalog(query)] = calls.as_slice() else {
+                panic!("正式目录应调用注入的公开读端口一次");
+            };
+            assert_eq!(query.world, Some(ListingWorld::Isekai));
+            assert_eq!(query.window.page(), 1);
+            assert_eq!(query.window.page_size(), 37);
+        }
+
+        #[tokio::test]
+        async fn public_status_uses_injected_registration_readiness() {
+            let ports = Arc::new(Ports::default());
+            let response = public_request(
+                public_app(&ports, true),
+                Method::GET,
+                "/api/v1/consignment/status",
+                Body::empty(),
+                false,
+            )
+            .await;
+            assert_wire(
+                "public/consignment-status",
+                consignment_json(StatusCode::OK, response).await,
+            );
+            assert_eq!(ports.take_calls(), [Call::Availability]);
+        }
+
+        async fn owned_detail(ports: &Arc<Ports>, enabled: bool) -> Value {
+            let response = public_request(
+                public_app(ports, enabled),
+                Method::GET,
+                &format!("{OWNED}/{LISTING_ID}"),
+                Body::empty(),
+                true,
+            )
+            .await;
+            consignment_json(StatusCode::OK, response).await
+        }
+
+        #[tokio::test]
+        async fn public_owned_detail_uses_injected_reader() {
+            let ports = Arc::new(Ports::default());
+            assert_wire("public/consignment-owned-listing", owned_detail(&ports, true).await);
+            assert_eq!(
+                ports.take_calls(),
+                [Call::OwnedDetail(UserId::from_uuid(PUBLIC_SESSION_USER_ID), LISTING_ID)]
+            );
+        }
+
+        #[tokio::test]
+        async fn public_owned_history_remains_readable_after_disable() {
+            let ports = Arc::new(Ports { history_closed: true, ..Ports::default() });
+            let mut expected = wire_fixture("public/consignment-owned-listing");
+            let listing = &mut expected["data"];
+            listing["effective_state"] = json!("closed");
+            listing["effective_reason"] = json!("service_disabled");
+            listing["allowed_actions"] = json!([]);
+            listing["view"] = json!({"kind":"closed","reason":"service_disabled","equipment":null});
+            assert_eq!(owned_detail(&ports, false).await, expected);
+            assert_eq!(
+                ports.take_calls(),
+                [Call::OwnedDetail(UserId::from_uuid(PUBLIC_SESSION_USER_ID), LISTING_ID)]
+            );
+        }
+
+        #[tokio::test]
+        async fn public_register_uses_injected_service() {
+            let ports = Arc::new(Ports::default());
+            let mut input = wire_fixture("public/consignment-register-request");
+            input["equipment_url"] = json!(FAKE_LINK);
+            let response = public_request(
+                public_app(&ports, true),
+                Method::POST,
+                LISTINGS,
+                Body::from(input.to_string()),
+                true,
+            )
+            .await;
+            assert_wire(
+                "public/consignment-register-receipt",
+                consignment_json(StatusCode::ACCEPTED, response).await,
+            );
+            assert_eq!(
+                ports.take_calls(),
+                [Call::Register(
+                    UserId::from_uuid(PUBLIC_SESSION_USER_ID),
+                    CommandId::from_uuid(fixture_uuid(0x65)),
+                    ListingMode::Consigned,
+                    101,
+                    500,
+                    true
+                ),]
+            );
+        }
+
+        async fn reprice(app: Router) -> Value {
+            let response = public_request(
+                app,
+                Method::PATCH,
+                &format!("{LISTINGS}/{LISTING_ID}/price"),
+                Body::from(wire_fixture("public/consignment-reprice-request").to_string()),
+                true,
+            )
+            .await;
+            consignment_json(StatusCode::OK, response).await
+        }
+
+        #[tokio::test]
+        async fn public_reprice_uses_injected_service() {
+            let ports = Arc::new(Ports::default());
+            assert_wire(
+                "public/consignment-reprice-receipt",
+                reprice(public_app(&ports, true)).await,
+            );
+            let calls = ports.take_calls();
+            let [Call::Reprice(command)] = calls.as_slice() else {
+                panic!("正式改价应调用注入的命令端口一次");
+            };
+            assert_eq!(
+                command.target,
+                SellerListingTarget {
+                    command_id: CommandId::from_uuid(fixture_uuid(0x66)),
+                    listing_id: LISTING_ID,
+                    seller_user_id: UserId::from_uuid(PUBLIC_SESSION_USER_ID),
+                    expected_version: version(1),
+                }
+            );
+            assert_eq!(command.price, amount(102));
+            assert!(command.enabled);
+        }
+
+        #[tokio::test]
+        async fn public_replays_original_receipt_after_disable() {
+            let ports = Arc::new(Ports::default());
+            let accepted = reprice(public_app(&ports, true)).await;
+            assert_wire("public/consignment-reprice-receipt", &accepted);
+            assert_eq!(reprice(public_app(&ports, false)).await, accepted);
+            let calls = ports.take_calls();
+            let [Call::Reprice(first), Call::Reprice(replay)] = calls.as_slice() else {
+                panic!("首次执行及停用重放应各调用同一命令端口一次");
+            };
+            assert!(first.enabled);
+            assert_eq!(
+                *replay,
+                RepriceListingCommand {
+                    enabled: false,
+                    // 每次传输由 HTTP 边界分配请求号，比较业务输入和规范摘要。
+                    request_id: replay.request_id.clone(),
+                    ..first.clone()
+                }
+            );
+        }
+
+        #[tokio::test]
+        async fn public_withdraw_uses_injected_service() {
+            let ports = Arc::new(Ports::default());
+            let response = public_request(
+                public_app(&ports, true),
+                Method::POST,
+                &format!("{LISTINGS}/{LISTING_ID}/withdraw"),
+                Body::from(wire_fixture("public/consignment-withdraw-request").to_string()),
+                true,
+            )
+            .await;
+            assert_wire(
+                "public/consignment-withdraw-receipt",
+                consignment_json(StatusCode::OK, response).await,
+            );
+            assert_eq!(
+                ports.take_calls(),
+                [Call::Withdraw(SellerListingTarget {
+                    command_id: CommandId::from_uuid(fixture_uuid(0x68)),
+                    listing_id: LISTING_ID,
+                    seller_user_id: UserId::from_uuid(PUBLIC_SESSION_USER_ID),
+                    expected_version: version(2),
+                })]
+            );
+        }
+
+        #[tokio::test]
+        async fn formal_admin_delist_uses_injected_service() {
+            let ports = Arc::new(Ports::default());
+            let state = admin_state().with_consignment(AdminConsignmentCapabilities {
+                read: None,
+                manage: Some(Arc::new(ManageListingService::new(ports.clone(), true))),
+            });
+            let response = admin_request(
+                state,
+                Method::POST,
+                &format!("/api/v1/admin/consignment/listings/{ADMIN_LISTING_ID}/delist"),
+                Body::from(wire_fixture("admin/consignment-delist-request").to_string()),
+            )
+            .await;
+            assert_wire(
+                "admin/consignment-delist-receipt",
+                consignment_json(StatusCode::OK, response).await,
+            );
+            assert_eq!(
+                ports.take_calls(),
+                [Call::Delist(
+                    "fixture-admin".to_owned(),
+                    CommandId::from_uuid(fixture_uuid(0x69)),
+                    ADMIN_LISTING_ID,
+                    2,
+                    "合成夹具下架说明".to_owned(),
+                )]
+            );
+        }
     }
 
     /// 只提供倒计时快照，用于验证 SVG 覆盖发生在通用脚本策略之后。
@@ -1329,7 +1980,7 @@ mod tests {
         ) -> ApplicationFuture<'_, PublicSessionIdentity> {
             Box::pin(async {
                 Ok(PublicSessionIdentity {
-                    user_id: Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2b),
+                    user_id: PUBLIC_SESSION_USER_ID,
                     username: "page-size-reader".to_owned(),
                     expires_at: None,
                     absolute_expires_at: None,
@@ -1368,6 +2019,8 @@ mod tests {
             unused_session_call()
         }
     }
+
+    const PUBLIC_SESSION_USER_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2b);
 
     fn public_state_with_session() -> PublicApiState {
         PublicApiState::new(
