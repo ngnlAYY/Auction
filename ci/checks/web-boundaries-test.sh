@@ -219,7 +219,7 @@ check_fixture denied-relative-cross-package 1 "web/public/src/to-shared.ts:1: �
 import { helper } from "../../shared/src/helper";
 TS
 
-check_fixture denied-alias-traversal 1 "web/contracts/src/to-public-traversal.ts:1: 不允许从 contracts 导入 public：@auction/contracts/../../public/src/main" web/contracts/src/to-public-traversal.ts <<'TS'
+check_fixture denied-alias-traversal 1 "web/contracts/src/to-public-traversal.ts:1: 未登记的 @auction 包名：@auction/contracts/../../public/src/main" web/contracts/src/to-public-traversal.ts <<'TS'
 import { main } from "@auction/contracts/../../public/src/main";
 TS
 

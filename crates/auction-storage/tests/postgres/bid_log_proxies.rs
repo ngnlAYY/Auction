@@ -1,11 +1,11 @@
-//! Public 竞价日志里的代理对代理竞争（运行账号）。
+//! 运行账号下的 Public 代理竞争日志与本人授权历史。
 //!
 //! 代理竞争只给胜者追加一条出价事实；被排位击败（`ranked_below`）的授权随这条事实公开出价人
 //! 与上限，否则会出现同一人连续抬价、价格无故跳升的假象。快慢模式一视同仁：正在等待反击的
 //! 慢速代理、当场落败的新建慢速代理，以及作为胜者当场出价的慢速代理都要覆盖。被普通出价超过
 //! 上限而耗尽的代理不公开上限。落败授权不是出价事实，不改变总数与游标。
 //!
-//! 夹具只用 SQL 写入场次、装备、lot 与用户；竞价全部走生产端口 `DatabaseCompetitionCommands`。
+//! 新竞价走生产端口 `DatabaseCompetitionCommands`；缺少创建命令出价的历史记录由 SQL 夹具构造。
 //! 逐行落败查找经 `auction_storage::bid_log_benchmark_sql` 读生产查询原文做 EXPLAIN，确认它能走
 //! 迁移 `000109` 的部分索引，而不是对只追加的转换表逐行顺序扫描。
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -13,8 +13,9 @@
 use std::sync::Arc;
 
 use auction_application::auction::{
-    CompetitionCommandPort, CreateProxyCommand, PlaceBidCommand, PublicBidLogCursor,
-    PublicBidLogEntry, PublicBidLogListRequest, PublicBidLogReader, PublicDefeatedProxy,
+    CompetitionCommandPort, CreateProxyCommand, PlaceBidCommand, PublicAccountPageRequest,
+    PublicAccountReader, PublicBidLogCursor, PublicBidLogEntry, PublicBidLogListRequest,
+    PublicBidLogReader, PublicDefeatedProxy, PublicMyBidsRequest,
 };
 use auction_domain::{BidAmount, CommandId, LotId, ProxyMode, UserId};
 use auction_storage::{DatabaseCompetitionCommands, DatabaseStore};
@@ -179,6 +180,11 @@ fn shape(entries: &[PublicBidLogEntry]) -> Vec<Shape> {
         .collect()
 }
 
+fn account_request() -> PublicMyBidsRequest {
+    let page = PublicAccountPageRequest { limit: 20, offset: 0 };
+    PublicMyBidsRequest { bids: page, proxies: page }
+}
+
 /// 用生产查询原文取第一页的 JSON 计划；禁用顺序扫描只为暴露可用索引，不改变查询文本。
 async fn first_page_plan(pool: &PgPool, auction_id: Uuid) -> String {
     let sql = auction_storage::bid_log_benchmark_sql::page_query_sql();
@@ -297,6 +303,177 @@ async fn postgres_bid_log_shows_proxies_defeated_by_proxies_including_slow_ones(
         plan.contains("bid_proxy_transitions_ranked_below_origin_idx"),
         "落败查找没有走部分索引：{plan}"
     );
+
+    service.postgres_pool().close().await;
+    admin.postgres_pool().close().await;
+}
+
+#[tokio::test]
+async fn postgres_proxy_history_partitions_same_timestamp_bids_by_creation_fact() {
+    for (second_maximum, second_bid) in [(400_000, None), (600_000, Some(530_000))] {
+        let database = support::TestDatabase::create().await.expect("克隆模板库");
+        let admin = database.maintenance_store().await.expect("以维护账号连接");
+        let service = database.store().await.expect("以运行账号连接");
+        let Seeded { lot_id, players, .. } = seed(&admin).await;
+        let [slow_a, ordinary_b, fast_c, ..] = players;
+
+        // 仅折叠夹具的写入时间，命令、转换和 lot 版本仍由生产端口持久化。
+        sqlx::raw_sql(
+            "CREATE FUNCTION public.test_proxy_history_timestamp() RETURNS trigger
+             LANGUAGE plpgsql AS $$
+             BEGIN
+                 NEW.created_at := '2026-01-01 00:00:00+00';
+                 RETURN NEW;
+             END;
+             $$;
+             CREATE TRIGGER test_proxy_history_bid_timestamp BEFORE INSERT ON public.bids
+             FOR EACH ROW EXECUTE FUNCTION public.test_proxy_history_timestamp();
+             CREATE TRIGGER test_proxy_history_authorization_timestamp
+             BEFORE INSERT ON public.bid_proxy_authorizations
+             FOR EACH ROW EXECUTE FUNCTION public.test_proxy_history_timestamp();",
+        )
+        .execute(admin.postgres_pool())
+        .await
+        .expect("折叠授权与竞价的写入时间");
+
+        let commands = DatabaseCompetitionCommands::new(Arc::new(service.clone()));
+        commands
+            .create_proxy(create_proxy("a-1", lot_id, slow_a, 200_000, ProxyMode::Slow))
+            .await
+            .expect("A 第一份代理");
+        commands.place_bid(place_bid("b-1", lot_id, ordinary_b, 80_000)).await.expect("B 普通出价");
+        commands
+            .create_proxy(create_proxy("c-1", lot_id, fast_c, 500_000, ProxyMode::Fast))
+            .await
+            .expect("C 代理击败 A");
+        commands
+            .create_proxy(create_proxy("a-2", lot_id, slow_a, second_maximum, ProxyMode::Slow))
+            .await
+            .expect("A 重建代理");
+
+        let page = service
+            .list_public_user_bids(slow_a, account_request())
+            .await
+            .expect("读取 A 的代理历史");
+        assert_eq!(page.proxy_total, 2);
+        let first = page.proxies.iter().find(|proxy| proxy.usage_number == 1).unwrap();
+        let second = page.proxies.iter().find(|proxy| proxy.usage_number == 2).unwrap();
+        assert_eq!(first.created_at, second.created_at);
+        assert_eq!(first.transitions[0].resulting_state_version, 1);
+        assert_eq!(second.transitions[0].resulting_state_version, 1);
+        let first_bid = first.bid.as_ref().expect("旧授权保留自己的竞价");
+        assert_eq!(first_bid.created_at, second.created_at);
+        assert_eq!(first_bid.amount, START_PRICE);
+        assert_eq!(second.bid.as_ref().map(|bid| bid.amount), second_bid);
+
+        let latest = service.public_user_proxy(lot_id, slow_a).await.expect("读取 A 的最新授权");
+        assert_eq!(latest.as_ref(), Some(second));
+
+        service.postgres_pool().close().await;
+        admin.postgres_pool().close().await;
+    }
+}
+
+#[tokio::test]
+async fn postgres_proxy_history_uses_legacy_time_boundary_without_creation_bid() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let admin = database.maintenance_store().await.expect("以维护账号连接");
+    let service = database.store().await.expect("以运行账号连接");
+    let Seeded { lot_id, players, .. } = seed(&admin).await;
+    let [actor, challenger, ..] = players;
+    let commands = DatabaseCompetitionCommands::new(Arc::new(service.clone()));
+    commands
+        .create_proxy(create_proxy("a-1", lot_id, actor, 200_000, ProxyMode::Fast))
+        .await
+        .expect("A 第一份代理");
+    commands
+        .place_bid(place_bid("b-1", lot_id, challenger, 300_000))
+        .await
+        .expect("B 超过 A 的上限");
+
+    // 历史格式的第二份授权与代理出价使用不同命令，仍按创建时间划分归属。
+    let mut tx = admin.postgres_pool().begin().await.expect("开启历史代理夹具事务");
+    let creation_command_id = stable_id(SEED, "legacy-create-proxy");
+    let bid_command_id = stable_id(SEED, "legacy-proxy-bid");
+    let authorization_id = stable_id(SEED, "legacy-authorization");
+    let bid_id = stable_id(SEED, "legacy-bid");
+    let (version, deadline, created_at): (i64, Timestamp, Timestamp) = sqlx::query_as(
+        "UPDATE public.lots
+         SET leader_user_id = $2, leader_proxy_last = true, current_price = 330000,
+             leader_since = effective_end_at - interval '1 hour',
+             last_proxy_sequence = 2, state_version = state_version + 1
+         WHERE id = $1
+         RETURNING state_version, effective_end_at, leader_since",
+    )
+    .bind(lot_id)
+    .bind(actor)
+    .fetch_one(&mut *tx)
+    .await
+    .expect("写入历史领先投影");
+    sqlx::query(
+        "INSERT INTO public.auction_commands
+            (command_id, command_kind, aggregate_id, request_hash, result_code, created_at)
+         VALUES ($1, 'place_proxy', $3, $4, 'accepted', $5),
+                ($2, 'place_bid', $3, $4, 'accepted', $5)",
+    )
+    .bind(creation_command_id)
+    .bind(bid_command_id)
+    .bind(lot_id)
+    .bind([7_u8; 32].as_slice())
+    .bind(created_at)
+    .execute(&mut *tx)
+    .await
+    .expect("写入分离的历史命令");
+    sqlx::query(
+        "WITH inserted_authorization AS (
+            INSERT INTO public.bid_proxy_authorizations
+                (authorization_id, lot_id, user_id, authorization_sequence, usage_number,
+                 maximum_amount, mode, status, state_version, creation_command_id, created_at,
+                 updated_at)
+            VALUES ($1, $2, $3, 2, 2, 400000, 'fast', 'active', 1, $4, $5, $5)
+            RETURNING authorization_id, creation_command_id, maximum_amount, mode, created_at
+         )
+         INSERT INTO public.bid_proxy_authorization_transitions
+            (authorization_id, transition_number, transition_kind, origin_command_id,
+             new_maximum_amount, new_mode, new_status, resulting_state_version, created_at)
+         SELECT authorization_id, 1, 'created', creation_command_id, maximum_amount, mode,
+                'active', 1, created_at
+         FROM inserted_authorization",
+    )
+    .bind(authorization_id)
+    .bind(lot_id)
+    .bind(actor)
+    .bind(creation_command_id)
+    .bind(created_at)
+    .execute(&mut *tx)
+    .await
+    .expect("写入历史授权与创建转换");
+    sqlx::query(
+        "INSERT INTO public.bids
+            (id, command_id, fact_index, lot_id, bidder_user_id, amount, mechanism,
+             effective_end_at, accepted_state_version, created_at)
+         VALUES ($1, $2, 1, $3, $4, 330000, 'proxy', $5, $6, $7)",
+    )
+    .bind(bid_id)
+    .bind(bid_command_id)
+    .bind(lot_id)
+    .bind(actor)
+    .bind(deadline)
+    .bind(version)
+    .bind(created_at)
+    .execute(&mut *tx)
+    .await
+    .expect("写入与历史授权同时刻的代理出价");
+    tx.commit().await.expect("提交历史代理夹具");
+
+    let mut page = service
+        .list_public_user_bids(actor, account_request())
+        .await
+        .expect("读取混合格式的代理历史");
+    assert_eq!(page.proxy_total, 2);
+    page.proxies.sort_unstable_by_key(|proxy| proxy.usage_number);
+    assert_eq!(page.proxies[0].bid.as_ref().map(|bid| bid.amount), Some(START_PRICE));
+    assert_eq!(page.proxies[1].bid.as_ref().map(|bid| bid.id), Some(bid_id));
 
     service.postgres_pool().close().await;
     admin.postgres_pool().close().await;

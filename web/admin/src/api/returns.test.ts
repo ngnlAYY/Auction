@@ -268,6 +268,44 @@ test("event_details_reject_unknown_keys_and_keep_legacy_held_empty", () => {
   ).toBe(false);
 });
 
+test("migrated_return_detail_decodes_event_provenance", async () => {
+  const { data, firstEvent, secondEvent } = returnDetail();
+  const opened = { ...firstEvent, event_kind: "opened" as const, details: { backfilled: true } };
+  const rebound = {
+    ...secondEvent,
+    event_kind: "recheck_rebound" as const,
+    details: { migration: 123, backfill_orphan_ordering_repaired: true },
+  };
+  const body = JSON.stringify({
+    code: "ok",
+    message: "ok",
+    data: { ...data, events: [opened, rebound] },
+  });
+  const detail = requireOk(
+    await readAdminFixture(body, `${LIST_PATH}/${CASE}`, (host, signal) =>
+      fetchSettlementReturn(host, CASE, signal),
+    ),
+  );
+  expect(detail.events).toEqual([opened, rebound]);
+
+  for (const events of [
+    [{ ...opened, details: { backfilled: false } }, rebound],
+    [{ ...opened, details: { ...opened.details, dispatch_no: 1 } }, rebound],
+    [opened, { ...rebound, details: { ...rebound.details, migration: 124 } }],
+    [opened, { ...rebound, details: { ...rebound.details, migration: "123" } }],
+    [
+      opened,
+      { ...rebound, details: { ...rebound.details, backfill_orphan_ordering_repaired: false } },
+    ],
+    [opened, { ...rebound, details: { ...rebound.details, dispatch_no: 1 } }],
+    [opened, { ...rebound, event_kind: "recheck_unchanged" as const }],
+  ]) {
+    const malformed = { ...detail, events };
+    expect(decode(AdminSettlementReturnDetailResponseSchema, malformed).ok).toBe(false);
+    expect(validDetail(malformed, CASE)).toBe(false);
+  }
+});
+
 test("command_result_must_echo_the_request", () => {
   // Rust 的 Uuid::from_u128(7) 用于回执比较，测试的是该层的身份相等条件。
   const commandId = "00000000-0000-0000-0000-000000000007";

@@ -45,6 +45,7 @@ DECLARE
     latest_command uuid;
     latest_revision bigint;
 BEGIN
+    -- 同名追加由事务锁串行化；账本事实不可变，校验读取无需 FOR SHARE 所要求的 UPDATE 权限。
     PERFORM pg_catalog.pg_advisory_xact_lock(
         pg_catalog.hashtextextended('runtime_switch:' || NEW.switch_name, 0)
     );
@@ -53,8 +54,7 @@ BEGIN
     END IF;
     SELECT * INTO target
     FROM public.runtime_switch_events AS event
-    WHERE event.command_id = NEW.expired_command_id
-    FOR SHARE;
+    WHERE event.command_id = NEW.expired_command_id;
     IF NOT FOUND
        OR target.switch_name IS DISTINCT FROM NEW.switch_name
        OR target.operation IS DISTINCT FROM 'set'
@@ -69,8 +69,7 @@ BEGIN
     FROM public.runtime_switch_events AS event
     WHERE event.switch_name = NEW.switch_name
     ORDER BY event.revision DESC
-    LIMIT 1
-    FOR SHARE;
+    LIMIT 1;
     IF latest_command IS DISTINCT FROM target.command_id
        OR latest_revision IS DISTINCT FROM NEW.expected_revision THEN
         RAISE EXCEPTION 'runtime switch expire 不能越过更新的 switch 事实'

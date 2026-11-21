@@ -143,13 +143,14 @@ async fn enqueue_in_transaction_with_created(
     let stored_recipient: String = sqlx::Row::try_get(&row, "recipient")?;
     let stored_payload: Value = sqlx::Row::try_get(&row, "payload")?;
     let stored_status: String = sqlx::Row::try_get(&row, "status")?;
-    if stored_digest != command.request_hash.as_bytes()
-        || stored_origin_kind != command.origin.as_str()
+    if stored_origin_kind != command.origin.as_str()
         || !matching_origin_id(&stored_origin_id, command)
         || stored_recipient != command.recipient
         || stored_payload != payload
         || prepared_status
             .is_some_and(|_| !matches!(stored_status.as_str(), "prepared" | "pending"))
+        || (stored_digest != command.request_hash.as_bytes()
+            && !command.matches_legacy_submission_receipt_digest(&stored_digest))
     {
         return Err(repository_error("MoogleMail delivery 命令摘要冲突").into());
     }

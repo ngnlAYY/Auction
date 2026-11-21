@@ -132,15 +132,17 @@ solid_fields=$(web_build_fields)
 	"$solid_fields" == *'bun_version=bun fixture'* && "$solid_fields" != *'dx_version='* ]] ||
 	fail 'Solid 回执应记录实际技术栈与 bun 版本'
 
-# 依赖凭据由 mise run web-prepare 生成；构建阶段只接受与当前锁文件和 bun 版本相符的凭据。
+# 构建阶段要求锁文件、bun 版本与已安装依赖树均与准备凭据一致。
 make_prepared_web() {
-	local root=$1
-	mkdir -p "$root/web/node_modules/.bin"
+	local root=$1 tree_sha256
+	mkdir -p "$root/web/node_modules/.bin" "$root/ci/release"
+	cp ci/release/web-dependency-tree.sh "$root/ci/release/"
 	printf 'lock\n' >"$root/web/bun.lock"
 	printf '#!/usr/bin/env bash\nexit 0\n' >"$root/web/node_modules/.bin/vite"
 	chmod +x "$root/web/node_modules/.bin/vite"
-	printf 'lock_sha256=%s\nbun_version=%s\n' \
-		"$(sha256_file "$root/web/bun.lock")" 'bun fixture' \
+	tree_sha256=$(bash "$root/ci/release/web-dependency-tree.sh" "$root/web/node_modules") || return 1
+	printf 'lock_sha256=%s\nbun_version=%s\ntree_sha256=%s\n' \
+		"$(sha256_file "$root/web/bun.lock")" 'bun fixture' "$tree_sha256" \
 		>"$root/web/node_modules/.auction-prepared"
 }
 
@@ -169,6 +171,7 @@ fi
 prepared_ok=$fixture/prepared-ok
 make_prepared_web "$prepared_ok"
 run_prepared_check "$prepared_ok" || fail '凭据相符的依赖准备应通过'
+prepared_tree_sha256=$(bash ci/release/web-dependency-tree.sh "$prepared_ok/web/node_modules")
 
 prepared_missing=$fixture/prepared-missing
 cp -a "$prepared_ok" "$prepared_missing"
@@ -181,7 +184,7 @@ fi
 
 prepared_digest=$fixture/prepared-digest
 cp -a "$prepared_ok" "$prepared_digest"
-printf 'lock_sha256=%064d\nbun_version=bun fixture\n' 0 \
+printf 'lock_sha256=%064d\nbun_version=bun fixture\ntree_sha256=%s\n' 0 "$prepared_tree_sha256" \
 	>"$prepared_digest/web/node_modules/.auction-prepared"
 if diagnostic=$(run_prepared_check "$prepared_digest" 2>&1); then
 	fail '准备凭据摘要不符时应失败'
@@ -190,13 +193,21 @@ fi
 
 prepared_version=$fixture/prepared-version
 cp -a "$prepared_ok" "$prepared_version"
-printf 'lock_sha256=%s\nbun_version=other bun\n' \
-	"$(sha256_file "$prepared_version/web/bun.lock")" \
+printf 'lock_sha256=%s\nbun_version=other bun\ntree_sha256=%s\n' \
+	"$(sha256_file "$prepared_version/web/bun.lock")" "$prepared_tree_sha256" \
 	>"$prepared_version/web/node_modules/.auction-prepared"
 if diagnostic=$(run_prepared_check "$prepared_version" 2>&1); then
 	fail '准备凭据的 bun 版本不符时应失败'
 fi
 [[ "$diagnostic" == *'bun 版本与当前工具不一致'* ]] || fail '版本不符时缺少明确诊断'
+
+prepared_modified=$fixture/prepared-modified
+cp -a "$prepared_ok" "$prepared_modified"
+printf '\n# 依赖安装后被修改\n' >>"$prepared_modified/web/node_modules/.bin/vite"
+if diagnostic=$(run_prepared_check "$prepared_modified" 2>&1); then
+	fail '已安装依赖内容与准备凭据不符时应失败'
+fi
+[[ "$diagnostic" == *'已安装依赖与准备凭据不一致'* ]] || fail '依赖内容变化时缺少明确诊断'
 
 prepared_vite=$fixture/prepared-vite
 cp -a "$prepared_ok" "$prepared_vite"
@@ -274,13 +285,13 @@ run_dioxus_fixture() {
 			unset AUCTION_WEB_STACK
 			FIXTURE_ROOT=$directory DIOXUS_CALL_LOG=$log PATH="$directory/bin:$PATH" \
 				bash "$directory/ci/release/web-bundle.sh" public
-		) >"$directory/stdout" 2>"$directory/stderr"
+		) >"$directory/stdout-$mode" 2>"$directory/stderr-$mode"
 	else
 		(
 			export AUCTION_WEB_STACK=dioxus
 			FIXTURE_ROOT=$directory DIOXUS_CALL_LOG=$log PATH="$directory/bin:$PATH" \
 				bash "$directory/ci/release/web-bundle.sh" public
-		) >"$directory/stdout" 2>"$directory/stderr"
+		) >"$directory/stdout-$mode" 2>"$directory/stderr-$mode"
 	fi
 }
 
@@ -298,8 +309,10 @@ for directory in "$default_fixture" "$explicit_fixture"; do
 	grep -Eq '^profile=wasm-release$' "$directory/target/dx/build/auction-web-public/web/WEB-BUILD-INFO" ||
 		fail 'Dioxus 回执 profile 不应改变'
 done
-sed "s|$default_fixture|<fixture>|g" "$default_fixture/calls.log" >"$fixture/default-calls"
-sed "s|$explicit_fixture|<fixture>|g" "$explicit_fixture/calls.log" >"$fixture/explicit-calls"
+sed -E -e "s|$default_fixture|<fixture>|g" -e 's/\.next\.[[:alnum:]]{6}( |$)/.next.<nonce>\1/g' \
+	"$default_fixture/calls.log" >"$fixture/default-calls"
+sed -E -e "s|$explicit_fixture|<fixture>|g" -e 's/\.next\.[[:alnum:]]{6}( |$)/.next.<nonce>\1/g' \
+	"$explicit_fixture/calls.log" >"$fixture/explicit-calls"
 cmp -s "$fixture/default-calls" "$fixture/explicit-calls" ||
 	fail '缺省与显式 dioxus 的 dx 调用应完全一致'
 
@@ -342,22 +355,31 @@ install_generated_directory "$install_fixture/next" "$install_fixture/current" |
 	fail '精确换入目录应成功'
 [[ -f "$install_fixture/current/new" && ! -e "$install_fixture/current/next" &&
 	! -e "$install_fixture/current/old" ]] || fail '换入应整体替换目标目录'
+
+# 并发走真实构建入口，验证 surface 锁覆盖生成、复用判定和稳定目录换入。
 parallel_fixture=$fixture/install-parallel
-for writer in a b; do
-	mkdir -p "$parallel_fixture/$writer"
-	printf '%s\n' "$writer" >"$parallel_fixture/$writer/payload"
-	done
-install_generated_directory "$parallel_fixture/a" "$parallel_fixture/current" &
+make_bundle_fixture "$parallel_fixture"
+run_dioxus_fixture "$parallel_fixture" default &
 first_writer=$!
-install_generated_directory "$parallel_fixture/b" "$parallel_fixture/current" &
+run_dioxus_fixture "$parallel_fixture" explicit &
 second_writer=$!
 wait "$first_writer" || fail '并发换入 A 失败'
 wait "$second_writer" || fail '并发换入 B 失败'
-[[ -f "$parallel_fixture/current/payload" ]] || fail '并发换入后目标缺失'
-final_payload=$(<"$parallel_fixture/current/payload")
-[[ $final_payload == a || $final_payload == b ]] || fail '并发换入留下不完整目标'
-if compgen -G "$parallel_fixture/current.previous.*" >/dev/null; then
+parallel_root="$parallel_fixture/target/dx/build/auction-web-public/web"
+[[ -f "$parallel_root/public/index.html" && -f "$parallel_root/WEB-BUILD-INFO" ]] ||
+	fail '并发换入留下不完整目标'
+if compgen -G "$parallel_root.previous.*" >/dev/null; then
 	fail '并发换入留下备份目录'
+fi
+
+# 中断可能发生在创建备份容器之后，也可能发生在旧目录已保存之后。
+interrupted=$fixture/install-interrupted/current
+mkdir -p "$interrupted.previous.000000" "$interrupted.previous.111111/payload"
+printf 'old\n' >"$interrupted.previous.111111/payload/version"
+recover_generated_directory "$interrupted" || fail '中断后应恢复稳定目录'
+[[ $(<"$interrupted/version") == old ]] || fail '中断恢复误用了空容器'
+if compgen -G "$interrupted.previous.*" >/dev/null; then
+	fail '中断恢复留下备份目录'
 fi
 
 # brotli 封存的枚举与各步失败必须传出来；函数不能被进程替换或 || 左侧吞掉。
@@ -593,9 +615,9 @@ source "$FIXTURE_ROOT/ci/release/build-identity.sh"
 root=$(web_surface_root "$1" "${FIXTURE_ROOT:?}")
 mkdir -p "$root/public"
 payload_sha=$(printf '%064d' 5)
-if [[ ${AUCTION_WEB_STACK:-dioxus} == solid && "$1" == public ]]; then
+if [[ ( ${AUCTION_WEB_STACK:-dioxus} == solid || ${FIXTURE_CHANGED_PAYLOAD:-0} == 1 ) && "$1" == public ]]; then
 	payload_sha=$(printf '%064d' 6)
-elif [[ ${AUCTION_WEB_STACK:-dioxus} == solid && "$1" == admin ]]; then
+elif [[ ( ${AUCTION_WEB_STACK:-dioxus} == solid || ${FIXTURE_CHANGED_PAYLOAD:-0} == 1 ) && "$1" == admin ]]; then
 	payload_sha=$(printf '%064d' 7)
 fi
 printf '%s\n' "$payload_sha" >"$root/PAYLOAD-SHA256"
@@ -703,36 +725,37 @@ run_release_fixture "$mixed" default "$mixed/default.out" || fail '混合场景�
 [[ $(wc -l <"$mixed/web-bundle.log") -eq 2 ]] || fail '缺省构建应生成两端页面'
 printf '%064d\n' 6 >"$mixed/target/dx/build/auction-web-public/web/PAYLOAD-SHA256"
 printf '%064d\n' 7 >"$mixed/target/dx/build/auction-web-admin/web/PAYLOAD-SHA256"
-run_release_fixture "$mixed" default "$mixed/mixed-after.out" || fail '混合页面后的缺省构建应成功'
+FIXTURE_CHANGED_PAYLOAD=1 run_release_fixture "$mixed" default "$mixed/mixed-after.out" ||
+	fail '混合页面后的缺省构建应成功'
 [[ $(<"$mixed/mixed-after.out") != *'复用'* ]] || fail '混合页面摘要与制品不一致时不得复用'
 [[ $(wc -l <"$mixed/calls.log") -eq 2 ]] || fail '混合页面不一致时应重新编译'
 [[ $(wc -l <"$mixed/web-bundle.log") -eq 4 ]] || fail '混合页面不一致时应重新生成两端页面'
 
-# 只恢复原生制品、没有稳定页面目录时同样不能复用。
+# 稳定目录缺失时先重建页面，只有锁内确认恢复到相同摘要才可复用原生制品。
 missing=$fixture/reuse-missing
 make_reuse_release_fixture "$missing"
 run_release_fixture "$missing" default "$missing/default.out" || fail '缺失页面场景的缺省构建应成功'
 rm -rf "$missing/target/dx/build/auction-web-public/web"
 run_release_fixture "$missing" default "$missing/missing-after.out" || fail '缺失页面后的缺省构建应成功'
-[[ $(<"$missing/missing-after.out") != *'复用'* ]] || fail '稳定 Public 页面缺失时不得复用'
+[[ $(<"$missing/missing-after.out") == *'复用'* ]] || fail '重新生成相同摘要时应复用原生制品'
 [[ $(<"$missing/missing-after.out") == *'当前 Public 页面 payload 缺失或无效'* ]] ||
 	fail '稳定 Public 页面缺失时缺少重建诊断'
-[[ $(wc -l <"$missing/calls.log") -eq 2 ]] || fail '稳定页面缺失时应重新编译'
+[[ $(wc -l <"$missing/calls.log") -eq 1 ]] || fail '重新生成相同摘要时不应重新编译'
 [[ $(wc -l <"$missing/web-bundle.log") -eq 4 ]] || fail '稳定页面缺失时应重新生成两端页面'
 
-# Solid 的稳定 Public 目录（target/web/public）缺失时同样不复用。
+# Solid 的稳定 Public 目录缺失时也必须先重建并核对摘要。
 missing_solid=$fixture/reuse-missing-solid
 make_reuse_release_fixture "$missing_solid"
 run_release_fixture "$missing_solid" solid "$missing_solid/default.out" || fail 'Solid 缺失页面场景的首次构建应成功'
 rm -rf "$missing_solid/target/web/public"
 run_release_fixture "$missing_solid" solid "$missing_solid/missing-after.out" || fail 'Solid 缺失页面后的构建应成功'
-[[ $(<"$missing_solid/missing-after.out") != *'复用'* ]] || fail 'Solid 稳定 Public 页面缺失时不得复用'
+[[ $(<"$missing_solid/missing-after.out") == *'复用'* ]] || fail 'Solid 恢复相同 Public 摘要时应复用'
 [[ $(<"$missing_solid/missing-after.out") == *'当前 Public 页面 payload 缺失或无效'* ]] ||
 	fail 'Solid 稳定 Public 页面缺失时缺少重建诊断'
-[[ $(wc -l <"$missing_solid/calls.log") -eq 2 ]] || fail 'Solid 稳定页面缺失时应重新编译'
+[[ $(wc -l <"$missing_solid/calls.log") -eq 1 ]] || fail 'Solid 恢复相同 Public 摘要时不应重新编译'
 [[ $(wc -l <"$missing_solid/web-bundle.log") -eq 4 ]] || fail 'Solid 稳定页面缺失时应重新生成两端页面'
 
-# Solid 的稳定 Admin 目录（target/web/admin）缺失时同样不能复用。
+# Solid 的稳定 Admin 目录缺失时也必须先重建并核对摘要。
 missing_solid_admin=$fixture/reuse-missing-solid-admin
 make_reuse_release_fixture "$missing_solid_admin"
 run_release_fixture "$missing_solid_admin" solid "$missing_solid_admin/default.out" ||
@@ -740,10 +763,10 @@ run_release_fixture "$missing_solid_admin" solid "$missing_solid_admin/default.o
 rm -rf "$missing_solid_admin/target/web/admin"
 run_release_fixture "$missing_solid_admin" solid "$missing_solid_admin/missing-after.out" ||
 	fail 'Solid Admin 缺失页面后的构建应成功'
-[[ $(<"$missing_solid_admin/missing-after.out") != *'复用'* ]] || fail 'Solid 稳定 Admin 页面缺失时不得复用'
+[[ $(<"$missing_solid_admin/missing-after.out") == *'复用'* ]] || fail 'Solid 恢复相同 Admin 摘要时应复用'
 [[ $(<"$missing_solid_admin/missing-after.out") == *'当前 Admin 页面 payload 缺失或无效'* ]] ||
 	fail 'Solid 稳定 Admin 页面缺失时缺少重建诊断'
-[[ $(wc -l <"$missing_solid_admin/calls.log") -eq 2 ]] || fail 'Solid Admin 页面缺失时应重新编译'
+[[ $(wc -l <"$missing_solid_admin/calls.log") -eq 1 ]] || fail 'Solid 恢复相同 Admin 摘要时不应重新编译'
 [[ $(wc -l <"$missing_solid_admin/web-bundle.log") -eq 4 ]] || fail 'Solid Admin 页面缺失时应重新生成两端页面'
 
 # 运行任务先取 feature，非法开关不能把缺值传给 cargo；Solid 还要注入页面构建号。

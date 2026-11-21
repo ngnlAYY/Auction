@@ -54,16 +54,20 @@ pub struct TestDatabase {
 impl TestDatabase {
     /// 克隆已执行全部迁移的模板库。
     pub async fn create() -> Result<Self, String> {
-        Self::create_inner(false).await
+        Self::create_inner(shared_cluster().await?, false).await
     }
 
     /// 从 `template0` 新建空库，供测试自行执行迁移。
     pub async fn create_empty() -> Result<Self, String> {
-        Self::create_inner(true).await
+        Self::create_inner(shared_cluster().await?, true).await
     }
 
-    async fn create_inner(empty: bool) -> Result<Self, String> {
-        let cluster = shared_cluster().await?;
+    /// 在一次性本机集群创建空库，供需要 superuser 的 DDL 回归使用。
+    pub async fn create_empty_isolated() -> Result<Self, String> {
+        Self::create_inner(Arc::new(bootstrap(None).await?), true).await
+    }
+
+    async fn create_inner(cluster: Arc<Cluster>, empty: bool) -> Result<Self, String> {
         let name = unique_name("auction_test_db_");
         let source = if empty { "template0" } else { cluster.template.as_str() };
         // 标识符只由本模块生成的 ASCII 名称构成，仍统一加引号避免大小写与保留字歧义。
@@ -275,14 +279,14 @@ async fn shared_cluster() -> Result<Arc<Cluster>, String> {
     if let Some(cluster) = guard.upgrade() {
         return Ok(cluster);
     }
-    let cluster = Arc::new(bootstrap().await?);
+    let cluster = Arc::new(bootstrap(env::var("AUCTION_TEST_DATABASE_URL").ok()).await?);
     *guard = Arc::downgrade(&cluster);
     Ok(cluster)
 }
 
-async fn bootstrap() -> Result<Cluster, String> {
-    let (admin_url, server) = match env::var("AUCTION_TEST_DATABASE_URL") {
-        Ok(url) if !url.trim().is_empty() => (url.trim().to_owned(), None),
+async fn bootstrap(external_url: Option<String>) -> Result<Cluster, String> {
+    let (admin_url, server) = match external_url.as_deref().map(str::trim) {
+        Some(url) if !url.is_empty() => (url.to_owned(), None),
         _ => {
             let (url, server) = TempServer::start()?;
             (url, Some(server))
@@ -349,10 +353,12 @@ async fn bootstrap() -> Result<Cluster, String> {
     prepare_template(&cluster).await?;
     // 只授予 auction_runtime 成员资格（默认 INHERIT），不带任何角色属性；外部服务器上要求维护角色
     // 创建一次性登录角色需要维护身份对 auction_runtime 的 ADMIN OPTION；上面已显式检查。
+    // 维护角色只继承本次创建的临时登录角色，以便 FORCE 删除时终止它的连接。
+    let service_role = quote_ident(&cluster.service_role);
     let statement = format!(
-        "CREATE ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS \
-         PASSWORD '{}' IN ROLE auction_runtime",
-        quote_ident(&cluster.service_role),
+        "CREATE ROLE {service_role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS \
+         PASSWORD '{}' IN ROLE auction_runtime; \
+         GRANT {service_role} TO CURRENT_USER WITH INHERIT TRUE, SET FALSE",
         cluster.service_password
     );
     run_sql(&cluster.admin_url, &statement).await?;
