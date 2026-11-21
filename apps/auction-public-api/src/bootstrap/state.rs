@@ -162,18 +162,15 @@ impl ConsignmentCredentials {
 fn configure_consignment<
     S: PublicListingRead + OwnedListingRead + ListingCommandStore + 'static,
 >(
-    state: PublicApiState,
     config: &ConsignmentConfig,
     activation: ConsignmentActivation,
     store: Option<&Arc<S>>,
     credentials: Option<ConsignmentCredentials>,
-) -> anyhow::Result<PublicApiState> {
+) -> anyhow::Result<ConsignmentCapabilities> {
     let enabled = activation == ConsignmentActivation::Enabled;
     let fee_bps = config.fee_bps();
     let Some(store) = store else {
-        return Ok(
-            state.with_consignment(ConsignmentCapabilities::without_database(enabled, fee_bps))
-        );
+        return Ok(ConsignmentCapabilities::without_database(enabled, fee_bps));
     };
     let sealer = credentials.as_ref().map(|credentials| Arc::clone(&credentials.sealer));
     let replay_crypto = credentials.map(|credentials| credentials.replay_crypto);
@@ -190,7 +187,7 @@ fn configure_consignment<
     };
     let registration_sealer_available = sealer.is_some();
     // 不变量 1、6：停用仍交给原命令账本仲裁，首次登记与改价受有效开关约束。
-    Ok(state.with_consignment(ConsignmentCapabilities {
+    Ok(ConsignmentCapabilities {
         enabled,
         fee_bps,
         public_read: Some(store.clone()),
@@ -207,7 +204,7 @@ fn configure_consignment<
         manage: Some(Arc::new(ManageListingService::new(store.clone(), enabled))),
         registration_sealer_available,
         replay_crypto,
-    }))
+    })
 }
 
 pub(super) async fn configure_state(
@@ -229,14 +226,9 @@ pub(super) async fn configure_state(
             security,
         )
         .with_runtime_switch_snapshot(switches);
-        let state = configure_consignment::<DatabaseStore>(
-            state,
-            &config.consignment,
-            activation,
-            None,
-            None,
-        )?;
-        return Ok((state, None, None, None));
+        let consignment =
+            configure_consignment::<DatabaseStore>(&config.consignment, activation, None, None)?;
+        return Ok((state.with_consignment(consignment), None, None, None));
     };
 
     // 审计失败按类别向共享影子框架记样本；进程级安装一次。
@@ -401,13 +393,13 @@ pub(super) async fn configure_state(
     .with_realtime_hub(hub)
     .with_runtime_switch_snapshot(switches)
     .with_readiness(readiness);
-    let state =
-        configure_consignment(state, &config.consignment, activation, Some(&store), credentials)?;
+    let consignment =
+        configure_consignment(&config.consignment, activation, Some(&store), credentials)?;
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "发布 Public ready 心跳失败");
     }
     Ok((
-        state,
+        state.with_consignment(consignment),
         Some(heartbeat),
         Some(realtime_relay),
         Some([runtime_switch_task, mail_template_task]),
@@ -515,8 +507,11 @@ mod tests {
     use auction_domain::consignment::{ListingPrice, ListingState};
     use auction_domain::{CommandId, UserId};
     use auction_http::PublicApiState;
-    use auction_integrations::{EquipmentKeyOpener, HentaiVerseListingUrlValidator, build_keyring};
+    use auction_integrations::{
+        EquipmentKeyOpener, HentaiVerseListingUrlValidator, Keyring, build_keyring,
+    };
     use auction_observability::{ProcessMetrics, TracingHealth, TracingHealthReader};
+    use auction_storage::DatabaseStore;
     use auction_time::Timestamp;
     use axum::Router;
     use axum::body::{Body, to_bytes};
@@ -573,9 +568,15 @@ mod tests {
 
     #[tokio::test]
     async fn consignment_without_database_reports_configured_status() {
-        for (enabled, activation) in
-            [(true, ConsignmentActivation::Enabled), (false, ConsignmentActivation::Disabled)]
-        {
+        for (enabled, activation, expected_status, expected_code) in [
+            (
+                true,
+                ConsignmentActivation::Enabled,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "consignment_unavailable",
+            ),
+            (false, ConsignmentActivation::Disabled, StatusCode::NOT_FOUND, "consignment_disabled"),
+        ] {
             let config = load_config(enabled);
             let metrics = Arc::new(
                 ProcessMetrics::new(false, "auction_public_api", "public", "test").unwrap(),
@@ -594,10 +595,20 @@ mod tests {
             )
             .await
             .unwrap();
-            let status = send(&configure_router(state), "GET", STATUS, None, StatusCode::OK).await;
+            let app = configure_router(state);
+            let status = send(&app, "GET", STATUS, None, StatusCode::OK).await;
             assert_eq!(status["data"]["enabled"], enabled);
             assert_eq!(status["data"]["fee_bps"], 175);
             assert_eq!(status["data"]["registration_ready"], false);
+
+            let catalog = send(&app, "GET", REGISTER, None, expected_status).await;
+            assert_eq!(catalog["code"], expected_code);
+
+            let capabilities =
+                configure_consignment::<DatabaseStore>(&config.consignment, activation, None, None)
+                    .unwrap();
+            assert!(capabilities.public_read.is_none());
+            assert!(capabilities.owned_read.is_none());
         }
     }
 
@@ -627,13 +638,12 @@ mod tests {
     async fn consignment_registration_passes_configured_policy_and_credentials() {
         let config = load_config(true);
         let store = Arc::new(ConsignmentStore::default());
-        let keyring = build_keyring(
-            DataKeyDomain::Equipment,
-            Some(("fixture-equipment", "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=")),
-            [],
-        )
-        .unwrap();
-        let app = router_with_store(&config, ConsignmentActivation::Enabled, &store, keyring);
+        let app = router_with_store(
+            &config,
+            ConsignmentActivation::Enabled,
+            &store,
+            Some(fixture_equipment_keyring()),
+        );
         let status = send(&app, "GET", STATUS, None, StatusCode::OK).await;
         assert_eq!(status["data"]["registration_ready"], true);
         assert_eq!(status["data"]["fee_bps"], 175);
@@ -654,7 +664,12 @@ mod tests {
     async fn consignment_disabled_preserves_owned_history_and_command_replay() {
         let config = load_config(false);
         let store = Arc::new(ConsignmentStore { replay: true, ..Default::default() });
-        let app = router_with_store(&config, ConsignmentActivation::Disabled, &store, None);
+        let app = router_with_store(
+            &config,
+            ConsignmentActivation::Disabled,
+            &store,
+            Some(fixture_equipment_keyring()),
+        );
         let history = send(&app, "GET", OWNED, None, StatusCode::OK).await;
         assert_eq!(history["data"]["items"], json!([]));
 
@@ -680,13 +695,35 @@ mod tests {
         )
         .await;
         assert_eq!(repriced["data"]["listing_id"], LISTING.to_string());
+
+        let without_comparator =
+            router_with_store(&config, ConsignmentActivation::Disabled, &store, None);
+        let failure = send(
+            &without_comparator,
+            "POST",
+            REGISTER,
+            Some(registration()),
+            StatusCode::SERVICE_UNAVAILABLE,
+        )
+        .await;
+        assert_eq!(failure["code"], "consignment_unavailable");
+    }
+
+    fn fixture_equipment_keyring() -> Arc<Keyring> {
+        build_keyring(
+            DataKeyDomain::Equipment,
+            Some(("fixture-equipment", "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=")),
+            [],
+        )
+        .unwrap()
+        .unwrap()
     }
 
     fn router_with_store(
         config: &AppConfig,
         activation: ConsignmentActivation,
         store: &Arc<ConsignmentStore>,
-        keyring: Option<Arc<auction_integrations::Keyring>>,
+        keyring: Option<Arc<Keyring>>,
     ) -> Router {
         let state = PublicApiState::new(
             None,
@@ -706,10 +743,10 @@ mod tests {
             configure_security(config).unwrap(),
         );
         let credentials = ConsignmentCredentials::from_keyring(keyring);
-        let state =
-            configure_consignment(state, &config.consignment, activation, Some(store), credentials)
+        let capabilities =
+            configure_consignment(&config.consignment, activation, Some(store), credentials)
                 .unwrap();
-        configure_router(state)
+        configure_router(state.with_consignment(capabilities))
     }
 
     fn registration() -> Value {
@@ -907,6 +944,9 @@ mod tests {
             });
             let price = command.input.price;
             Box::pin(async move {
+                if !replay_crypto {
+                    return Err(ConsignmentError::Unavailable);
+                }
                 if self.replay {
                     assert!(!command.policy.enabled);
                     let registered = ListingRegistered::new(LISTING, price)?;
@@ -914,7 +954,7 @@ mod tests {
                         registered,
                     )));
                 }
-                if !sealer || !replay_crypto {
+                if !sealer {
                     return Err(ConsignmentError::Unavailable);
                 }
                 Ok(ListingCommandOutcome::Accepted(ListingRegistered::new(
