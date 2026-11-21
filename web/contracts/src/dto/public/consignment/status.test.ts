@@ -45,7 +45,7 @@ test("状态夹具分别表示可登记、关闭与依赖不可用", async () =>
   });
 });
 
-test.each([
+const requiredStatusKeys = [
   "enabled",
   "registration_ready",
   "registration_modes",
@@ -55,15 +55,19 @@ test.each([
   "fee_bps",
   "min_price",
   "max_price",
-] as const)("状态缺少必填键 %s 时拒绝解码", async (missing) => {
-  const { data: status } = await readResponse(
-    "public/consignment-status.json",
-    ConsignmentStatusSchema,
-  );
-  const incomplete: Partial<typeof status> = { ...status };
-  delete incomplete[missing];
-  expect(decode(ConsignmentStatusSchema, incomplete).ok).toBe(false);
-});
+] as const;
+
+for (const [capability, fixture] of [
+  ["ready", "public/consignment-status.json"],
+  ["read-only", "public/consignment-status-unavailable.json"],
+] as const) {
+  test.each(requiredStatusKeys)(`${capability} 状态缺少必填键 %s 时拒绝解码`, async (missing) => {
+    const { data: status } = await readResponse(fixture, ConsignmentStatusSchema);
+    const incomplete: Partial<typeof status> = { ...status };
+    delete incomplete[missing];
+    expect(decode(ConsignmentStatusSchema, incomplete).ok).toBe(false);
+  });
+}
 
 test("状态拒绝矛盾能力、未知枚举和非法协议常量", async () => {
   const { data: status } = await readResponse(

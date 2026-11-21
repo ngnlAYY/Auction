@@ -2,11 +2,13 @@
 
 import { expect, test } from "bun:test";
 import { dirname, relative, resolve } from "node:path";
-import { type SourceFile, SyntaxKind } from "typescript/unstable/ast";
+import { NodeFlags, type SourceFile, SyntaxKind } from "typescript/unstable/ast";
 import {
   isExportDeclaration,
   isImportDeclaration,
+  isNamedImports,
   isStringLiteral,
+  isTypeAliasDeclaration,
   isVariableStatement,
 } from "typescript/unstable/ast/is";
 import { API, type Snapshot } from "typescript/unstable/async";
@@ -18,15 +20,57 @@ const publicEntry = resolve(repositoryRoot, "web/public/src/main.tsx");
 const adminEntry = resolve(repositoryRoot, "web/admin/src/main.ts");
 const publicContract = "web/contracts/src/dto/public/consignment";
 const publicPages = "web/public/src/surface/consignment";
-const capabilityDeclarations = {
+const capabilityDeclarationsAndExports = {
   [`${publicContract}/listing-options.ts`]: [
-    "LISTING_PRICE_MAX",
-    "ListingFeeBpsSchema",
-    "ListingModeSchema",
-    "ListingWorldSchema",
+    'import { maxValue, picklist, pipe, type InferOutput } from "valibot"',
+    'import { unsignedInteger } from "../../../wire"',
+    "export const LISTING_PRICE_MAX",
+    "export const ListingFeeBpsSchema",
+    "export const ListingModeSchema",
+    "export const ListingWorldSchema",
+    "export type ListingMode",
+    "export type ListingWorld",
   ],
-  [`${publicContract}/status.ts`]: ["ConsignmentStatusSchema"],
+  [`${publicContract}/status.ts`]: [
+    'import { array, boolean, check, literal, pipe, type InferOutput } from "valibot"',
+    'import { strictStruct } from "../../../wire"',
+    'import { LISTING_PRICE_MAX, ListingFeeBpsSchema, ListingModeSchema, ListingWorldSchema } from "./listing-options"',
+    "export const ConsignmentStatusSchema",
+    "export type ConsignmentStatus",
+  ],
 };
+
+function declarationsAndExports(source: SourceFile): string[] {
+  return source.statements.flatMap((statement) => {
+    if (isImportDeclaration(statement)) {
+      const clause = statement.importClause;
+      const bindings = clause?.namedBindings;
+      if (
+        bindings !== undefined &&
+        isNamedImports(bindings) &&
+        clause?.name === undefined &&
+        clause?.phaseModifier === undefined &&
+        statement.attributes === undefined
+      ) {
+        const names = bindings.elements.map((binding) => binding.getText(source)).sort();
+        const specifier = statement.moduleSpecifier.getText(source);
+        return [`import { ${names.join(", ")} } from ${specifier}`];
+      }
+    }
+    if (!isVariableStatement(statement) && !isTypeAliasDeclaration(statement)) {
+      // 保留其他顶层语句供精确比较，包括默认导出、export = 和重导出。
+      return [statement.getText(source)];
+    }
+
+    const modifiers = statement.modifiers?.map((modifier) => modifier.getText(source)) ?? [];
+    if (isTypeAliasDeclaration(statement)) {
+      return [[...modifiers, "type", statement.name.text].join(" ")];
+    }
+    const { declarations, flags } = statement.declarationList;
+    const kind = (flags & NodeFlags.Const) !== 0 ? "const" : "其他变量声明";
+    return declarations.map(({ name }) => [...modifiers, kind, name.getText(source)].join(" "));
+  });
+}
 
 async function staticModules(snapshot: Snapshot, entry: string) {
   const project = await snapshot.getDefaultProjectForFile(entry);
@@ -62,6 +106,7 @@ async function staticModules(snapshot: Snapshot, entry: string) {
   return reached;
 }
 
+// TypeScript 需要解析两个入口及其所在的包，单独放宽本用例的超时。
 test("Public 和 Admin 的静态入口只可达约定的寄售模块与能力原语", async () => {
   const api = new API({ cwd: resolve(repositoryRoot, "web") });
   try {
@@ -70,20 +115,16 @@ test("Public 和 Admin 的静态入口只可达约定的寄售模块与能力原
       const publicModules = await staticModules(snapshot, publicEntry);
       expect(
         [...publicModules.keys()].filter((path) => path.startsWith(`${publicContract}/`)).sort(),
-      ).toEqual(Object.keys(capabilityDeclarations).sort());
+      ).toEqual(Object.keys(capabilityDeclarationsAndExports).sort());
       expect(
         [...publicModules.keys()].filter((path) => path.startsWith(`${publicPages}/`)),
       ).toEqual([`${publicPages}/capability.ts`]);
 
       // 仅检查文件路径无法发现把其他 schema 搬进已可达的窄模块。
-      for (const [path, expected] of Object.entries(capabilityDeclarations)) {
+      for (const [path, expected] of Object.entries(capabilityDeclarationsAndExports)) {
         const source = publicModules.get(path);
-        const declarations = source?.statements.flatMap((statement) =>
-          isVariableStatement(statement)
-            ? statement.declarationList.declarations.map(({ name }) => name.getText(source))
-            : [],
-        );
-        expect(declarations?.sort()).toEqual(expected);
+        if (source === undefined) throw new Error(`无法检查静态模块 ${path}`);
+        expect(declarationsAndExports(source).sort()).toEqual([...expected].sort());
       }
 
       const adminModules = await staticModules(snapshot, adminEntry);
@@ -100,4 +141,4 @@ test("Public 和 Admin 的静态入口只可达约定的寄售模块与能力原
   } finally {
     await api.close();
   }
-});
+}, 30_000);

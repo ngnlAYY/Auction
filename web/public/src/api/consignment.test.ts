@@ -154,6 +154,20 @@ test("HTTP 200 的状态缺少 enabled 时返回 invalid-response", async () => 
   }
 });
 
+test("HTTP 200 的 read-only 状态缺少 registration_ready 时返回 invalid-response", async () => {
+  const transport = fakeFetch(() =>
+    response({ ...status(true, false), registration_ready: undefined }),
+  );
+  try {
+    expect(await fetchConsignmentStatus(new AbortController().signal)).toEqual({
+      ok: false,
+      error: { kind: "invalid-response" },
+    });
+  } finally {
+    transport.restore();
+  }
+});
+
 const MATCHED_QUERY = { ...QUERY, q: "Oak" };
 
 test.each([
