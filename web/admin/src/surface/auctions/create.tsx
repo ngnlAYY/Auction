@@ -245,9 +245,9 @@ function AdminAuctionCreateFields(props: {
     if (frozen()) {
       return;
     }
-    const worldIdValue = worldId();
+    const worldIdValue = rustTrim(worldId());
     let errors: CreateFieldErrors = EMPTY_FIELD_ERRORS;
-    if (rustTrim(worldIdValue).length === 0) {
+    if (worldIdValue.length === 0) {
       errors = { ...errors, world: "required" };
     }
     const sequenceValue = parseSequence(sequence());

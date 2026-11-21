@@ -37,52 +37,6 @@ pub(crate) async fn seal_file(input: &Path, output: &Path, recipient: &str) -> a
     publish(&temporary, output)
 }
 
-/// 用离线 age 私钥解密到输出目录内的私有临时文件；私钥只作参数，不复制或读入内存。
-pub(crate) async fn decrypt_file(
-    identity: &Path,
-    input: &Path,
-    output: &Path,
-) -> anyhow::Result<()> {
-    require_identity(identity)?;
-    files::require_private_target(output)?;
-    let temporary = partial(output);
-    process::remove_stale(&temporary, "残留临时文件")?;
-    let mut child = Command::new("age")
-        .args(["--decrypt", "--identity"])
-        .arg(identity)
-        .arg("--output")
-        .arg(&temporary)
-        .arg(input)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .context("age 解密无法启动")?;
-    let stderr = child.stderr.take().context("age stderr 不可用")?;
-    let (status, _) = tokio::try_join!(child.wait(), process::capture(stderr, 16 * 1024))?;
-    if !status.success() {
-        let _ = fs::remove_file(&temporary);
-        anyhow::bail!("age 解密失败；请核对离线私钥与备份收件人");
-    }
-    publish(&temporary, output)
-}
-
-fn require_identity(identity: &Path) -> anyhow::Result<()> {
-    if !identity.is_absolute() {
-        anyhow::bail!("age 私钥必须使用绝对路径");
-    }
-    let file = files::open_regular(identity)?;
-    let metadata = file.metadata().context("读取 age 私钥元数据失败")?;
-    if metadata.uid() != files::effective_uid()
-        || metadata.nlink() != 1
-        || metadata.mode() & 0o077 != 0
-    {
-        anyhow::bail!("age 私钥必须是当前账号拥有的 owner-only 单链接普通文件");
-    }
-    Ok(())
-}
-
 fn partial(output: &Path) -> std::path::PathBuf {
     let name = output.file_name().and_then(|name| name.to_str()).unwrap_or("scope");
     output.with_file_name(format!(".{name}.partial"))

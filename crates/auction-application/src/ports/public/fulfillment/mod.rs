@@ -5,6 +5,8 @@
 //! 映射为 wire 字符串，浏览器只把字符串映射为文案。邮件、投递、履约与命令标识、诊断码、
 //! Bot 身份与代理模式都不进入本端口的公开输出。
 
+use std::collections::HashSet;
+
 use auction_domain::SettlementWorld;
 use auction_time::Timestamp;
 use uuid::Uuid;
@@ -118,10 +120,9 @@ impl PublicFulfillmentPage {
         {
             return Err("公开履约进度页无效");
         }
-        for (index, entry) in self.entries.iter().enumerate() {
-            if self.entries[..index].iter().any(|other| other.lot_id == entry.lot_id) {
-                return Err("公开履约进度 lot 重复");
-            }
+        let mut lot_ids = HashSet::with_capacity(self.entries.len());
+        if self.entries.iter().any(|entry| !lot_ids.insert(entry.lot_id)) {
+            return Err("公开履约进度 lot 重复");
         }
         self.views().map(|_| ())
     }

@@ -15,7 +15,7 @@ use crate::api::{
     silence_admin_alert,
 };
 use crate::surface::ADMIN_LOCALE_CATALOG;
-use crate::surface::auctions::draft_page_tests::{button, click_button, mount_writer};
+use crate::surface::auctions::editor::tests::{button, click_button, mount_writer};
 use crate::surface::pending::{
     PendingCommandNotices, PendingCommandPanel, use_pending_command_host, use_pending_commands,
 };

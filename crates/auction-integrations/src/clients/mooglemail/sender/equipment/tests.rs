@@ -15,7 +15,7 @@ use crate::clients::mooglemail::{
     MoogleMailClient, MoogleMailMessageFields, MoogleMailParser, MoogleMailWorld,
 };
 
-type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+const MAXIMUM_REQUEST_HEADER_BYTES: usize = 16 * 1024;
 
 const REFERENCE: &str = "/dynjs/1793537462/fixture/equip-77.js";
 
@@ -47,14 +47,33 @@ fn request() -> MoogleMailSendRequest {
     }
 }
 
+struct FixtureServer(Option<JoinHandle<std::io::Result<()>>>);
+
+impl FixtureServer {
+    async fn finish(
+        mut self,
+    ) -> Result<std::io::Result<()>, Box<dyn std::error::Error + Send + Sync>> {
+        let task = self
+            .0
+            .take()
+            .ok_or_else(|| std::io::Error::other("fixture server task already joined"))?;
+        Ok(task.await?)
+    }
+}
+
+impl Drop for FixtureServer {
+    fn drop(&mut self) {
+        if let Some(task) = &self.0 {
+            task.abort();
+        }
+    }
+}
+
 async fn fixture(
     page: String,
     content_type: &str,
     metadata: String,
-) -> Result<
-    (MoogleMailSender, JoinHandle<std::io::Result<()>>),
-    Box<dyn std::error::Error + Send + Sync>,
-> {
+) -> Result<(MoogleMailSender, FixtureServer), Box<dyn std::error::Error + Send + Sync>> {
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
     let address = listener.local_addr()?;
     let content_type = content_type.to_owned();
@@ -63,19 +82,36 @@ async fn fixture(
             ("/?s=Bazaar&ss=am&screen=organize&filter=armor_cloth", "text/html".to_owned(), page),
             (REFERENCE, content_type, metadata),
         ] {
-            let (mut stream, _) = listener.accept().await?;
-            let mut request = Vec::new();
-            loop {
-                let mut buffer = [0; 1024];
-                let length = stream.read(&mut buffer).await?;
-                if length == 0 {
-                    return Err(std::io::ErrorKind::UnexpectedEof.into());
+            let (mut stream, _) = tokio::time::timeout(Duration::from_secs(5), listener.accept())
+                .await
+                .map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::TimedOut, "fixture accept timed out")
+                })??;
+            let request = tokio::time::timeout(Duration::from_secs(5), async {
+                let mut request = Vec::new();
+                loop {
+                    let mut buffer = [0; 1024];
+                    let length = stream.read(&mut buffer).await?;
+                    if length == 0 {
+                        return Err(std::io::ErrorKind::UnexpectedEof.into());
+                    }
+                    if request
+                        .len()
+                        .checked_add(length)
+                        .is_none_or(|size| size > MAXIMUM_REQUEST_HEADER_BYTES)
+                    {
+                        return Err(std::io::Error::other("fixture request headers too large"));
+                    }
+                    request.extend_from_slice(&buffer[..length]);
+                    if request.windows(4).any(|value| value == b"\r\n\r\n") {
+                        return Ok::<_, std::io::Error>(request);
+                    }
                 }
-                request.extend_from_slice(&buffer[..length]);
-                if request.windows(4).any(|value| value == b"\r\n\r\n") {
-                    break;
-                }
-            }
+            })
+            .await
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::TimedOut, "fixture request timed out")
+            })??;
             let expected = format!("GET {path} HTTP/1.1\r\n");
             if !request.starts_with(expected.as_bytes()) {
                 return Err(std::io::Error::other("读取元数据时出现非预期请求"));
@@ -94,11 +130,12 @@ async fn fixture(
         minimum_request_interval: Duration::from_millis(1),
         request_timeout: Duration::from_secs(2),
     })?;
-    Ok((MoogleMailSender::new(client), server))
+    Ok((MoogleMailSender::new(client), FixtureServer(Some(server))))
 }
 
 #[tokio::test]
-async fn inventory_metadata_binds_external_name_before_preparing_equipment() -> TestResult {
+async fn inventory_metadata_binds_external_name_before_preparing_equipment()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 名称中的锁图标不是状态；脚本说明中的登录/战斗标记也不是页面状态。
     let name = "Custom \u{1f512} Blade";
     let label = format!("\u{1f4e6} \u{1f6e1}\u{fe0f} {name}");
@@ -114,7 +151,7 @@ async fn inventory_metadata_binds_external_name_before_preparing_equipment() -> 
             true
         })
         .await?;
-    server.await??;
+    server.finish().await??;
     assert_eq!(state.equipment.len(), 1);
     let equipment = &state.equipment[0];
     assert_eq!(equipment.equipment_id, "314");
@@ -137,7 +174,7 @@ async fn reject_metadata(
             true
         })
         .await;
-    server.await??;
+    server.finish().await??;
     assert!(
         matches!(result, Err(error) if error.category == MoogleMailErrorCategory::ProtocolDrift && !error.write_started())
     );
@@ -145,7 +182,8 @@ async fn reject_metadata(
 }
 
 #[tokio::test]
-async fn inventory_metadata_rejects_incomplete_or_ambiguous_names() -> TestResult {
+async fn inventory_metadata_rejects_incomplete_or_ambiguous_names()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     for metadata in [
         r#"var dynjs_equip = {};"#,
         r#"var dynjs_eqstore = {"314":{"t":"Fixture"}};"#,
@@ -161,7 +199,8 @@ async fn inventory_metadata_rejects_incomplete_or_ambiguous_names() -> TestResul
 }
 
 #[test]
-fn inventory_metadata_rejects_non_native_label_decoration() -> TestResult {
+fn inventory_metadata_rejects_non_native_label_decoration()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let ids = vec!["314".to_owned()];
     for decoration in [
         "<span hidden></span>",
@@ -184,7 +223,8 @@ fn inventory_metadata_rejects_non_native_label_decoration() -> TestResult {
 }
 
 #[tokio::test]
-async fn inventory_metadata_rejects_html_responses() -> TestResult {
+async fn inventory_metadata_rejects_html_responses()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     for (media_type, metadata) in [
         ("text/html", r#"var dynjs_equip = {"314":{"t":"Fixture"}};"#),
         ("application/javascript", " \n<html><body>Fixture</body></html>"),
@@ -195,7 +235,8 @@ async fn inventory_metadata_rejects_html_responses() -> TestResult {
 }
 
 #[test]
-fn inventory_metadata_rejects_origin_world_and_path_substitution() -> TestResult {
+fn inventory_metadata_rejects_origin_world_and_path_substitution()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let client = MoogleMailClient::production()?;
     for source in [
         "https://other.invalid/dynjs/77/fixture/equip-77.js",

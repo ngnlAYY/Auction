@@ -117,6 +117,17 @@ pub const ADMIN_SETTLEMENT_RETURN_ASSET_LOCATIONS: [&str; 7] = [
     "resent_in_transit",
 ];
 
+fn deserialize_asset_location<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    if !ADMIN_SETTLEMENT_RETURN_ASSET_LOCATIONS.contains(&value.as_str()) {
+        return Err(serde::de::Error::custom("资产位置不在闭集内"));
+    }
+    Ok(value)
+}
+
 /// 领回后的处理计划闭集。
 pub const ADMIN_SETTLEMENT_RETURN_PLANS: [&str; 2] = ["resend", "hold"];
 
@@ -138,6 +149,263 @@ pub const ADMIN_SETTLEMENT_RETURN_EVENT_KINDS: [&str; 15] = [
     "resent",
     "inbox_closed",
 ];
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminSettlementReturnEventKind {
+    Opened,
+    Acknowledged,
+    RecheckRequested,
+    RecheckRebound,
+    RecheckUnchanged,
+    TakeRequested,
+    TakeActivated,
+    TakeProven,
+    TakeUnknown,
+    TakeObserved,
+    TakeRetryRequested,
+    Held,
+    ResendAuthorized,
+    Resent,
+    InboxClosed,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminSettlementReturnStatus {
+    Quarantined,
+    RecheckPending,
+    AwaitingDecision,
+    TakePending,
+    TakeUnknown,
+    ResendPending,
+    Held,
+    Resent,
+    InboxClosed,
+    Reviewed,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminSettlementReturnMatchState {
+    Untrusted,
+    Unbound,
+    FulfillmentTerminal,
+    ManualReconcile,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminSettlementReturnReason {
+    SourceUnproven,
+    EvidenceInvalid,
+    ObligationUnknown,
+    SubjectKindMismatch,
+    DeliveryUnsent,
+    WorldMismatch,
+    DispatchUnknown,
+    DispatchAmbiguous,
+    DispatchAlreadyReturned,
+    DispatchSuperseded,
+    BodyUnproven,
+    ReturnedAssetsMatch,
+    ReturnedAssetsMismatch,
+    ReceivedBeforeSend,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminSettlementReturnAction {
+    ReclaimAndResend,
+    ReclaimAndHold,
+    ResendFromCustody,
+    CloseInbox,
+    Acknowledge,
+    Recheck,
+    RetryTake,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminSettlementReturnHandleAction {
+    ReclaimAndResend,
+    ReclaimAndHold,
+    ResendFromCustody,
+    CloseInbox,
+    Acknowledge,
+    RetryTake,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminSettlementReturnBlocker {
+    Untrusted,
+    Unbound,
+    AssetsMismatch,
+    StateConflict,
+    ResendLimit,
+    ObligationIneligible,
+    ProofRequired,
+    SendUnresolved,
+    ObservationRequired,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminSettlementReturnPlan {
+    Resend,
+    Hold,
+}
+
+/// 案件摘要。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminSettlementReturnSummaryResponse {
+    pub return_id: String,
+    pub case_version: i64,
+    pub status: AdminSettlementReturnStatus,
+    pub match_state: AdminSettlementReturnMatchState,
+    pub reason_code: AdminSettlementReturnReason,
+    pub world_id: String,
+    pub external_mail_id: String,
+    pub received_at: String,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub obligation_id: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub obligation_kind: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub auction_id: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub lot_id: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub delivery_id: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub dispatch_no: Option<u32>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub recipient: Option<String>,
+    pub credits: i64,
+    pub cod: i64,
+    pub attachment_count: u32,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub plan: Option<AdminSettlementReturnPlan>,
+    pub resend_limit: u8,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub resends_used: Option<u32>,
+    #[serde(deserialize_with = "deserialize_asset_location")]
+    pub asset_location: String,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub closed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminSettlementReturnListResponse {
+    pub returns: Vec<AdminSettlementReturnSummaryResponse>,
+    pub pagination: AdminStrictPaginationResponse,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminSettlementReturnEventResponse {
+    pub case_version: i64,
+    pub event_kind: AdminSettlementReturnEventKind,
+    pub occurred_at: String,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub actor_id: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub command_id: Option<String>,
+    pub details: Value,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminSettlementReturnDispatchResponse {
+    pub dispatch_no: u32,
+    pub delivery_id: String,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub delivery_status: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub sending_at: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub completed_at: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub authorized_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminSettlementReturnTakeResponse {
+    pub execution_state: String,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub delivery_id: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub delivery_status: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub failure_code: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub proven_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminSettlementReturnCustodyResponse {
+    pub beneficiary: String,
+    pub credits: i64,
+    pub equipment_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminSettlementReturnBlockerResponse {
+    pub action: AdminSettlementReturnAction,
+    pub blocker: AdminSettlementReturnBlocker,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminSettlementReturnDetailResponse {
+    pub summary: AdminSettlementReturnSummaryResponse,
+    pub events: Vec<AdminSettlementReturnEventResponse>,
+    pub dispatches: Vec<AdminSettlementReturnDispatchResponse>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub take: Option<AdminSettlementReturnTakeResponse>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub resend_dispatch_no: Option<u32>,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub custody: Option<AdminSettlementReturnCustodyResponse>,
+    pub allowed_actions: Vec<AdminSettlementReturnAction>,
+    pub blockers: Vec<AdminSettlementReturnBlockerResponse>,
+    pub recheck_unavailable: bool,
+    pub take_unavailable: bool,
+    #[serde(deserialize_with = "deserialize_required_option")]
+    pub take_unknown_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminSettlementReturnHandleRequest {
+    pub command_id: Uuid,
+    pub expected_version: i64,
+    pub action: AdminSettlementReturnHandleAction,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminSettlementReturnRecheckRequest {
+    pub command_id: Uuid,
+    pub expected_version: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminSettlementReturnCommandResponse {
+    pub command_id: String,
+    pub return_id: String,
+    pub action: AdminSettlementReturnAction,
+    pub case_version: i64,
+    pub status: AdminSettlementReturnStatus,
+}
 
 /// 持久 Take 的执行状态闭集（`settlement_return_actions.execution_state`）。
 pub const ADMIN_SETTLEMENT_RETURN_TAKE_STATES: [&str; 4] =
@@ -153,190 +421,6 @@ pub const ADMIN_SETTLEMENT_RETURN_OBLIGATION_KINDS: [&str; 7] = [
     "unsold_return",
     "withdrawn_return",
 ];
-
-/// 案件的安全摘要；列表行与详情共用。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminSettlementReturnSummaryResponse {
-    /// 案件 ID，即退件入站邮件 ID。
-    pub return_id: String,
-    pub case_version: i64,
-    pub status: String,
-    pub match_state: String,
-    pub reason_code: String,
-    pub world_id: String,
-    /// 退件在 Bot 收件箱中的远端 MID。
-    pub external_mail_id: String,
-    pub received_at: String,
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub obligation_id: Option<String>,
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub obligation_kind: Option<String>,
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub auction_id: Option<String>,
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub lot_id: Option<String>,
-    /// 被退回的原派发投递；只在已绑定时存在。
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub delivery_id: Option<String>,
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub dispatch_no: Option<u32>,
-    /// 原派发冻结收件人；补寄只寄给这个名字。
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub recipient: Option<String>,
-    pub credits: i64,
-    pub cod: i64,
-    pub attachment_count: u32,
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub plan: Option<String>,
-    /// 案件建立时冻结的补寄上限（不含首寄）。
-    pub resend_limit: u8,
-    /// 原义务已发生的补寄次数；未绑定义务时为空。
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub resends_used: Option<u32>,
-    pub asset_location: String,
-    pub created_at: String,
-    pub updated_at: String,
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub closed_at: Option<String>,
-}
-
-/// `GET /api/v1/admin/settlement-returns` 的分页结果。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminSettlementReturnListResponse {
-    pub returns: Vec<AdminSettlementReturnSummaryResponse>,
-    pub pagination: AdminStrictPaginationResponse,
-}
-
-/// 案件处理事件（只追加）。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminSettlementReturnEventResponse {
-    pub case_version: i64,
-    pub event_kind: String,
-    pub occurred_at: String,
-    /// Admin 命令触发时为操作者；Worker 事件为空。
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub actor_id: Option<String>,
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub command_id: Option<String>,
-    /// 安全细节对象（分类、原因码、派发编号、投递 ID、失败码等），不含正文或秘密。
-    pub details: Value,
-}
-
-/// 原义务的一次派发。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminSettlementReturnDispatchResponse {
-    pub dispatch_no: u32,
-    pub delivery_id: String,
-    /// 投递当前状态；补寄已授权但尚未准备时为空。
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub delivery_status: Option<String>,
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub sending_at: Option<String>,
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub completed_at: Option<String>,
-    /// 授权这次补寄的退件案件；首寄为空。
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub authorized_by: Option<String>,
-}
-
-/// 本案的持久 Take。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminSettlementReturnTakeResponse {
-    pub execution_state: String,
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub delivery_id: Option<String>,
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub delivery_status: Option<String>,
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub failure_code: Option<String>,
-    /// 精确领回证明成立的时刻。
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub proven_at: Option<String>,
-}
-
-/// 代管责任：原权利人与代管资产；权益保留，不归 Bot 自有。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminSettlementReturnCustodyResponse {
-    /// 原派发冻结收件人（原权利人）。
-    pub beneficiary: String,
-    pub credits: i64,
-    pub equipment_ids: Vec<String>,
-}
-
-/// 一个不被允许的动作及其类型化原因。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminSettlementReturnBlockerResponse {
-    pub action: String,
-    pub blocker: String,
-}
-
-/// `GET /api/v1/admin/settlement-returns/{return_id}` 的详情；`allowed_actions` 与 `blockers`
-/// 合起来恰好覆盖动作闭集，服务端在命令事务内仍会锁内复核。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminSettlementReturnDetailResponse {
-    pub summary: AdminSettlementReturnSummaryResponse,
-    pub events: Vec<AdminSettlementReturnEventResponse>,
-    pub dispatches: Vec<AdminSettlementReturnDispatchResponse>,
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub take: Option<AdminSettlementReturnTakeResponse>,
-    /// 本案授权的补寄派发编号。
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub resend_dispatch_no: Option<u32>,
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub custody: Option<AdminSettlementReturnCustodyResponse>,
-    pub allowed_actions: Vec<String>,
-    pub blockers: Vec<AdminSettlementReturnBlockerResponse>,
-    /// 案件待重新核验（`recheck_pending`），但没有在线 Worker 能只读读取该世界的 MoogleMail：
-    /// 核验能力不可用，案件保持待核验，能力恢复后自动继续。其他状态恒为 `false`。
-    pub recheck_unavailable: bool,
-    /// 案件待领回（`take_pending`）、Take 尚未执行，但没有 Worker 能以持久凭据身份执行该世界的
-    /// Take（只配置 Cookie 或未启用邮件）：领回能力不可用，案件停在待领回，能力恢复后自动继续。
-    /// 其他状态恒为 `false`。
-    pub take_unavailable: bool,
-    /// 案件 Take 结果未知（`take_unknown`）时的具体原因，取
-    /// [`ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS`]；其他状态为 `null`。只读说明，再次领回的
-    /// 资格以 `allowed_actions` 为准。
-    #[serde(deserialize_with = "deserialize_required_option")]
-    pub take_unknown_reason: Option<String>,
-}
-
-/// `POST …/{return_id}/handle` 请求；动作只取 [`ADMIN_SETTLEMENT_RETURN_HANDLE_ACTIONS`]。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminSettlementReturnHandleRequest {
-    pub command_id: Uuid,
-    /// 页面读取时的案件版本。
-    pub expected_version: i64,
-    pub action: String,
-}
-
-/// `POST …/{return_id}/recheck` 请求。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminSettlementReturnRecheckRequest {
-    pub command_id: Uuid,
-    pub expected_version: i64,
-}
-
-/// 命令结果；同一 `command_id` 原样重试返回首次提交时的结果。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AdminSettlementReturnCommandResponse {
-    pub command_id: String,
-    pub return_id: String,
-    pub action: String,
-    /// 命令提交后的案件版本。
-    pub case_version: i64,
-    pub status: String,
-}
 
 #[cfg(test)]
 mod tests {
@@ -420,6 +504,26 @@ mod tests {
             ADMIN_SETTLEMENT_RETURN_CLOSED_STATUSES
                 .iter()
                 .all(|status| ADMIN_SETTLEMENT_RETURN_STATUSES.contains(status))
+        );
+    }
+
+    #[test]
+    fn event_kinds_and_handle_actions_are_closed_with_legacy_held() {
+        assert_eq!(
+            serde_json::from_str::<super::AdminSettlementReturnEventKind>("\"held\"").unwrap(),
+            super::AdminSettlementReturnEventKind::Held
+        );
+        assert!(
+            serde_json::from_str::<super::AdminSettlementReturnEventKind>("\"future_kind\"")
+                .is_err()
+        );
+        let mut unknown = json!({
+            "command_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+            "expected_version": 2,
+            "action": "recheck"
+        });
+        assert!(
+            serde_json::from_value::<AdminSettlementReturnHandleRequest>(unknown.take()).is_err()
         );
     }
 }

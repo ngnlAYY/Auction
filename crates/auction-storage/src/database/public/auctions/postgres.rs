@@ -11,10 +11,10 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use super::mapping::{
-    map_postgres_current, map_postgres_summary, map_realtime_status, storage_error,
-    validate_list_request,
+    map_postgres_current, map_postgres_summary, map_realtime_status, validate_list_request,
 };
 use crate::database::DatabaseStore;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 /// 目录和按 ID 摘要对停用世界采用同一门禁，已结算历史仍可公开读取。

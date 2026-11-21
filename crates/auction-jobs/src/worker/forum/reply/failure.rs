@@ -5,7 +5,7 @@ use auction_application::forum::{ForumReplyPhase, ForumReplyTopic, ForumWritePro
 use auction_time::Timestamp;
 
 use super::ForumReplyRuntime;
-use super::topic::retry_scan_at;
+use crate::worker::forum::reply::topic::schedule::retry_scan_at;
 use crate::worker::runtime::WorkerError;
 
 /// 按应用错误收敛失败码后持久化；返回 Final 收紧节奏下的重试时刻，供论坛循环提前唤醒。

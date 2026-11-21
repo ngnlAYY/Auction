@@ -29,12 +29,26 @@ struct TrackerState {
     mail_last_request_at: Option<Timestamp>,
     mail_last_success_at: Option<Timestamp>,
     mail_last_failure_at: Option<Timestamp>,
-    mail_account_busy_since: Option<Timestamp>,
+    mail_busy: Vec<MailBusyObservation>,
+    mail_request_sequence: u128,
+    mail_in_flight: Vec<MailRequestObservation>,
     forum_last_request_at: Option<Timestamp>,
     forum_last_success_at: Option<Timestamp>,
     forum_last_failure_at: Option<Timestamp>,
     forum_write_unknown_count: u64,
     maintenance_worlds: Vec<MaintenanceWorldObservation>,
+}
+
+struct MailBusyObservation {
+    world: MailWorld,
+    since: Timestamp,
+    sequence: u128,
+}
+
+struct MailRequestObservation {
+    sequence: u128,
+    world: MailWorld,
+    operation: MailOperation,
 }
 
 #[derive(Clone)]
@@ -98,10 +112,12 @@ impl ExternalAccountTracker {
         let status = ExternalAccountStatus {
             observed_at,
             mail: ExternalMailAccountStatus {
-                busy: state.mail_account_busy_since.is_some(),
+                busy: !state.mail_busy.is_empty(),
                 busy_age_seconds: state
-                    .mail_account_busy_since
-                    .map(|since| age_seconds(since, observed_at)),
+                    .mail_busy
+                    .iter()
+                    .map(|busy| age_seconds(busy.since, observed_at))
+                    .max(),
                 gate_wait_count: count(state.mail_gate_wait_count),
                 gate_wait_seconds_total: count(state.mail_gate_wait_millis / 1000),
                 request_count: count(state.mail_request_count),
@@ -162,37 +178,90 @@ impl TrackerState {
         &mut self.maintenance_worlds[index]
     }
 
+    fn start_mail_request(&mut self, world: MailWorld, operation: MailOperation) {
+        self.mail_request_sequence = self.mail_request_sequence.saturating_add(1);
+        self.mail_in_flight.push(MailRequestObservation {
+            sequence: self.mail_request_sequence,
+            world,
+            operation,
+        });
+    }
+
+    fn finish_mail_request(&mut self, world: MailWorld, operation: MailOperation) -> Option<u128> {
+        let index = self
+            .mail_in_flight
+            .iter()
+            .position(|request| request.world == world && request.operation == operation)?;
+        Some(self.mail_in_flight.remove(index).sequence)
+    }
+
+    fn active_mail_request_sequence(
+        &self,
+        world: MailWorld,
+        operation: MailOperation,
+    ) -> Option<u128> {
+        self.mail_in_flight
+            .iter()
+            .filter(|request| request.world == world && request.operation == operation)
+            .map(|request| request.sequence)
+            .max()
+    }
+
+    fn record_mail_busy(&mut self, world: MailWorld, sequence: Option<u128>, now: Timestamp) {
+        let sequence = sequence.unwrap_or(self.mail_request_sequence);
+        if let Some(busy) = self.mail_busy.iter_mut().find(|busy| busy.world == world) {
+            busy.sequence = busy.sequence.max(sequence);
+        } else {
+            self.mail_busy.push(MailBusyObservation { world, since: now, sequence });
+        }
+    }
+
+    fn clear_mail_busy_after_success(&mut self, world: MailWorld, sequence: Option<u128>) {
+        let Some(sequence) = sequence else { return };
+        if let Some(index) =
+            self.mail_busy.iter().position(|busy| busy.world == world && sequence > busy.sequence)
+        {
+            self.mail_busy.remove(index);
+        }
+    }
+
     fn apply(&mut self, event: ExternalMetricsEvent, now: Timestamp) {
         match event {
-            ExternalMetricsEvent::MailRequestStarted { .. } => {
+            ExternalMetricsEvent::MailRequestStarted { world, operation } => {
                 self.mail_request_count = self.mail_request_count.saturating_add(1);
                 self.mail_last_request_at = Some(now);
+                self.start_mail_request(world, operation);
             }
-            ExternalMetricsEvent::MailRequestFinished { operation, category, .. } => {
+            ExternalMetricsEvent::MailRequestFinished { world, operation, category } => {
+                let sequence = self.finish_mail_request(world, operation);
                 // 在途请求不等于远端账号忙碌；忙碌只由 account_busy 结果或信号置位。
                 match category {
                     MailRequestCategory::Ok => {
                         self.mail_last_success_at = Some(now);
-                        // 成功请求是账号恢复的最强本地证据；清除此前 account_busy 投影。
                         // 装备页成功不能证明已退出战斗；候选凭据检查未证明属于当前账号。两者与
                         // 熔断器同口径，不清除忙碌。
                         if !matches!(
                             operation,
                             MailOperation::Equipment | MailOperation::CredentialCheck
                         ) {
-                            self.mail_account_busy_since = None;
+                            self.clear_mail_busy_after_success(world, sequence);
                         }
                     }
                     MailRequestCategory::Canceled => {}
                     MailRequestCategory::AccountBusy => {
                         self.mail_last_failure_at = Some(now);
-                        self.mail_account_busy_since.get_or_insert(now);
+                        self.record_mail_busy(world, sequence, now);
                     }
                     _ => self.mail_last_failure_at = Some(now),
                 }
             }
-            ExternalMetricsEvent::MailRequestSignal { signal: MailSignal::AccountBusy, .. } => {
-                self.mail_account_busy_since.get_or_insert(now);
+            ExternalMetricsEvent::MailRequestSignal {
+                world,
+                operation,
+                signal: MailSignal::AccountBusy,
+            } => {
+                let sequence = self.active_mail_request_sequence(world, operation);
+                self.record_mail_busy(world, sequence, now);
             }
             ExternalMetricsEvent::MailGateWait { waited, .. } => {
                 self.mail_gate_wait_count = self.mail_gate_wait_count.saturating_add(1);
@@ -218,7 +287,13 @@ impl TrackerState {
                 entry.last_event_at = Some(now);
             }
             ExternalMetricsEvent::MailMaintenanceFinished { world, outcome } => {
-                let entry = self.maintenance_entry(world);
+                let Some(entry) = self
+                    .maintenance_worlds
+                    .iter_mut()
+                    .find(|entry| entry.world == world && entry.running_since.is_some())
+                else {
+                    return;
+                };
                 entry.running_since = None;
                 entry.last_event_at = Some(now);
                 match outcome {
@@ -292,7 +367,7 @@ mod tests {
     }
 
     #[test]
-    fn mail_busy_tracks_account_busy_and_successful_recovery() {
+    fn mail_busy_tracks_request_order_and_world_specific_recovery() {
         let tracker = ExternalAccountTracker::default();
         let observer: &dyn ExternalMetricsObserver = &tracker;
         observer.observe(ExternalMetricsEvent::MailRequestStarted {
@@ -300,38 +375,64 @@ mod tests {
             operation: MailOperation::Inbox,
         });
         observer.observe(ExternalMetricsEvent::MailRequestStarted {
-            world: MailWorld::Isekai,
+            world: MailWorld::Main,
             operation: MailOperation::Sent,
         });
         let status = tracker.snapshot().expect("请求快照");
         assert!(!status.mail.busy, "在途请求不等于远端账号忙碌");
         assert_eq!(status.mail.request_count, 2);
         assert!(status.mail.last_request_at.is_some());
+
         observer.observe(ExternalMetricsEvent::MailRequestSignal {
             world: MailWorld::Main,
-            operation: MailOperation::Inbox,
+            operation: MailOperation::Sent,
             signal: MailSignal::AccountBusy,
         });
-        let status = tracker.snapshot().expect("账号忙碌快照");
-        assert!(status.mail.busy);
-        assert_eq!(status.mail.busy_age_seconds, Some(0));
-
+        assert!(tracker.snapshot().expect("账号忙碌快照").mail.busy);
         observer.observe(ExternalMetricsEvent::MailRequestFinished {
             world: MailWorld::Main,
             operation: MailOperation::Inbox,
             category: MailRequestCategory::Ok,
         });
-        let status = tracker.snapshot().expect("恢复快照");
-        assert!(!status.mail.busy);
-        assert_eq!(status.mail.busy_age_seconds, None);
-        assert!(status.mail.last_success_at.is_some());
+        assert!(tracker.snapshot().expect("较早成功快照").mail.busy);
         observer.observe(ExternalMetricsEvent::MailRequestFinished {
-            world: MailWorld::Isekai,
+            world: MailWorld::Main,
             operation: MailOperation::Sent,
             category: MailRequestCategory::AccountBusy,
         });
-        let status = tracker.snapshot().expect("再次忙碌快照");
-        assert!(status.mail.busy);
+
+        observer.observe(ExternalMetricsEvent::MailRequestStarted {
+            world: MailWorld::Isekai,
+            operation: MailOperation::Inbox,
+        });
+        observer.observe(ExternalMetricsEvent::MailRequestFinished {
+            world: MailWorld::Isekai,
+            operation: MailOperation::Inbox,
+            category: MailRequestCategory::AccountBusy,
+        });
+        observer.observe(ExternalMetricsEvent::MailRequestStarted {
+            world: MailWorld::Main,
+            operation: MailOperation::Inbox,
+        });
+        observer.observe(ExternalMetricsEvent::MailRequestFinished {
+            world: MailWorld::Main,
+            operation: MailOperation::Inbox,
+            category: MailRequestCategory::Ok,
+        });
+        assert!(tracker.snapshot().expect("Isekai 忙碌快照").mail.busy);
+        observer.observe(ExternalMetricsEvent::MailRequestStarted {
+            world: MailWorld::Isekai,
+            operation: MailOperation::Inbox,
+        });
+        observer.observe(ExternalMetricsEvent::MailRequestFinished {
+            world: MailWorld::Isekai,
+            operation: MailOperation::Inbox,
+            category: MailRequestCategory::Ok,
+        });
+        let status = tracker.snapshot().expect("账号恢复快照");
+        assert!(!status.mail.busy);
+        assert_eq!(status.mail.busy_age_seconds, None);
+        assert!(status.mail.last_success_at.is_some());
         assert!(status.mail.last_failure_at.is_some());
     }
 
@@ -340,10 +441,23 @@ mod tests {
     fn equipment_success_keeps_the_busy_projection() {
         let tracker = ExternalAccountTracker::default();
         let observer: &dyn ExternalMetricsObserver = &tracker;
+        observer.observe(ExternalMetricsEvent::MailRequestStarted {
+            world: MailWorld::Main,
+            operation: MailOperation::Inbox,
+        });
         observer.observe(ExternalMetricsEvent::MailRequestSignal {
             world: MailWorld::Main,
             operation: MailOperation::Inbox,
             signal: MailSignal::AccountBusy,
+        });
+        observer.observe(ExternalMetricsEvent::MailRequestFinished {
+            world: MailWorld::Main,
+            operation: MailOperation::Inbox,
+            category: MailRequestCategory::AccountBusy,
+        });
+        observer.observe(ExternalMetricsEvent::MailRequestStarted {
+            world: MailWorld::Main,
+            operation: MailOperation::Equipment,
         });
         observer.observe(ExternalMetricsEvent::MailRequestFinished {
             world: MailWorld::Main,
@@ -353,6 +467,10 @@ mod tests {
         let status = tracker.snapshot().expect("装备页成功后的快照");
         assert!(status.mail.busy, "装备页成功不得清除账号忙碌");
         assert!(status.mail.last_success_at.is_some());
+        observer.observe(ExternalMetricsEvent::MailRequestStarted {
+            world: MailWorld::Main,
+            operation: MailOperation::Inbox,
+        });
         observer.observe(ExternalMetricsEvent::MailRequestFinished {
             world: MailWorld::Main,
             operation: MailOperation::Inbox,

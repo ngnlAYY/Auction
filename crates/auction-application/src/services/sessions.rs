@@ -79,7 +79,20 @@ impl PublicSessionPort for PublicSessionService {
                     self.config.max_public_sessions,
                 )
                 .await?;
-            if stored.user_id != login.user_id || stored.username != login.username {
+            if stored.user_id != login.user_id
+                || stored.username != login.username
+                || stored.expires_at.is_some() != stored.absolute_expires_at.is_some()
+                || stored.expires_at.is_some_and(|expires_at| {
+                    expires_at.timestamp_nanos_opt().is_none() || expires_at <= now
+                })
+                || stored.absolute_expires_at.is_some_and(|expires_at| {
+                    expires_at.timestamp_nanos_opt().is_none() || expires_at <= now
+                })
+                || stored
+                    .expires_at
+                    .zip(stored.absolute_expires_at)
+                    .is_some_and(|(expires_at, absolute)| expires_at > absolute)
+            {
                 return Err(SessionError::InvalidIdentity.into());
             }
             Ok(PublicLoginResult { token, identity: stored })

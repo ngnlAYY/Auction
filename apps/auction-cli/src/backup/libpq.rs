@@ -2,8 +2,8 @@
 //! passfile，绝不进入进程参数；继承的 PG* 环境全部清除，避免目标被机器环境改写。
 
 use std::{
-    fs::{self, OpenOptions},
-    io::Write,
+    fs::{self, File, OpenOptions},
+    io::{Seek, SeekFrom, Write},
     os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
     process::Stdio,
@@ -176,8 +176,10 @@ impl Libpq {
     }
 
     /// 单事务恢复：任一对象失败即整体回滚；只传入仅含 dbname 的 conninfo，不含凭据。
-    pub(super) async fn restore(&self, database: &str, archive: &Path) -> anyhow::Result<()> {
+    pub(super) async fn restore(&self, database: &str, archive: &File) -> anyhow::Result<()> {
         let conninfo = format!("dbname='{}'", database.replace('\\', "\\\\").replace('\'', "\\'"));
+        let mut archive = archive.try_clone().context("复制已验证 archive 描述符失败")?;
+        archive.seek(SeekFrom::Start(0)).context("定位已验证 archive 失败")?;
         let mut command = Command::new("pg_restore");
         command
             .args([
@@ -188,21 +190,36 @@ impl Libpq {
                 "--no-privileges",
                 "--dbname",
             ])
-            .arg(conninfo)
-            .arg(archive);
+            .arg(conninfo);
         self.apply(&mut command);
-        run(command, "pg_restore").await
+        run_with_stdin(command, "pg_restore", archive).await
     }
 }
 
-/// 只读取 archive 目录、不连接数据库，证明 archive 结构可被 pg_restore 解析。
-pub(super) async fn list_archive(archive: &Path) -> anyhow::Result<()> {
+/// 只读取已校验的 archive 描述符，不重新解析可替换的路径。
+pub(super) async fn list_archive(archive: &File) -> anyhow::Result<()> {
+    let mut archive = archive.try_clone().context("复制已验证 archive 描述符失败")?;
+    archive.seek(SeekFrom::Start(0)).context("定位已验证 archive 失败")?;
     let mut command = Command::new("pg_restore");
-    command.args(["--list", "--no-password"]).arg(archive);
+    command.args(["--list", "--no-password"]);
     for key in INHERITED {
         command.env_remove(key);
     }
-    run(command, "pg_restore --list").await
+    run_with_stdin(command, "pg_restore --list", archive).await
+}
+
+async fn run_with_stdin(mut command: Command, label: &str, input: File) -> anyhow::Result<()> {
+    let status = command
+        .stdin(Stdio::from(input))
+        .stdout(Stdio::null())
+        .kill_on_drop(true)
+        .status()
+        .await
+        .with_context(|| format!("无法启动 {label}；请确认 PostgreSQL 客户端工具在 PATH 中"))?;
+    if !status.success() {
+        anyhow::bail!("{label} 失败：{status}");
+    }
+    Ok(())
 }
 
 async fn run(mut command: Command, label: &str) -> anyhow::Result<()> {

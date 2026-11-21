@@ -6,23 +6,28 @@
 //! [`dry_run::FILESYSTEM_PURGE_MIN_HEADROOM_SECONDS`] 秒有效期；文件已删而数据库执行仍返回错误时，
 //! 先写 `outcome=failed` 的本地回执再返回。
 
-use std::{path::Path, time::SystemTime};
+use std::{
+    fs::{self, OpenOptions},
+    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
 
 use anyhow::Context;
 use auction_storage::{
-    RETENTION_PURGE_MAX_BATCH_SIZE, RETENTION_PURGE_MIN_BATCH_SIZE, RETENTION_PURGE_POLICY_VERSION,
-    RETENTION_PURGE_RECEIPT_FORMAT, RetentionPurgeApproval, RetentionPurgeFilesystemResult,
-    RetentionPurgeOutcome, RetentionPurgeRequest, RetentionPurgeTableApproval,
+    RetentionPurgeApproval, RetentionPurgeFilesystemArtifactRef, RetentionPurgeOutcome,
+    RetentionPurgeTableApproval,
 };
 use auction_time::Timestamp;
+use sha2::{Digest, Sha256};
 
-use self::dry_run::{DryRunReceipt, load_receipt, require_receipt_headroom, validate_receipt};
-use self::failure::execution_failed;
-use crate::app::print_json;
+use self::dry_run::DryRunReceipt;
 use crate::config_dir::ConfigDir;
-use crate::operations::operator_identity;
+use crate::support::digest::sha256_bytes;
 use crate::support::files;
 
+mod execute;
+pub(crate) use execute::run;
 mod dry_run;
 mod failure;
 
@@ -43,137 +48,48 @@ struct FamilyPlan {
     candidate_rows: i64,
     candidate_bytes: Option<u64>,
     tables: Vec<RetentionPurgeTableApproval>,
+    filesystem_root_identity_sha256: Option<String>,
     approval_token: String,
 }
 
-pub(crate) async fn run(options: Options<'_>) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        (RETENTION_PURGE_MIN_BATCH_SIZE..=RETENTION_PURGE_MAX_BATCH_SIZE)
-            .contains(&options.batch_size),
-        "批次大小必须在 {RETENTION_PURGE_MIN_BATCH_SIZE}..={RETENTION_PURGE_MAX_BATCH_SIZE} 之间"
-    );
-    let receipt = load_receipt(options.dry_run_receipt)?;
-    let (policy_version, policy_sha256) =
-        auction_storage::retention_policy_identity().context("编译制品内嵌保留政策无效")?;
-    anyhow::ensure!(policy_version == RETENTION_PURGE_POLICY_VERSION, "编译制品的保留政策不是 v2");
-    validate_receipt(&receipt, options.database, policy_version, &policy_sha256, Timestamp::now())?;
-    let plans = build_plans(&receipt, options.database, &policy_sha256)?;
+#[derive(Debug, Clone, serde::Serialize)]
+struct FilesystemPurgeArtifact {
+    format: &'static str,
+    run_id: uuid::Uuid,
+    dry_run_run_id: uuid::Uuid,
+    database_name: String,
+    dataset_family: String,
+    approval_token_sha256: String,
+    policy_version: i64,
+    policy_sha256: String,
+    filesystem_root_identity_sha256: String,
+    approved_max_files: u64,
+    completed_at: Timestamp,
+    outcome: RetentionPurgeOutcome,
+    directory_present: bool,
+    examined_files: u64,
+    deleted_files: u64,
+    deleted_bytes: u64,
+    retained_files: u64,
+    write_unknown_held_files: u64,
+    write_unknown_over_hold_window_files: u64,
+    unexpected_entries: u64,
+    limit_reached: bool,
+    needs_follow_up: bool,
+    failure_code: Option<String>,
+}
 
-    if !options.execute {
-        print_json(&serde_json::json!({
-            "execute": false,
-            "dry_run_receipt": options.dry_run_receipt,
-            "dry_run_run_id": receipt.run_id,
-            "dry_run_created_at": receipt.created_at,
-            "database": receipt.database_retention.database_name,
-            "policy_version": receipt.database_retention.policy_version,
-            "policy_sha256": receipt.database_retention.policy_sha256,
-            "batch_size": options.batch_size,
-            "families": plans.iter().map(|plan| serde_json::json!({
-                "dataset_family": plan.dataset_family,
-                "retention_kind": plan.retention_kind,
-                "candidate_rows": plan.candidate_rows,
-                "candidate_bytes": plan.candidate_bytes,
-                "tables": plan.tables.iter().map(|table| serde_json::json!({
-                    "table": table.table,
-                    "rule_ids": table.rule_ids,
-                    "candidate_rows": table.candidate_rows,
-                })).collect::<Vec<_>>(),
-                "approval_token": plan.approval_token,
-            })).collect::<Vec<_>>(),
-            "next": "复核候选计数后，以 --execute --approve <family>=<approval_token> --confirm 'PURGE <database>' --receipt <file> 重新运行",
-            "mutation_executed": false,
-            "deletion_authorized": false,
-        }))?;
-        return Ok(());
-    }
+#[derive(Debug, Clone)]
+struct FilesystemPurgeEvidence {
+    artifact: FilesystemPurgeArtifact,
+    artifact_path: Option<PathBuf>,
+    sha256: Option<String>,
+}
 
-    let expected_confirm = format!("PURGE {}", options.database);
-    anyhow::ensure!(
-        options.confirm == Some(expected_confirm.as_str()),
-        "确认串必须逐字为 '{expected_confirm}'"
-    );
-    let receipt_path = options.receipt.context("实际执行必须提供 --receipt")?;
-    files::require_private_target(receipt_path)?;
-    let approvals = parse_approvals(options.approvals, &plans)?;
-    // 删除业务库行的审计必须能追溯到主机操作者；采集失败时在任何连接与删除之前拒绝。
-    let operator = operator_identity::capture().context("采集操作者身份失败；未执行任何删除")?;
-
-    let config = super::confirmed_worker(options.config_dir, options.database)?;
-    let report = super::with_store(
-        &config,
-        auction_storage::DatabaseConnectionPurpose::CliRetentionPurge,
-        async |store| {
-            // 先用零值占位结果完成包含目标身份与迁移前缀在内的全部预校验；预校验失败时
-            // 不清理任何文件、不执行任何 DELETE。
-            let placeholder_filesystem = approvals
-                .iter()
-                .any(|approval| approval.dataset_family == mail_family())
-                .then(zero_filesystem_result);
-            let mut request = RetentionPurgeRequest {
-                database_name: receipt.database_retention.database_name.clone(),
-                dry_run_run_id: receipt.database_retention.run_id,
-                dry_run_collected_at: receipt.database_retention.collected_at,
-                dry_run_created_at: receipt.created_at,
-                policy_sha256: policy_sha256.clone(),
-                batch_size: options.batch_size,
-                approvals: approvals.clone(),
-                filesystem: placeholder_filesystem,
-                operator_identity: Some(operator.clone()),
-            };
-            store
-                .preflight_retention_purge(&request)
-                .await
-                .context("保留清理预校验失败；未执行任何删除")?;
-            if request.filesystem.is_some() {
-                require_receipt_headroom(receipt.created_at, Timestamp::now())?;
-                request.filesystem = Some(run_filesystem_purge(&config, &plans)?);
-            }
-            let filesystem = request.filesystem.clone();
-            store.execute_retention_purge(request).await.map_err(|error| {
-                execution_failed(options.dry_run_receipt, &receipt, receipt_path, filesystem, error)
-            })
-        },
-    )
-    .await?;
-
-    let receipt_document = serde_json::json!({
-        "format": RETENTION_PURGE_RECEIPT_FORMAT,
-        "created_at": Timestamp::now(),
-        "dry_run_receipt": options.dry_run_receipt,
-        "dry_run_run_id": receipt.run_id,
-        "dry_run_created_at": receipt.created_at,
-        "execution": &report,
-        "notes": [
-            "回执只记录计数与安全分类，不包含行内容、凭据或令牌",
-            "deleted_row_bytes 是删除时 pg_column_size 的行载荷字节数，不是物理页面大小",
-            "partial_limit_reached 表示批准上限内已删完但仍有候选；须重新只读演练并再次批准",
-        ],
-    });
-    files::write_private(receipt_path, &serde_json::to_vec_pretty(&receipt_document)?)?;
-
-    print_json(&serde_json::json!({
-        "output": receipt_path,
-        "run_id": report.run_id,
-        "dry_run_run_id": report.dry_run_run_id,
-        "database": report.database_name,
-        "outcome": report.outcome,
-        "failure_code": report.failure_code,
-        "deleted_rows": report.deleted_rows,
-        "deleted_row_bytes": report.deleted_row_bytes,
-        "filesystem_deleted_files": report.filesystem.as_ref().map(|filesystem| filesystem.deleted_files),
-        "filesystem_deleted_bytes": report.filesystem.as_ref().map(|filesystem| filesystem.deleted_bytes),
-        "audit_id": report.audit_id,
-        "mutation_executed": report.mutation_executed,
-    }))?;
-    if report.outcome == RetentionPurgeOutcome::Failed {
-        anyhow::bail!(
-            "保留清理未完成（{}）；回执已写入 {}",
-            report.failure_code.unwrap_or("unknown"),
-            receipt_path.display()
-        );
-    }
-    Ok(())
+#[derive(Debug, Clone)]
+struct WrittenFilesystemPurgeArtifact {
+    evidence: FilesystemPurgeEvidence,
+    reference: RetentionPurgeFilesystemArtifactRef,
 }
 
 fn build_plans(
@@ -232,18 +148,23 @@ fn build_plans(
             }
             other => anyhow::bail!("不支持的保留类型：{other}"),
         };
+        let filesystem_root_identity_sha256 = (family.retention_kind == "filesystem")
+            .then(|| receipt.filesystem_retention.root_identity_sha256.clone());
         let table_binding = tables
             .iter()
             .map(|table| (table.table.clone(), table.candidate_rows))
             .collect::<Vec<_>>();
         let approval_token = auction_storage::retention_purge_approval_token(
-            database,
-            receipt.database_retention.run_id,
-            policy_sha256,
-            &family.dataset_family,
-            family.candidate_rows,
-            candidate_bytes,
-            &table_binding,
+            auction_storage::RetentionPurgeApprovalTokenInput {
+                database_name: database,
+                dry_run_run_id: receipt.database_retention.run_id,
+                policy_sha256,
+                dataset_family: &family.dataset_family,
+                filesystem_root_identity_sha256: filesystem_root_identity_sha256.as_deref(),
+                candidate_rows: family.candidate_rows,
+                candidate_bytes,
+                tables: &table_binding,
+            },
         );
         plans.push(FamilyPlan {
             dataset_family: family.dataset_family.clone(),
@@ -252,6 +173,7 @@ fn build_plans(
             candidate_bytes,
             tables,
             approval_token,
+            filesystem_root_identity_sha256,
         });
     }
     // 文件族不在数据库报告内，由只读演练的独立快照给出候选文件数与字节数。
@@ -264,19 +186,23 @@ fn build_plans(
     let candidate_rows = i64::try_from(filesystem.candidate_files).context("候选文件数超出范围")?;
     anyhow::ensure!(candidate_rows >= 0, "候选文件数不能为负");
     let approval_token = auction_storage::retention_purge_approval_token(
-        database,
-        receipt.database_retention.run_id,
-        policy_sha256,
-        &filesystem.dataset_family,
-        candidate_rows,
-        Some(filesystem.candidate_bytes),
-        &[],
+        auction_storage::RetentionPurgeApprovalTokenInput {
+            database_name: database,
+            dry_run_run_id: receipt.database_retention.run_id,
+            policy_sha256,
+            dataset_family: &filesystem.dataset_family,
+            filesystem_root_identity_sha256: Some(&filesystem.root_identity_sha256),
+            candidate_rows,
+            candidate_bytes: Some(filesystem.candidate_bytes),
+            tables: &[],
+        },
     );
     plans.push(FamilyPlan {
         dataset_family: filesystem.dataset_family.clone(),
         retention_kind: "filesystem".to_owned(),
         candidate_rows,
         candidate_bytes: Some(filesystem.candidate_bytes),
+        filesystem_root_identity_sha256: Some(filesystem.root_identity_sha256.clone()),
         tables: Vec::new(),
         approval_token,
     });
@@ -306,6 +232,7 @@ fn parse_approvals(
         );
         approvals.push(RetentionPurgeApproval {
             dataset_family: plan.dataset_family.clone(),
+            filesystem_root_identity_sha256: plan.filesystem_root_identity_sha256.clone(),
             approval_token: token.to_owned(),
             candidate_rows: plan.candidate_rows,
             candidate_bytes: plan.candidate_bytes,
@@ -319,42 +246,116 @@ fn mail_family() -> &'static str {
     "mail_diagnostic_files"
 }
 
-fn zero_filesystem_result() -> RetentionPurgeFilesystemResult {
-    RetentionPurgeFilesystemResult {
-        directory_present: false,
-        examined_files: 0,
-        deleted_files: 0,
-        deleted_bytes: 0,
-        retained_files: 0,
-        write_unknown_held_files: 0,
-        write_unknown_over_hold_window_files: 0,
-        unexpected_entries: 0,
-        limit_reached: false,
-        needs_follow_up: false,
-        failure_code: None,
+/// Stable identity of the configured diagnostics root; never emits the configured path.
+pub(super) fn filesystem_root_identity_sha256(path: &Path) -> anyhow::Result<String> {
+    if !path.is_absolute()
+        || path.components().any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        anyhow::bail!("邮件诊断目录身份路径无效");
     }
+    let mut identity = b"auction-retention-filesystem-root/1\0".to_vec();
+    identity.extend_from_slice(path.as_os_str().as_encoded_bytes());
+    identity.push(0);
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path);
+    match directory {
+        Ok(directory) => {
+            let metadata = directory.metadata().context("读取邮件诊断目录身份失败")?;
+            if !metadata.is_dir() {
+                anyhow::bail!("邮件诊断根不是目录");
+            }
+            identity.push(1);
+            identity.extend_from_slice(&metadata.dev().to_be_bytes());
+            identity.extend_from_slice(&metadata.ino().to_be_bytes());
+            identity.extend_from_slice(&metadata.uid().to_be_bytes());
+            identity.extend_from_slice(&metadata.gid().to_be_bytes());
+            identity.extend_from_slice(&(metadata.mode() & 0o7777).to_be_bytes());
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => identity.push(0),
+        Err(error) => return Err(error).context("打开邮件诊断目录身份失败"),
+    }
+    Ok(sha256_bytes(&identity))
 }
 
 fn run_filesystem_purge(
     config: &auction_config::AppConfig,
     plans: &[FamilyPlan],
-) -> anyhow::Result<RetentionPurgeFilesystemResult> {
+) -> anyhow::Result<auction_integrations::mooglemail::MailDiagnosticPurgeOutcome> {
     let plan = plans
         .iter()
         .find(|plan| plan.dataset_family == mail_family())
         .context("已批准的文件数据族不在演练回执中")?;
     let (ordinary_days, hold_days) = super::mail_diagnostic_windows()?;
     let max_files = u64::try_from(plan.candidate_rows).context("候选文件数无效")?;
+    let max_bytes = plan.candidate_bytes.context("文件族批准缺少字节上限")?;
+    let directory = &config.worker.mooglemail.diagnostics.directory;
+    let snapshot = auction_integrations::mooglemail::mail_diagnostic_retention_snapshot(
+        directory,
+        super::days_to_duration(ordinary_days)?,
+        super::days_to_duration(hold_days)?,
+        SystemTime::now(),
+    )
+    .map_err(|error| anyhow::anyhow!("删除前重新统计加密诊断文件失败：{}", error.as_str()))?;
+    anyhow::ensure!(
+        snapshot.ordinary_expired_files == max_files
+            && snapshot.ordinary_expired_bytes == max_bytes,
+        "当前文件候选数或字节数与批准的演练回执不一致；未删除任何文件"
+    );
     let outcome = auction_integrations::mooglemail::mail_diagnostic_purge_ordinary(
-        &config.worker.mooglemail.diagnostics.directory,
+        directory,
         super::days_to_duration(ordinary_days)?,
         super::days_to_duration(hold_days)?,
         SystemTime::now(),
         max_files,
+        max_bytes,
     )
     .map_err(|error| anyhow::anyhow!("清理加密邮件诊断文件失败：{}", error.as_str()))?;
-    anyhow::ensure!(outcome.deleted_files <= max_files, "文件清理超过批准上限");
-    Ok(RetentionPurgeFilesystemResult {
+    Ok(outcome)
+}
+
+fn build_filesystem_purge_artifact(
+    execution_id: uuid::Uuid,
+    dry_run: &DryRunReceipt,
+    database: &str,
+    policy_version: i64,
+    policy_sha256: &str,
+    plan: &FamilyPlan,
+    mut outcome: auction_integrations::mooglemail::MailDiagnosticPurgeOutcome,
+) -> anyhow::Result<FilesystemPurgeArtifact> {
+    let approved_max_files = u64::try_from(plan.candidate_rows).context("批准的文件数无效")?;
+    let approved_max_bytes = plan.candidate_bytes.context("文件族批准缺少字节上限")?;
+    let exceeded_approval =
+        outcome.deleted_files > approved_max_files || outcome.deleted_bytes > approved_max_bytes;
+    if exceeded_approval {
+        outcome.failure_code.get_or_insert("evidence_file_changed");
+        outcome.needs_follow_up = true;
+    }
+    let filesystem_root_identity_sha256 = plan
+        .filesystem_root_identity_sha256
+        .as_ref()
+        .context("批准的文件数据族缺少根身份摘要")?
+        .clone();
+    let artifact = FilesystemPurgeArtifact {
+        format: "auction-retention-filesystem-purge-artifact.v1",
+        run_id: execution_id,
+        dry_run_run_id: dry_run.run_id,
+        database_name: database.to_owned(),
+        dataset_family: plan.dataset_family.clone(),
+        approval_token_sha256: sha256_bytes(plan.approval_token.as_bytes()),
+        policy_version,
+        policy_sha256: policy_sha256.to_owned(),
+        filesystem_root_identity_sha256,
+        approved_max_files,
+        completed_at: Timestamp::now(),
+        outcome: if outcome.failure_code.is_some() {
+            RetentionPurgeOutcome::Failed
+        } else if outcome.limit_reached {
+            RetentionPurgeOutcome::PartialLimitReached
+        } else {
+            RetentionPurgeOutcome::Complete
+        },
         directory_present: outcome.directory_present,
         examined_files: outcome.examined_files,
         deleted_files: outcome.deleted_files,
@@ -365,7 +366,34 @@ fn run_filesystem_purge(
         unexpected_entries: outcome.unexpected_entries,
         limit_reached: outcome.limit_reached,
         needs_follow_up: outcome.needs_follow_up,
-        failure_code: outcome.failure_code.map(std::borrow::ToOwned::to_owned),
+        failure_code: outcome.failure_code.map(str::to_owned),
+    };
+    Ok(artifact)
+}
+
+fn publish_filesystem_purge_artifact(
+    receipt_path: &Path,
+    artifact: &FilesystemPurgeArtifact,
+) -> anyhow::Result<WrittenFilesystemPurgeArtifact> {
+    let bytes = serde_json::to_vec(&artifact).context("序列化文件清理证据失败")?;
+    let digest: [u8; 32] = Sha256::digest(&bytes).into();
+    let sha256 = sha256_bytes(&bytes);
+    let directory_path =
+        receipt_path.with_file_name(format!(".filesystem-purge-{}", artifact.run_id));
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&directory_path)
+        .with_context(|| format!("创建文件清理证据目录失败：{}", directory_path.display()))?;
+    let directory = files::PrivateDirectory::open_existing(&directory_path)?;
+    directory.write("artifact.json", &bytes, false)?;
+    let path = directory_path.join("artifact.json");
+    Ok(WrittenFilesystemPurgeArtifact {
+        evidence: FilesystemPurgeEvidence {
+            artifact: artifact.clone(),
+            artifact_path: Some(path.clone()),
+            sha256: Some(sha256),
+        },
+        reference: RetentionPurgeFilesystemArtifactRef { path, sha256: digest },
     })
 }
 

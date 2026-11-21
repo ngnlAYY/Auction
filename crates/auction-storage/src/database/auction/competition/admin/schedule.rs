@@ -343,7 +343,7 @@ async fn append_admin_auction_schedule_record_inner(
             schema_version: 1,
             payload,
             state_version: result.auction.state_version,
-            origin_command_id: command.command_id.as_uuid(),
+            origin_command_id: Some(command.command_id.as_uuid()),
             created_at: None,
         },
     )

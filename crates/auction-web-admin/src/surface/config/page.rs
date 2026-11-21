@@ -550,7 +550,7 @@ mod tests {
     use super::draft::{ConfigDraft, ConfigValidationStub, use_config_draft};
     use super::{ConfigCommand, ConfigNotice, RuntimeConfigDocument};
     use crate::api::{AdminApiFailure, stub_runtime_config, update_admin_runtime_config};
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         RecordRead, assert_field, button, click_button, has_live_text, mount_writer, settle_writer,
         submit_button_disabled, writer_form,
     };

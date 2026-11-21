@@ -76,7 +76,13 @@ sub typescript_marks {
             $mark->[OFFSET] = pos($source) - 1;
             $mark->[LINE] = $line;
             $at{$byte} = scalar @marks if $symbol eq '(';
-            $line++ if $symbol eq "\n";
+            if ($symbol eq "\n") {
+                $line++;
+            } elsif ($symbol eq "\r") {
+                $line++ if substr($source, pos($source), 1) ne "\n";
+            } elsif ($symbol eq "\x{2028}" || $symbol eq "\x{2029}") {
+                $line++;
+            }
         }
         if ($has_templates && $symbol eq '{' && $byte > 0 && $byte - 1 != $escape_at
                 && do { use bytes; substr($source, $byte - 1, 1) } eq '$') {

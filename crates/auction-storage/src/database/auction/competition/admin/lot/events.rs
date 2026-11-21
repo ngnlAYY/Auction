@@ -77,7 +77,7 @@ pub(super) async fn append_admin_lot_record_inner(
                 "state_version": auction_state_version,
             }),
             state_version: auction_state_version,
-            origin_command_id: command.command_id.as_uuid(),
+            origin_command_id: Some(command.command_id.as_uuid()),
             created_at: None,
         },
     )

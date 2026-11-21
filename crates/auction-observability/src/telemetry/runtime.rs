@@ -17,11 +17,11 @@ use opentelemetry_sdk::{
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+use super::processor::DropAwareBatchSpanProcessor;
 use super::{
     config::{InitError, ShutdownError, TracingConfig},
     filter::{default_filter, target_filter},
     health::TracingHealthState,
-    processor::{DropAwareBatchSpanProcessor, HealthSpanExporter},
 };
 use crate::logging::PanicSafeJson;
 
@@ -210,11 +210,9 @@ fn build_provider(
         .with_headers(headers)
         .build()
         .map_err(|_| InitError { message: "failed to build OTLP HTTP exporter".to_owned() })?;
-    let processor_health = Arc::clone(&health);
-    let exporter = HealthSpanExporter { exporter, health };
     let processor = DropAwareBatchSpanProcessor::new(
         exporter,
-        processor_health,
+        health,
         config.queue_capacity,
         config.max_export_batch_size,
         config.batch_timeout,

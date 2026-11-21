@@ -8,6 +8,7 @@ import type {
 import { transportErrorCode } from "@auction/web-shared/net/transport";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { compareText } from "@auction/web-shared/text";
+import { validUuid } from "@auction/web-shared/ui/validation";
 import { sendGet } from "../clock";
 import { decodeErrorCode } from "../decoder";
 import {
@@ -73,6 +74,9 @@ export async function fetchHistoricalAuction(
   auctionId: string,
   signal: AbortSignal,
 ): Promise<Result<CurrentAuctionItemResponse, string>> {
+  if (!validUuid(auctionId)) {
+    return err("invalid_auction_id");
+  }
   // 结算目录沿用可复用的第一页缓存键，与 lots 并发读取，使目录命中时无需再等待一轮往返。
   const settledFirstPage = fetchAuctionPage(null, "settled", 1, SUMMARY_PAGE_SIZE, signal);
   const envelopeResult = await fetchCurrentLots(

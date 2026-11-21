@@ -15,7 +15,7 @@ use super::{CredentialCreateForm, CredentialDeleteDialog, CredentialTable};
 use crate::api::AdminCredentialPage;
 use crate::api::{AdminCredential, delete_admin_credential, fetch_admin_credentials};
 #[cfg(all(test, not(target_arch = "wasm32")))]
-use crate::surface::auctions::draft_page_tests::RecordRead;
+use crate::surface::auctions::editor::tests::RecordRead;
 use crate::surface::pagination::{AdminPager, use_admin_pagination, use_versioned_admin_page};
 use crate::surface::pending::{
     CommandDelivery, CommandReceipt, PendingCommandPanel, set_if_alive, try_set_if_alive,
@@ -247,7 +247,7 @@ mod tests {
     use crate::api::{
         AdminCredentialPage, AdminWriteFailure, WriteDispatchStub, WriteTransportStub,
     };
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         RecordRead, button, click_button, command_button, has_live_text, init_i18n, mount_writer,
         settle_writer,
     };

@@ -12,6 +12,7 @@
 use std::collections::BTreeMap;
 
 use auction_application::settlement::{SettlementReturnAdminPort, SettlementReturnListRequest};
+use auction_domain::SettlementReturnCaseStatus;
 use serde_json::json;
 use sqlx::{PgPool, Row};
 
@@ -289,7 +290,8 @@ FROM generate_series(1, 500) AS g;
 INSERT INTO public.settlement_return_cases
   (return_mail_id, world_id, obligation_id, delivery_id, dispatch_no, status, reason_code, plan,
    resend_limit, resend_dispatch_no, case_version, created_at, updated_at, closed_at)
-SELECT d.return_mail_id, d.dispatch_world, d.obligation_id, d.first_delivery_id, 1, d.return_case,
+SELECT d.return_mail_id, d.dispatch_world, d.obligation_id,
+       d.first_delivery_id, 1, d.return_case,
        'returned_assets_match',
        CASE WHEN d.return_case IN ('take_pending', 'take_unknown', 'held') THEN 'hold'
             WHEN d.return_case = 'resent' THEN 'resend' END,
@@ -409,7 +411,7 @@ async fn perf_settlement_return_solvency_and_list_plans() {
     .expect("统计合成退件");
     assert_eq!(seeded, (SEEDED_CASES, SEEDED_OPEN_CASES, SEEDED_TAKES), "合成退件规模应与种子一致");
 
-    // 结果先于计划核对：列表经真实端口映射全部种子行，偿付查询读到代管负债且稳态不判定余额过期。
+    // 结果先于计划核对：真实端口分别映射未结案首页与已结案的补寄案件。
     let open_page = store
         .list_settlement_returns(SettlementReturnListRequest {
             open_only: true,
@@ -423,6 +425,41 @@ async fn perf_settlement_return_solvency_and_list_plans() {
         (SEEDED_OPEN_CASES, 50),
         "未结案首页应按真实端口映射出整页"
     );
+    let resent_page = store
+        .list_settlement_returns(SettlementReturnListRequest {
+            status: Some(SettlementReturnCaseStatus::Resent),
+            limit: PAGE_LIMIT,
+            ..Default::default()
+        })
+        .await
+        .expect("Admin 补寄案件列表");
+    assert!(resent_page.total > 0, "真实端口应列出已结案的补寄案件");
+    assert!(
+        resent_page.items.iter().all(|item| {
+            item.status == SettlementReturnCaseStatus::Resent
+                && item.closed_at.is_some()
+                && item.dispatch_no == Some(1)
+        }),
+        "补寄案件应保持原退件绑定到第 1 次派发"
+    );
+    let resent_dispatches: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.settlement_return_cases AS cases
+         JOIN public.settlement_return_evidence AS evidence
+           ON evidence.return_mail_id = cases.return_mail_id
+          AND evidence.delivery_id = cases.delivery_id
+         JOIN public.settlement_return_takes AS take
+           ON take.return_mail_id = cases.return_mail_id
+          AND take.original_delivery_id = cases.delivery_id
+         JOIN public.settlement_obligation_fulfillments AS fulfillment
+           ON fulfillment.obligation_id = cases.obligation_id
+         WHERE cases.status = 'resent' AND cases.closed_at IS NOT NULL
+           AND cases.dispatch_no = 1 AND cases.resend_dispatch_no = 2
+           AND fulfillment.dispatch_no = 2",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("统计补寄案件原派发与当前履约派发");
+    assert_eq!(resent_page.total, resent_dispatches, "端口列表应覆盖全部第 2 次派发中的已结案补寄");
     let solvency_sql = auction_storage::solvency_benchmark_sql::solvency_world_sql();
     let (custody, before_take) = solvency_main(&pool, solvency_sql).await;
     assert_eq!(custody, expected_custody(&pool).await, "偿付查询的代管负债应与案件事实一致");
@@ -484,7 +521,7 @@ async fn perf_settlement_return_solvency_and_list_plans() {
         "custom_plan": custom.iter().map(|(label, summary)| (label.clone(), summary.to_json())).collect::<BTreeMap<_, _>>(),
         "generic_plan": generic.iter().map(|(label, summary)| (label.clone(), summary.to_json())).collect::<BTreeMap<_, _>>(),
     });
-    let path = write_report("settlement-return-plans", &report);
+    let path = write_report("settlement-return-plans", &report).expect("持久化退件计划报告");
     println!("结算退件计划报告：{}", path.display());
     pool.close().await;
 }

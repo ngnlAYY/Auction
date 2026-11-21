@@ -36,7 +36,7 @@ pub struct LotWatchPmRuntime {
 }
 
 impl LotWatchPmRuntime {
-    /// 复用 delivery 轮询与 forum 总超时/租约；无需新增配置开关。
+    /// 复用 delivery 轮询、围栏前工作预算与论坛租约；无需新增配置开关。
     pub fn new(
         store: Arc<dyn LotWatchPmWorkStore>,
         sender: Arc<dyn ForumPmSender>,
@@ -53,7 +53,7 @@ impl LotWatchPmRuntime {
             || lease_seconds > 86400
             || item_timeout >= Duration::from_secs(lease_seconds)
         {
-            return Err("PM 轮询、总预算与论坛租约无效");
+            return Err("PM 轮询、围栏前预算与论坛租约无效");
         }
         Ok(Self {
             store,
@@ -133,7 +133,7 @@ impl LotWatchPmRuntime {
         self
     }
 
-    /// drain 停止领取；在途工作仅等待到总预算，取消后依赖持久 fence 恢复。
+    /// drain 停止领取；总预算约束进入围栏，确认后原 owner 必须发送并持久化结果。
     pub async fn run(self, worker_id: String, mut drain: watch::Receiver<bool>) {
         let diagnostic_metrics = self.metrics.clone();
         let diagnostic_loop = auction_observability::WorkerLoop::Forum;
@@ -143,7 +143,7 @@ impl LotWatchPmRuntime {
                     break;
                 }
                 // 暂停期间不领取任何 PM 工作（发送与只读核对都会访问论坛）。本循环逐项
-                // 串行，检查点处没有在途写入；已越过 sending 围栏的项在上一轮内按原预算结束。
+                // 串行；围栏前工作受 item 预算限制，已越过 sending 围栏的项由原 owner 收口。
                 if self.switches.external_access_paused() {
                     if wait_while_paused(&mut drain).await {
                         break;
@@ -176,23 +176,20 @@ impl LotWatchPmRuntime {
                     let activity = self
                         .write_lifecycle
                         .activity(auction_application::operations::CriticalWriteKind::ForumPm);
-                    let operation = tokio::time::timeout_at(
+                    let operation = process_with_item_deadline(
+                        &self,
+                        request,
+                        &drain,
                         deadline,
-                        delivery::process(
-                            &self,
-                            request,
-                            &drain,
-                            deadline,
-                            &activity,
-                            &claimed_world,
-                        ),
+                        &activity,
+                        &claimed_world,
                     );
                     let Some(result) = activity.run(operation).await else {
                         return;
                     };
                     match result {
-                        Ok(Ok(())) => {}
-                        Ok(Err(error)) => {
+                        Some(Ok(())) => {}
+                        Some(Err(error)) => {
                             diagnostics::unpersisted_error(
                                 "forum_pm",
                                 "deliver_notifications",
@@ -200,7 +197,7 @@ impl LotWatchPmRuntime {
                                 DiagnosticContext::default(),
                             );
                         }
-                        Err(error) => {
+                        None => {
                             let world = match claimed_world.lock() {
                                 Ok(guard) => *guard,
                                 Err(poisoned) => *poisoned.into_inner(),
@@ -214,7 +211,7 @@ impl LotWatchPmRuntime {
                             diagnostics::unpersisted_error(
                                 "forum_pm",
                                 "deliver_notifications_timeout",
-                                diagnostics::timeout_kind(&error),
+                                auction_application::core::diagnostics::SafeErrorKind::TIMEOUT,
                                 DiagnosticContext::default(),
                             );
                         }
@@ -235,5 +232,37 @@ impl LotWatchPmRuntime {
             }
         };
         diagnostics::scope(diagnostic_metrics, diagnostic_loop, body).await;
+    }
+}
+
+// 预算只在持久围栏调用前取消工作；调用开始后须等提交结果，确认后由原 owner 发送。
+async fn process_with_item_deadline(
+    runtime: &LotWatchPmRuntime,
+    request: LotWatchPmClaimRequest,
+    drain: &watch::Receiver<bool>,
+    deadline: tokio::time::Instant,
+    activity: &auction_application::operations::ExternalWriteActivity,
+    claimed_world: &std::sync::Mutex<Option<auction_domain::SettlementWorld>>,
+) -> Option<Result<(), auction_application::public::LotWatchError>> {
+    let fence_started = std::sync::atomic::AtomicBool::new(false);
+    let process = delivery::process(
+        runtime,
+        request,
+        drain,
+        deadline,
+        activity,
+        claimed_world,
+        &fence_started,
+    );
+    tokio::pin!(process);
+    tokio::select! {
+        result = &mut process => Some(result),
+        _ = tokio::time::sleep_until(deadline) => {
+            if fence_started.load(std::sync::atomic::Ordering::SeqCst) {
+                Some(process.await)
+            } else {
+                None
+            }
+        }
     }
 }

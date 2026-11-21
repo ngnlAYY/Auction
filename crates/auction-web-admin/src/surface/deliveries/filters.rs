@@ -233,7 +233,7 @@ mod tests {
     use dioxus::prelude::*;
 
     use super::{DeliveryFilters, DeliveryFiltersDraft};
-    use crate::surface::auctions::draft_page_tests::{mount_writer, writer_form};
+    use crate::surface::auctions::editor::tests::{mount_writer, writer_form};
     use crate::surface::realtime::text_attributes;
 
     #[test]

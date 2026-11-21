@@ -94,6 +94,8 @@ impl EhentaiClient {
             "check_send_owner",
             || EhentaiError::credential(operation),
         ))?;
+        let _cookie_use =
+            cookie.lock_for_use().await.ok_or_else(|| EhentaiError::credential(operation))?;
         let request = self
             .client
             .post(action.clone())

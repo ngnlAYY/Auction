@@ -118,6 +118,38 @@ async fn ensure_recovery_blacklist_postgres_once(
         .execute(&mut *transaction)
         .await
         .map_err(map_admin_write_error)?;
+    } else if before.status == AdminUserStatus::Blacklisted {
+        // 重申黑名单会修复当前投影并追加一条独立命令历史；既有历史事实不改写。
+        sqlx::query(
+            "INSERT INTO public.user_blacklist
+                (user_id, public_reason, actor, created_at, revoked_at)
+             VALUES ($1, $2, $3, $4, NULL)
+             ON CONFLICT (user_id) DO UPDATE
+             SET public_reason = EXCLUDED.public_reason,
+                 actor = EXCLUDED.actor,
+                 created_at = GREATEST(user_blacklist.created_at, EXCLUDED.created_at),
+                 revoked_at = NULL",
+        )
+        .bind(command.buyer_user_id)
+        .bind(&command.public_reason)
+        .bind(RECOVERY_BUYER_BLACKLIST_ACTOR)
+        .bind(side_effect_at)
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_admin_write_error)?;
+        sqlx::query(
+            "INSERT INTO public.user_blacklist_history
+                (id, user_id, public_reason, actor, blacklisted_at)
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(command.command_id)
+        .bind(command.buyer_user_id)
+        .bind(&command.public_reason)
+        .bind(RECOVERY_BUYER_BLACKLIST_ACTOR)
+        .bind(side_effect_at)
+        .execute(&mut *transaction)
+        .await
+        .map_err(map_admin_write_error)?;
     }
     revoke_public_sessions_postgres(&mut transaction, command.buyer_user_id, side_effect_at)
         .await?;
@@ -196,8 +228,15 @@ pub(super) async fn freeze_blacklist_proxies_postgres(
     .fetch_all(&mut **transaction)
     .await
     .map_err(map_storage_error)?;
-    if locked_lots.len() != proxies.len() {
-        return Err(admin_error(AdminUserError::StoredResultCorrupt));
+    let locked_lot_ids = locked_lots
+        .iter()
+        .map(|row| row.try_get::<Uuid, _>("id").map_err(map_storage_error))
+        .collect::<Result<std::collections::HashSet<_>, _>>()?;
+    for proxy in &proxies {
+        let lot_id: Uuid = proxy.try_get("lot_id").map_err(map_storage_error)?;
+        if !locked_lot_ids.contains(&lot_id) {
+            return Err(admin_error(AdminUserError::StoredResultCorrupt));
+        }
     }
 
     for row in proxies {
@@ -316,7 +355,7 @@ pub(super) async fn revoke_public_sessions_postgres(
 ) -> Result<(), ApplicationError> {
     sqlx::query(
         "UPDATE public.public_sessions
-         SET revoked_at = GREATEST(created_at, $1)
+         SET revoked_at = GREATEST(created_at, last_activity_at, $1)
          WHERE user_id = $2 AND revoked_at IS NULL",
     )
     .bind(now)

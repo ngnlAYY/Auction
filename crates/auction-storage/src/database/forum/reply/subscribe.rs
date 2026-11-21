@@ -94,18 +94,26 @@ pub(super) async fn subscribe_notify_postgres(
             .map_err(|error| storage_error_from(error, "回滚论坛订阅事务失败"))?;
         return Ok(NotifySubscription::Capped("account_limit"));
     }
-    let version: i64 = sqlx::query_scalar(
+    let version: Option<i64> = sqlx::query_scalar(
         "INSERT INTO public.lot_watches (user_id, lot_id, watched, channel, version)
          VALUES ($1, $2, true, 'mm', 1)
          ON CONFLICT (user_id, lot_id) DO UPDATE SET watched = true,
              version = lot_watches.version + 1, updated_at = clock_timestamp()
+         WHERE lot_watches.watched IS DISTINCT FROM true
          RETURNING version",
     )
     .bind(user_id.as_uuid())
     .bind(lot_id.as_uuid())
-    .fetch_one(&mut *transaction)
+    .fetch_optional(&mut *transaction)
     .await
     .map_err(|error| storage_error_from(error, "写入论坛订阅失败"))?;
+    let Some(version) = version else {
+        transaction
+            .commit()
+            .await
+            .map_err(|error| storage_error_from(error, "提交论坛订阅重放事务失败"))?;
+        return Ok(NotifySubscription::AlreadySubscribed);
+    };
     sqlx::query(
         "INSERT INTO public.audit_records
          (id, actor_type, actor_id, action, entity_type, entity_id, result, source, metadata)

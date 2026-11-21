@@ -46,13 +46,14 @@ pub(crate) fn cdn_cache_policy(response: &Response) -> HeaderValue {
 /// 时不执行 `stale-while-revalidate`/`stale-if-error`，原样复制会让这两个窗口在边缘失效。
 pub(super) fn shared_cache_policy(headers: &HeaderMap) -> Option<HeaderValue> {
     let mut eligible = None;
+    let mut any_malformed_freshness = false;
     let mut no_cache = false;
     for value in headers.get_all(header::CACHE_CONTROL) {
         let Ok(text) = value.to_str() else {
             return None;
         };
         let mut is_public = false;
-        let mut malformed_freshness = false;
+        let mut field_malformed_freshness = false;
         let mut max_age = None;
         let mut shared_max_age = None;
         let mut stale_while_revalidate = None;
@@ -72,10 +73,10 @@ pub(super) fn shared_cache_policy(headers: &HeaderMap) -> Option<HeaderValue> {
             } else if name.eq_ignore_ascii_case("public") {
                 is_public = true;
             } else if name.eq_ignore_ascii_case("max-age") {
-                malformed_freshness |= seconds.is_none();
+                field_malformed_freshness |= seconds.is_none();
                 max_age = seconds;
             } else if name.eq_ignore_ascii_case("s-maxage") {
-                malformed_freshness |= seconds.is_none();
+                field_malformed_freshness |= seconds.is_none();
                 shared_max_age = seconds;
             } else if name.eq_ignore_ascii_case("stale-while-revalidate") {
                 stale_while_revalidate = seconds;
@@ -84,7 +85,8 @@ pub(super) fn shared_cache_policy(headers: &HeaderMap) -> Option<HeaderValue> {
             }
         }
         // 新鲜度写坏的响应不猜测意图，按无资格处理。
-        let freshness = if malformed_freshness { None } else { shared_max_age.or(max_age) };
+        any_malformed_freshness |= field_malformed_freshness;
+        let freshness = if field_malformed_freshness { None } else { shared_max_age.or(max_age) };
         if let (true, Some(freshness), None) = (is_public, freshness, &eligible) {
             let mut policy = format!("public, max-age={freshness}");
             for (name, seconds) in [
@@ -101,7 +103,7 @@ pub(super) fn shared_cache_policy(headers: &HeaderMap) -> Option<HeaderValue> {
     if no_cache {
         return Some(HeaderValue::from_static("no-cache"));
     }
-    eligible
+    if any_malformed_freshness { None } else { eligible }
 }
 
 /// 只接受非负十进制秒数；`max-age` 历史上可能带引号，两种写法都按有效新鲜度处理。

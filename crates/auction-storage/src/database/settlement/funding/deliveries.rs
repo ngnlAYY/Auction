@@ -21,7 +21,7 @@ pub async fn reserve_funded_delivery(
 ) -> Result<Uuid, FundingError> {
     if replay(tx, account, command, "reserve", delivery_id).await? {
         return sqlx::query_scalar(
-            "SELECT id FROM public.settlement_funding_allocations WHERE uid=$1 AND delivery_id=$2",
+            "SELECT allocation_id FROM public.settlement_funding_delivery_bindings WHERE uid=$1 AND delivery_id=$2",
         )
         .bind(account.uid())
         .bind(delivery_id)

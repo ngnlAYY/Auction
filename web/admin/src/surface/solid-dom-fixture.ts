@@ -158,13 +158,12 @@ export function insert(
     for (const [index, child] of children.entries()) {
       if (mounted[index] === child) continue;
       place(parent, child, () => {
-        mounted.splice(mounted.indexOf(child), 1);
         content = withoutNode(content, child);
         updateSelect(parent, [child]);
       });
-      mounted.splice(index, 0, child);
       added.push(child);
     }
+    mounted.splice(0, mounted.length, ...children);
     content = next;
     updateSelect(parent, added, true);
   };

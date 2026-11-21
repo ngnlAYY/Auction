@@ -441,7 +441,8 @@ fn valid_exact_history_median(value: &Map<String, Value>) -> bool {
 
 fn valid_rules(value: &Value) -> bool {
     object(value).is_some_and(|value| {
-        account_nonempty(value.get("locale"))
+        json_keys_only(value, &["locale", "title", "markdown", "revision", "published_at"], &[])
+            && account_nonempty(value.get("locale"))
             && account_nonempty(value.get("title"))
             && string(value.get("markdown")).is_some()
             && positive(value.get("revision"))
@@ -468,7 +469,8 @@ fn valid_blacklist_page(value: &Value) -> bool {
 fn valid_compensation_pool(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
     // 两个世界共用一个补偿池，单行始终存在，因此余额与更新时间都必须给出。
-    valid_numbered_page(value)
+    json_keys_only(value, &["balance", "updated_at", "rounds", "page", "page_size", "total"], &[])
+        && valid_numbered_page(value)
         && nonnegative(value.get("balance"))
         && time(value.get("updated_at"))
         && value
@@ -479,7 +481,8 @@ fn valid_compensation_pool(value: &Value) -> bool {
 
 fn valid_compensation_lots(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    valid_numbered_page(value)
+    json_keys_only(value, &["round", "lots", "total", "page", "page_size"], &[])
+        && valid_numbered_page(value)
         && valid_compensation_round(value.get("round").unwrap_or(&Value::Null))
         && value
             .get("lots")
@@ -489,7 +492,25 @@ fn valid_compensation_lots(value: &Value) -> bool {
 
 fn valid_compensation_round(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    valid_uuid(string(value.get("auction_id")).unwrap_or_default())
+    json_keys_only(
+        value,
+        &[
+            "auction_id",
+            "world_id",
+            "auction_sequence",
+            "policy_mode",
+            "opening_balance",
+            "tax_income",
+            "discount_demand",
+            "compensation_out",
+            "closing_balance",
+            "movement_count",
+            "reversal_count",
+            "reversal_amount",
+            "settled_at",
+        ],
+        &[],
+    ) && valid_uuid(string(value.get("auction_id")).unwrap_or_default())
         && account_nonempty(value.get("world_id"))
         && positive(value.get("auction_sequence"))
         && matches!(
@@ -509,7 +530,30 @@ fn valid_compensation_round(value: &Value) -> bool {
 
 fn valid_compensation_lot(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    valid_uuid(string(value.get("lot_id")).unwrap_or_default())
+    json_keys_only(
+        value,
+        &[
+            "lot_id",
+            "lot_number",
+            "equipment_name",
+            "equipment_category",
+            "game_equipment_url",
+            "end_price",
+            "hold_ppm",
+            "adjustment_ppm",
+            "leader_held_nanos",
+            "tax_amount",
+            "discount_amount",
+            "compensation_amount",
+            "buyer_amount",
+            "seller_amount",
+            "buyer_name",
+            "seller_name",
+            "voided",
+        ],
+        &["reversal"],
+    )
+        && valid_uuid(string(value.get("lot_id")).unwrap_or_default())
         && positive(value.get("lot_number"))
         && account_nonempty(value.get("equipment_name"))
         && account_nonempty(value.get("equipment_category"))
@@ -532,7 +576,12 @@ fn valid_compensation_lot(value: &Value) -> bool {
         && value.get("voided").is_some_and(Value::is_boolean)
         && value.get("reversal").is_none_or(|reversal| {
             object(reversal).is_some_and(|reversal| {
-                int(reversal.get("amount")).is_some()
+                json_keys_only(
+                    reversal,
+                    &["amount", "tax_shortfall", "balance_after", "reversed_at"],
+                    &[],
+                )
+                    && int(reversal.get("amount")).is_some()
                     && nonnegative(reversal.get("tax_shortfall"))
                     && nonnegative(reversal.get("balance_after"))
                     && time(reversal.get("reversed_at"))

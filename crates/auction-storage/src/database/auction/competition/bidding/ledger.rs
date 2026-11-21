@@ -105,7 +105,7 @@ impl PostgresCompetitionTransaction {
             .bind(command.aggregate_id)
             .bind(command.request_hash.as_bytes().as_slice())
             .bind(&command.result_code)
-            .bind(payload)
+            .bind(&payload)
             .execute(&mut **transaction)
             .await
             .map_err(map_sql_error)?
@@ -121,7 +121,22 @@ impl PostgresCompetitionTransaction {
                 "命令冲突后无法读取已有账本记录".to_owned(),
             ));
         };
-        if existing == *command {
+        let existing_payload: Value =
+            serde_json::from_slice(&existing.result_payload).map_err(|error| {
+                tracing::warn!(
+                    line = error.line(),
+                    column = error.column(),
+                    "已有命令结果的 JSON 无效"
+                );
+                invalid_record()
+            })?;
+        if existing.command_id == command.command_id
+            && existing.command_kind == command.command_kind
+            && existing.aggregate_id == command.aggregate_id
+            && existing.request_hash == command.request_hash
+            && existing.result_code == command.result_code
+            && existing_payload == payload
+        {
             Ok(CommandInsert::Duplicate(existing))
         } else {
             Err(CompetitionTransactionError::CommandLedger(CommandLedgerError::Conflict))

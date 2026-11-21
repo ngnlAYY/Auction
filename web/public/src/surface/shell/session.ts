@@ -24,7 +24,7 @@ import { createCatalogProxySnapshots } from "../catalog/proxy-snapshots";
 import { createCompetitionCommands } from "../commands/host";
 import type { PublicSessionResource, PublicSessionResult } from "../index";
 import { usePublicSessionExpiry, usePublicSessionSync } from "../session/lifecycle";
-import { invalidateLotWatches } from "../watches/cache";
+import { invalidateLotWatches, rebaseLotWatches } from "../watches/cache";
 import type { SessionConfirmation } from "./session-authority";
 
 type SessionRead = "refresh" | "reconcile" | "cookie_changed" | "expiry";
@@ -102,8 +102,14 @@ export function createPublicShellSession(refreshGeneration: Cell<number>) {
     return true;
   };
   const checkSession = (reason: SessionRefreshReason): void => {
-    if (reason === "refresh" && readKind.peek() !== "refresh" && resource.state() === "pending") {
-      // 聚焦与可见性通知不能把正在进行的对账或到期复核换成 Cookie 写入。
+    if (
+      (reason === "refresh" || reason === "cookie_changed") &&
+      readKind.peek() !== reason &&
+      resource.state() === "pending"
+    ) {
+      // The active authority read already owns this reconciliation. Cookie-write failure can
+      // publish a follow-up signal before its result is delivered; restarting here would discard
+      // that concrete failure and replace it with a second, potentially successful GET.
       return;
     }
     if (reason === "authentication_failed") {
@@ -182,6 +188,14 @@ export function createPublicShellSession(refreshGeneration: Cell<number>) {
     if (observation.identityRevision !== publicSessionIdentityRevision()) {
       checkPendingExpiry();
       return;
+    }
+    const cacheRebase = observation.watchCacheRebase;
+    if (
+      cacheRebase !== null &&
+      cacheRebase !== undefined &&
+      commandOwner.peek() === cacheRebase.userId
+    ) {
+      rebaseLotWatches(cacheRebase.userId, cacheRebase.fromRevision, cacheRebase.toRevision);
     }
     consumeConfirmedLogout(revisions.confirmed);
     // 这轮对账即使读取失败也消耗未知退出提示；下次例行复核仍能报告真正的非本地结束。

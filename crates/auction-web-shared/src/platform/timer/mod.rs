@@ -26,7 +26,9 @@ extern "C" {
 #[must_use = "futures do nothing unless polled or awaited"]
 pub struct TimeoutFuture {
     state: Rc<TimeoutState>,
-    handle: JsValue,
+    handle: RefCell<JsValue>,
+    remaining_millis: Cell<u32>,
+    scheduled_millis: Cell<u32>,
     // 回调必须活到触发或取消之后；先释放会让运行时调用已失效的闭包。
     _callback: Closure<dyn FnMut()>,
 }
@@ -41,7 +43,7 @@ impl TimeoutFuture {
     pub fn new(milliseconds: u32) -> Self {
         let state = Rc::new(TimeoutState::default());
         let fired_state = Rc::clone(&state);
-        let callback = Closure::once(move || {
+        let callback = Closure::<dyn FnMut()>::new(move || {
             fired_state.fired.set(true);
             // 先结束借用再唤醒，唤醒方即使同步轮询也不会重入同一个 `RefCell`。
             let waker = fired_state.waker.borrow_mut().take();
@@ -49,12 +51,15 @@ impl TimeoutFuture {
                 waker.wake();
             }
         });
-        // 超过 `i32` 的延时会被运行时当作 0；饱和到上限保持“至少等这么久”。
-        let handle = set_timeout(
-            callback.as_ref().unchecked_ref(),
-            i32::try_from(milliseconds).unwrap_or(i32::MAX),
-        );
-        Self { state, handle, _callback: callback }
+        let scheduled_millis = milliseconds.min(i32::MAX as u32);
+        let handle = set_timeout(callback.as_ref().unchecked_ref(), scheduled_millis as i32);
+        Self {
+            state,
+            handle: RefCell::new(handle),
+            remaining_millis: Cell::new(milliseconds),
+            scheduled_millis: Cell::new(scheduled_millis),
+            _callback: callback,
+        }
     }
 }
 
@@ -62,8 +67,17 @@ impl Future for TimeoutFuture {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<()> {
-        if self.state.fired.get() {
-            return Poll::Ready(());
+        if self.state.fired.replace(false) {
+            let remaining = self.remaining_millis.get().saturating_sub(self.scheduled_millis.get());
+            if remaining == 0 {
+                return Poll::Ready(());
+            }
+            let scheduled_millis = remaining.min(i32::MAX as u32);
+            self.remaining_millis.set(remaining);
+            self.scheduled_millis.set(scheduled_millis);
+            let handle =
+                set_timeout(self._callback.as_ref().unchecked_ref(), scheduled_millis as i32);
+            *self.handle.borrow_mut() = handle;
         }
         // 每次都换成最新的 waker：同一等待可能在竞速组合器之间被不同任务轮询。
         *self.state.waker.borrow_mut() = Some(context.waker().clone());
@@ -74,6 +88,6 @@ impl Future for TimeoutFuture {
 impl Drop for TimeoutFuture {
     fn drop(&mut self) {
         // 已触发的句柄再取消是无操作，不需要区分。
-        clear_timeout(&self.handle);
+        clear_timeout(&self.handle.borrow());
     }
 }

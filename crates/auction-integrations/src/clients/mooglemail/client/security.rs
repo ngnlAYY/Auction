@@ -129,9 +129,7 @@ pub(super) fn is_session_expired(
         return true;
     }
     status.is_redirection()
-        && location.and_then(|value| value.to_str().ok()).and_then(login_reference_url).is_some_and(
-            |url| matches!(url.host_str(), Some("e-hentai.org" | "forums.e-hentai.org")),
-        )
+        && location.and_then(|value| value.to_str().ok()).is_some_and(is_login_reference)
 }
 
 /// HV 会在角色处于战斗时用战斗页替代 Item Shop/MoogleMail 页面。

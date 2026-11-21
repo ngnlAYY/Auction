@@ -57,11 +57,17 @@ async fn insert_postgres(
             pool.begin()
         };
         let mut transaction = begin.await.map_err(map_storage_error)?;
-        let result =
-            enqueue_in_transaction(&mut transaction, command, prepared_status, Some(notifications))
+        let (result, created) =
+            enqueue_in_transaction_with_created(&mut transaction, command, prepared_status)
                 .await
                 .map_err(MailDeliveryTransactionError::into_repository)?;
         transaction.commit().await.map_err(map_storage_error)?;
+        if created && let Some(kind) = notification_kind(command) {
+            notifications.observe_stage(
+                kind,
+                auction_application::notification_metrics::NotificationStage::Created,
+            );
+        }
         Ok(result)
     })
     .await
@@ -75,6 +81,24 @@ pub(crate) async fn enqueue_in_transaction(
     prepared_status: Option<&str>,
     notifications: Option<&dyn auction_application::notification_metrics::NotificationRecorder>,
 ) -> Result<MailDeliveryResult, MailDeliveryTransactionError> {
+    let (result, created) =
+        enqueue_in_transaction_with_created(transaction, command, prepared_status).await?;
+    if created
+        && let Some(notifications) = notifications
+        && let Some(kind) = notification_kind(command)
+    {
+        notifications.observe_stage(
+            kind,
+            auction_application::notification_metrics::NotificationStage::Created,
+        );
+    }
+    Ok(result)
+}
+async fn enqueue_in_transaction_with_created(
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
+    command: &MailDeliveryCommand,
+    prepared_status: Option<&str>,
+) -> Result<(MailDeliveryResult, bool), MailDeliveryTransactionError> {
     super::validation::validate_command(command)
         .map_err(|_| repository_error("MoogleMail delivery 命令无效"))?;
     let payload = payload(command);
@@ -103,16 +127,6 @@ pub(crate) async fn enqueue_in_transaction(
     .bind(occurred_at)
     .execute(&mut **transaction)
     .await?;
-    // 只有真正新建 outbox 行才计一次创建；幂等重放不重复记账。
-    if inserted.rows_affected() == 1
-        && let Some(notifications) = notifications
-        && let Some(kind) = notification_kind(command)
-    {
-        notifications.observe_stage(
-            kind,
-            auction_application::notification_metrics::NotificationStage::Created,
-        );
-    }
 
     let row = sqlx::query(
         "SELECT id, request_digest, origin_kind, origin_id, recipient, payload, status
@@ -160,7 +174,7 @@ pub(crate) async fn enqueue_in_transaction(
         )
         .await?;
     }
-    Ok(MailDeliveryResult { delivery_id: stored_id })
+    Ok((MailDeliveryResult { delivery_id: stored_id }, inserted.rows_affected() == 1))
 }
 
 pub(crate) fn payload(command: &MailDeliveryCommand) -> Value {
@@ -258,11 +272,17 @@ pub(super) async fn enqueue_within_limit_postgres(
                     return Ok(MailNoticeEnqueue::Suppressed);
                 }
             }
-            let result =
-                enqueue_in_transaction(&mut transaction, command, None, Some(notifications))
+            let (result, created) =
+                enqueue_in_transaction_with_created(&mut transaction, command, None)
                     .await
                     .map_err(MailDeliveryTransactionError::into_repository)?;
             transaction.commit().await.map_err(map_storage_error)?;
+            if created && let Some(kind) = notification_kind(command) {
+                notifications.observe_stage(
+                    kind,
+                    auction_application::notification_metrics::NotificationStage::Created,
+                );
+            }
             Ok(MailNoticeEnqueue::Enqueued(result))
         },
     )

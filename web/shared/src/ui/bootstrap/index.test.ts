@@ -39,11 +39,18 @@ test("non_wasm_reporter_is_a_noop：宿主环境没有 window 时上报不发请
     { preconnect: () => undefined },
   );
   const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(unexpectedFetch);
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   try {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: undefined });
     reportBrowserError("wasm_panic");
     reportBrowserErrorWithBuildId("dto_decode", "invalid build id");
     expect(requests).toBe(0);
   } finally {
     fetchSpy.mockRestore();
+    if (previousWindow === undefined) {
+      Reflect.deleteProperty(globalThis, "window");
+    } else {
+      Object.defineProperty(globalThis, "window", previousWindow);
+    }
   }
 });

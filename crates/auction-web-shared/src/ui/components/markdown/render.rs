@@ -1,5 +1,7 @@
 //! Markdown 结构到安全 DOM 的渲染。
 
+use std::collections::{BTreeMap, HashSet};
+
 use dioxus::prelude::*;
 
 use super::inline::is_internal_target;
@@ -7,9 +9,9 @@ use super::model::{Inline, MarkdownBlock};
 use super::scroll::use_table_scroll;
 
 #[component]
-pub(super) fn MarkdownBlockView(block: MarkdownBlock) -> Element {
+pub(super) fn MarkdownBlockView(block: MarkdownBlock, heading_id: Option<String>) -> Element {
     match block {
-        MarkdownBlock::Heading { level, nodes } => render_heading(level, nodes),
+        MarkdownBlock::Heading { level, nodes } => render_heading(level, nodes, heading_id),
         MarkdownBlock::Paragraph(nodes) => rsx! {
             p { MarkdownInline { nodes } }
         },
@@ -150,9 +152,7 @@ fn count_visible_units(nodes: &[Inline], remaining: &mut usize) -> u16 {
     units
 }
 
-fn render_heading(level: u8, nodes: Vec<Inline>) -> Element {
-    // 标题生成 id 锚点，供目录或站内 # 链接跳转；无效 slug（如纯标点标题）则不生成 id。
-    let anchor = heading_anchor(&nodes);
+fn render_heading(level: u8, nodes: Vec<Inline>, anchor: Option<String>) -> Element {
     match level {
         1 => rsx! { h1 { id: anchor, MarkdownInline { nodes } } },
         2 => rsx! { h2 { id: anchor, MarkdownInline { nodes } } },
@@ -165,7 +165,7 @@ fn render_heading(level: u8, nodes: Vec<Inline>) -> Element {
 
 /// 从标题行内节点提取纯文本并 slug 化为锚点 id；仅保留字母数字（含 CJK），其余折叠为
 /// 单个连字符。文本为空或全是标点时返回 `None`，不生成空 id。
-fn heading_anchor(nodes: &[Inline]) -> Option<String> {
+pub(super) fn heading_anchor(nodes: &[Inline]) -> Option<String> {
     let mut text = String::new();
     collect_text(nodes, &mut text);
 
@@ -178,6 +178,38 @@ fn heading_anchor(nodes: &[Inline]) -> Option<String> {
         }
     }
     (!slug.is_empty()).then_some(slug)
+}
+
+pub(super) fn unique_heading_anchors(blocks: &[MarkdownBlock]) -> Vec<Option<String>> {
+    let bases = blocks
+        .iter()
+        .map(|block| match block {
+            MarkdownBlock::Heading { nodes, .. } => heading_anchor(nodes),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let reserved = bases.iter().flatten().cloned().collect::<HashSet<_>>();
+    let mut used = HashSet::new();
+    let mut next_suffix = BTreeMap::<String, usize>::new();
+    bases
+        .into_iter()
+        .map(|base| {
+            let base = base?;
+            if used.insert(base.clone()) {
+                next_suffix.insert(base.clone(), 2);
+                return Some(base);
+            }
+            let suffix = next_suffix.entry(base.clone()).or_insert(2);
+            loop {
+                let index = *suffix;
+                *suffix = suffix.saturating_add(1);
+                let candidate = format!("{base}-{index}");
+                if !reserved.contains(&candidate) && used.insert(candidate.clone()) {
+                    return Some(candidate);
+                }
+            }
+        })
+        .collect()
 }
 
 /// 递归收集行内节点的可见纯文本，供锚点和表格滚动区域命名。

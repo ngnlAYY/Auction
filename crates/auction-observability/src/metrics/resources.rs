@@ -1,35 +1,40 @@
 //! 当前进程的资源指标：从 `/proc/self` 读取 CPU、内存、文件描述符、线程数与启动时间。
 
-use std::fs;
+use std::{fs, sync::Mutex};
 
 use prometheus::{
-    IntCounter, IntGauge, Opts,
+    Counter, Gauge, IntGauge, Opts,
     core::{Collector, Desc},
     proto::MetricFamily,
 };
 
 use super::types::MetricsError;
 
-/// 内核向用户态报告 CPU 时间与启动时间所用的每秒 tick 数。Linux 在受支持的架构上固定为 100，
-/// Prometheus 官方 procfs 库同样按常量处理；不为一次 `sysconf` 引入 unsafe 调用。
-const USER_HZ: u64 = 100;
-
 /// Prometheus 约定的 `process_*` 指标；名称、类型与单位是既有监控面板和规则的契约。
-/// 只读取当前进程，不带连接串、请求参数或业务主键。
+/// CPU 累计从 `/proc/self/stat` 的 tick 总数推进，时钟频率只在初始化时读取一次。
 pub(super) struct ProcessResourceCollector {
     descs: Vec<Desc>,
-    cpu_seconds: IntCounter,
+    cpu_seconds: Counter,
+    last_cpu_ticks: Mutex<u64>,
+    user_hz: u64,
     open_fds: IntGauge,
     max_fds: IntGauge,
     virtual_memory: IntGauge,
     resident_memory: IntGauge,
-    start_time: IntGauge,
+    start_time: Gauge,
     threads: IntGauge,
 }
 
 impl ProcessResourceCollector {
     pub(super) fn new() -> Result<Self, MetricsError> {
-        let cpu_seconds = IntCounter::with_opts(Opts::new(
+        // SAFETY: sysconf reads a process-wide Linux constant; it does not access memory or mutate state.
+        let tick_rate = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+        let user_hz = u64::try_from(tick_rate).ok().filter(|rate| *rate > 0).ok_or_else(|| {
+            MetricsError::Registry(prometheus::Error::Msg(
+                "invalid Linux clock tick rate".to_owned(),
+            ))
+        })?;
+        let cpu_seconds = Counter::with_opts(Opts::new(
             "process_cpu_seconds_total",
             "Total user and system CPU time spent in seconds.",
         ))
@@ -40,17 +45,18 @@ impl ProcessResourceCollector {
             gauge("process_virtual_memory_bytes", "Virtual memory size in bytes.")?;
         let resident_memory =
             gauge("process_resident_memory_bytes", "Resident memory size in bytes.")?;
-        let start_time = gauge(
+        let start_time = Gauge::with_opts(Opts::new(
             "process_start_time_seconds",
             "Start time of the process since unix epoch in seconds.",
-        )?;
+        ))
+        .map_err(MetricsError::Registry)?;
         let threads = gauge("process_threads", "Number of OS threads in the process.")?;
 
         // 启动时间在进程生命周期内不变，只在注册时读取一次。
         if let Some(stat) = read("/proc/self/stat").as_deref().and_then(parse_stat)
             && let Some(boot_time) = read("/proc/stat").as_deref().and_then(parse_boot_time)
         {
-            start_time.set(saturating_i64(stat.start_ticks / USER_HZ + boot_time));
+            start_time.set(stat.start_ticks as f64 / user_hz as f64 + boot_time as f64);
         }
 
         let descs = cpu_seconds
@@ -67,6 +73,8 @@ impl ProcessResourceCollector {
         Ok(Self {
             descs,
             cpu_seconds,
+            last_cpu_ticks: Mutex::new(0),
+            user_hz,
             open_fds,
             max_fds,
             virtual_memory,
@@ -86,9 +94,14 @@ impl Collector for ProcessResourceCollector {
     fn collect(&self) -> Vec<MetricFamily> {
         let mut families = Vec::with_capacity(self.descs.len());
         if let Some(stat) = read("/proc/self/stat").as_deref().and_then(parse_stat) {
-            // 计数器只增不减：按整秒总量与已累计值的差推进。
-            let total_seconds = (stat.user_ticks + stat.system_ticks) / USER_HZ;
-            self.cpu_seconds.inc_by(total_seconds.saturating_sub(self.cpu_seconds.get()));
+            // 只有成功推进 tick 基线的 scrape 累加增量；保留小数秒，避免并发 overcount 与截断丢失。
+            let total_ticks = stat.user_ticks.saturating_add(stat.system_ticks);
+            let mut previous =
+                self.last_cpu_ticks.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if total_ticks > *previous {
+                self.cpu_seconds.inc_by((total_ticks - *previous) as f64 / self.user_hz as f64);
+                *previous = total_ticks;
+            }
             self.virtual_memory.set(saturating_i64(stat.virtual_memory_bytes));
             self.threads.set(saturating_i64(stat.threads));
             families.extend(self.cpu_seconds.collect());

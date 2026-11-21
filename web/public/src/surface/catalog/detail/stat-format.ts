@@ -60,7 +60,7 @@ function formatShortestFloat(value: number): string {
   if (value === -Infinity) {
     return "-inf";
   }
-  const negative = value < 0;
+  const negative = value < 0 || Object.is(value, -0);
   const magnitude = Math.abs(value);
   // Public 详情与 Rust 解码后的零使用同一显示。
   if (magnitude === 0) {
@@ -86,7 +86,11 @@ function formatShortestFloat(value: number): string {
   }
   let coefficient = numerator / denominator;
   const remainder = numerator % denominator;
-  if (remainder * 2n >= denominator) {
+  const doubledRemainder = remainder * 2n;
+  if (
+    doubledRemainder > denominator ||
+    (doubledRemainder === denominator && coefficient % 2n === 1n)
+  ) {
     coefficient += 1n;
   }
   let coefficientText = coefficient.toString();

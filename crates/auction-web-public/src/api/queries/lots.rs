@@ -4,6 +4,7 @@ use std::cell::Cell;
 use std::future::Future;
 
 use auction_web_shared::timer::TimeoutFuture;
+use auction_web_shared::valid_uuid;
 use auction_web_shared::visibility::document_is_visible;
 use url::form_urlencoded;
 
@@ -42,6 +43,9 @@ pub(crate) async fn fetch_current_lots(
     page: i64,
     page_size: i64,
 ) -> Result<LotEnvelope, String> {
+    if !valid_uuid(&auction_id) {
+        return Err("invalid_auction_id".to_owned());
+    }
     let url = current_lots_url(
         &auction_id,
         category.as_deref(),
@@ -138,6 +142,9 @@ pub(crate) async fn prefetch_current_lots(
     page: i64,
     page_size: i64,
 ) {
+    if !valid_uuid(&auction_id) {
+        return;
+    }
     let url = current_lots_url(
         &auction_id,
         category.as_deref(),
@@ -219,6 +226,9 @@ fn current_lots_url(
 }
 
 pub(crate) async fn fetch_lot_detail(lot_id: String) -> Result<LotEnvelope, LotDetailFetchError> {
+    if !valid_uuid(&lot_id) {
+        return Err(LotDetailFetchError::Unavailable);
+    }
     let url = format!("/api/v1/lots/{lot_id}");
     let request_url = url.clone();
     swr_cache::get_or_fetch(

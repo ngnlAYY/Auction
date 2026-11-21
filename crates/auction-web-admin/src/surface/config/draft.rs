@@ -100,7 +100,7 @@ async fn validate_candidate(
 #[derive(Clone)]
 pub(super) struct ConfigValidationStub(
     pub(super)  std::rc::Rc<
-        crate::surface::auctions::draft_page_tests::RecordRead<AdminRuntimeConfigResponse>,
+        crate::surface::auctions::editor::tests::RecordRead<AdminRuntimeConfigResponse>,
     >,
 );
 

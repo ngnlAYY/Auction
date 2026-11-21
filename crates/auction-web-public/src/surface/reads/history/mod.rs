@@ -11,7 +11,7 @@ use crate::surface::{
     use_page_query, use_public_page_bounds,
 };
 
-mod filters;
+pub(super) mod filters;
 mod presentation;
 mod table;
 mod values;

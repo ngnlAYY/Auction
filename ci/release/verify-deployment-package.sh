@@ -16,7 +16,7 @@ offline=false
 usage() {
 	printf '%s\n' \
 		'用法：ci/release/verify-deployment-package.sh <auction-rust-*.tar.gz> [选项]' \
-		'  --tag <v版本>        要求从该发布 tag 到达构建提交（默认选择包含提交的发布 tag）' \
+		'  --tag <v版本>        要求从该发布 tag 到达构建提交（未提供时仅接受唯一可达 tag）' \
 		'  --repo <路径>        用于核对 tag 与提交的 Git 仓库（默认本仓库）' \
 		'  --release-repo <owner/name>  GitHub 仓库（默认 $GITHUB_REPOSITORY 或 origin）' \
 		'  --offline            跳过 GitHub 来源证明校验；仅用于离线核对' \
@@ -69,39 +69,88 @@ dependencies="$package_dir/DEPENDENCIES.md"
 base=${package_archive%.tar.gz}
 [[ $base != "$package_archive" ]] || fail '归档必须使用 .tar.gz 后缀'
 [[ $base != *-dirty ]] || fail '拒绝部署带 -dirty 后缀的本地制品'
+[[ $base != *-candidate ]] || fail '拒绝部署候选制品'
 [[ $base =~ ^auction-rust-(.+)-([0-9a-f]{12})(-single)?$ ]] ||
 	fail "归档名不符合 auction-rust-<版本>-<提交前12位>[-single].tar.gz：$package_archive"
 short_commit=${BASH_REMATCH[2]}
 
-# 外层清单只应描述本次发布的两个文件；用清单本身校验，不信任文件名。
+# 先限制外层清单只指向两个预期文件，再读取摘要目标，避免将任意路径交给 sha256sum。
+if ! awk -v archive="$package_archive" '
+{
+	separator = index($0, "  ")
+	if (separator != 65) {
+		invalid = 1
+		next
+	}
+	digest = substr($0, 1, 64)
+	path = substr($0, 67)
+	if (digest ~ /[^0-9a-f]/) invalid = 1
+	if (path == archive) archive_count += 1
+	else if (path == "DEPENDENCIES.md") dependencies_count += 1
+	else invalid = 1
+	count += 1
+}
+END {
+	if (invalid || count != 2 || archive_count != 1 || dependencies_count != 1) exit 1
+}' "$checksums"; then
+	fail '外层 SHA256SUMS 必须精确包含归档与 DEPENDENCIES.md 两项'
+fi
 (
 	cd "$package_dir"
 	sha256sum --check --strict SHA256SUMS >/dev/null
 ) || fail '外层 SHA256SUMS 校验失败'
-grep -Eq "^[0-9a-f]{64}  ${package_archive//./\\.}$" "$checksums" ||
-	fail "外层 SHA256SUMS 未包含 $package_archive"
-grep -Eq '^[0-9a-f]{64}  DEPENDENCIES\.md$' "$checksums" ||
-	fail '外层 SHA256SUMS 未包含 DEPENDENCIES.md'
 
 temporary_root=$(mktemp -d)
 trap 'rm -rf -- "$temporary_root"' EXIT
 
-# 先核对归档成员，避免解包路径穿越、符号链接或特殊文件。
-members=$(tar --list --gzip --file "$archive")
-[[ -n $members ]] || fail '归档为空'
-while IFS= read -r member; do
-	[[ $member == "$base" || $member == "$base"/* ]] ||
+# 先核对归档成员，避免解包路径穿越、符号链接、特殊文件、重复路径和文件/目录冲突。
+member_list="$temporary_root/members.tsv"
+tar --list --gzip --null --file "$archive" >"$member_list" || fail '无法读取归档成员'
+[[ -s $member_list ]] || fail '归档为空'
+verbose_list="$temporary_root/members.verbose"
+tar --list --verbose --null --gzip --file "$archive" >"$verbose_list" ||
+	fail '无法读取归档成员类型'
+mapfile -d '' -t member_lines <"$member_list"
+mapfile -d '' -t verbose_lines <"$verbose_list"
+[[ ${#member_lines[@]} -eq ${#verbose_lines[@]} ]] ||
+	fail '归档成员路径与类型清单不一致'
+sorted_member_list="$temporary_root/members.sorted.tsv"
+: >"$member_list"
+for index in "${!member_lines[@]}"; do
+	member=${member_lines[$index]}
+	member_type=${verbose_lines[$index]:0:1}
+	[[ $member_type == '-' || $member_type == 'd' ]] ||
+		fail '归档包含符号链接或其他特殊文件'
+	member_path=${member%/}
+	[[ $member_path == "$base" || $member_path == "$base"/* ]] ||
 		fail "归档成员不在 $base/ 下：$member"
-	case "/$member/" in
-	*/../* | */./*) fail "归档成员包含相对路径：$member" ;;
+	[[ $member != *\\* ]] || fail '归档成员含无法安全按行核对的反斜杠或转义名称'
+	case "/$member_path/" in
+	*/../* | */./* | *//* ) fail "归档成员包含非规范路径组件：$member" ;;
 	esac
-done <<<"$members"
-verbose=$(tar --list --verbose --gzip --file "$archive")
-if awk '{ if (substr($1, 1, 1) != "-" && substr($1, 1, 1) != "d") bad = 1 } END { exit bad }' <<<"$verbose"; then
-	:
-else
-	fail '归档包含符号链接或其他特殊文件'
-fi
+	printf '%s\t%s\n' "$member_path" "$member_type" >>"$member_list" ||
+		fail '无法记录归档成员清单'
+done
+LC_ALL=C sort -t $'\t' -k1,1 "$member_list" >"$sorted_member_list" ||
+	fail '无法排序归档成员清单'
+awk -F '\t' '
+{
+	path = $1
+	if (path in types) bad = 1
+	types[path] = $2
+	paths[NR] = path
+}
+END {
+	for (row = 1; row <= NR; row++) {
+		count = split(paths[row], components, "/")
+		parent = ""
+		for (component = 1; component < count; component++) {
+			parent = component == 1 ? components[component] : parent "/" components[component]
+			if (types[parent] == "-") bad = 1
+		}
+	}
+	exit bad
+}' "$sorted_member_list" || fail '归档含重复规范路径或文件/目录冲突'
 
 tar --extract --gzip --file "$archive" --directory "$temporary_root" --no-same-owner
 package_root="$temporary_root/$base"
@@ -113,6 +162,20 @@ package_root="$temporary_root/$base"
 
 manifest="$package_root/RELEASE-MANIFEST.v1"
 [[ -f $manifest && ! -L $manifest ]] || fail '归档缺少 RELEASE-MANIFEST.v1'
+	awk -F= '
+	{
+		if ($0 == "files=") { in_files = 1; next }
+		if (in_files) next
+		separator = index($0, "=")
+		if (!separator) { bad = 1; next }
+		key = substr($0, 1, separator - 1)
+		if (key !~ /^(schema|package|source_commit|source_fingerprint)$/ || seen[key]++) bad = 1
+	}
+	END {
+		if (!in_files || seen["schema"] != 1 || seen["package"] != 1 ||
+			seen["source_commit"] != 1 || seen["source_fingerprint"] != 1) bad = 1
+		exit bad
+	}' "$manifest" || fail 'RELEASE-MANIFEST.v1 含重复、未知或缺失的头部字段'
 read_build_info() {
 	awk -F= -v wanted="$1" '$1 == wanted { print substr($0, length($1) + 2); exit }' "$2"
 }
@@ -152,27 +215,33 @@ if [[ -n $tag ]]; then
 	[[ $tag =~ ^v[0-9] ]] || fail "不是发布 tag：$tag"
 	printf '%s\n' "${release_tags[@]}" | grep -Fxq -- "$tag" ||
 		fail "本地不存在发布 tag：$tag"
+	remote_tag=$(git -C "$repository_root" ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}" 2>/dev/null) ||
+		fail "无法读取远程发布 tag：$tag"
+	remote_tag_object=$(printf '%s\n' "$remote_tag" | awk -v ref="refs/tags/$tag" '$2 == ref { print $1 }')
+	remote_commit=$(printf '%s\n' "$remote_tag" | awk -v ref="refs/tags/$tag^{}" '$2 == ref { print $1 }')
+	[[ -n $remote_tag_object ]] || fail "GitHub 仓库缺少发布 tag：$tag"
+	if [[ -z $remote_commit ]]; then remote_commit=$remote_tag_object; fi
+	local_tag_object=$(git -C "$repository_root" rev-parse --verify "$tag^{tag}" 2>/dev/null ||
+		git -C "$repository_root" rev-parse --verify "$tag^{commit}" 2>/dev/null) ||
+		fail "无法解析本地发布 tag：$tag"
+	[[ $local_tag_object == "$remote_tag_object" ]] || fail "本地发布 tag 与远程不一致：$tag"
+	git -C "$repository_root" merge-base --is-ancestor "$commit" "$remote_commit" ||
+		fail "构建提交 $commit 不能从远程发布 tag $tag 到达"
 	git -C "$repository_root" merge-base --is-ancestor "$commit" "$tag" ||
 		fail "构建提交 $commit 不能从发布 tag $tag 到达"
 else
-	exact=
-	while IFS= read -r candidate; do
-		[[ -n $candidate ]] || continue
-		if [[ $(git -C "$repository_root" rev-parse --verify --quiet "$candidate^{commit}") == "$commit" ]]; then
-			exact=$candidate
-			break
+	matching_tags=()
+	for candidate in "${release_tags[@]}"; do
+		if git -C "$repository_root" merge-base --is-ancestor "$commit" "$candidate"; then
+			matching_tags+=("$candidate")
+		else
+			status=$?
+			((status == 1)) || fail "检查构建提交与 tag 的关系失败：$candidate"
 		fi
-	done < <(git -C "$repository_root" tag --list 'v[0-9]*' --points-at "$commit")
-	if [[ -n $exact ]]; then
-		tag=$exact
-	else
-		while IFS= read -r candidate; do
-			[[ -n $candidate ]] || continue
-			if git -C "$repository_root" merge-base --is-ancestor "$commit" "$candidate"; then
-				tag=$candidate
-			fi
-		done <<<"$(printf '%s\n' "${release_tags[@]}")"
-	fi
+	done
+	[[ ${#matching_tags[@]} -eq 1 ]] ||
+		fail "构建提交 $commit 可从 ${#matching_tags[@]} 个发布 tag 到达；必须显式指定 --tag"
+	tag=${matching_tags[0]}
 	[[ -n $tag ]] || fail "构建提交 $commit 不能从任何发布 tag 到达"
 fi
 

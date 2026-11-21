@@ -7,12 +7,11 @@
 //! 用已验证的 Release 重建信任。
 //!
 //! 三角色 unit 以各自的运行账号执行程序：安装目录与每一级祖先必须能被它们穿越，各角色程序必须
-//! 能被对应账号执行。root 0700 的目录同样“可信”，却会让停机、替换之后的启动失败，因此一并在停机
-//! 前核对，同样不自动 chmod。
+//! 能被对应账号执行。root 0700 的目录、ACL 布局与 noexec 挂载都在停机前拒绝，不自动 chmod。
 //!
 //! 执行本命令的账号（部署执行账号）同样要执行安装目录中的旧 auction-cli：deploy 停机后用它校验
-//! 停机备份，停机后失败的恢复指引也用它执行 `service start`。这是当前进程自己的权限，交给内核按
-//! 有效身份判定，与停机后启动它时的检查同源；在停机前核对，同样不自动 chmod。
+//! 停机备份，停机后失败的恢复指引也用它执行 `service start`。按当前有效 UID 与固定 mode 位做
+//! 保守判定；ACL 只在已知本地文件系统上可证明命名空间不适用时忽略，未知或网络文件系统失败关闭。
 //!
 //! 安装、换回与复核都相对同一个以 `O_DIRECTORY | O_NOFOLLOW` 打开的目录描述符完成：临时文件以
 //! `O_EXCL | O_NOFOLLOW` 新建，`renameat` 原子替换，替换后重新打开目标复核属主、权限与摘要。
@@ -55,27 +54,11 @@ pub(crate) struct RunAccount {
     pub(crate) uid: Option<u32>,
 }
 
-/// 运行账号能否穿越目录或执行程序（两者都看执行位）。账号是属主时看属主位；否则 group 与 other
-/// 两类都必须有执行位：门禁不解析组成员关系，账号若恰在属组里，生效的是 group 位，只看 other 位
-/// 会误放行。标准布局 root:root 0755 满足；root 0700 的目录与缺执行位的程序都不满足。
+/// owner UID 以属主执行位判定；其他 UID 要求 group 与 other 同时有执行位，保守覆盖未知组成员关系。
+/// 安装检查还会拒绝 POSIX ACL 并检查程序挂载 noexec 标志，因此 mode 位是已界定布局下的充分证明。
 fn executable_by(facts: Facts, uid: Option<u32>) -> bool {
     let required = if uid == Some(facts.uid) { 0o100 } else { 0o011 };
     facts.mode & required == required
-}
-
-/// 部署执行账号（当前进程的有效 UID、GID 与附加组）能否执行 `program`。由内核按有效身份判定
-/// （`faccessat` 的 `X_OK` 与 `AT_EACCESS`），与随后以同一凭据启动该程序时的权限检查同源：组成员、
-/// ACL 与 noexec 挂载都已计入，root 对普通文件也要求至少一个执行位。只读，不修改文件。
-fn executable_by_caller(program: &Path) -> std::io::Result<()> {
-    let path = CString::new(program.as_os_str().as_bytes())
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
-    // SAFETY：path 以 NUL 结尾且在调用期间有效；faccessat 只读取路径与当前进程凭据。
-    let status =
-        unsafe { libc::faccessat(libc::AT_FDCWD, path.as_ptr(), libc::X_OK, libc::AT_EACCESS) };
-    if status != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
 }
 
 fn account_text(account: &RunAccount) -> String {
@@ -119,11 +102,11 @@ fn program_problem(facts: Facts, euid: u32) -> Option<&'static str> {
 }
 
 /// 停机前门禁（deploy 与 rollback，dry-run 同样执行）：只读核对安装目录、它的每一级祖先与其中
-/// 四个程序的信任，三角色运行账号对目录的穿越与对各自程序的执行，以及部署执行账号对旧
-/// auction-cli 的执行；不创建、不修改任何文件。
+/// 四个程序的信任、三角色运行账号与当前部署账号的执行权限；ACL/`noexec` 布局失败关闭。
 pub(crate) fn require_install_dir(path: &Path, accounts: &[RunAccount]) -> anyhow::Result<()> {
-    for (prefix, facts) in require_trusted_directory(path)? {
-        if let Some(account) = accounts.iter().find(|account| !executable_by(facts, account.uid)) {
+    let directory = PinnedInstallDir::open(path)?;
+    for (prefix, facts) in &directory.levels {
+        if let Some(account) = accounts.iter().find(|account| !executable_by(*facts, account.uid)) {
             anyhow::bail!(
                 "{}无法进入 {}（缺少执行位），停机替换后角色将无法启动；{STANDARD_ACCESS}",
                 account_text(account),
@@ -131,13 +114,11 @@ pub(crate) fn require_install_dir(path: &Path, accounts: &[RunAccount]) -> anyho
             );
         }
     }
-    let euid = files::effective_uid();
     for name in REQUIRED_BINARIES {
-        let program = path.join(name);
-        let metadata = fs::symlink_metadata(&program)
-            .with_context(|| format!("读取当前安装程序失败：{}", program.display()))?;
+        let program = directory.open_program(name)?;
+        let metadata = program.metadata().context("读取当前安装程序元数据失败")?;
         let facts = Facts::of(&metadata);
-        if let Some(problem) = program_problem(facts, euid) {
+        if let Some(problem) = program_problem(facts, directory.euid) {
             anyhow::bail!("安装目录中的 {name} 不可信（{problem}）；{REBUILD_TRUST}");
         }
         if let Some(account) = accounts.iter().find(|account| account.program == name)
@@ -150,12 +131,10 @@ pub(crate) fn require_install_dir(path: &Path, accounts: &[RunAccount]) -> anyho
         }
         // 三角色停止之后才会启动旧 CLI（deploy 的停机备份校验、失败后的 service start）：
         // 部署执行账号执行不了它时只能在这里拒绝，否则服务已停才失败。
-        if name == "auction-cli"
-            && let Err(error) = executable_by_caller(&program)
-        {
+        if name == "auction-cli" && !executable_by(facts, Some(directory.euid)) {
             anyhow::bail!(
-                "安装目录中的 auction-cli 不能由部署执行账号（UID {euid}）执行（{error}）：deploy \
-                 停机后要用它校验停机备份，停机后失败的恢复也要用它执行 service start；{STANDARD_ACCESS}"
+                "安装目录中的 auction-cli 不能由部署执行账号（UID {}）执行（缺少可信执行位）；{STANDARD_ACCESS}",
+                directory.euid
             );
         }
     }
@@ -164,34 +143,193 @@ pub(crate) fn require_install_dir(path: &Path, accounts: &[RunAccount]) -> anyho
 
 /// 安装目录与每一级祖先；能替换其中任一目录项的账号就能替换 root 执行的程序。返回从根到安装
 /// 目录逐级的路径与元数据事实，供运行账号的穿越核对使用。
-fn require_trusted_directory(path: &Path) -> anyhow::Result<Vec<(PathBuf, Facts)>> {
+fn require_trusted_directory(path: &Path) -> anyhow::Result<(Vec<(PathBuf, Facts)>, File)> {
     if !path.is_absolute()
         || path.components().any(|part| matches!(part, Component::ParentDir | Component::CurDir))
     {
         anyhow::bail!("安装目录必须是不含 . 或 .. 的绝对路径：{}", path.display());
     }
     let euid = files::effective_uid();
-    let components = path.components().collect::<Vec<_>>();
-    let mut prefix = PathBuf::new();
-    let mut levels = Vec::with_capacity(components.len());
-    for (index, part) in components.iter().enumerate() {
-        prefix.push(part.as_os_str());
-        let metadata = fs::symlink_metadata(&prefix)
-            .with_context(|| format!("读取安装目录失败：{}", prefix.display()))?;
+    let components = path
+        .components()
+        .filter_map(|part| match part {
+            Component::RootDir => None,
+            Component::Normal(name) => Some(name),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open("/")
+        .context("打开根目录以固定安装目录祖先失败")?;
+    let mut prefix = PathBuf::from("/");
+    let mut levels = Vec::with_capacity(components.len() + 1);
+    let root_facts = Facts::of(&directory.metadata().context("读取根目录元数据失败")?);
+    let root_problem = if components.is_empty() {
+        directory_problem(root_facts, euid)
+    } else {
+        ancestor_problem(root_facts, euid)
+    };
+    if let Some(problem) = root_problem {
+        anyhow::bail!("安装目录祖先 / 不可信（{problem}）；{REBUILD_TRUST}");
+    }
+    require_no_acl(&directory, &prefix, true)?;
+    levels.push((prefix.clone(), root_facts));
+
+    for (index, component) in components.iter().enumerate() {
+        prefix.push(component);
+        let name = CString::new(component.as_bytes()).context("安装目录路径项包含 NUL")?;
+        // SAFETY：父目录描述符固定，name 是单个普通路径分量，成功返回的描述符由当前调用独占。
+        let descriptor = unsafe {
+            libc::openat(
+                directory.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if descriptor < 0 {
+            return Err(std::io::Error::last_os_error())
+                .with_context(|| format!("打开安装目录祖先失败：{}", prefix.display()));
+        }
+        // SAFETY：openat 成功，descriptor 由当前调用独占拥有。
+        let next = unsafe { File::from_raw_fd(descriptor) };
+        let metadata = next
+            .metadata()
+            .with_context(|| format!("读取安装目录元数据失败：{}", prefix.display()))?;
+        let mut entry = std::mem::MaybeUninit::<libc::stat>::zeroed();
+        // SAFETY: directory is pinned, name is one NUL-free component, and entry is writable stat storage.
+        if unsafe {
+            libc::fstatat(
+                directory.as_raw_fd(),
+                name.as_ptr(),
+                entry.as_mut_ptr(),
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        } != 0
+        {
+            return Err(std::io::Error::last_os_error())
+                .with_context(|| format!("复核安装目录项失败：{}", prefix.display()));
+        }
+        // SAFETY: fstatat initialized entry after returning success.
+        let entry = unsafe { entry.assume_init() };
+        if entry.st_dev != metadata.dev()
+            || entry.st_ino != metadata.ino()
+            || entry.st_mode & libc::S_IFMT != libc::S_IFDIR
+        {
+            anyhow::bail!("安装目录项在固定时被替换：{}", prefix.display());
+        }
         let facts = Facts::of(&metadata);
-        if index + 1 < components.len() {
-            if let Some(problem) = ancestor_problem(facts, euid) {
-                anyhow::bail!(
-                    "安装目录的祖先 {} 不可信（{problem}）；{REBUILD_TRUST}",
-                    prefix.display()
-                );
-            }
-        } else if let Some(problem) = directory_problem(facts, euid) {
+        let last = index + 1 == components.len();
+        let problem =
+            if last { directory_problem(facts, euid) } else { ancestor_problem(facts, euid) };
+        if let Some(problem) = problem {
             anyhow::bail!("安装目录 {} 不可信（{problem}）；{REBUILD_TRUST}", prefix.display());
         }
+        require_no_acl(&next, &prefix, true)?;
         levels.push((prefix.clone(), facts));
+        directory = next;
     }
-    Ok(levels)
+    Ok((levels, directory))
+}
+
+/// ACL 会覆盖目标 UID 的 mode 位；有 ACL 的布局失败关闭，目录默认 ACL 同样拒绝。
+/// `EOPNOTSUPP` 仅在明确支持的本地文件系统上表示该 ACL 命名空间不适用；其他文件系统保持失败关闭。
+fn require_no_acl(file: &File, path: &Path, directory: bool) -> anyhow::Result<()> {
+    const ACCESS_ACL: &[u8] = b"system.posix_acl_access\0";
+    const DEFAULT_ACL: &[u8] = b"system.posix_acl_default\0";
+    const NFS4_ACL: &[u8] = b"system.nfs4_acl\0";
+    const RICH_ACL: &[u8] = b"system.richacl\0";
+    let attributes = if directory {
+        &[ACCESS_ACL, DEFAULT_ACL, NFS4_ACL, RICH_ACL][..]
+    } else {
+        &[ACCESS_ACL, NFS4_ACL, RICH_ACL][..]
+    };
+    let mut stat = std::mem::MaybeUninit::<libc::statfs>::zeroed();
+    // SAFETY：stat 指向可写的 libc::statfs 存储，file 是打开的有效描述符。
+    if unsafe { libc::fstatfs(file.as_raw_fd(), stat.as_mut_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("读取安装路径文件系统类型失败：{}", path.display()));
+    }
+    // SAFETY：fstatfs 成功时已初始化 stat。
+    let filesystem_type = unsafe { stat.assume_init() }.f_type;
+    for attribute in attributes {
+        // SAFETY：描述符有效，属性名是静态 NUL 结尾字符串；size=0 只查询是否存在。
+        let size = unsafe {
+            libc::fgetxattr(file.as_raw_fd(), attribute.as_ptr().cast(), std::ptr::null_mut(), 0)
+        };
+        if size >= 0 {
+            anyhow::bail!("安装目录或程序含访问 ACL，无法证明运行账号访问权限：{}", path.display());
+        }
+        let error = std::io::Error::last_os_error();
+        let errno = error.raw_os_error().unwrap_or(libc::EIO);
+        match classify_acl_probe(Err(errno), filesystem_type) {
+            AclProbeResult::Absent => continue,
+            AclProbeResult::Opaque => anyhow::bail!(
+                "安装路径所在文件系统无法证明 ACL 命名空间不存在（类型 {filesystem_type:#x}）：{}",
+                path.display()
+            ),
+            AclProbeResult::Failed(_) => {
+                return Err(error)
+                    .with_context(|| format!("读取安装路径 ACL 失败：{}", path.display()));
+            }
+            AclProbeResult::Present => anyhow::bail!(
+                "安装目录或程序含访问 ACL，无法证明运行账号访问权限：{}",
+                path.display()
+            ),
+        }
+    }
+    Ok(())
+}
+
+/// Linux 文件系统 magic：仅这些本地文件系统可把“不支持该 xattr 命名空间”视为该 ACL 形式不适用。
+fn known_local_filesystem(filesystem_type: libc::c_long) -> bool {
+    matches!(
+        filesystem_type,
+        0x0000_ef53 // ext2/3/4
+            | 0x5846_5342 // XFS
+            | 0x9123_683e // Btrfs
+            | 0x0102_1994 // tmpfs
+            | 0x794c_7630 // overlayfs
+            | 0x8584_58f6 // ramfs
+            | 0xf2f5_2010 // F2FS
+    )
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum AclProbeResult {
+    Present,
+    Absent,
+    Opaque,
+    Failed(i32),
+}
+
+fn classify_acl_probe(result: Result<isize, i32>, filesystem_type: libc::c_long) -> AclProbeResult {
+    match result {
+        Ok(_) => AclProbeResult::Present,
+        Err(errno) if errno == libc::ENODATA => AclProbeResult::Absent,
+        Err(errno) if errno == libc::EOPNOTSUPP && known_local_filesystem(filesystem_type) => {
+            AclProbeResult::Absent
+        }
+        Err(errno) if errno == libc::EOPNOTSUPP => AclProbeResult::Opaque,
+        Err(errno) => AclProbeResult::Failed(errno),
+    }
+}
+
+/// 程序文件所在挂载的 noexec 标记不能从 mode 位获知，须从同一文件描述符读取挂载属性。
+fn require_executable_mount(file: &File, path: &Path) -> anyhow::Result<()> {
+    let mut stat = std::mem::MaybeUninit::<libc::statvfs>::zeroed();
+    // SAFETY：stat 指向可写的 libc::statvfs 存储。
+    if unsafe { libc::fstatvfs(file.as_raw_fd(), stat.as_mut_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("读取安装程序文件系统属性失败：{}", path.display()));
+    }
+    // SAFETY: fstatvfs initialized stat on success.
+    let flags = unsafe { stat.assume_init() }.f_flag;
+    if flags & libc::ST_NOEXEC as libc::c_ulong != 0 {
+        anyhow::bail!("安装程序所在文件系统使用 noexec：{}", path.display());
+    }
+    Ok(())
 }
 
 /// 已安装程序的当前事实；读取与元数据来自同一个不跟随符号链接的描述符。
@@ -206,6 +344,7 @@ pub(crate) struct Inspection {
 pub(crate) struct PinnedInstallDir {
     path: PathBuf,
     directory: File,
+    levels: Vec<(PathBuf, Facts)>,
     euid: u32,
 }
 
@@ -213,18 +352,8 @@ impl PinnedInstallDir {
     /// 安装与换回前重新核对安装目录与祖先，再在打开的描述符上复核目录本身。程序本身的信任在
     /// 停机前由 [`require_install_dir`] 核对；这里不重查，换回时目标可能已被部分替换。
     pub(crate) fn open(path: &Path) -> anyhow::Result<Self> {
-        require_trusted_directory(path)?;
-        let directory = OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-            .open(path)
-            .with_context(|| format!("打开安装目录失败：{}", path.display()))?;
-        let euid = files::effective_uid();
-        let metadata = directory.metadata().context("读取安装目录元数据失败")?;
-        if let Some(problem) = directory_problem(Facts::of(&metadata), euid) {
-            anyhow::bail!("安装目录 {} 不可信（{problem}）；{REBUILD_TRUST}", path.display());
-        }
-        Ok(Self { path: path.to_owned(), directory, euid })
+        let (levels, directory) = require_trusted_directory(path)?;
+        Ok(Self { path: path.to_owned(), directory, levels, euid: files::effective_uid() })
     }
 
     pub(crate) fn path(&self) -> &Path {
@@ -235,7 +364,7 @@ impl PinnedInstallDir {
     pub(crate) fn create_temporary(&self, name: &str) -> anyhow::Result<(String, File)> {
         let temporary = format!(".{name}.{}.new", Uuid::new_v4());
         let file = self
-            .open_at(&temporary, libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL, PROGRAM_MODE)
+            .open_at(&temporary, libc::O_RDWR | libc::O_CREAT | libc::O_EXCL, PROGRAM_MODE)
             .with_context(|| format!("创建安装临时文件失败：{}", self.path.join(name).display()))?;
         Ok((temporary, file))
     }
@@ -279,8 +408,7 @@ impl PinnedInstallDir {
             .with_context(|| format!("同步安装目录失败：{}", self.path.display()))
     }
 
-    /// 重新打开目录中的程序并读取事实；不是普通文件时失败。
-    pub(crate) fn inspect(&self, name: &str) -> anyhow::Result<Inspection> {
+    fn open_program(&self, name: &str) -> anyhow::Result<File> {
         let file = self
             .open_at(name, libc::O_RDONLY | libc::O_NONBLOCK, 0)
             .with_context(|| format!("打开安装目录中的程序失败：{name}"))?;
@@ -288,6 +416,16 @@ impl PinnedInstallDir {
         if !metadata.is_file() {
             anyhow::bail!("安装目录中的 {name} 不是普通文件");
         }
+        let path = self.path.join(name);
+        require_no_acl(&file, &path, false)?;
+        require_executable_mount(&file, &path)?;
+        Ok(file)
+    }
+
+    /// 重新打开目录中的程序并读取事实；不是普通文件时失败。
+    pub(crate) fn inspect(&self, name: &str) -> anyhow::Result<Inspection> {
+        let file = self.open_program(name)?;
+        let metadata = file.metadata().context("读取程序元数据失败")?;
         let sealed = metadata.uid() == self.euid
             && (self.euid != 0 || metadata.gid() == 0)
             && metadata.mode() & 0o7777 == PROGRAM_MODE;
@@ -324,11 +462,13 @@ fn component(name: &str) -> anyhow::Result<CString> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
 
     use super::{
-        Facts, Kind, PinnedInstallDir, RunAccount, ancestor_problem, directory_problem,
-        executable_by, program_problem, require_install_dir,
+        AclProbeResult, Facts, Kind, PinnedInstallDir, RunAccount, ancestor_problem,
+        classify_acl_probe, directory_problem, executable_by, program_problem, require_install_dir,
     };
     use crate::deploy::artifact::REQUIRED_BINARIES;
     use crate::deploy::gates::verify_backup_with_cli;
@@ -443,7 +583,10 @@ mod tests {
         fs::set_permissions(&root.0, fs::Permissions::from_mode(0o775)).expect("放宽祖先");
         let text =
             format!("{:#}", require_install_dir(&install, &accounts).expect_err("可写祖先拒绝"));
-        assert!(text.contains("祖先") && text.contains("重建安装目录信任"), "{text}");
+        assert!(
+            text.contains(&root.0.display().to_string()) && text.contains("重建安装目录信任"),
+            "{text}"
+        );
         assert!(PinnedInstallDir::open(&install).is_err(), "安装时同样核对祖先");
         fs::set_permissions(&root.0, fs::Permissions::from_mode(0o755)).expect("恢复祖先");
 
@@ -471,6 +614,12 @@ mod tests {
         std::os::unix::fs::symlink(&install, &link).expect("符号链接安装目录");
         assert!(require_install_dir(&link, &accounts).is_err(), "符号链接安装目录拒绝");
         assert!(PinnedInstallDir::open(&link).is_err());
+
+        let ancestor_link = root.0.join("ancestor-link");
+        std::os::unix::fs::symlink(&root.0, &ancestor_link).expect("符号链接祖先");
+        let redirected = ancestor_link.join("bin");
+        assert!(require_install_dir(&redirected, &accounts).is_err(), "符号链接祖先拒绝");
+        assert!(PinnedInstallDir::open(&redirected).is_err(), "安装固定路径拒绝符号链接祖先");
         assert!(require_install_dir(&root.0.join("bin/../bin"), &accounts).is_err(), "拒绝 ..");
     }
 
@@ -553,5 +702,49 @@ mod tests {
         verify_backup_with_cli(&cli, &root.0, &manifest, "auction")
             .await
             .expect("门禁放行时停机后能执行旧 CLI");
+    }
+    #[test]
+    fn acl_probe_preserves_detected_acls_and_absent_attributes() {
+        let ext_filesystem = 0x0000_ef53;
+        assert_eq!(classify_acl_probe(Ok(0), ext_filesystem), AclProbeResult::Present);
+        assert_eq!(
+            classify_acl_probe(Err(libc::ENODATA), 0x6969),
+            AclProbeResult::Absent,
+            "明确不存在的属性在任何文件系统上都是 absent"
+        );
+    }
+
+    #[test]
+    fn unsupported_acl_namespaces_are_ignored_only_on_known_local_filesystems() {
+        for filesystem_type in [
+            0x0000_ef53, // ext2/3/4
+            0x5846_5342, // XFS
+            0x9123_683e, // Btrfs
+            0x0102_1994, // tmpfs
+            0x794c_7630, // overlayfs
+            0x8584_58f6, // ramfs
+            0xf2f5_2010, // F2FS
+        ] {
+            assert_eq!(
+                classify_acl_probe(Err(libc::EOPNOTSUPP), filesystem_type),
+                AclProbeResult::Absent,
+                "known local filesystem {filesystem_type:#x}"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_acl_namespaces_on_opaque_filesystems_fail_closed() {
+        for filesystem_type in [0x6969, 0x6573_554e, 0x1234_5678] {
+            assert_eq!(
+                classify_acl_probe(Err(libc::EOPNOTSUPP), filesystem_type),
+                AclProbeResult::Opaque,
+                "unknown or network filesystem {filesystem_type:#x}"
+            );
+        }
+        assert_eq!(
+            classify_acl_probe(Err(libc::EACCES), 0x0000_ef53),
+            AclProbeResult::Failed(libc::EACCES)
+        );
     }
 }

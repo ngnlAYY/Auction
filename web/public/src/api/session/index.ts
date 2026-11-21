@@ -36,6 +36,7 @@ import {
   publicSessionIdentityRevision,
   publicSessionPrimaryRevision,
   publicSessionRevisions,
+  publicWatchCacheRevision,
   publishPublicSessionIdentity,
   requestPublicSessionCheck,
   type SessionRevisions,
@@ -289,6 +290,11 @@ interface SessionObservation {
   readonly result: Result<PublicSession | null, string>;
   readonly revisions: SessionRevisions;
   readonly identityRevision: number | null;
+  readonly watchCacheRebase?: {
+    readonly userId: string;
+    readonly fromRevision: string | null;
+    readonly toRevision: string | null;
+  } | null;
 }
 
 /** 在同一锁内取得当前身份和退出修订；普通复核需要同步时复用锁内的 GET。 */
@@ -303,6 +309,7 @@ export async function fetchPublicSession(
   const locked = await withCookieLock(async (lockSignal): Promise<SessionObservation> => {
     const revisions = publicSessionRevisions();
     let identityRevision = publicSessionIdentityRevision();
+    let watchCacheRebase: SessionObservation["watchCacheRebase"] = null;
     const publish = (session: PublicSession | null, cookieWritten: boolean): void => {
       identityRevision = publishPublicSessionIdentity(
         { kind: "session", session },
@@ -324,11 +331,19 @@ export async function fetchPublicSession(
       }
     }
     // 等锁期间 Cookie 可能被其他标签页替换，只能用锁内刚读到的身份同步持久期。
-    const result =
-      synchronizeCookie && current.ok && current.value !== null && needsSync(current.value)
-        ? await synchronizePublicCookie(current.value, lockSignal, publish)
-        : current;
-    return { result, revisions, identityRevision };
+    let result = current;
+    if (synchronizeCookie && current.ok && current.value !== null && needsSync(current.value)) {
+      const userId = current.value.user_id;
+      result = await synchronizePublicCookie(
+        current.value,
+        lockSignal,
+        publish,
+        (fromRevision, toRevision) => {
+          watchCacheRebase = { userId, fromRevision, toRevision };
+        },
+      );
+    }
+    return { result, revisions, identityRevision, watchCacheRebase };
   }, signal);
   if (signal.aborted) {
     return { result: err("network_error"), revisions: queuedRevisions, identityRevision: null };
@@ -368,6 +383,7 @@ async function synchronizePublicCookie(
   current: PublicSession,
   signal: AbortSignal,
   publish: (session: PublicSession | null, cookieWritten: boolean) => void,
+  onReschedule: (fromRevision: string | null, toRevision: string | null) => void,
 ): Promise<Result<PublicSession | null, string>> {
   const response = await sendRequest(
     () =>
@@ -378,25 +394,44 @@ async function synchronizePublicCookie(
     signal,
   );
   if (signal.aborted) {
+    if (mayHaveChangedCookie(response)) {
+      rescheduleCookieSync(onReschedule);
+    }
     return err("network_error");
   }
   if (!response.ok) {
+    if (mayHaveChangedCookie(response)) {
+      rescheduleCookieSync(onReschedule);
+    }
     return err(transportErrorCode(response.error));
   }
   const synchronized = decodeCurrentSession(response.value);
   if (!synchronized.ok) {
     if (response.value.status === 409) {
       observePublicSessionFailure(409, synchronized.error, current.user_id);
+    } else if (mayHaveChangedCookie(response)) {
+      rescheduleCookieSync(onReschedule);
     }
     return synchronized;
   }
   const identity = synchronized.value;
   if (identity === null || identity.user_id !== current.user_id) {
+    rescheduleCookieSync(onReschedule);
     return err("invalid_response");
   }
   record(identity);
   publish(identity, true);
   return synchronized;
+}
+
+function rescheduleCookieSync(
+  onReschedule: (fromRevision: string | null, toRevision: string | null) => void,
+): void {
+  invalidate();
+  const fromRevision = publicWatchCacheRevision();
+  markPublicSessionChange();
+  onReschedule(fromRevision, publicWatchCacheRevision());
+  requestPublicSessionCheck("cookie_changed");
 }
 
 function mayHaveChangedCookie(response: Result<TransportResponse, TransportError>): boolean {

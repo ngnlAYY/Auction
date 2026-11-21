@@ -399,13 +399,13 @@ pub(crate) fn take_cod_receipt_amount(value: &str) -> Option<i64> {
 pub(crate) fn valid_removed_attachment_receipt(value: &str, expected_count: usize) -> bool {
     const MARKER: &str = "Removed attachment:";
     let mut count = 0_usize;
-    for (start, _) in value.match_indices(MARKER) {
-        let line = value[start + MARKER.len()..]
-            .trim_start_matches([' ', '\t'])
-            .split(['\r', '\n'])
-            .next()
-            .unwrap_or_default();
-        if line.trim().is_empty() {
+    for line in value.lines() {
+        let mut markers = line.match_indices(MARKER);
+        let Some((start, _)) = markers.next() else { continue };
+        if markers.next().is_some() || !line[..start].trim().is_empty() {
+            return false;
+        }
+        if line[start + MARKER.len()..].trim().is_empty() {
             return false;
         }
         count += 1;

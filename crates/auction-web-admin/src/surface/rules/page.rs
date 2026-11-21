@@ -203,7 +203,7 @@ mod tests {
 
     use super::page;
     use crate::api::{AdminDocumentKind, AdminRules, AdminRulesCandidate};
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         RecordRead, click_button, has_live_text, init_i18n, mount_writer, settle_writer,
     };
     use crate::surface::rules::model::DocumentDrafts;

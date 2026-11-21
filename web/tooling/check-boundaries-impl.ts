@@ -427,14 +427,17 @@ async function projectForFile(snapshot: Snapshot, file: string) {
 }
 
 export async function runBoundaryCheck(repositoryRoot: string): Promise<0 | 1 | 2> {
+  diagnostics.length = 0;
   let api: API | undefined;
   let snapshot: Snapshot | undefined;
   let failure: string | undefined;
+  let timedOut = false;
+  const timeout = Promise.withResolvers<never>();
   const watchdog = setTimeout(() => {
-    console.error("Web 包边界检查失败：TypeScript 解析器在 120 秒内没有完成。");
-    process.exit(2);
+    timedOut = true;
+    timeout.reject(new Error("TypeScript 解析器在 120 秒内没有完成"));
   }, 120_000);
-  try {
+  const work = async (): Promise<void> => {
     activeRepositoryRoot = repositoryRoot;
     const webRoot = resolve(repositoryRoot, "web");
     const configuration = loadConfiguration(webRoot, repositoryRoot);
@@ -452,24 +455,36 @@ export async function runBoundaryCheck(repositoryRoot: string): Promise<0 | 1 | 
     }
     api = new API({ cwd: webRoot });
     snapshot = await api.updateSnapshot({ openFiles: files });
+    if (timedOut) {
+      return;
+    }
     for (const file of files) {
+      if (timedOut) {
+        return;
+      }
       const sourcePackage = packageOfPath(file, repositoryRoot);
       if (sourcePackage === undefined) {
         throw new Error(`无法确定 ${relative(repositoryRoot, file)} 所属的包`);
       }
       const project = await projectForFile(snapshot, file);
+      if (timedOut) {
+        return;
+      }
       if (project === undefined) {
         throw new Error(`无法确定 ${relative(repositoryRoot, file)} 所属的 TypeScript 项目`);
       }
       const sourceFile = await project.program.getSourceFile(file);
+      if (timedOut) {
+        return;
+      }
       if (sourceFile === undefined) {
         throw new Error(`无法解析 ${relative(repositoryRoot, file)}`);
       }
       visit(sourceFile, repositoryRoot, configuration.dependencies);
     }
-  } catch (error) {
-    failure = errorMessage(error);
-  } finally {
+  };
+  const workPromise = work();
+  const cleanup = async (): Promise<void> => {
     if (snapshot !== undefined) {
       try {
         await snapshot.dispose();
@@ -484,8 +499,28 @@ export async function runBoundaryCheck(repositoryRoot: string): Promise<0 | 1 | 
         failure ??= `关闭 TypeScript 解析器失败：${errorMessage(error)}`;
       }
     }
-    clearTimeout(watchdog);
+  };
+  try {
+    await Promise.race([workPromise, timeout.promise]);
+  } catch (error) {
+    failure = errorMessage(error);
   }
+  if (timedOut) {
+    // 工作中的解析调用可能仍在使用快照；等它响应 timedOut 并退出后再释放资源。
+    void workPromise
+      .catch(() => undefined)
+      .then(cleanup)
+      .catch(() => undefined);
+  } else {
+    const cleanupPromise = cleanup();
+    try {
+      await Promise.race([cleanupPromise, timeout.promise]);
+    } catch (error) {
+      failure ??= errorMessage(error);
+      void cleanupPromise.catch(() => undefined);
+    }
+  }
+  clearTimeout(watchdog);
   for (const diagnostic of diagnostics) {
     console.error(diagnostic);
   }

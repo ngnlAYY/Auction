@@ -10,7 +10,7 @@ use dioxus::prelude::*;
 
 use crate::api::{AdminMailPolling, AdminWriteFailure, set_mail_paused, trigger_mail_poll};
 #[cfg(test)]
-use crate::surface::auctions::draft_page_tests::RecordRead;
+use crate::surface::auctions::editor::tests::RecordRead;
 use crate::surface::mail::{MAILBOX_ENTITY_PREFIX, mailbox_command_entity};
 use crate::surface::pending::{CommandDelivery, CommandReceipt, PendingCommands, set_if_alive};
 
@@ -144,7 +144,7 @@ mod tests {
 
     use super::observe_pause_resume;
     use crate::api::{AdminWriteEndpoint, AdminWriteFailure};
-    use crate::surface::auctions::draft_page_tests::{button, click_button, mount_writer};
+    use crate::surface::auctions::editor::tests::{button, click_button, mount_writer};
     use crate::surface::pending::{PendingCommandPanel, use_pending_commands};
 
     #[test]

@@ -3,14 +3,14 @@
 use std::{fs, os::unix::fs::PermissionsExt, path::Path, path::PathBuf, time::Duration};
 
 use auction_storage::{
-    RETENTION_PURGE_RECEIPT_MAX_AGE_SECONDS, RetentionPurgeError, RetentionPurgeFilesystemResult,
+    RETENTION_PURGE_RECEIPT_MAX_AGE_SECONDS, RetentionPurgeError, RetentionPurgeOutcome,
 };
 use auction_time::{TimeDelta, Timestamp};
 use uuid::Uuid;
 
 use super::dry_run::{DryRunReceipt, require_receipt_headroom};
 use super::failure::execution_failed;
-use super::zero_filesystem_result;
+use super::{FilesystemPurgeArtifact, FilesystemPurgeEvidence};
 use crate::database::{days_to_duration, mail_diagnostic_windows};
 
 struct TempDirectory(PathBuf);
@@ -33,7 +33,7 @@ impl Drop for TempDirectory {
 fn dry_run_receipt(created_at: Timestamp) -> DryRunReceipt {
     let run_id = Uuid::new_v4();
     serde_json::from_value(serde_json::json!({
-        "format": "auction-retention-dry-run-receipt.v1",
+        "format": "auction-retention-dry-run-receipt.v2",
         "run_id": run_id,
         "created_at": created_at,
         "database_retention": {
@@ -52,18 +52,44 @@ fn dry_run_receipt(created_at: Timestamp) -> DryRunReceipt {
             "dataset_family": "mail_diagnostic_files",
             "candidate_files": 3,
             "candidate_bytes": 300,
+            "root_identity_sha256": "b".repeat(64),
         },
     }))
     .expect("演练回执夹具")
 }
 
-fn deleted(files: u64) -> RetentionPurgeFilesystemResult {
-    RetentionPurgeFilesystemResult {
-        directory_present: true,
-        examined_files: 3,
-        deleted_files: files,
-        deleted_bytes: files * 100,
-        ..zero_filesystem_result()
+fn deleted(files: u64) -> FilesystemPurgeEvidence {
+    let run_id = Uuid::new_v4();
+    let path =
+        PathBuf::from(format!("/var/backups/auction/.filesystem-purge-{run_id}/artifact.json"));
+    FilesystemPurgeEvidence {
+        artifact: FilesystemPurgeArtifact {
+            format: "auction-retention-filesystem-purge-artifact.v1",
+            run_id,
+            dry_run_run_id: Uuid::from_u128(1),
+            database_name: "auction".to_owned(),
+            dataset_family: "mail_diagnostic_files".to_owned(),
+            approval_token_sha256: "a".repeat(64),
+            policy_version: 2,
+            policy_sha256: "b".repeat(64),
+            filesystem_root_identity_sha256: "c".repeat(64),
+            approved_max_files: 3,
+            completed_at: Timestamp::now(),
+            outcome: RetentionPurgeOutcome::Complete,
+            directory_present: true,
+            examined_files: 3,
+            deleted_files: files,
+            deleted_bytes: files * 100,
+            retained_files: 0,
+            write_unknown_held_files: 0,
+            write_unknown_over_hold_window_files: 0,
+            unexpected_entries: 0,
+            limit_reached: false,
+            needs_follow_up: false,
+            failure_code: None,
+        },
+        artifact_path: Some(path),
+        sha256: Some("d".repeat(64)),
     }
 }
 

@@ -157,12 +157,18 @@ test.each([404, 410])(
   },
 );
 
-test("eviction_at_headers_blocks_every_earlier_inflight_write：响应头驱逐后只有新请求可以重建快照", async () => {
+test.each([404, 410])(
+  "eviction_at_headers_blocks_every_earlier_inflight_write：状态 %d 响应头驱逐后只有新请求可以重建快照",
+  verifyMissingHeadersEviction,
+);
+
+async function verifyMissingHeadersEviction(status: number): Promise<void> {
   const missingHeaders = Promise.withResolvers<Response>();
   const missingBody = Promise.withResolvers<ArrayBuffer>();
   const youngerResponse = Promise.withResolvers<Response>();
+  const replacementResponse = Promise.withResolvers<Response>();
   const readingBody = Promise.withResolvers<void>();
-  const missing = new Response(null, { status: 404 });
+  const missing = new Response(null, { status });
   missing.arrayBuffer = () => {
     readingBody.resolve();
     return missingBody.promise;
@@ -182,7 +188,7 @@ test("eviction_at_headers_blocks_every_earlier_inflight_write：响应头驱逐�
           requests += 1;
           if (requests === 1) return missingHeaders.promise;
           if (requests === 2) return youngerResponse.promise;
-          if (requests === 5) return new Response("驱逐后重建");
+          if (requests === 3) return replacementResponse.promise;
           throw new Error("断网");
         },
         { preconnect: () => {} },
@@ -191,33 +197,35 @@ test("eviction_at_headers_blocks_every_earlier_inflight_write：响应头驱逐�
     const missingRead = readCachedLot();
     invalidateAfterCommand();
     const younger = readCachedLot();
-    let offline: ReturnType<typeof readCachedLot> | null = null;
+    const queuedReaders = [readCachedLot(), readCachedLot()];
+    expect(requests).toBe(2);
     try {
       missingHeaders.resolve(missing);
       await readingBody.promise;
-      offline = readCachedLot();
+      for (let round = 0; round < 12; round += 1) {
+        await Promise.resolve();
+      }
       expect(requests).toBe(3);
+      replacementResponse.resolve(new Response("缺失头后重建"));
+      const rebuilt = ok({ value: "缺失头后重建", staleFallback: null });
+      expect(await Promise.all(queuedReaders)).toEqual([rebuilt, rebuilt]);
       youngerResponse.resolve(new Response("驱逐前已在途"));
       expect(await younger).toEqual(ok({ value: "驱逐前已在途", staleFallback: null }));
-      expect(await offline).toEqual(err("network_error"));
-      expect(await readCachedLot()).toEqual(err("network_error"));
-      const rebuilt = ok({ value: "驱逐后重建", staleFallback: null });
-      expect(await readCachedLot()).toEqual(rebuilt);
-      // 同一个 404 的正文收尾不能再次驱逐响应头之后重建的快照。
       missingBody.resolve(errorBody);
       expect(await missingRead).toEqual(err("not_found"));
       expect(await readCachedLot()).toEqual(rebuilt);
-      expect(requests).toBe(5);
+      expect(requests).toBe(3);
     } finally {
       youngerResponse.resolve(new Response("驱逐前已在途"));
+      replacementResponse.resolve(new Response("缺失头后重建"));
       missingBody.resolve(errorBody);
-      await Promise.allSettled([missingRead, younger, offline]);
+      await Promise.allSettled([missingRead, younger, ...queuedReaders]);
     }
   } finally {
     fetchSpy.mockRestore();
     resetStoreForTest();
   }
-});
+}
 
 test("observed_missing_blocks_an_inflight_fallback_after_cancellation：已取消请求的 410 仍禁止在途读回退", async () => {
   const delayed = Promise.withResolvers<Response>();

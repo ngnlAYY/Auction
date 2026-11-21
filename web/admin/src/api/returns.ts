@@ -20,6 +20,7 @@ import {
   ADMIN_SETTLEMENT_RETURN_STATUSES,
   ADMIN_SETTLEMENT_RETURN_TAKE_STATES,
   ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS,
+  type AdminSettlementReturnAction,
   type AdminSettlementReturnCommandResponse,
   AdminSettlementReturnCommandResponseSchema,
   type AdminSettlementReturnCustodyResponse,
@@ -218,7 +219,7 @@ export async function fetchSettlementReturn(
 export interface SettlementReturnActionIntent {
   readonly returnId: string;
   readonly expectedVersion: number;
-  readonly action: string;
+  readonly action: AdminSettlementReturnAction;
 }
 
 // 只有本模块的工厂能构造提交；外部同形对象无法把另一份意图的正文混进本次路由与回执核对。
@@ -519,8 +520,111 @@ function validEvent(event: AdminSettlementReturnEventResponse): boolean {
     validAdminTime(event.occurred_at) &&
     (event.actor_id === null || validSafeText(event.actor_id, 128)) &&
     (event.command_id === null || validUuid(event.command_id)) &&
-    isJsonObject(event.details)
+    validEventDetails(event.event_kind, event.details)
   );
+}
+
+function validEventDetails(kind: string, details: unknown): boolean {
+  if (!isJsonObject(details)) return false;
+  const keys = Object.keys(details).sort().join(",");
+  const matches = (expected: string): boolean => keys === expected;
+  const positive = (value: unknown): value is number =>
+    typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+  const uuid = (value: unknown): value is string => typeof value === "string" && validUuid(value);
+  const reason = (value: unknown): boolean =>
+    typeof value === "string" && inClosedSet(ADMIN_SETTLEMENT_RETURN_REASONS, value);
+  const state = (value: unknown): boolean =>
+    typeof value === "string" && inClosedSet(ADMIN_SETTLEMENT_RETURN_MATCH_STATES, value);
+  switch (kind) {
+    case "opened":
+      return (
+        matches("dispatch_no,match_state,reason_code") &&
+        (details.dispatch_no === null || positive(details.dispatch_no)) &&
+        state(details.match_state) &&
+        reason(details.reason_code)
+      );
+    case "acknowledged":
+    case "recheck_requested":
+    case "held":
+      return matches("");
+    case "recheck_rebound":
+      return (
+        matches("delivery_id,dispatch_no,match_state,reason_code,verified_version") &&
+        uuid(details.delivery_id) &&
+        positive(details.dispatch_no) &&
+        state(details.match_state) &&
+        reason(details.reason_code) &&
+        positive(details.verified_version)
+      );
+    case "recheck_unchanged":
+      return (
+        (matches("match_state,reason_code") &&
+          state(details.match_state) &&
+          reason(details.reason_code)) ||
+        (matches("reason_code") && details.reason_code === "mail_not_found")
+      );
+    case "take_requested":
+      return (
+        (matches("plan") && (details.plan === "resend" || details.plan === "hold")) ||
+        (matches("handover") && details.handover === true)
+      );
+    case "take_retry_requested":
+      return (
+        matches("delivery_id,fencing_version,observed_case_version") &&
+        uuid(details.delivery_id) &&
+        positive(details.fencing_version) &&
+        positive(details.observed_case_version)
+      );
+    case "take_activated":
+      return (
+        (matches("delivery_id") && uuid(details.delivery_id)) ||
+        (uuid(details.delivery_id) &&
+          details.requeued === true &&
+          typeof details.reason === "string" &&
+          ((matches("delivery_id,reason,requeued,restarts") && positive(details.restarts)) ||
+            (matches("delivery_id,reason,requeued,sweep_retries") &&
+              positive(details.sweep_retries))))
+      );
+    case "take_proven":
+      return matches("dispatch_no,next,proof")
+        ? positive(details.dispatch_no) &&
+            details.next === "resend" &&
+            typeof details.proof === "string"
+        : matches("next,proof,resend_blocked") &&
+            details.next === "hold" &&
+            typeof details.proof === "string" &&
+            (details.resend_blocked === null ||
+              (typeof details.resend_blocked === "string" &&
+                inClosedSet(ADMIN_SETTLEMENT_RETURN_BLOCKERS, details.resend_blocked)));
+    case "take_unknown":
+      return (
+        matches("delivery_id,failure_code") &&
+        (details.delivery_id === null || uuid(details.delivery_id)) &&
+        typeof details.failure_code === "string" &&
+        validSafeText(details.failure_code, 96)
+      );
+    case "take_observed":
+      return (
+        matches("delivery_id,fencing_version,observation,sweep_retries") &&
+        uuid(details.delivery_id) &&
+        positive(details.fencing_version) &&
+        positive(details.sweep_retries) &&
+        typeof details.observation === "string" &&
+        inClosedSet(ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS, details.observation)
+      );
+    case "resend_authorized":
+      return matches("dispatch_no") && positive(details.dispatch_no);
+    case "resent":
+      return (
+        matches("delivery_id,dispatch_no") &&
+        uuid(details.delivery_id) &&
+        positive(details.dispatch_no)
+      );
+    case "inbox_closed":
+      return matches("asset_location") && details.asset_location === "returned_in_inbox";
+    default:
+      return false;
+  }
 }
 
 function validDispatch(dispatch: AdminSettlementReturnDispatchResponse): boolean {

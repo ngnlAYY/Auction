@@ -4,7 +4,7 @@ use auction_application::recovery::{
     RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
     RecoveryConfirmationResult,
 };
-use auction_domain::{CommandId, legacy_natural_key_uuid};
+use auction_domain::legacy_natural_key_uuid;
 use auction_time::{TimeDelta, Timestamp};
 use serde_json::json;
 use sqlx::{Postgres, Row};
@@ -29,7 +29,6 @@ pub(super) async fn relist_recovery(
     transaction: &mut Transaction<'_, Postgres>,
     recovery: &RecoveryRow,
     original_lot: &OriginalLot,
-    command_id: CommandId,
     preview_event_id: Uuid,
     action: RecoveryConfirmationAction,
     now: Timestamp,
@@ -177,7 +176,6 @@ pub(super) async fn relist_recovery(
         &recovery.world_id,
         next_revision,
         target_next_state_version,
-        command_id,
         preview_event_id,
     )
     .await?;
@@ -202,7 +200,6 @@ pub(super) async fn insert_preview_event(
     world_id: &str,
     preview_revision: i64,
     state_version: i64,
-    command_id: CommandId,
     event_id: Uuid,
 ) -> Result<(), RecoveryCommandError> {
     let stream_key = format!("auction:{auction_id}");
@@ -215,7 +212,7 @@ pub(super) async fn insert_preview_event(
             schema_version: 1,
             payload: preview_catalog_changed_payload(world_id, auction_id, preview_revision),
             state_version,
-            origin_command_id: command_id.as_uuid(),
+            origin_command_id: None,
             created_at: None,
         },
     )

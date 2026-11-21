@@ -8,8 +8,8 @@
 //! 旧程序保留取安装目录中将被替换的程序（deploy 四个，rollback 三个角色）的字节合计；安装取最大
 //! 的单个新或旧程序（同目录临时文件，安装中途失败换回时临时副本是旧程序）加各程序新旧大小的
 //! 正增量合计（替换后旧文件即释放，正增量是净占用）。估算只是检查时刻的快照，
-//! 不预留空间，也不替代停机后各步骤自身的失败处理。文件系统按设备号合并：btrfs 子卷等共享
-//! 存储池的布局各有设备号，合计需求会被低估。
+//! 不预留空间，也不替代停机后各步骤自身的失败处理。Btrfs 多个设备号可能属于共享容量池，无法安全
+//! 合并时在停机前失败关闭。
 
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
@@ -21,7 +21,7 @@ use anyhow::Context;
 use auction_config::BackupConfig;
 use serde::Serialize;
 
-use crate::support::files::{DiskUsage, disk_usage};
+use crate::support::files::{BTRFS_FILESYSTEM_TYPE, DiskUsage, disk_usage};
 
 /// rollback 的独立余量：扣除实际写入后每个文件系统至少还留 64 MiB。
 pub(super) const ROLLBACK_MIN_FREE_BYTES: u64 = 64 * 1024 * 1024;
@@ -79,6 +79,8 @@ struct FilesystemCheck {
     available_bytes: u64,
     total_bytes: u64,
     passed: bool,
+    #[serde(skip)]
+    overflowed: bool,
 }
 
 /// 余量阈值：扣除需求后的可用空间仍须同时满足字节与比例下限。
@@ -113,8 +115,11 @@ pub(super) fn require_space(
         }
         sizes.push((*new, metadata.len()));
     }
-    let retain_bytes = sizes.iter().fold(0_u64, |total, (_, old)| total.saturating_add(*old));
-    let install_bytes = install_bytes(&sizes);
+    let retain_bytes = sizes
+        .iter()
+        .try_fold(0_u64, |total, (_, old)| total.checked_add(*old))
+        .context("保留程序空间估算溢出")?;
+    let install_bytes = install_bytes(&sizes).context("安装临时空间估算溢出")?;
     let mut demands = Vec::with_capacity(3);
     if let Some((backup_dir, database_size_bytes)) = backup {
         demands.push(Demand {
@@ -136,14 +141,18 @@ pub(super) fn require_space(
     let mut located = Vec::with_capacity(demands.len());
     let mut usage = BTreeMap::new();
     for demand in demands {
+        let filesystem_usage = disk_usage(&demand.path)
+            .with_context(|| format!("读取磁盘水位失败：{}", demand.path.display()))?;
         let device = fs::metadata(&demand.path)
             .with_context(|| format!("读取目录所在文件系统失败：{}", demand.path.display()))?
             .dev();
-        if let Entry::Vacant(entry) = usage.entry(device) {
-            entry.insert(
-                disk_usage(&demand.path)
-                    .with_context(|| format!("读取磁盘水位失败：{}", demand.path.display()))?,
+        if filesystem_usage.filesystem_type == BTRFS_FILESYSTEM_TYPE {
+            anyhow::bail!(
+                "停机前空间门禁不能证明 Btrfs 子卷的共享容量池剩余空间；当前不支持 Btrfs 上的部署空间估算，尚未停止任何服务"
             );
+        }
+        if let Entry::Vacant(entry) = usage.entry(device) {
+            entry.insert(filesystem_usage);
         }
         located.push((device, demand));
     }
@@ -197,9 +206,9 @@ pub(super) fn require_space(
 
 /// 安装逐个以同目录临时文件替换程序，中途失败时再以临时文件换回旧程序：峰值占用不超过最大的
 /// 单个新或旧程序加全部正增量。
-fn install_bytes(sizes: &[(u64, u64)]) -> u64 {
+fn install_bytes(sizes: &[(u64, u64)]) -> Option<u64> {
     let largest = sizes.iter().map(|(new, old)| (*new).max(*old)).max().unwrap_or_default();
-    sizes.iter().fold(largest, |total, (new, old)| total.saturating_add(new.saturating_sub(*old)))
+    sizes.iter().try_fold(largest, |total, (new, old)| total.checked_add(new.saturating_sub(*old)))
 }
 
 /// 按设备号合并需求并判定；比例用整数比较，避免浮点取整放宽门禁。
@@ -218,18 +227,26 @@ fn evaluate(
             available_bytes: measured.map_or(0, |usage| usage.available_bytes),
             total_bytes: measured.map_or(0, |usage| usage.total_bytes),
             passed: false,
+            overflowed: false,
         });
         if !entry.paths.contains(&demand.path) {
             entry.paths.push(demand.path);
         }
         entry.purposes.push(demand.purpose);
-        entry.required_bytes = entry.required_bytes.saturating_add(demand.bytes);
+        match entry.required_bytes.checked_add(demand.bytes) {
+            Some(total) => entry.required_bytes = total,
+            None => {
+                entry.required_bytes = u64::MAX;
+                entry.overflowed = true;
+            }
+        }
     }
     merged
         .into_values()
         .map(|mut filesystem| {
             let remaining = filesystem.available_bytes.checked_sub(filesystem.required_bytes);
-            filesystem.passed = filesystem.total_bytes != 0
+            filesystem.passed = !filesystem.overflowed
+                && filesystem.total_bytes != 0
                 && remaining.is_some_and(|remaining| {
                     remaining >= margin.min_free_bytes
                         && u128::from(remaining) * 100
@@ -311,7 +328,11 @@ mod tests {
             .map(|(device, total_bytes, available_bytes)| {
                 (
                     *device,
-                    DiskUsage { total_bytes: *total_bytes, available_bytes: *available_bytes },
+                    DiskUsage {
+                        total_bytes: *total_bytes,
+                        available_bytes: *available_bytes,
+                        filesystem_type: 0,
+                    },
                 )
             })
             .collect()
@@ -413,8 +434,8 @@ mod tests {
                 &usage(&[(3, 100 * gib, 2 * gib)]),
                 policy.margin(),
             )
-            .remove(0)
-            .passed
+            .into_iter()
+            .all(|filesystem| filesystem.passed)
         };
         let rollback_need = 600 * 1024 * 1024;
         assert!(check(rollback_need, SpacePolicy::Rollback), "剩余 1.4 GiB 远超 64 MiB");
@@ -426,10 +447,10 @@ mod tests {
 
     #[test]
     fn install_estimate_is_largest_binary_plus_growth() {
-        assert_eq!(install_bytes(&[(10, 12), (30, 25), (20, 20), (5, 1)]), 30 + 5 + 4);
+        assert_eq!(install_bytes(&[(10, 12), (30, 25), (20, 20), (5, 1)]), Some(30 + 5 + 4));
         // 旧程序最大时按旧程序预留：换回的临时副本是旧程序。
-        assert_eq!(install_bytes(&[(10, 40), (20, 20), (6, 1)]), 40 + 5);
-        assert_eq!(install_bytes(&[]), 0);
+        assert_eq!(install_bytes(&[(10, 40), (20, 20), (6, 1)]), Some(40 + 5));
+        assert_eq!(install_bytes(&[]), Some(0));
     }
 
     #[test]

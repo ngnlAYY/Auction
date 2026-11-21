@@ -396,22 +396,80 @@ async fn postgres_reclaim_confirmation_counts_sends_without_frozen_attempts() {
     let pool = store.postgres_pool();
     let action = RecoveryConfirmationAction::Reclaimed;
 
-    // 夹具的原付款是没有冻结尝试的旧发送围栏（fence 2、+5 分钟）；另有一次被外部核对隔离的发送。
+    // 原付款的 fence 保留为一条冻结发送尝试；额外 quarantine 发送必须绑定隔离前的当前 fence。
     let quarantined = voidable_sale(&store, "main", 7_900_401).await;
     let at = created_at(pool, quarantined.recovery_id).await;
+    let original_fence: i64 =
+        sqlx::query_scalar("SELECT fencing_version FROM public.deliveries WHERE id = $1")
+            .bind(quarantined.payment_delivery)
+            .fetch_one(pool)
+            .await
+            .expect("读取原发送 fence");
+    freeze_current_attempt(
+        pool,
+        quarantined.payment_delivery,
+        original_fence,
+        at + Duration::minutes(5),
+    )
+    .await;
+    let mut transaction = pool.begin().await.expect("开启隔离夹具事务");
+    let fence: i64 = sqlx::query_scalar(
+        "UPDATE public.deliveries
+         SET status = 'pending', fencing_version = fencing_version + 1,
+             lease_token = NULL, lease_expires_at = NULL, claimed_at = NULL,
+             sending_at = NULL, completed_at = NULL, external_reference = NULL,
+             failure_code = NULL, result_metadata = '{}'::jsonb
+         WHERE id = $1 RETURNING fencing_version",
+    )
+    .bind(quarantined.payment_delivery)
+    .fetch_one(&mut *transaction)
+    .await
+    .expect("构造外部核对候选 fence");
+    let scan_id = Uuid::new_v4();
+    let sent_at = at + Duration::minutes(3);
+    let observed_at = at + Duration::minutes(4);
     sqlx::query(
         "INSERT INTO public.delivery_external_quarantines
             (scan_id, delivery_id, fencing_version, world_id, external_mail_id, sent_at,
              recipient, subject, collected, observed_at)
-         VALUES (gen_random_uuid(), $1, 1, 'main', '7900401', $2, 'Recovery buyer',
-                 'Auction equipment delivery', false, $3)",
+         VALUES ($1, $2, $3, 'main', '7900401', $4, 'Recovery buyer',
+                 'Auction equipment delivery', false, $5)",
     )
+    .bind(scan_id)
     .bind(quarantined.payment_delivery)
-    .bind(at + Duration::minutes(3))
-    .bind(at + Duration::minutes(4))
-    .execute(pool)
+    .bind(fence)
+    .bind(sent_at)
+    .bind(observed_at)
+    .execute(&mut *transaction)
     .await
     .expect("写入外部核对隔离的发送");
+    sqlx::query(
+        "UPDATE public.deliveries
+         SET status = 'manual_reconcile', completed_at = $2,
+             failure_code = 'external_recovery_payload_match',
+             result_metadata = jsonb_build_object(
+                 'outcome_unknown', true,
+                 'reason_code', 'external_recovery_payload_match',
+                 'external_recovery_quarantine', jsonb_build_object(
+                     'format', 'auction-external-recovery.v1',
+                     'scan_id', $4::uuid,
+                     'external_mail_id', '7900401',
+                     'sent_at', $5::timestamptz,
+                     'observed_at', $6::timestamptz,
+                     'match_evidence', 'restored_payload')),
+             fencing_version = fencing_version + 1, updated_at = clock_timestamp()
+         WHERE id = $1 AND status = 'pending' AND fencing_version = $3",
+    )
+    .bind(quarantined.payment_delivery)
+    .bind(observed_at)
+    .bind(fence)
+    .bind(scan_id)
+    .bind(sent_at)
+    .bind(observed_at)
+    .execute(&mut *transaction)
+    .await
+    .expect("隔离投递并推进 fence");
+    transaction.commit().await.expect("提交隔离夹具事务");
     assert_rejected(&store, &quarantined, action).await;
 
     // 旧 Sent 绑定落在当前旧发送围栏之外的 fence：另一次已寄达的发送。

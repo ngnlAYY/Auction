@@ -375,7 +375,6 @@ impl TestActivity {
         *self.phase.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// 进入已释放相位；与协调器的计数口径一致，只有已登记的活动释放时才产生事件。
     fn release(&self, persisted: bool) {
         let previous = std::mem::replace(
             &mut *self.phase.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
@@ -383,10 +382,15 @@ impl TestActivity {
         );
         if previous == Phase::Critical {
             self.state.observe(DrainEvent::Released { persisted });
+            let wakers = std::mem::take(
+                &mut *self.state.wakers.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
+            );
+            for waker in wakers {
+                waker.wake();
+            }
         }
     }
 }
-
 impl Drop for TestActivity {
     fn drop(&mut self) {
         // 与协调器一致：未经 complete 就丢弃的已登记活动只记为未确认结果的释放。
@@ -422,6 +426,10 @@ impl ExternalWriteActivityPort for TestActivity {
         }
         let mut wakers =
             self.state.wakers.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        // 与 close/release 共用 waker 锁复查，避免状态转换与注册之间丢失唤醒。
+        if self.is_cancelled() {
+            return Poll::Ready(());
+        }
         if !wakers.iter().any(|waker| waker.will_wake(context.waker())) {
             wakers.push(context.waker().clone());
         }

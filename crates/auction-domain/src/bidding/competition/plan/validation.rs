@@ -141,6 +141,9 @@ impl CompetitionPlan {
         if last_transitions.keys().any(|authorization_id| !states.contains_key(authorization_id)) {
             return Err(DomainError::InvalidBidState("代理转换缺少对应的最终快照"));
         }
+        if self.active_proxy_id.is_some_and(|active_id| !states.contains_key(&active_id)) {
+            return Err(DomainError::InvalidBidState("活动代理标识缺少最终快照"));
+        }
         if self.active_proxy_id.is_some_and(ProxyAuthorizationId::is_nil) {
             return Err(DomainError::InvalidBidState("活动代理标识不能是 nil UUID"));
         }

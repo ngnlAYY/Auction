@@ -10,7 +10,12 @@
 //! {"end":true,"files":1,"format":"auction-backup-scope-bundle.v1"}\n
 //! ```
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::{
+    fs::{self, File, OpenOptions},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},
+    os::unix::fs::OpenOptionsExt,
+    path::PathBuf,
+};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -23,6 +28,10 @@ use super::collect::{
 pub(crate) const FORMAT: &str = "auction-backup-scope-bundle.v1";
 const MAX_HEADER_BYTES: usize = 4096;
 const CHUNK: usize = 64 * 1024;
+const MAX_ENTRIES: usize = 8192;
+const MAX_BUNDLE_BYTES: u64 = 1024 * 1024 * 1024
+    + MAX_ENTRIES as u64 * (MAX_HEADER_BYTES as u64 * 2)
+    + MAX_HEADER_BYTES as u64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -125,12 +134,21 @@ pub(crate) fn read<R: Read, F>(inner: R, mut sink: F) -> anyhow::Result<ReadDige
 where
     F: FnMut(&SourceKind, &str, &[u8]) -> anyhow::Result<()>,
 {
-    let mut reader = BufReader::new(HashingReader { inner, hasher: Sha256::new(), bytes: 0 });
+    let mut reader = BufReader::new(HashingReader {
+        inner,
+        hasher: Sha256::new(),
+        bytes: 0,
+        limit: MAX_BUNDLE_BYTES + 1,
+    });
     let start: StartHeader = parse_line(&mut reader, "范围包头意外结束")?;
     if start.format != FORMAT {
         anyhow::bail!("备份范围打包格式无效");
     }
-    let mut entries: Vec<EntryDigest> = Vec::new();
+    let mut entries = Vec::<EntryDigest>::new();
+    let mut staged = Vec::new();
+    let mut spool = RecordSpool::new()?;
+    let mut spool_bytes = 0_u64;
+    let mut buffer = vec![0_u8; CHUNK];
     loop {
         let line = next_line(&mut reader)?.context("备份范围打包文件缺少结束标记")?;
         if let Ok(end) = serde_json::from_slice::<EndHeader>(&line) {
@@ -139,20 +157,22 @@ where
             }
             break;
         }
+        if entries.len() >= MAX_ENTRIES {
+            anyhow::bail!("备份范围条目数超过 {MAX_ENTRIES} 上限");
+        }
         let header: RecordHeader =
             serde_json::from_slice(&line).context("备份范围打包文件包含无效记录头")?;
         validate_record(&header, &entries)?;
-        // 空分块作为条目开始标记，使零字节文件也会被创建并计入。
-        sink(&header.kind, &header.path, &[])?;
         let mut hasher = Sha256::new();
         hasher.update(&line);
+        let offset = spool_bytes;
         let mut remaining = header.bytes;
-        let mut buffer = vec![0_u8; CHUNK];
         while remaining > 0 {
             let want = usize::try_from(remaining.min(CHUNK as u64)).unwrap_or(CHUNK);
             reader.read_exact(&mut buffer[..want]).context("备份范围内容被截断")?;
             hasher.update(&buffer[..want]);
-            sink(&header.kind, &header.path, &buffer[..want])?;
+            spool.file.write_all(&buffer[..want]).context("暂存已校验的范围记录失败")?;
+            spool_bytes = spool_bytes.checked_add(want as u64).context("备份范围暂存字节数溢出")?;
             remaining -= want as u64;
         }
         let trailer: RecordTrailer = parse_line(&mut reader, "备份范围记录缺少摘要")?;
@@ -160,6 +180,7 @@ where
         if trailer.sha256 != sha256 {
             anyhow::bail!("备份范围记录摘要不一致：{}", header.path);
         }
+        staged.push((header.kind, header.path.clone(), header.bytes, offset));
         entries.push(EntryDigest {
             kind: header.kind,
             path: header.path,
@@ -173,11 +194,55 @@ where
     }
     let hashing = reader.into_inner();
     let bytes = hashing.bytes;
-    Ok(ReadDigest {
-        sha256: auction_application::core::lower_hex(&hashing.hasher.finalize()),
-        bytes,
-        entries,
-    })
+    let sha256 = auction_application::core::lower_hex(&hashing.hasher.finalize());
+
+    // No sink observes data until the complete bundle, including its end marker, has validated.
+    spool.file.flush().context("刷新范围记录暂存失败")?;
+    for (kind, path, record_bytes, offset) in staged {
+        sink(&kind, &path, &[])?;
+        spool.file.seek(SeekFrom::Start(offset)).context("定位范围记录暂存失败")?;
+        let mut remaining = record_bytes;
+        while remaining > 0 {
+            let want = usize::try_from(remaining.min(CHUNK as u64)).unwrap_or(CHUNK);
+            spool.file.read_exact(&mut buffer[..want]).context("读取范围记录暂存失败")?;
+            sink(&kind, &path, &buffer[..want])?;
+            remaining -= want as u64;
+        }
+    }
+    Ok(ReadDigest { sha256, bytes, entries })
+}
+
+struct RecordSpool {
+    path: PathBuf,
+    file: File,
+}
+
+impl RecordSpool {
+    fn new() -> anyhow::Result<Self> {
+        for _ in 0..8 {
+            let path = std::env::temp_dir()
+                .join(format!(".auction-scope-bundle-{}.partial", uuid::Uuid::new_v4()));
+            match OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+                .open(&path)
+            {
+                Ok(file) => return Ok(Self { path, file }),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error).context("创建范围记录暂存文件失败"),
+            }
+        }
+        anyhow::bail!("无法分配唯一的范围记录暂存文件名")
+    }
+}
+
+impl Drop for RecordSpool {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 fn validate_record(header: &RecordHeader, entries: &[EntryDigest]) -> anyhow::Result<()> {
@@ -274,11 +339,20 @@ struct HashingReader<R> {
     inner: R,
     hasher: Sha256,
     bytes: u64,
+    limit: u64,
 }
 
 impl<R: Read> Read for HashingReader<R> {
     fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
-        let count = self.inner.read(bytes)?;
+        if self.bytes >= self.limit {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "备份范围打包文件超过总字节上限",
+            ));
+        }
+        let capacity = usize::try_from((self.limit - self.bytes).min(bytes.len() as u64))
+            .unwrap_or(bytes.len());
+        let count = self.inner.read(&mut bytes[..capacity])?;
         self.hasher.update(&bytes[..count]);
         self.bytes = self.bytes.saturating_add(count as u64);
         Ok(count)

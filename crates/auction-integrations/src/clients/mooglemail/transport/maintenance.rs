@@ -86,7 +86,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
     ) -> ApplicationFuture<'a, MoogleMailboxComposeState> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
-            let mut session = self.compose_session(world).await?;
+            let session = self.compose_session(world).await?;
             match self.sender.inspect_compose(session.cookie(), world).await {
                 Ok(state) => {
                     check_observation_session(&session).await?;
@@ -120,23 +120,26 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
     ) -> ApplicationFuture<'a, MoogleMailboxDiscard> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
-            let mut session = self.compose_session(world).await?;
+            let session = self.compose_session(world).await?;
             check_observation_session(&session).await?;
             if session.observation_credential_binding() != expected.observation_credential {
                 return Err(maintenance_error("compose 草稿观察的凭据或运行时已变化"));
             }
-            match self.sender.discard_compose(session.cookie(), world, expected).await {
-                Ok(MoogleMailDiscardOutcome::AlreadyClean) => {
-                    Ok(MoogleMailboxDiscard::AlreadyClean)
-                }
-                Ok(MoogleMailDiscardOutcome::Discarded) => Ok(MoogleMailboxDiscard::Discarded),
+            let outcome = match self.sender.discard_compose(session.cookie(), world, expected).await
+            {
+                Ok(outcome) => outcome,
                 Err(error) => {
                     if error.category == MoogleMailErrorCategory::SessionExpired {
                         let _ = session.invalidate_current().await;
                     }
-                    Err(maintenance_remote_error(error, "compose 草稿丢弃失败"))
+                    return Err(maintenance_remote_error(error, "compose 草稿丢弃失败"));
                 }
-            }
+            };
+            check_observation_session(&session).await?;
+            Ok(match outcome {
+                MoogleMailDiscardOutcome::AlreadyClean => MoogleMailboxDiscard::AlreadyClean,
+                MoogleMailDiscardOutcome::Discarded => MoogleMailboxDiscard::Discarded,
+            })
         })
     }
 
@@ -146,7 +149,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
     ) -> ApplicationFuture<'a, MoogleMailboxSentEntries> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
-            let mut session = self.read_session(world, MoogleMailOperation::Sent).await?;
+            let session = self.read_session(world, MoogleMailOperation::Sent).await?;
             match self.sender.scan_sent_summaries(session.cookie(), world).await {
                 Ok(scan) => {
                     check_observation_session(&session).await?;
@@ -179,7 +182,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
     fn read_mail_observed<'a>(&'a self, world_id: &'a str) -> ApplicationFuture<'a, usize> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
-            let mut session = self.read_session(world, MoogleMailOperation::ReadMail).await?;
+            let session = self.read_session(world, MoogleMailOperation::ReadMail).await?;
             match self.sender.scan_read_summaries(session.cookie(), world).await {
                 Ok(entries) => {
                     check_observation_session(&session).await?;
@@ -210,7 +213,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
     ) -> ApplicationFuture<'a, MoogleMailboxInboxObservation> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
-            let mut session = self.read_session(world, MoogleMailOperation::Detail).await?;
+            let session = self.read_session(world, MoogleMailOperation::Detail).await?;
             match self
                 .sender
                 .inspect_inbox_attachments(session.cookie(), world, external_mail_id)
@@ -247,7 +250,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
     ) -> ApplicationFuture<'a, MoogleMailboxReturnTakeObservation> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
-            let mut session = self.read_session(world, MoogleMailOperation::Detail).await?;
+            let session = self.read_session(world, MoogleMailOperation::Detail).await?;
             match self
                 .sender
                 .inspect_returned_take(session.cookie(), world, external_mail_id, identity)
@@ -279,7 +282,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
     ) -> ApplicationFuture<'a, MoogleMailboxSentState> {
         Box::pin(async move {
             let world = maintenance_world(world_id)?;
-            let mut session = self.read_session(world, MoogleMailOperation::SentDetail).await?;
+            let session = self.read_session(world, MoogleMailOperation::SentDetail).await?;
             let summary = MoogleMailSentListEntry {
                 external_mail_id: entry.external_mail_id.clone(),
                 recipient: entry.recipient.clone(),

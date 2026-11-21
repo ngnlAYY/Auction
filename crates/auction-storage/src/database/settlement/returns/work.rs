@@ -26,10 +26,10 @@ use super::take::{
     take_funding_command_id,
 };
 use crate::database::TrackedTransaction as Transaction;
-use crate::database::mail::delivery::{
-    activate_in_transaction, enqueue_in_transaction, return_take_blocked_sql,
-    settlement_return_take_conflicts,
+use crate::database::mail::delivery::disposition::{
+    return_take_blocked_sql, settlement_return_take_conflicts,
 };
+use crate::database::mail::delivery::{activate_in_transaction, enqueue_in_transaction};
 use crate::database::settlement::fulfillment::{
     lock_settlement_delivery_eligibility, recovery_allows_execution_now,
 };

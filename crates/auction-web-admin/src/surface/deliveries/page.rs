@@ -356,7 +356,7 @@ mod tests {
 
     use super::submit_queue_action;
     use crate::api::{AdminApiFailure, AdminWriteFailure, DeliveryAction, execute_delivery};
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         button, click_button, command_button, has_live_text, init_i18n, mount_writer, settle_writer,
     };
     use crate::surface::deliveries::delivery_command_entity;

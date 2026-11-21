@@ -12,7 +12,7 @@ use crate::api::{
     set_lot_watch,
 };
 use crate::surface::PublicCommandOwner;
-use crate::surface::commands::{CommandSession, SessionAuthority};
+use crate::surface::commands::session::{CommandSession, SessionAuthority};
 
 #[derive(Clone)]
 struct WatchCommandOwner {

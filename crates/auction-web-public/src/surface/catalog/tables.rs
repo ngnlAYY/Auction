@@ -10,7 +10,7 @@ use dioxus::prelude::*;
 
 use super::actions::CatalogRecoveryEntry;
 use super::columns::{CatalogColumn, CatalogColumnsMenu, CatalogLayout, CatalogVisibility};
-use super::detail::{CatalogViewButton, use_catalog_detail_entry};
+use super::detail::entry::{CatalogViewButton, use_catalog_detail_entry};
 use super::{
     CatalogEquipmentCells, CatalogEquipmentName, CatalogParticipant, CountdownDisplay,
     LiveCatalogActions, PreviewCatalogRow, catalog_category_key, catalog_count, countdown_class,

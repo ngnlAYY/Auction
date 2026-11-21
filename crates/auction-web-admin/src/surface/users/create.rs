@@ -37,6 +37,9 @@ impl UserFieldErrors {
         }
     }
 }
+#[cfg(test)]
+#[derive(Clone)]
+struct UsernameConflictDelay(std::rc::Rc<dyn Fn() -> std::pin::Pin<Box<dyn Future<Output = ()>>>>);
 
 /// 一次性展示的登录 Key；嵌套派生 Debug 也必须保持脱敏。
 #[derive(Clone, PartialEq)]
@@ -90,6 +93,10 @@ pub(super) fn AdminUserCreateForm(
     let key_delivery = try_consume_context::<SourceKeyDelivery>();
     let mut feedback = use_signal(|| None::<AdminActionFeedback>);
     let mut field_errors = use_signal(UserFieldErrors::default);
+    #[cfg(test)]
+    // Native tests advance one task turn through the mount_writer context seam instead of calling
+    // the browser-only wasm-bindgen timer.
+    let conflict_delay = try_consume_context::<UsernameConflictDelay>();
 
     // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管。
     rsx! {
@@ -126,6 +133,8 @@ pub(super) fn AdminUserCreateForm(
                         feedback.set(None);
                         // 手动 Key 仅留在当前会话的工厂内存；重试复制原值，不从已清空的输入框重建。
                         let manual = (key_mode == "manual").then_some(submitted_manual_key);
+                        #[cfg(test)]
+                        let conflict_delay = conflict_delay.clone();
                         let submitted = pending.submit_with_receipt(
                             "create-user".to_owned(),
                             format!("{} · {username}", t!("admin-users-create-open")),
@@ -152,11 +161,23 @@ pub(super) fn AdminUserCreateForm(
                                 finish_create(result.user.username, result.generated_key, source_alive, open, notice)
                             },
                             move |code| {
-                                let mut field_errors = field_errors;
-                                if code == "user_conflict"
-                                    && let Ok(mut errors) = field_errors.try_write()
-                                {
-                                    errors.username = Some(UserFieldIssue::UsernameConflict);
+                                if code == "user_conflict" {
+                                    #[cfg(test)]
+                                    let conflict_delay = conflict_delay.clone();
+                                    let mut field_errors = field_errors;
+                                    spawn(async move {
+                                        #[cfg(test)]
+                                        if let Some(delay) = conflict_delay {
+                                            (delay.0)().await;
+                                        } else {
+                                            auction_web_shared::timer::TimeoutFuture::new(0).await;
+                                        }
+                                        #[cfg(not(test))]
+                                        auction_web_shared::timer::TimeoutFuture::new(0).await;
+                                        if let Ok(mut errors) = field_errors.try_write() {
+                                            errors.username = Some(UserFieldIssue::UsernameConflict);
+                                        }
+                                    });
                                 }
                                 set_if_alive(feedback, Some(AdminActionFeedback::Error(code)));
                             },
@@ -328,10 +349,11 @@ mod tests {
     use gloo_net::http::Method;
 
     use super::{
-        AdminUserCreateForm, AdminUserGeneratedKey, AdminUserGeneratedKeyDialog, finish_create,
+        AdminUserCreateForm, AdminUserGeneratedKey, AdminUserGeneratedKeyDialog,
+        UsernameConflictDelay, finish_create,
     };
     use crate::api::{AdminApiFailure, AdminWriteEndpoint, AdminWriteFailure};
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         button, click_button, has_live_text, mount_writer, writer_form,
     };
     use crate::surface::pending::{
@@ -400,6 +422,21 @@ mod tests {
                     409,
                     r#"{"code":"user_conflict","message":"用户已存在","data":null,"request_id":null}"#,
                 );
+            });
+            // Match the browser's deferred field update while yielding once to release render borrows.
+            use_context_provider(|| {
+                UsernameConflictDelay(std::rc::Rc::new(|| {
+                    let mut yielded = false;
+                    Box::pin(std::future::poll_fn(move |context| {
+                        if yielded {
+                            std::task::Poll::Ready(())
+                        } else {
+                            yielded = true;
+                            context.waker().wake_by_ref();
+                            std::task::Poll::Pending
+                        }
+                    }))
+                }))
             });
             let open = use_signal(|| true);
             let notice = use_signal(|| None);

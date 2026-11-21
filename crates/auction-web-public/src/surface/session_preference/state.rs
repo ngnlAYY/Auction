@@ -6,10 +6,13 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use super::duration::DurationDraft;
-use crate::api::{CommandError, fetch_session_preference, set_session_preference};
+use crate::api::{
+    CommandError, PublicSessionEvidenceTrigger, SessionIdentityObservation,
+    fetch_session_preference, set_session_preference,
+};
 use crate::surface::PublicSessionResource;
 use crate::surface::account::preference_reload::{PreferenceRead, PreferenceReload};
-use crate::surface::commands::SessionAuthority;
+use crate::surface::commands::session::SessionAuthority;
 use crate::surface::session::SessionCommandScope;
 
 #[derive(Default)]
@@ -68,6 +71,7 @@ impl PreferenceState {
 pub(super) struct PreferenceOwner {
     pub(super) user_id: String,
     pub(super) identity: Signal<Option<String>>,
+    pub(super) evidence: PublicSessionEvidenceTrigger,
     pub(super) session: PublicSessionResource,
     pub(super) state: Signal<PreferenceState>,
     pub(super) form_scope: ScopeId,
@@ -188,9 +192,10 @@ impl PreferenceOwner {
         }
         let mut owner = self.clone();
         let confirmation = self.authority.current();
+        let observation = SessionIdentityObservation::from_trigger(self.evidence);
         self.commands.spawn(async move {
             // 预期用户与 CAS 由服务端复核；一旦发送，表单卸载也要等收包和 Cookie 对账。
-            let result = set_session_preference(&owner.user_id, &payload, || {
+            let result = set_session_preference(&owner.user_id, &payload, observation, || {
                 confirmation.is_some()
                     && owner.session_ready()
                     && owner.authority.current() == confirmation

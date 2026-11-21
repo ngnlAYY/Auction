@@ -7,6 +7,7 @@
 
 use std::{
     collections::BTreeSet,
+    io::Read,
     path::{Path, PathBuf},
 };
 
@@ -29,7 +30,7 @@ pub(crate) fn append(
     state: &PrivateDirectory,
     receipt: &DeploymentReceipt,
 ) -> anyhow::Result<PathBuf> {
-    receipt.validate()?;
+    receipt.validate_for_append()?;
     let name = file_name(receipt.receipt_id);
     let bytes = serde_json::to_vec_pretty(receipt).context("序列化部署回执失败")?;
     if bytes.len() as u64 > MAX_RECEIPT_BYTES {
@@ -119,13 +120,24 @@ fn file_name(receipt_id: Uuid) -> String {
 /// 相对回执目录的描述符读取；文件必须是当前账号所有、单链接、无 group/other 权限的普通文件。
 fn read_file(directory: &PrivateDirectory, name: &str) -> anyhow::Result<DeploymentReceipt> {
     let path = directory.path.join(name);
-    let bytes =
-        directory.read(name).with_context(|| format!("读取部署回执失败：{}", path.display()))?;
+    let mut file =
+        directory.open(name).with_context(|| format!("读取部署回执失败：{}", path.display()))?;
+    if file.metadata().context("读取部署回执元数据失败")?.len() > MAX_RECEIPT_BYTES {
+        anyhow::bail!("部署回执超过 {MAX_RECEIPT_BYTES} 字节上限：{}", path.display());
+    }
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take(MAX_RECEIPT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("读取部署回执失败：{}", path.display()))?;
     if bytes.len() as u64 > MAX_RECEIPT_BYTES {
         anyhow::bail!("部署回执超过 {MAX_RECEIPT_BYTES} 字节上限：{}", path.display());
     }
     let receipt: DeploymentReceipt = serde_json::from_slice(&bytes)
         .with_context(|| format!("解析部署回执失败：{}", path.display()))?;
+    if file_name(receipt.receipt_id) != name {
+        anyhow::bail!("部署回执文件名与 receipt_id 不一致：{name}");
+    }
     receipt.validate().with_context(|| format!("部署回执无效：{}", path.display()))?;
     Ok(receipt)
 }
@@ -349,10 +361,8 @@ mod tests {
             &format!("{}.json", Uuid::new_v4()),
             &serde_json::to_vec(&receipt).unwrap(),
         );
-        let listed = list(&state, 10).expect("列表按内容标识去重");
-        let receipt_id = receipt.receipt_id;
-        assert_eq!(listed, vec![receipt]);
-        assert!(read(&state, receipt_id).is_err());
+        assert!(list(&state, 10).is_err());
+        assert!(read(&state, receipt.receipt_id).is_err());
     }
 
     #[test]

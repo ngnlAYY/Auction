@@ -15,10 +15,8 @@ use uuid::Uuid;
 
 use crate::database::DatabaseStore;
 
-mod snapshot;
+pub(in crate::database) mod snapshot;
 mod transaction;
-
-pub(in crate::database) use snapshot::admission_rows;
 
 pub(in crate::database) const SENT_OBSERVATION_KINDS: [&str; 2] =
     ["mailbox_sweep", "sent_reference_sighting"];

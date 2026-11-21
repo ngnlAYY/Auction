@@ -296,7 +296,9 @@ async fn postgres_solvency_query_decodes_numeric_sum_as_i64()
             ('00000000-0000-0000-0000-000000000007','main','seller_payout','ready',800),
             ('00000000-0000-0000-0000-000000000008','main','seller_payout','ready',60),
             ('00000000-0000-0000-0000-000000000009','main','buyer_refund','ready',40);
-         INSERT INTO pg_temp.settlement_obligation_fulfillments VALUES
+         INSERT INTO pg_temp.settlement_obligation_fulfillments
+            (obligation_id, execution_state, dispatch_world, delivery_id, delivery_operation)
+         VALUES
             ('00000000-0000-0000-0000-000000000001','pending','main',NULL,'send'),
             ('00000000-0000-0000-0000-000000000002','pending','main',NULL,'send'),
             ('00000000-0000-0000-0000-000000000003','pending','main',NULL,'send'),
@@ -309,7 +311,9 @@ async fn postgres_solvency_query_decodes_numeric_sum_as_i64()
              '00000000-0000-0000-0000-000000000108','send'),
             ('00000000-0000-0000-0000-000000000009','enqueued','main',
              '00000000-0000-0000-0000-000000000109','send');
-         INSERT INTO pg_temp.deliveries VALUES
+         INSERT INTO pg_temp.deliveries
+            (id, status, payload_operation, payload_world, completed_at)
+         VALUES
             ('00000000-0000-0000-0000-000000000107','succeeded','send','main',
              now() - interval '1 hour'),
             ('00000000-0000-0000-0000-000000000108','succeeded','send','main',
@@ -442,7 +446,8 @@ async fn postgres_solvency_in_transit_aligns_with_balance_observation()
              '00000000-0000-0000-0000-000000000211','send'),
             ('00000000-0000-0000-0000-000000000121','enqueued','isekai',
              '00000000-0000-0000-0000-000000000221','send');
-         INSERT INTO pg_temp.deliveries VALUES
+         INSERT INTO pg_temp.deliveries
+            (id, status, payload_operation, payload_world, completed_at) VALUES
             ('00000000-0000-0000-0000-000000000201','succeeded','send','main',
              now() - interval '70 minutes'),
             ('00000000-0000-0000-0000-000000000202','succeeded','send','main',
@@ -919,7 +924,7 @@ async fn postgres_custody_moves_sent_equipment_to_in_transit()
             ('00000000-0000-0000-0000-000000000018','failed','00000000-0000-0000-0000-000000001008','send'),
             ('00000000-0000-0000-0000-000000000019','manual_reconcile','00000000-0000-0000-0000-000000001009','send'),
             ('00000000-0000-0000-0000-000000000020','enqueued','00000000-0000-0000-0000-000000001010','send');
-         INSERT INTO pg_temp.deliveries VALUES
+         INSERT INTO pg_temp.deliveries (id, status, payload) VALUES
             ('00000000-0000-0000-0000-000000001001','succeeded','{}'),
             ('00000000-0000-0000-0000-000000001002','succeeded','{}'),
             ('00000000-0000-0000-0000-000000001003','succeeded','{}'),

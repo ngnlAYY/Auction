@@ -8,7 +8,7 @@ import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource, type ResourceState } from "@auction/web-shared/reactive/resource";
 import { createTaskScope } from "@auction/web-shared/reactive/tasks";
-import type { Result } from "@auction/web-shared/result";
+import { err, type Result } from "@auction/web-shared/result";
 import { useRouter } from "@auction/web-shared/router";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
@@ -138,7 +138,9 @@ export function login(input: LoginProps | string | null = null): JSX.Element {
           submitting.set(true);
           const returnPathValue = returnPath();
           tasks.spawn(async (context) => {
-            const loginResult = await loginPublic(submittedKey, context.signal);
+            const loginResult = await loginPublic(submittedKey, context.signal).catch(() =>
+              err(publicSessionApiErrorLocal("network_error")),
+            );
             if (!context.alive()) {
               return;
             }

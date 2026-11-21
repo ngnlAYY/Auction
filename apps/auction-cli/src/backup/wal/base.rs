@@ -23,11 +23,13 @@ use tokio::{
     process::Command,
 };
 
-use super::model::{
-    BASE_CIPHER_SUFFIX, BASE_MANIFEST_FORMAT, BaseManifest, base_cipher_path, base_id,
-    base_manifest_path, read_base_manifest, regular_or_none, require_staging_dir, valid_recipient,
+use super::model::manifest::BaseManifest;
+use super::model::paths::{
+    base_cipher_path, base_id, base_manifest_path, require_staging_dir, valid_recipient,
 };
-use super::staging::{STAGED_MODE, STDERR_LIMIT, temp_path, write_staged_manifest};
+use super::model::scan::{read_base_manifest, regular_or_none};
+use super::model::{BASE_CIPHER_SUFFIX, BASE_MANIFEST_FORMAT};
+use super::staging::{STAGED_MODE, STDERR_LIMIT, TempPathGuard, temp_path, write_staged_manifest};
 use crate::{
     app::progress,
     backup::libpq,
@@ -64,9 +66,13 @@ pub(super) async fn run(request: &Request) -> anyhow::Result<Outcome> {
     if !valid_recipient(&request.recipient) {
         anyhow::bail!("age 收件人公钥无效；须与 [backup.offsite] age_recipient 相同");
     }
-    let started = process::unix_seconds()?;
-    let backup_id = base_id(Timestamp::now());
-    if let Some(outcome) = resolve_existing(&request.staging_dir, &backup_id)? {
+    let started_at = Timestamp::now();
+    let started =
+        u64::try_from(started_at.timestamp()).context("基础备份开始时间早于 UNIX 纪元")?;
+    let backup_id = base_id(started_at);
+    let lock_path = request.staging_dir.join(format!(".{backup_id}.lock"));
+    let _lock = files::lock_file(&lock_path, "同一基础备份身份正在创建")?;
+    if let Some(outcome) = resolve_existing(&request.staging_dir, &backup_id).await? {
         return Ok(outcome);
     }
     let tools = Tools {
@@ -119,7 +125,7 @@ fn source_args(backup_id: &str) -> Vec<OsString> {
 }
 
 /// 同一秒内的重复运行沿用既有身份；只有密文而没有 manifest 表示上次中断，删除后重做。
-fn resolve_existing(directory: &Path, backup_id: &str) -> anyhow::Result<Option<Outcome>> {
+async fn resolve_existing(directory: &Path, backup_id: &str) -> anyhow::Result<Option<Outcome>> {
     let cipher = base_cipher_path(directory, backup_id);
     let manifest = base_manifest_path(directory, backup_id);
     let cipher_metadata = regular_or_none(&cipher)?;
@@ -144,13 +150,17 @@ fn resolve_existing(directory: &Path, backup_id: &str) -> anyhow::Result<Option<
             if metadata.len() != record.cipher_bytes {
                 anyhow::bail!("基础备份密文长度与 manifest 不一致：{}", cipher.display());
             }
+            let cipher_sha256 = sha256_file(&cipher).await?;
+            if cipher_sha256 != record.cipher_sha256 {
+                anyhow::bail!("基础备份密文 SHA-256 与 manifest 不一致：{}", cipher.display());
+            }
             progress(format_args!("wal_base_backup status=already_created backup_id={backup_id}"));
             Ok(Some(Outcome {
                 backup_id: backup_id.to_owned(),
                 status: CreateStatus::AlreadyCreated,
                 plaintext_bytes: record.plaintext_bytes,
                 cipher_bytes: record.cipher_bytes,
-                cipher_sha256: record.cipher_sha256,
+                cipher_sha256,
                 staging: cipher,
             }))
         }
@@ -200,12 +210,8 @@ async fn publish(
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
         .open(&temp)
         .with_context(|| format!("创建基础备份密文临时文件失败：{}", temp.display()))?;
-    let result = write_cipher(tools, directory, backup_id, file, started).await;
-    if result.is_err() {
-        // 只回收本次未发布的临时文件；已发布的密文由下次运行按 manifest 判定。
-        process::discard_stale(&temp, "wal_base_backup");
-    }
-    result
+    let mut temporary = TempPathGuard::new(temp.clone());
+    write_cipher(tools, directory, backup_id, file, started, &mut temporary).await
 }
 
 async fn write_cipher(
@@ -214,6 +220,7 @@ async fn write_cipher(
     backup_id: &str,
     file: File,
     started: u64,
+    temporary: &mut TempPathGuard,
 ) -> anyhow::Result<Outcome> {
     let mut source = command(&tools.source)
         .stdin(Stdio::null())
@@ -307,12 +314,13 @@ async fn write_cipher(
     let temp = temp_path(directory, backup_id, BASE_CIPHER_SUFFIX);
     let cipher = base_cipher_path(directory, backup_id);
     let cipher_sha256 = sha256_file(&temp).await?;
-    fs::rename(&temp, &cipher)
-        .with_context(|| format!("发布基础备份密文失败：{}", cipher.display()))?;
+    fs::hard_link(&temp, &cipher)
+        .with_context(|| format!("无覆盖发布基础备份密文失败：{}", cipher.display()))?;
+    fs::remove_file(&temp)
+        .with_context(|| format!("清理基础备份密文临时链接失败：{}", temp.display()))?;
+    temporary.disarm();
     files::sync_directory(directory, "暂存目录")?;
-    let cipher_bytes = fs::symlink_metadata(&cipher)
-        .with_context(|| format!("读取基础备份密文失败：{}", cipher.display()))?
-        .len();
+    let cipher_bytes = file.metadata().context("读取基础备份密文元数据失败")?.len();
     let record = BaseManifest {
         format: BASE_MANIFEST_FORMAT.to_owned(),
         backup_id: backup_id.to_owned(),
@@ -367,11 +375,12 @@ mod tests {
         sync::atomic::{AtomicU32, Ordering},
     };
 
+    use super::super::model::manifest::BaseManifest;
     use super::{
         CreateStatus, Request, Tool, Tools, base_cipher_path, base_id, base_manifest_path,
         resolve_existing, run, write_cipher,
     };
-    use crate::backup::wal::model::BaseManifest;
+    use crate::backup::wal::staging::TempPathGuard;
     use crate::support::digest::sha256_file;
 
     static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -450,6 +459,7 @@ mod tests {
         assert!(!fixture.staging().join(format!("{BACKUP_ID}.tar.zst.age.tmp")).exists());
         // 同一秒的重跑不重复加密，直接返回既有证据。
         let existing = resolve_existing(&fixture.staging(), BACKUP_ID)
+            .await
             .expect("判定既有身份")
             .expect("必须命中既有基础备份");
         assert_matches!(existing.status, CreateStatus::AlreadyCreated);
@@ -489,7 +499,7 @@ mod tests {
         let fixture = Fixture::new();
         let cipher = base_cipher_path(&fixture.staging(), BACKUP_ID);
         fs::write(&cipher, b"partial").expect("写入未确认密文");
-        assert!(resolve_existing(&fixture.staging(), BACKUP_ID).expect("判定").is_none());
+        assert!(resolve_existing(&fixture.staging(), BACKUP_ID).await.expect("判定").is_none());
         assert!(!cipher.exists());
     }
 
@@ -499,6 +509,7 @@ mod tests {
         let manifest_path = base_manifest_path(&fixture.staging(), BACKUP_ID);
         fs::write(&manifest_path, b"{}").expect("写入孤立 manifest");
         let error = resolve_existing(&fixture.staging(), BACKUP_ID)
+            .await
             .expect_err("孤立 manifest 必须失败关闭");
         assert!(error.to_string().contains("密文缺失"));
     }
@@ -532,8 +543,10 @@ mod tests {
             .mode(0o600)
             .open(&temp)
             .expect("创建临时文件");
-        let outcome =
-            write_cipher(&tools, &fixture.staging(), BACKUP_ID, file, 5).await.expect("写入密文");
+        let mut temp_guard = TempPathGuard::new(temp.clone());
+        let outcome = write_cipher(&tools, &fixture.staging(), BACKUP_ID, file, 5, &mut temp_guard)
+            .await
+            .expect("写入密文");
         assert_eq!(outcome.cipher_bytes, b"bytes".len() as u64);
         assert_eq!(
             fs::read(base_cipher_path(&fixture.staging(), BACKUP_ID)).expect("读取密文"),

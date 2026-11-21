@@ -52,6 +52,7 @@ fn entry(mid: &str, subject: &str) -> WorkerRecoverySentEntry {
 
 fn detail(mid: &str, subject: &str, collected: bool) -> WorkerSentLookupCandidate {
     WorkerSentLookupCandidate {
+        world: "main".to_owned(),
         external_mail_id: mid.to_owned(),
         recipient: "Sample﹒Fixture".to_owned(),
         subject: subject.to_owned(),
@@ -63,7 +64,16 @@ fn detail(mid: &str, subject: &str, collected: bool) -> WorkerSentLookupCandidat
         observed_at: Timestamp::now(),
     }
 }
-
+fn detail_in_world(
+    world: &str,
+    mid: &str,
+    subject: &str,
+    collected: bool,
+) -> WorkerSentLookupCandidate {
+    let mut candidate = detail(mid, subject, collected);
+    candidate.world = world.to_owned();
+    candidate
+}
 fn inbound(world: &str, mid: &str, received_at: Timestamp) -> WorkerRecoveryInboundEntry {
     WorkerRecoveryInboundEntry {
         world: world.to_owned(),
@@ -168,6 +178,32 @@ fn plan_requires_unique_list_candidate_and_exact_detail() {
     plan.apply_details(&[detail("100", expectation.subject.as_deref().unwrap_or_default(), false)]);
     assert_eq!(plan.exact.len(), 1);
     assert_eq!(plan.quarantine_matches()[0].external_mail_id, "100");
+}
+
+#[test]
+fn identical_sent_mids_are_matched_only_within_their_world() {
+    let cutoff = Timestamp::now() - TimeDelta::hours(1);
+    let subject = "[Auction] settlement payment 11111111";
+    let expected = expectation(70, subject);
+    let mut other_world_entry = entry("100", subject);
+    other_world_entry.world = "isekai".to_owned();
+    let mut plan = SentMatchPlan::new(std::slice::from_ref(&expected), cutoff);
+    plan.scan_entries(&[entry("100", subject), other_world_entry]);
+
+    plan.apply_details(&[
+        detail_in_world("isekai", "100", subject, false),
+        detail_in_world("main", "100", subject, false),
+    ]);
+    assert_eq!(plan.exact.len(), 1);
+    assert_eq!(plan.exact[0].world_id, "main");
+
+    let mut wrong_world_only = SentMatchPlan::new(&[expected], cutoff);
+    let mut other_world_entry = entry("100", subject);
+    other_world_entry.world = "isekai".to_owned();
+    wrong_world_only.scan_entries(&[entry("100", subject), other_world_entry]);
+    wrong_world_only.apply_details(&[detail_in_world("isekai", "100", subject, false)]);
+    assert!(wrong_world_only.exact.is_empty());
+    assert_eq!(wrong_world_only.unconfirmed, 1);
 }
 
 #[test]

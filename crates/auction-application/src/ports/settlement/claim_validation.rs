@@ -73,6 +73,15 @@ impl SettlementClaimExecutionSnapshot {
         if SettlementFulfillmentOperation::from_name(&self.delivery_operation).is_none() {
             return Err(SettlementClaimExecutionBlocker::UnknownDeliveryOperation);
         }
+        if self.delivery_id.is_some_and(|id| id.is_nil())
+            || self.prepare_command_id.is_some_and(|id| id.is_nil())
+            || self.activate_command_id.is_some_and(|id| id.is_nil())
+            || self.delivery_snapshot_id.is_some_and(|id| id.is_nil())
+            || self.prepare_request_digest.as_ref().is_some_and(|digest| digest.len() != 32)
+            || self.activate_request_digest.as_ref().is_some_and(|digest| digest.len() != 32)
+        {
+            return Err(SettlementClaimExecutionBlocker::ExecutionShapeMismatch);
+        }
         let has_prepare = self.delivery_id.is_some()
             || self.prepare_command_id.is_some()
             || self.prepare_request_digest.is_some();
@@ -166,8 +175,10 @@ impl SettlementClaimContextSnapshot {
     /// 校验 world/identity/装备/收件人/金额与返还投稿来源。
     pub fn evaluate(&self) -> Result<(), SettlementClaimContextBlocker> {
         // 先判关系上下文：前置义务存在但行缺失时优先隔离，不再继续 world 判定。
-        if self.prerequisite_obligation_id.is_some() && self.prerequisite_row_id.is_none() {
-            return Err(SettlementClaimContextBlocker::MissingPrerequisiteRow);
+        match (self.prerequisite_obligation_id, self.prerequisite_row_id) {
+            (Some(obligation_id), Some(row_id)) if !obligation_id.is_nil() && !row_id.is_nil() => {}
+            (None, None) => {}
+            _ => return Err(SettlementClaimContextBlocker::MissingPrerequisiteRow),
         }
         if SettlementWorld::from_name(&self.obligation_world).is_none()
             || self.equipment_world.as_deref() != Some(self.obligation_world.as_str())
@@ -190,11 +201,25 @@ impl SettlementClaimContextSnapshot {
         {
             return Err(SettlementClaimContextBlocker::EquipmentFactInvalid);
         }
+        if self
+            .recipient_user_game_identity
+            .as_deref()
+            .is_some_and(|value| value.is_empty() || value != value.trim())
+        {
+            return Err(SettlementClaimContextBlocker::RecipientOwnerMismatch);
+        }
         let has_user = self.recipient_user_id.is_some_and(|id| !id.is_nil());
         let has_game_identity = self
             .recipient_game_identity
             .as_deref()
             .is_some_and(|value| !value.is_empty() && value == value.trim());
+        if self
+            .recipient_game_identity
+            .as_deref()
+            .is_some_and(|value| value.is_empty() || value != value.trim())
+        {
+            return Err(SettlementClaimContextBlocker::RecipientOwnerMismatch);
+        }
         if has_user == has_game_identity
             || self.recipient_user_id.is_some_and(|id| id.is_nil())
             || self.recipient_user_id.is_some() && self.recipient_user_game_identity.is_none()

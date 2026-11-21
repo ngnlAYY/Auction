@@ -10,6 +10,7 @@ import { err, ok, type Result } from "@auction/web-shared/result";
 import { utf8ByteLength } from "@auction/web-shared/text";
 import { reportBrowserError } from "@auction/web-shared/ui/bootstrap";
 import type * as v from "valibot";
+import { parseStrictRfc3339 } from "../session/rfc3339";
 
 /** 解析成功 envelope，并在 schema 解码前执行 route-specific data 校验。 */
 export function decodeSuccess<TSchema extends v.GenericSchema>(
@@ -218,13 +219,13 @@ export function rawNonemptyStr(value: string): boolean {
 /** 可解析的时刻；wasm32 分支使用浏览器的 `Date.parse`。 */
 export function time(value: unknown): boolean {
   const text = string(value);
-  return text !== null && text.length > 0 && !Number.isNaN(Date.parse(text));
+  return text !== null && parseStrictRfc3339(text) !== null;
 }
 
 /** 时刻对应的毫秒数；无法解析时返回 null。 */
 export function timeValue(value: unknown): number | null {
   const text = string(value);
-  if (text === null) {
+  if (text === null || parseStrictRfc3339(text) === null) {
     return null;
   }
   const timestamp = Date.parse(text);

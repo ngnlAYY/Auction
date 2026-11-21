@@ -59,7 +59,7 @@ pub(crate) fn parse_detail_actions(
         // 页面可能带 `javascript:`、`; return false` 或不同空白；只按函数调用 token 识别。
         let normalized =
             value.chars().filter(|character| !character.is_whitespace()).collect::<String>();
-        if let Some(index) = normalized.find("return_mail(") {
+        if let Some(index) = function_call_index(&normalized, "return_mail") {
             let tail = &normalized[index + "return_mail(".len()..];
             let Some(close) = tail.find(')') else {
                 return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
@@ -73,7 +73,7 @@ pub(crate) fn parse_detail_actions(
         } else if normalized.contains("return_mail") {
             return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
         }
-        if let Some(index) = normalized.find("remove_attachment(") {
+        if let Some(index) = function_call_index(&normalized, "remove_attachment") {
             let tail = &normalized[index + "remove_attachment(".len()..];
             let Some(close) = tail.find(')') else {
                 return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
@@ -92,6 +92,23 @@ pub(crate) fn parse_detail_actions(
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
     Ok((returns == 1, claimable))
+}
+
+fn function_call_index(source: &str, name: &str) -> Option<usize> {
+    source.match_indices(&format!("{name}(")).find_map(|(index, _)| {
+        let prefix = &source[..index];
+        let previous = prefix.chars().next_back();
+        let mooglemail_method = prefix
+            .strip_suffix("mooglemail.")
+            .is_some_and(|receiver| action_call_boundary(receiver.chars().next_back()));
+        (mooglemail_method || action_call_boundary(previous)).then_some(index)
+    })
+}
+
+fn action_call_boundary(previous: Option<char>) -> bool {
+    previous.is_none_or(|character| {
+        !(character.is_alphanumeric() || matches!(character, '_' | '$' | '.' | ']' | ')'))
+    })
 }
 
 pub(crate) fn extract_mid(value: &str) -> Option<String> {

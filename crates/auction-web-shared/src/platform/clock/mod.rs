@@ -80,7 +80,7 @@ pub fn use_second_tick() -> Signal<u64> {
             let guard = Rc::new(SubscriptionGuard { state: Rc::clone(&state) });
             let mut borrowed = state.borrow_mut();
             borrowed.subscribers = borrowed.subscribers.saturating_add(1);
-            if borrowed.subscribers == 1 && borrowed.interval.is_none() {
+            if borrowed.interval.is_none() {
                 start_interval(&mut borrowed, tick);
             }
             drop(borrowed);

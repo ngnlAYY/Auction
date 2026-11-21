@@ -38,7 +38,7 @@ pub(crate) struct DeliveryDispositionFact<'a> {
     pub request_digest: Option<[u8; 32]>,
 }
 
-/// 追加处置事实；同一投递、fence 与种类只允许一条，重复写入幂等忽略。
+/// 追加处置事实；同一投递、fence 与种类只允许一条，完全一致的重试幂等忽略。
 ///
 /// 准入校验在写入前复用领域规则；校验失败映射为明确的协议错误，调用方事务一并回滚。
 pub(crate) async fn append(
@@ -80,11 +80,61 @@ pub(crate) async fn append(
     .bind(fact.reason)
     .bind(fact.reason_code)
     .bind(fact.kind.resolves_alert(fact.reason_code))
-    .bind(detail)
+    .bind(&detail)
     .execute(&mut **transaction)
     .await?;
     if inserted.rows_affected() > 1 {
         return Err(protocol_error("投递处置事实写入返回了多条行"));
+    }
+    if inserted.rows_affected() == 0 {
+        let identical: bool = sqlx::query_scalar(
+            r#"SELECT EXISTS (
+                   SELECT 1 FROM public.delivery_dispositions
+                   WHERE delivery_id = $1
+                     AND fencing_version = $2
+                     AND kind = $3
+                     AND command_id IS NOT DISTINCT FROM $4
+                     AND request_digest IS NOT DISTINCT FROM $5
+                     AND sent_confirmation_id IS NOT DISTINCT FROM $6
+                     AND admin_command_id IS NOT DISTINCT FROM $7
+                     AND equipment_loss_id IS NOT DISTINCT FROM $8
+                     AND legacy_self_reconciliation_id IS NOT DISTINCT FROM $9
+                     AND sent_binding_world_id IS NOT DISTINCT FROM $10
+                     AND sent_binding_external_mail_id IS NOT DISTINCT FROM $11
+                     AND settlement_recovery_id IS NOT DISTINCT FROM $12
+                     AND source_audit_id IS NOT DISTINCT FROM $13
+                     AND actor_source = $14
+                     AND actor_id = $15
+                     AND reason IS NOT DISTINCT FROM $16
+                     AND reason_code IS NOT DISTINCT FROM $17
+                     AND resolves_alert = $18
+                     AND detail = $19
+               )"#,
+        )
+        .bind(fact.delivery_id)
+        .bind(fact.fencing_version)
+        .bind(fact.kind.as_str())
+        .bind(fact.command_id)
+        .bind(fact.request_digest.as_ref().map(<[u8; 32]>::as_slice))
+        .bind(fact.source.sent_confirmation_id)
+        .bind(fact.source.admin_command_id)
+        .bind(fact.source.equipment_loss_id)
+        .bind(fact.source.legacy_self_reconciliation_id)
+        .bind(binding_world)
+        .bind(binding_mail_id)
+        .bind(fact.source.settlement_recovery_id)
+        .bind(fact.source.audit_id)
+        .bind(fact.actor_source.as_str())
+        .bind(fact.actor_id)
+        .bind(fact.reason)
+        .bind(fact.reason_code)
+        .bind(fact.kind.resolves_alert(fact.reason_code))
+        .bind(&detail)
+        .fetch_one(&mut **transaction)
+        .await?;
+        if !identical {
+            return Err(protocol_error("同一处置身份已存在不同事实"));
+        }
     }
     Ok(())
 }

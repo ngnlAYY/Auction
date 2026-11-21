@@ -132,17 +132,18 @@ impl DatabaseStore {
             .map_err(|source| query_error("database_identity", source))?;
 
         let marker_exists =
-            crate::database::migrations::postgres_history_present(&mut *transaction)
+            crate::database::migrations::evidence::postgres_history_present(&mut *transaction)
                 .await
                 .map_err(|source| query_error("migration_marker", source))?;
         if !marker_exists {
             return Err(RetentionInventoryError::MigrationHistoryMissing);
         }
 
-        let schema_identity = crate::database::migrations::read_schema_identity(&mut *transaction)
-            .await
-            .map_err(|source| query_error("schema_identity", source))?
-            .ok_or(RetentionInventoryError::SchemaIdentityInvalid)?;
+        let schema_identity =
+            crate::database::migrations::evidence::read_schema_identity(&mut *transaction)
+                .await
+                .map_err(|source| query_error("schema_identity", source))?
+                .ok_or(RetentionInventoryError::SchemaIdentityInvalid)?;
         let migration = read_migration_inventory(&mut transaction).await?;
         let relations = read_relations(&mut transaction).await?;
         let policy_tables = build_policy_table_inventory(&policy, &relations);

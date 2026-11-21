@@ -127,7 +127,7 @@ mod tests {
     use crate::api::{
         AdminApiFailure, AdminUser, blacklist_admin_user, mutate_admin_user, unblacklist_admin_user,
     };
-    use crate::surface::auctions::draft_page_tests::{button, click_button, mount_writer};
+    use crate::surface::auctions::editor::tests::{button, click_button, mount_writer};
     use crate::surface::pending::{PendingCommandPanel, use_pending_commands};
 
     const USER_ID: &str = "00000000-0000-4000-8000-000000000002";

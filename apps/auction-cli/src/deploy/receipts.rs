@@ -18,7 +18,7 @@ use crate::receipt::{
 use crate::service::{self, ManagedRole, Systemctl};
 use crate::support::files::PrivateDirectory;
 
-/// 停机后流程的失败；`recorded` 为真表示本次调用已用回滚记录的标识尝试发布失败回执。
+/// 停机后流程的失败；`recorded` 为真表示此调用已按对应标识收口，不再追加通用回执，无论发布成功与否。
 pub(super) struct Failure {
     pub(super) error: anyhow::Error,
     pub(super) recorded: bool,
@@ -28,6 +28,12 @@ impl Failure {
     /// 保留旧程序之前的失败：还没有回滚记录，由入口追加通用失败回执。
     pub(super) fn unrecorded(error: anyhow::Error) -> Self {
         Self { error, recorded: false }
+    }
+}
+
+impl From<anyhow::Error> for Failure {
+    fn from(error: anyhow::Error) -> Self {
+        Self::unrecorded(error)
     }
 }
 
@@ -43,8 +49,8 @@ pub(super) struct FailedReceipt<'a> {
 }
 
 impl FailedReceipt<'_> {
-    /// 发布失败回执并返回已记录的失败。程序摘要无法取得或回执写入失败（含同一标识已经发布）
-    /// 时，把原因接在原错误之后；无论哪种情况本次调用都不再追加第二条回执。
+    /// 发布失败回执并返回已收口的失败。若发布出错，按固定标识读取既有回执；读取失败也不推断该标识下
+    /// 没有文件，不换标识补写第二条。
     pub(super) fn publish(
         &self,
         failure: anyhow::Error,
@@ -67,7 +73,18 @@ impl FailedReceipt<'_> {
         });
         let error = match published {
             Ok(_) => failure,
-            Err(record_error) => anyhow::anyhow!("{failure:#}；部署回执也未写入：{record_error:#}"),
+            Err(record_error) => {
+                let existing = match receipt::read(self.state, self.receipt_id) {
+                    Ok(receipt) => format!(
+                        "同一标识的现有回执可读（action={:?}, outcome={:?}）；未覆盖该回执，请核对后再重试或回退",
+                        receipt.action, receipt.outcome
+                    ),
+                    Err(read_error) => format!(
+                        "同一标识的回执状态无法确认：{read_error:#}；重试或回退前先核对该标识"
+                    ),
+                };
+                anyhow::anyhow!("{failure:#}；失败回执未写入：{record_error:#}；{existing}")
+            }
         };
         Failure { error, recorded: true }
     }
@@ -358,7 +375,12 @@ mod tests {
         let failure = failed.publish(anyhow::anyhow!("receipt write failed"), None, Ok(Vec::new()));
         assert!(failure.recorded);
         let text = format!("{:#}", failure.error);
-        assert!(text.starts_with("receipt write failed；部署回执也未写入："), "{text}");
+        assert!(
+            text.contains("receipt write failed")
+                && text.contains("同一标识的现有回执可读")
+                && text.contains("outcome=Failed"),
+            "{text}"
+        );
         assert_eq!(receipt_files(&state.path), 1);
         assert_eq!(
             read_receipt(&state, record.record_id).expect("原回执").failure.as_deref(),
@@ -371,7 +393,42 @@ mod tests {
             Err(anyhow::anyhow!("no digest")),
         );
         assert!(failure.recorded);
-        assert!(format!("{:#}", failure.error).starts_with("launch failed；部署回执也未写入："));
+        let text = format!("{:#}", failure.error);
+        assert!(
+            text.contains("launch failed") && text.contains("同一标识的现有回执可读"),
+            "{text}"
+        );
+        assert_eq!(receipt_files(&state.path), 1);
+    }
+    #[test]
+    fn success_receipt_is_reported_when_failure_republication_collides() {
+        let root = TempRoot::new();
+        let install = root.install_dir();
+        let state = pin(&root.path().join("state"));
+        let record = retain_unknown(&state, &install);
+        let mut success = receipt(0, Action::Deploy, Outcome::Succeeded, 'a');
+        success.receipt_id = record.deploy_receipt_id;
+        append(&state, &success).expect("模拟已发布的成功回执");
+
+        let context = ReceiptContext::resolve(None, Some("operator")).expect("上下文");
+        let deploy = deploy_record(&install, record.record_id);
+        let failed = FailedReceipt {
+            state: &state,
+            receipt_id: record.deploy_receipt_id,
+            action: Action::Deploy,
+            started_at: success.started_at,
+            context: &context,
+            deploy: &deploy,
+        };
+        let failure = failed.publish(anyhow::anyhow!("成功回执目录同步失败"), None, Ok(Vec::new()));
+        assert!(failure.recorded);
+        let text = format!("{:#}", failure.error);
+        assert!(text.contains("成功回执目录同步失败"), "{text}");
+        assert!(text.contains("失败回执未写入") && text.contains("outcome=Succeeded"), "{text}");
+        assert_eq!(
+            read_receipt(&state, record.record_id).expect("成功回执仍可读").outcome,
+            Outcome::Succeeded
+        );
         assert_eq!(receipt_files(&state.path), 1);
     }
 
@@ -451,6 +508,17 @@ mod tests {
                 rollback_record_id: Some(Uuid::new_v4()),
             })
         });
+        let migration = if action == Action::Deploy && outcome == Outcome::Succeeded {
+            let expected_version = 90 + minutes;
+            Some(MigrationRecord {
+                before_version: 90,
+                after_version: expected_version,
+                expected_version,
+                applied: minutes,
+            })
+        } else {
+            None
+        };
         DeploymentReceipt {
             format: crate::receipt::FORMAT.to_owned(),
             receipt_id: Uuid::new_v4(),
@@ -461,7 +529,7 @@ mod tests {
             actor: "operator".to_owned(),
             actor_uid: 0,
             backup_id: None,
-            migration: None,
+            migration,
             artifacts: artifacts(tag),
             failure: (outcome == Outcome::Failed).then(|| "启动失败".to_owned()),
             deploy,
@@ -547,7 +615,12 @@ mod tests {
             Outcome::Succeeded,
             Timestamp::now(),
             &context,
-            None,
+            Some(MigrationRecord {
+                before_version: 94,
+                after_version: 96,
+                expected_version: 96,
+                applied: 2,
+            }),
             artifacts('a'),
             deploy_record(Path::new("/opt/auction/bin"), Uuid::new_v4()),
             None,

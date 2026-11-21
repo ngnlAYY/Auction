@@ -549,7 +549,7 @@ mod tests {
         let mut response = projection();
         response.data.document["listener"]["mode"] = json!("unix");
         let model = read_form(response);
-        let (page, edits) = crate::surface::auctions::draft_page_tests::mount_writer(move || {
+        let (page, edits) = crate::surface::auctions::editor::tests::mount_writer(move || {
             let form = use_signal(|| model.clone());
             use_context_provider(|| form);
             rsx! {

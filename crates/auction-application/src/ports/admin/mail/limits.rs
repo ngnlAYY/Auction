@@ -1,6 +1,6 @@
 //! Admin Mail owner 共享常量、聚合标识和字段校验。
 
-pub(super) use auction_domain::valid_text;
+use auction_domain::valid_text;
 use uuid::Uuid;
 
 /// Admin 邮箱标识允许的最大字节数。

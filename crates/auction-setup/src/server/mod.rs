@@ -1,25 +1,27 @@
 //! 初始化页面的令牌门禁、数据库连通性检查与单次提交。
 
-use std::{fs, io::ErrorKind, net::IpAddr, path::PathBuf, sync::Arc, time::Duration};
-
-use auction_config::{FirstRunConfig, FirstRunError, PostgresConnectionConfig};
-use auction_contracts::{SetupErrorResponse, SetupRequest, SetupResponse};
-use auction_http::WebScriptPolicy;
-use auction_storage::{DatabaseStore, postgres_connect_options};
-use axum::{
-    Json, Router,
-    extract::{DefaultBodyLimit, FromRequest, Request, State},
-    http::{HeaderMap, StatusCode},
-    routing::post,
+use std::{
+    fs,
+    io::{self, ErrorKind, Write},
+    net::IpAddr,
+    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
+    path::{Path, PathBuf},
+    sync::Arc,
 };
+
+use auction_contracts::{SetupErrorResponse, SetupResponse};
+use auction_http::WebScriptPolicy;
+use auction_storage::postgres_connect_options;
+use axum::{Json, Router, extract::DefaultBodyLimit, http::StatusCode, routing::post};
 use rust_embed::RustEmbed;
-use subtle::ConstantTimeEq;
 use tokio::{
     net::TcpListener,
-    sync::{Mutex, MutexGuard, oneshot},
+    sync::{Mutex, oneshot},
 };
 use uuid::Uuid;
 
+mod handlers;
+use self::handlers::{complete, validate, verify};
 mod access;
 mod lifecycle;
 pub use access::{FirstRunPolicy, RemoteSetupAccess};
@@ -67,6 +69,7 @@ pub struct FirstRunServerOptions {
 struct FirstRunState {
     options: FirstRunServerOptions,
     token: String,
+    token_file: PathBuf,
     policy: Arc<FirstRunPolicy>,
     operation: Mutex<SetupOperation>,
 }
@@ -127,6 +130,111 @@ pub async fn run_first_run<A: RustEmbed + 'static>(
     }
 }
 
+fn create_setup_token_file(output_dir: &Path, token: &str) -> Result<PathBuf, &'static str> {
+    if !output_dir.is_absolute() {
+        return Err("setup output directory must be absolute");
+    }
+    let parent = output_dir.parent().ok_or("cannot locate setup output parent")?;
+    let parent_metadata =
+        fs::symlink_metadata(parent).map_err(|_| "cannot inspect setup output parent")?;
+    // SAFETY: geteuid only reads the effective UID of this setup process.
+    let effective_uid = unsafe { libc::geteuid() };
+    if !parent_metadata.file_type().is_dir()
+        || parent_metadata.mode() & 0o022 != 0
+        || (parent_metadata.uid() != effective_uid && parent_metadata.uid() != 0)
+    {
+        return Err("setup output parent is not private to the setup operator");
+    }
+
+    let directory = parent.join(format!(".auction-setup-token-{}", Uuid::new_v4().simple()));
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&directory)
+        .map_err(|_| "cannot create private setup token directory")?;
+    let token_file = directory.join("token");
+    let result = (|| {
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
+            .map_err(|_| "cannot secure setup token directory")?;
+        let directory_metadata =
+            fs::symlink_metadata(&directory).map_err(|_| "cannot verify setup token directory")?;
+        if !directory_metadata.file_type().is_dir()
+            || directory_metadata.uid() != effective_uid
+            || directory_metadata.mode() & 0o7777 != 0o700
+        {
+            return Err("setup token directory has unsafe ownership or permissions");
+        }
+
+        let mut options = fs::OpenOptions::new();
+        options
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+        let mut file = options.open(&token_file).map_err(|_| "cannot create setup token file")?;
+        let metadata = file.metadata().map_err(|_| "cannot verify setup token file")?;
+        if !metadata.file_type().is_file()
+            || metadata.uid() != effective_uid
+            || metadata.mode() & 0o7777 & !0o600 != 0
+        {
+            return Err("setup token file has unsafe ownership or permissions");
+        }
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|_| "cannot secure setup token file")?;
+        let metadata = file.metadata().map_err(|_| "cannot verify setup token file")?;
+        if !metadata.file_type().is_file()
+            || metadata.uid() != effective_uid
+            || metadata.mode() & 0o7777 != 0o600
+        {
+            return Err("setup token file has unsafe ownership or permissions");
+        }
+        file.write_all(token.as_bytes()).map_err(|_| "cannot write setup token file")?;
+        file.sync_all().map_err(|_| "cannot persist setup token file")?;
+        fs::File::open(&directory)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|_| "cannot persist setup token directory")?;
+        fs::File::open(parent)
+            .and_then(|parent| parent.sync_all())
+            .map_err(|_| "cannot persist setup token directory entry")?;
+        Ok(token_file.clone())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&token_file);
+        let _ = fs::remove_dir(&directory);
+    }
+    result
+}
+
+fn remove_setup_token(token_file: &Path) -> io::Result<()> {
+    let directory = token_file
+        .parent()
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "setup token file has no parent"))?;
+    let parent = directory.parent().ok_or_else(|| {
+        io::Error::new(ErrorKind::InvalidInput, "setup token directory has no parent")
+    })?;
+    // SAFETY: geteuid only reads the effective UID of this setup process.
+    let effective_uid = unsafe { libc::geteuid() };
+    let directory_metadata = fs::symlink_metadata(directory)?;
+    let file_metadata = fs::symlink_metadata(token_file)?;
+    if !directory_metadata.file_type().is_dir()
+        || directory_metadata.uid() != effective_uid
+        || directory_metadata.mode() & 0o7777 != 0o700
+        || !file_metadata.file_type().is_file()
+        || file_metadata.uid() != effective_uid
+        || file_metadata.mode() & 0o7777 != 0o600
+    {
+        return Err(io::Error::new(ErrorKind::PermissionDenied, "setup token path is unsafe"));
+    }
+    fs::remove_file(token_file)?;
+    fs::remove_dir(directory)?;
+    fs::File::open(parent)?.sync_all()
+}
+
+fn write_setup_banner(writer: &mut impl Write, origin: &str, token_file: &Path) -> io::Result<()> {
+    writeln!(writer, "首次部署页面：{origin}/setup")?;
+    writeln!(writer, "一次性设置令牌文件：{}", token_file.display())?;
+    writeln!(writer, "仅使用 SSH 隧道或已显式授权的 HTTPS 代理；不要公开明文初始化监听器。")
+}
+
 /// 通过独立策略启用受信 HTTPS 代理或合并入口的初始化确认，不挂载普通 Admin 写接口。
 /// `web_script_policy` 与其他绑定参数一样在启动时确定，并作用于所有首次设置响应。
 pub async fn run_first_run_with_policy<A: RustEmbed + 'static>(
@@ -146,10 +254,12 @@ pub async fn run_first_run_with_policy<A: RustEmbed + 'static>(
     let listener =
         TcpListener::bind(policy.listen).await.map_err(|_| "cannot bind setup listener")?;
     let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let token_file = create_setup_token_file(&options.output_dir, &token)?;
     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
     let state = Arc::new(FirstRunState {
         options,
         token,
+        token_file,
         policy: Arc::clone(&policy),
         operation: Mutex::new(SetupOperation {
             status: SetupStatus::Pending,
@@ -162,9 +272,9 @@ pub async fn run_first_run_with_policy<A: RustEmbed + 'static>(
         .remote
         .as_ref()
         .map_or_else(|| format!("http://{}", policy.listen), |remote| remote.origin.clone());
-    eprintln!("首次部署页面：{origin}/setup");
-    eprintln!("一次性设置令牌：{}", state.token);
-    eprintln!("仅使用 SSH 隧道或已显式授权的 HTTPS 代理；不要公开明文初始化监听器。");
+    let mut stderr = io::stderr().lock();
+    write_setup_banner(&mut stderr, &origin, &state.token_file)
+        .map_err(|_| "cannot write setup token file path")?;
 
     let reason = lifecycle::serve(listener, app, signals, shutdown_receiver).await?;
     // 强制收口后不再次无界等待操作锁；无法确认终态时禁止后续迁移和角色启动。
@@ -182,211 +292,10 @@ pub async fn run_first_run_with_policy<A: RustEmbed + 'static>(
     }
 }
 
-/// 仅验证部署码和操作状态，不接收配置、不连接数据库，也不消费令牌或建立全局已验证状态。
-async fn verify(State(state): State<Arc<FirstRunState>>, headers: HeaderMap) -> SetupResult {
-    authorize(&state, &headers)?;
-    let _operation = begin_operation(&state)?;
-    Ok(Json(SetupResponse {
-        status: "verified".to_owned(),
-        initialize_and_start: state.policy.initialize_and_start,
-    }))
-}
-
-async fn validate(State(state): State<Arc<FirstRunState>>, request: Request) -> SetupResult {
-    authorize(&state, request.headers())?;
-    let _operation = begin_operation(&state)?;
-    let Json(request) = Json::<SetupRequest>::from_request(request, &())
-        .await
-        .map_err(|_| error(StatusCode::BAD_REQUEST, "invalid_input"))?;
-    let options = config(&state, request);
-    options.validate().map_err(config_error)?;
-    check_database(&database_url(&options.database)?).await?;
-    Ok(Json(SetupResponse {
-        status: "validated".to_owned(),
-        initialize_and_start: state.policy.initialize_and_start,
-    }))
-}
-
-async fn complete(State(state): State<Arc<FirstRunState>>, request: Request) -> SetupResult {
-    authorize(&state, request.headers())?;
-    let mut operation = begin_operation(&state)?;
-    let confirmed_target = if state.policy.initialize_and_start {
-        access::single_header(request.headers(), "x-setup-confirm-target")
-            .ok()
-            .flatten()
-            .map(str::to_owned)
-    } else {
-        None
-    };
-    let Json(request) = Json::<SetupRequest>::from_request(request, &())
-        .await
-        .map_err(|_| error(StatusCode::BAD_REQUEST, "invalid_input"))?;
-    if state.policy.initialize_and_start {
-        require_confirmed_target(&request, confirmed_target.as_deref())?;
-    }
-    let options = config(&state, request);
-    options.validate().map_err(config_error)?;
-    let database_url = database_url(&options.database)?;
-    let confirmed_database = if state.policy.initialize_and_start {
-        let target = SetupDatabaseTarget::from_database_url(&database_url)
-            .ok_or_else(|| error(StatusCode::BAD_REQUEST, "invalid_input"))?;
-        Some(target)
-    } else {
-        None
-    };
-    check_database(&database_url).await?;
-    let written = if state.policy.initialize_and_start {
-        options.write_managed_to(&state.options.output_dir)
-    } else {
-        options.write_to(&state.options.output_dir)
-    };
-    match written {
-        // 发布和保存授权目标使用同一门禁，让监管进程按这次确认复核重读的配置。
-        Ok(()) => operation.status = SetupStatus::Completed(confirmed_database),
-        Err(FirstRunError::OutcomeUnknown) => {
-            // 目录可能已经发布，保留终态直到人工检查并停止此进程，不能恢复为可重试状态。
-            operation.status = SetupStatus::OutcomeUnknown;
-            return Err(config_error(FirstRunError::OutcomeUnknown));
-        }
-        Err(error) => return Err(config_error(error)),
-    }
-    if let Some(sender) = operation.shutdown.take() {
-        let _ = sender.send(());
-    }
-    Ok(Json(SetupResponse {
-        status: "completed".to_owned(),
-        initialize_and_start: state.policy.initialize_and_start,
-    }))
-}
-
-fn require_confirmed_target(
-    request: &SetupRequest,
-    confirmed_target: Option<&str>,
-) -> Result<(), SetupFailure> {
-    // 空库初始化的授权必须与将要发布的目标一致。先核对，再试连和写盘，确认头只包含端点与库名。
-    let database = &request.database;
-    let target = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("host", &database.host)
-        .append_pair("port", &database.port.to_string())
-        .append_pair("name", &database.name)
-        .finish();
-    if !request.confirm_initialize || confirmed_target != Some(target.as_str()) {
-        return Err(error(StatusCode::BAD_REQUEST, "setup_confirmation_required"));
-    }
-    Ok(())
-}
-
-/// 三个接口先独立鉴权再获取同一非阻塞门禁；锁覆盖数据库等待、目录发布、终态与完成通知。
-fn begin_operation(state: &FirstRunState) -> Result<MutexGuard<'_, SetupOperation>, SetupFailure> {
-    let operation =
-        state.operation.try_lock().map_err(|_| error(StatusCode::CONFLICT, "setup_busy"))?;
-    match operation.status {
-        SetupStatus::Pending => Ok(operation),
-        SetupStatus::Completed(_) => Err(error(StatusCode::CONFLICT, "setup_completed")),
-        SetupStatus::OutcomeUnknown => {
-            Err(error(StatusCode::INTERNAL_SERVER_ERROR, "setup_outcome_unknown"))
-        }
-    }
-}
-
-fn authorize(
-    state: &FirstRunState,
-    headers: &HeaderMap,
-) -> Result<(), (StatusCode, Json<SetupErrorResponse>)> {
-    let provided = access::single_header(headers, "x-setup-token").ok().flatten().unwrap_or("");
-    if provided.len() != state.token.len()
-        || !bool::from(provided.as_bytes().ct_eq(state.token.as_bytes()))
-    {
-        return Err(error(StatusCode::FORBIDDEN, "setup_auth"));
-    }
-    Ok(())
-}
-
-fn config(state: &FirstRunState, request: SetupRequest) -> FirstRunConfig {
-    FirstRunConfig {
-        database: PostgresConnectionConfig {
-            host: request.database.host,
-            port: request.database.port,
-            username: request.database.username,
-            password: request.database.password,
-            name: request.database.name,
-        },
-        admin_actor: request.admin_actor,
-        admin_secret: request.admin_secret,
-        public_origin: request.public_origin,
-        admin_origin: request.admin_origin,
-        public_listener_port: request.public_listener_port,
-        admin_listener_port: request.admin_listener_port,
-        metrics_enabled: request.metrics_enabled,
-        schedule: auction_config::AuctionScheduleConfig {
-            enabled: request.schedule_enabled,
-            timezone: request.schedule.timezone,
-            preview_day: request.schedule.preview_day,
-            preview_time: request.schedule.preview_time,
-            open_day: request.schedule.open_day,
-            open_time: request.schedule.open_time,
-            nominal_end_day: request.schedule.nominal_end_day,
-            nominal_end_time: request.schedule.nominal_end_time,
-            // 首次表单不开放 world 或 runtime 接管；沿用 main、isekai 的部署默认值。
-            worlds: vec!["main".to_owned(), "isekai".to_owned()],
-            // 首次设置不开放早鸟期；保持默认关闭，后续在公共配置或 runtime 中启用。
-            early_bird: Default::default(),
-        },
-        start_price: request.start_price,
-        log_filter: request.log_filter,
-        worker_concurrency: request.worker_concurrency,
-        worker_poll_interval_seconds: request.worker_poll_interval_seconds,
-        realtime_poll_interval_millis: request.realtime_poll_interval_millis,
-        control_group: state.options.control_group.clone(),
-        control_uid: state.options.control_uid,
-    }
-}
-
-fn database_url(database: &PostgresConnectionConfig) -> Result<String, SetupFailure> {
-    database.connection_url().map_err(|_| error(StatusCode::BAD_REQUEST, "invalid_input"))
-}
-
-async fn check_database(database_url: &str) -> Result<(), SetupFailure> {
-    let maintenance = auction_config::DatabaseProfilesConfig::default().maintenance;
-    let profile = auction_storage::DatabaseConnectionProfile::maintenance(
-        auction_storage::DatabaseConnectionPurpose::SetupCheck,
-        maintenance.max_connections,
-        maintenance.acquire_timeout_millis,
-    );
-    match tokio::time::timeout(
-        Duration::from_secs(8),
-        DatabaseStore::connect(database_url, profile),
-    )
-    .await
-    {
-        Ok(Ok(store)) => {
-            // 首次空库迁移要求无其他客户端；主动关闭连通性检查池，不遗留后台关闭窗口。
-            store.postgres_pool().close().await;
-            Ok(())
-        }
-        _ => Err(error(StatusCode::SERVICE_UNAVAILABLE, "database_unavailable")),
-    }
-}
-
-fn config_error(error_value: FirstRunError) -> (StatusCode, Json<SetupErrorResponse>) {
-    match error_value {
-        FirstRunError::InvalidInput => error(StatusCode::BAD_REQUEST, "invalid_input"),
-        FirstRunError::InvalidConfig => error(StatusCode::BAD_REQUEST, "configuration_invalid"),
-        FirstRunError::AlreadyExists => error(StatusCode::CONFLICT, "setup_locked"),
-        FirstRunError::Io => error(StatusCode::INTERNAL_SERVER_ERROR, "setup_io"),
-        FirstRunError::OutcomeUnknown => {
-            error(StatusCode::INTERNAL_SERVER_ERROR, "setup_outcome_unknown")
-        }
-    }
-}
-
-fn error(status: StatusCode, code: &'static str) -> (StatusCode, Json<SetupErrorResponse>) {
-    (status, Json(SetupErrorResponse { code: code.to_owned() }))
-}
-
 #[cfg(test)]
 mod tests {
-    use std::{borrow::Cow, net::SocketAddr, sync::Arc, time::Duration};
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::{borrow::Cow, fs, net::SocketAddr, sync::Arc, time::Duration};
 
     use auction_contracts::{SetupDatabaseRequest, SetupRequest, SetupScheduleRequest};
     use auction_http::WebScriptPolicy;
@@ -404,7 +313,8 @@ mod tests {
 
     use super::{
         FirstRunPolicy, FirstRunServerOptions, FirstRunState, SetupOperation, SetupStatus,
-        complete, first_run_router,
+        complete, create_setup_token_file, first_run_router, remove_setup_token,
+        write_setup_banner,
     };
 
     const DATABASE_TARGET: &str = "host=%3A%3A1&port=5432&name=%E6%8B%8D%E5%8D%96+%26+%25";
@@ -421,6 +331,41 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/../auction-contracts/tests/fixtures/admin/setup-confirm-target-mismatch.json"
     ));
+
+    #[test]
+    fn setup_token_is_private_and_logs_only_its_path() {
+        let parent = std::env::temp_dir()
+            .join(format!("auction-setup-token-test-{}", uuid::Uuid::new_v4().simple()));
+        fs::create_dir(&parent).expect("private test parent");
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))
+            .expect("secure test parent");
+        let output_dir = parent.join("config");
+        let secret = "one-time-fixture-secret";
+        let token_file = create_setup_token_file(&output_dir, secret).expect("secure token file");
+        let token_directory = token_file.parent().expect("token directory");
+        // SAFETY: geteuid only reads the effective UID for these filesystem assertions.
+        let effective_uid = unsafe { libc::geteuid() };
+        let directory_metadata = fs::symlink_metadata(token_directory).expect("directory metadata");
+        let file_metadata = fs::symlink_metadata(&token_file).expect("file metadata");
+        assert!(directory_metadata.file_type().is_dir());
+        assert_eq!(directory_metadata.uid(), effective_uid);
+        assert_eq!(directory_metadata.mode() & 0o7777, 0o700);
+        assert!(file_metadata.file_type().is_file());
+        assert_eq!(file_metadata.uid(), effective_uid);
+        assert_eq!(file_metadata.mode() & 0o7777, 0o600);
+        assert_eq!(fs::read_to_string(&token_file).expect("token contents"), secret);
+
+        let mut log = Vec::new();
+        write_setup_banner(&mut log, "http://127.0.0.1:8091", &token_file).expect("banner");
+        let log = String::from_utf8(log).expect("UTF-8 banner");
+        assert!(log.contains(token_file.to_str().expect("absolute UTF-8 path")));
+        assert!(!log.contains(secret));
+
+        remove_setup_token(&token_file).expect("remove consumed token");
+        assert!(!token_file.exists());
+        assert!(!token_directory.exists());
+        fs::remove_dir(parent).expect("remove test parent");
+    }
 
     struct NoAssets;
 
@@ -502,7 +447,9 @@ mod tests {
                 control_uid: 1000,
             },
             token: "fixture-token".to_owned(),
+            token_file: std::env::temp_dir().join("auction-setup-fixture-token/token"),
             policy: Arc::new(FirstRunPolicy::default()),
+
             operation: Mutex::new(SetupOperation { status: SetupStatus::Pending, shutdown: None }),
         })
     }
@@ -704,6 +651,8 @@ mod tests {
                 control_uid: 1000,
             },
             token: "fixture-token".to_owned(),
+            token_file: std::env::temp_dir().join("auction-setup-fixture-token/token"),
+
             policy: Arc::new(FirstRunPolicy { initialize_and_start, ..FirstRunPolicy::default() }),
             operation: Mutex::new(SetupOperation { status: SetupStatus::Pending, shutdown: None }),
         })

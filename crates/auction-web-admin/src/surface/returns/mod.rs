@@ -8,6 +8,6 @@ mod detail;
 mod labels;
 mod list;
 
-pub(super) use detail::detail_page;
-pub(super) use labels::settlement_return_case;
-pub(super) use list::page;
+pub(crate) use detail::detail_page;
+pub(crate) use labels::settlement_return_case;
+pub(crate) use list::page;

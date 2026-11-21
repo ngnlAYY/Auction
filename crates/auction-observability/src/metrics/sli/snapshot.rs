@@ -129,7 +129,7 @@ impl PrometheusCollector for Collector {
     }
 
     fn collect(&self) -> Vec<MetricFamily> {
-        let snapshot = lock(&self.snapshot);
+        let snapshot = lock(&self.snapshot).clone();
         self.enabled.set(i64::from(self.switches.sli_snapshot_enabled()));
         self.available.set(i64::from(snapshot.is_some()));
         self.age.set(

@@ -10,6 +10,7 @@ use serde::Serialize;
 use crate::app::{print_json, progress};
 use crate::cli::{ServiceAction, ServiceArgs};
 use crate::config_dir::ConfigDir;
+use crate::deploy::unit_states;
 use crate::receipt::{self, Action, Outcome, ReceiptContext};
 
 mod guard;
@@ -107,13 +108,25 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
                 }));
             }
             if !states.iter().all(UnitState::stopped) {
-                anyhow::bail!("部分角色正在运行或处于转换状态；请先执行 auction-cli service stop");
+                let error = anyhow::anyhow!(
+                    "部分角色正在运行或处于转换状态；请先执行 auction-cli service stop"
+                );
+                record_failure(
+                    state.directory(),
+                    &systemctl,
+                    Action::Start,
+                    started_at,
+                    &context,
+                    &error,
+                )
+                .await?;
+                return Err(error);
             }
             // 迁移不可撤销：执行前确认锁与回执仍属于同一个状态目录。
             state.verify_unchanged()?;
             match launch(&systemctl, &deployment, Some(&owner), timeout, None).await {
                 Ok(report) => {
-                    let published = publish_receipt(
+                    let published = match publish_receipt(
                         state.directory(),
                         &systemctl,
                         Action::Start,
@@ -123,7 +136,15 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
                         report.migration.as_ref().map(|migration| migration.record.clone()),
                         None,
                     )
-                    .await?;
+                    .await
+                    {
+                        Ok(published) => published,
+                        Err(error) => {
+                            return Err(error.context(
+                                "服务启动已成功，但部署回执发布失败；请先执行 auction-cli service status 核实状态，不要重试启动",
+                            ));
+                        }
+                    };
                     print_json(&report.report_json(&units, &published))
                 }
                 Err(error) => {
@@ -149,9 +170,58 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
             // 先证明新配置与 unit 绑定可用，再停止当前服务。
             let deployment = prepare(config_dir, &systemctl).await?;
             let gate =
-                shutdown::check(config_dir, Some(&deployment.worker), "restart", &shutdown).await?;
-            state.verify_unchanged()?;
-            stop_all(&systemctl).await?;
+                match shutdown::check(config_dir, Some(&deployment.worker), "restart", &shutdown)
+                    .await
+                {
+                    Ok(gate) => gate,
+                    Err(error) => {
+                        record_failure(
+                            state.directory(),
+                            &systemctl,
+                            Action::Restart,
+                            started_at,
+                            &context,
+                            &error,
+                        )
+                        .await?;
+                        return Err(error);
+                    }
+                };
+            if let Err(error) = state.verify_unchanged() {
+                record_failure(
+                    state.directory(),
+                    &systemctl,
+                    Action::Restart,
+                    started_at,
+                    &context,
+                    &error,
+                )
+                .await?;
+                return Err(error);
+            }
+            if let Err(error) = stop_all(&systemctl).await {
+                let observed = match unit_states(&systemctl).await {
+                    Ok(states) => serde_json::to_value(states).unwrap_or_else(
+                        |error| serde_json::json!({"status_error": error.to_string()}),
+                    ),
+                    Err(status_error) => {
+                        serde_json::json!({"status_error": format!("{status_error:#}")})
+                    }
+                };
+                let error = anyhow::anyhow!(
+                    "restart 停止阶段失败；当前 unit 状态 {observed}；原因：{error:#}"
+                );
+                record_failure(
+                    state.directory(),
+                    &systemctl,
+                    Action::Restart,
+                    started_at,
+                    &context,
+                    &error,
+                )
+                .await?;
+                return Err(error);
+            }
             match launch(
                 &systemctl,
                 &deployment,
@@ -162,7 +232,7 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
             .await
             {
                 Ok(report) => {
-                    let published = publish_receipt(
+                    let published = match publish_receipt(
                         state.directory(),
                         &systemctl,
                         Action::Restart,
@@ -172,10 +242,21 @@ pub(crate) async fn run(config_dir: &ConfigDir, args: ServiceArgs) -> anyhow::Re
                         report.migration.as_ref().map(|migration| migration.record.clone()),
                         None,
                     )
-                    .await?;
+                    .await
+                    {
+                        Ok(published) => published,
+                        Err(error) => {
+                            return Err(error.context(
+                                "服务重启已成功，但部署回执发布失败；请先执行 auction-cli service status 核实状态，不要重试重启",
+                            ));
+                        }
+                    };
                     print_json(&report.report_json(&units, &published))
                 }
                 Err(error) => {
+                    let error = error.context(
+                        "重启未完成，所有服务角色当前均已停止；修正原因后请执行 auction-cli service start 恢复服务",
+                    );
                     record_failure(
                         state.directory(),
                         &systemctl,

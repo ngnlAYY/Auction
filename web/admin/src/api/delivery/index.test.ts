@@ -44,7 +44,7 @@ const SESSION_BODY = JSON.stringify({
     csrf_token: "csrf-token",
     expires_at: "2099-01-01T00:00:00Z",
     absolute_expires_at: "2099-01-02T00:00:00Z",
-    server_time: "2099-01-01T00:00:00Z",
+    server_time: "2098-12-31T00:00:00Z",
   },
 });
 

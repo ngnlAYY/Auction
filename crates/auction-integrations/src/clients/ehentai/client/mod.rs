@@ -46,6 +46,7 @@ pub struct EhentaiClient {
     isekai_board_id: i32,
     ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
     write_progress: Option<auction_application::forum::ForumWriteProgress>,
+    topic_create_lock: Arc<tokio::sync::Mutex<()>>,
     external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
 }
 

@@ -6,8 +6,13 @@ import { validUuid } from "@auction/web-shared/ui/validation";
 import { boolValue, int, nonempty, object, positive, string, time } from "..";
 import { validEquipment } from "./preview-equipment";
 
-/** 校验 live lot 的字段闭集、价格关系、领先者状态、时间与完整装备。 */
-export function validLiveLot(value: unknown, auctionId: string, lotId: string | null): boolean {
+/** 校验 live lot 的字段闭集、价格关系、领先者状态、时间与装备投影；详情要求完整属性。 */
+export function validLiveLot(
+  value: unknown,
+  auctionId: string,
+  lotId: string | null,
+  full = true,
+): boolean {
   const decoded = object(value);
   if (decoded === null) return false;
   const hasLeader = boolValue(decoded.has_leader);
@@ -60,6 +65,6 @@ export function validLiveLot(value: unknown, auctionId: string, lotId: string | 
     hasLeader === leaderPresent &&
     statusMatches &&
     positive(decoded.state_version) &&
-    validEquipment(decoded.equipment, true)
+    validEquipment(decoded.equipment, full)
   );
 }

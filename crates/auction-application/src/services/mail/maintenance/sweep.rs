@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use auction_time::Timestamp;
 use serde_json::{Value, json};
+use uuid::Uuid;
 
 use super::MailboxMaintenanceReport;
 use super::MailboxMaintenanceService;
@@ -22,6 +23,14 @@ const RECOVERY_PER_SWEEP: usize = 20;
 /// 普通候选占用原有位置，失败取证只使用本轮剩余位置。
 const CANDIDATES_PER_SWEEP: usize = 200;
 
+#[derive(Clone, Copy)]
+struct SweepContext<'a> {
+    world_id: &'a str,
+    start: Option<MoogleMailboxSweepPosition>,
+    sweep_id: Uuid,
+    deadline: Instant,
+}
+
 impl MailboxMaintenanceService {
     /// Worker 以同一总截止点包住完整 future；DB、凭据排队与所有远端操作均计入维护预算。
     /// 普通页面的远端失败分开记录，不清除已获证据；游标与 discard 围栏在取消后仍保留。
@@ -38,9 +47,25 @@ impl MailboxMaintenanceService {
         check_deadline(deadline)?;
         let mut report = MailboxMaintenanceReport::default();
         let batch = self.store.unproven_sends(world_id, CANDIDATES_PER_SWEEP as i64).await?;
+        let sweep_id = Uuid::new_v4();
         let entries = self.read_sent_entries(world_id, &mut report).await;
+        let oldest_visible = if world_id == "main" {
+            entries
+                .as_ref()
+                .filter(|coverage| coverage.complete)
+                .and_then(|coverage| coverage.entries.iter().map(|entry| entry.sent_at).min())
+        } else {
+            None
+        };
+        let context = SweepContext { world_id, start: batch.position, sweep_id, deadline };
         let remaining = self
-            .recover_sent(world_id, &batch.candidates, entries.as_ref(), deadline, &mut report)
+            .recover_sent(
+                &context,
+                &batch.candidates,
+                oldest_visible,
+                entries.as_ref(),
+                &mut report,
+            )
             .await?;
         check_deadline(deadline)?;
         self.clean_compose(world_id, &batch.candidates, deadline, activity, &mut report).await?;
@@ -51,15 +76,8 @@ impl MailboxMaintenanceService {
             && slots_left > 0
             && let Some(coverage) = entries.as_ref().filter(|coverage| coverage.complete)
         {
-            self.observe_failed_sends(
-                coverage,
-                batch.position,
-                slots_left,
-                remaining,
-                deadline,
-                &mut report,
-            )
-            .await?;
+            self.observe_failed_sends(&context, coverage, slots_left, remaining, &mut report)
+                .await?;
         }
         Ok(report)
     }
@@ -91,12 +109,13 @@ impl MailboxMaintenanceService {
     /// Sent/Take 统计按字段直接累加进本轮报告，不经位置元组回填；返回错误时整轮报告随之丢弃。
     async fn recover_sent(
         &self,
-        world_id: &str,
+        context: &SweepContext<'_>,
         candidates: &[MoogleMailboxSweepCandidate],
+        oldest_visible: Option<Timestamp>,
         entries: Option<&MoogleMailboxSentEntries>,
-        deadline: Instant,
         report: &mut MailboxMaintenanceReport,
     ) -> Result<usize, ApplicationError> {
+        let SweepContext { world_id, start, sweep_id, deadline } = *context;
         // 按已读取的稳定环形批次逐条开始；候选批次本身不推进持久游标。
         let mut recovery_budget = RECOVERY_PER_SWEEP;
         for slot in candidates {
@@ -110,9 +129,21 @@ impl MailboxMaintenanceService {
                 // 未获得 Sent 列表就没有开始此候选，保留它及其后缀的持久轮转位置。
                 break;
             }
-            if !self.store.record_sweep_attempt(world_id, slot.delivery_id).await? {
+            if !self
+                .store
+                .record_sweep_attempt_from(
+                    world_id,
+                    slot.delivery_id,
+                    start,
+                    sweep_id,
+                    None,
+                    oldest_visible,
+                )
+                .await?
+            {
                 continue;
             }
+            check_deadline(deadline)?;
             report.sent_candidates += 1;
             // 不可重建的旧行也获得一次轮转机会，但不读取远端、不产生恢复证明。
             let Some(candidate) = slot.send.as_ref() else { continue };
@@ -198,13 +229,13 @@ impl MailboxMaintenanceService {
 
     async fn observe_failed_sends(
         &self,
+        context: &SweepContext<'_>,
         coverage: &MoogleMailboxSentEntries,
-        start: Option<MoogleMailboxSweepPosition>,
         slots_left: usize,
         mut budget: usize,
-        deadline: Instant,
         report: &mut MailboxMaintenanceReport,
     ) -> Result<(), ApplicationError> {
+        let SweepContext { start, sweep_id, deadline, .. } = *context;
         let Some(oldest) = coverage.entries.iter().map(|entry| entry.sent_at).min() else {
             return Ok(());
         };
@@ -222,7 +253,14 @@ impl MailboxMaintenanceService {
             // 只有持久登记成功才使用一个剩余额度。失败、取消和未知提交都不能重新授权读取（不变量 5）。
             if !self
                 .store
-                .begin_failed_sent_detail(slot.delivery_id, slot.fencing_version, entry)
+                .begin_failed_sent_detail_from(
+                    slot.delivery_id,
+                    slot.fencing_version,
+                    entry,
+                    start,
+                    sweep_id,
+                    oldest,
+                )
                 .await?
             {
                 continue;
@@ -240,6 +278,7 @@ impl MailboxMaintenanceService {
                     continue;
                 }
             };
+            check_deadline(deadline)?;
             let credential_matches = target
                 .expectation
                 .credential
@@ -329,7 +368,9 @@ mod tests {
     use uuid::Uuid;
 
     use super::super::ComposeCleanupFailure;
-    use super::{MailboxMaintenanceReport, MailboxMaintenanceService, RECOVERY_PER_SWEEP};
+    use super::{
+        MailboxMaintenanceReport, MailboxMaintenanceService, RECOVERY_PER_SWEEP, SweepContext,
+    };
     use crate::errors::ApplicationError;
     use crate::ports::core::ApplicationFuture;
     use crate::ports::core::Clock;
@@ -736,10 +777,15 @@ mod tests {
         let mut report = MailboxMaintenanceReport::default();
         let entries = block_on(service.read_sent_entries("main", &mut report));
         block_on(service.recover_sent(
-            "main",
+            &SweepContext {
+                world_id: "main",
+                start: None,
+                sweep_id: Uuid::new_v4(),
+                deadline: Instant::now() + std::time::Duration::from_secs(60),
+            },
             &[MoogleMailboxSweepCandidate { delivery_id, send: Some(candidate) }],
+            None,
             entries.as_ref(),
-            Instant::now() + std::time::Duration::from_secs(60),
             &mut report,
         ))
         .expect("维护不得失败");
@@ -1213,10 +1259,15 @@ mod tests {
         let mut report = MailboxMaintenanceReport::default();
         let entries = block_on(service.read_sent_entries("main", &mut report));
         block_on(service.recover_sent(
-            "main",
+            &SweepContext {
+                world_id: "main",
+                start: None,
+                sweep_id: Uuid::new_v4(),
+                deadline: Instant::now() + std::time::Duration::from_secs(60),
+            },
             &[MoogleMailboxSweepCandidate { delivery_id, send: Some(send) }],
+            None,
             entries.as_ref(),
-            Instant::now() + std::time::Duration::from_secs(60),
             &mut report,
         ))
         .expect("维护不得失败");
@@ -1390,10 +1441,15 @@ mod tests {
         let mut report = MailboxMaintenanceReport::default();
         let entries = block_on(service.read_sent_entries("main", &mut report));
         block_on(service.recover_sent(
-            "main",
+            &SweepContext {
+                world_id: "main",
+                start: None,
+                sweep_id: Uuid::new_v4(),
+                deadline: Instant::now() + std::time::Duration::from_secs(60),
+            },
             &[MoogleMailboxSweepCandidate { delivery_id, send: Some(intake) }],
+            None,
             entries.as_ref(),
-            Instant::now() + std::time::Duration::from_secs(60),
             &mut report,
         ))
         .expect("维护不得失败");

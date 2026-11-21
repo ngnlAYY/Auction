@@ -9,6 +9,7 @@ use clap::Parser;
 use uuid::Uuid;
 
 use super::artifact::{Artifact, ArtifactBinary, REQUIRED_BINARIES};
+use super::drill_package_inputs;
 use super::run_inspected;
 use crate::cli::{Cli, Command, DeployArgs};
 use crate::config_dir::ConfigDir;
@@ -19,7 +20,7 @@ use crate::support::files::effective_uid;
 /// 都已停止、运行账号为当前 UID、配置绑定到本现场的角色文件），其余调用（停止前读取超时、stop、
 /// start）记录后失败退出。
 const SYSTEMCTL: &str = r#"#!/bin/sh
-printf '%s\n' "$*" >> '@LOG@'
+printf '%s\n' "$*" >> @LOG@
 [ "$1" = show ] && [ "$2" = --property ] || exit 1
 case "$5" in
   auction-worker.service) role=worker ;;
@@ -27,7 +28,7 @@ case "$5" in
   auction-public-api.service) role=public ;;
   *) exit 1 ;;
 esac
-printf 'LoadState=loaded\nActiveState=inactive\nSubState=dead\nMainPID=0\nInvocationID=\nUser=@UID@\nDynamicUser=no\nEnvironment=AUCTION_CONFIG_FILE=@CONFIG@/%s.toml\n' "$role"
+printf 'LoadState=loaded\nActiveState=inactive\nSubState=dead\nMainPID=0\nInvocationID=\nUser=@UID@\nDynamicUser=no\nEnvironment="AUCTION_CONFIG_FILE=%s/%s.toml"\n' @CONFIG@ "$role"
 "#;
 
 /// deploy 入口的本地现场：首次设置向导生成的三角色配置、owner 凭据、安装目录（标准 0755）、停机
@@ -55,9 +56,9 @@ impl Site {
             write_file(&site.path(&format!("bin/{name}")), &format!("a-{name}"), 0o755);
         }
         let script = SYSTEMCTL
-            .replace("@LOG@", &site.path("systemctl.log").display().to_string())
+            .replace("@LOG@", &shell_literal(&site.path("systemctl.log").display().to_string()))
             .replace("@UID@", &effective_uid().to_string())
-            .replace("@CONFIG@", &site.path("config").display().to_string());
+            .replace("@CONFIG@", &shell_literal(&site.path("config").display().to_string()));
         write_file(&site.path("systemctl"), &script, 0o755);
         site
     }
@@ -77,6 +78,7 @@ impl Site {
                 write_file(&bin.join(name), &content, 0o755);
                 ArtifactBinary {
                     name,
+                    file: fs::File::open(bin.join(name)).expect("固定真实制品文件句柄"),
                     path: bin.join(name),
                     sha256: sha256_bytes(content.as_bytes()),
                     bytes: content.len() as u64,
@@ -105,6 +107,8 @@ impl Site {
             text("owner.toml"),
             "--backup-dir".to_owned(),
             text("backups"),
+            "--package-sha256".to_owned(),
+            "f".repeat(64),
             "--install-dir".to_owned(),
             text("bin"),
             "--systemctl".to_owned(),
@@ -116,6 +120,10 @@ impl Site {
         ])
         .expect("参数可以解析");
         let Command::Deploy(args) = cli.command else { panic!("应解析为 deploy") };
+        assert_eq!(
+            args.package_sha256.as_deref(),
+            Some("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+        );
         args
     }
 }
@@ -164,6 +172,10 @@ fn write_file(path: &Path, content: &str, mode: u32) {
     fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("设置权限");
 }
 
+fn shell_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 /// 只有安装目录中的旧 auction-cli 缺执行位（0644；三个角色程序、各级目录与运行账号都满足）：deploy
 /// 入口按生产顺序走完 owner 凭据、部署锁、严格配置与 unit 绑定、安装目录推导后，在停机前拒绝。
 /// systemctl 替身只收到状态查询，没有停止前的超时查询、stop 或 start；没有写回执、回滚记录或停机
@@ -199,4 +211,47 @@ async fn deploy_rejects_an_unexecutable_installed_cli_before_stopping_any_unit()
     assert_eq!(backups, 0, "停机前拒绝不写停机备份");
     let mode = fs::metadata(&cli).expect("元数据").permissions().mode() & 0o777;
     assert_eq!(mode, 0o644, "门禁不修补权限");
+}
+
+/// 不可信安装目录在部署入口的安装前门禁失败：原程序保持不变，systemctl 只收到状态查询，
+/// 不得停止、启动或重启 unit。
+#[tokio::test]
+async fn deploy_rejects_untrusted_install_dir_without_service_mutations() {
+    let site = Site::new();
+    fs::set_permissions(site.path("bin"), fs::Permissions::from_mode(0o775)).expect("放宽安装目录");
+    let originals = REQUIRED_BINARIES
+        .map(|name| fs::read(site.path(&format!("bin/{name}"))).expect("读取原程序"));
+    let config_dir = ConfigDir::new(&site.path("config")).expect("配置目录");
+
+    let error = run_inspected(&config_dir, &site.artifact(), site.deploy_args())
+        .await
+        .expect_err("不可信安装目录必须失败关闭");
+    let text = format!("{error:#}");
+    assert!(text.contains("安装目录") && text.contains("不可信"), "{text}");
+
+    let calls = fs::read_to_string(site.path("systemctl.log")).expect("systemctl 调用记录");
+    assert!(!calls.trim().is_empty(), "入口应记录 unit 状态查询");
+    assert!(calls.lines().all(|line| line.starts_with("show --property LoadState,")), "{calls}");
+    assert!(!calls.contains(" start ") && !calls.contains(" restart "), "{calls}");
+    for (name, expected) in REQUIRED_BINARIES.into_iter().zip(originals) {
+        assert_eq!(
+            fs::read(site.path(&format!("bin/{name}"))).expect("复核原程序"),
+            expected,
+            "{name}"
+        );
+    }
+    assert!(!site.path("state/receipts").exists(), "信任门禁前不写部署回执");
+}
+
+#[test]
+fn migration_deploy_requires_verified_tarball_digest_and_prior_role_package() {
+    let package = "auction-rust-0.1.0-aaaaaaaaaaaa";
+    let digest = "f".repeat(64);
+    assert!(drill_package_inputs(None, Some(package)).is_err());
+    assert!(drill_package_inputs(Some(&digest), None).is_err());
+    assert!(drill_package_inputs(Some("not-a-digest"), Some(package)).is_err());
+    assert_eq!(
+        drill_package_inputs(Some(&digest), Some(package)).expect("complete drill inputs"),
+        (package, digest.as_str())
+    );
 }

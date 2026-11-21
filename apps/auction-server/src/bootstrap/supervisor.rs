@@ -157,6 +157,13 @@ async fn stop(children: &mut [RoleChild], signals: &mut TerminationSignals) -> a
     };
     if !complete {
         for child in children.iter_mut().rev() {
+            if let Some(pid) = child.process.id() {
+                // 每个角色在 spawn 前创建独立进程组；先停止整组，避免孤儿工作进程继续持有锁。
+                // SAFETY：pid 来自尚未回收的 Child，且其进程组由本 supervisor 创建。
+                unsafe {
+                    libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
+                }
+            }
             let _ = child.process.start_kill();
         }
         let mut reap_error = None;

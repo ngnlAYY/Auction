@@ -106,6 +106,26 @@ async fn ensure_postgres_once(
     {
         let result = snapshot_postgres(&row)?;
         verify_existing(&result, request)?;
+        let command = sqlx::query(
+            "SELECT command_kind, aggregate_id, request_hash, result_code
+             FROM public.auction_commands WHERE command_id = $1",
+        )
+        .bind(request.create_command_id.as_uuid())
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(PostgresBootstrapError::Storage)?
+        .ok_or_else(|| repository_error("周计划创建命令账本缺失"))?;
+        let command_kind: String = command.try_get("command_kind").map_err(map_storage_error)?;
+        let aggregate_id: Uuid = command.try_get("aggregate_id").map_err(map_storage_error)?;
+        let request_hash: Vec<u8> = command.try_get("request_hash").map_err(map_storage_error)?;
+        let result_code: String = command.try_get("result_code").map_err(map_storage_error)?;
+        if command_kind != "scheduled_round_create"
+            || aggregate_id != request.round_id
+            || request_hash.as_slice() != request.request_hash.as_bytes().as_slice()
+            || result_code != "accepted"
+        {
+            return Err(repository_error("周计划创建命令摘要冲突").into());
+        }
         if let Some(source) = row
             .try_get::<Option<serde_json::Value>, _>("schedule_snapshot")
             .map_err(map_storage_error)?

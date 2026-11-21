@@ -184,7 +184,7 @@ async fn observe_observations(
             sqlx::query(
                 "UPDATE public.operations_alert_signals
                  SET active = false, resolved_at = $2, next_notify_at = NULL,
-                     next_webhook_at = NULL,
+                     next_webhook_at = NULL, silenced_until = NULL,
                      state_version = state_version + 1
                  WHERE fingerprint = ANY($1::bytea[]) AND active",
             )

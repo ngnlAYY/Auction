@@ -3,9 +3,7 @@
 use std::path::Path;
 
 use anyhow::Context;
-use auction_storage::{
-    RETENTION_PURGE_RECEIPT_FORMAT, RetentionPurgeError, RetentionPurgeFilesystemResult,
-};
+use auction_storage::{RETENTION_PURGE_RECEIPT_FORMAT, RetentionPurgeError};
 use auction_time::Timestamp;
 
 use super::dry_run::DryRunReceipt;
@@ -18,15 +16,24 @@ pub(super) fn execution_failed(
     dry_run_receipt: &Path,
     receipt: &DryRunReceipt,
     receipt_path: &Path,
-    filesystem: Option<RetentionPurgeFilesystemResult>,
+    filesystem: Option<super::FilesystemPurgeEvidence>,
     error: RetentionPurgeError,
 ) -> anyhow::Error {
     let failure_code = failure_code(&error);
     let error = anyhow::Error::new(error).context("执行保留清理失败");
-    let Some(filesystem) = filesystem.filter(|result| result.deleted_files > 0) else {
+    let Some(filesystem) = filesystem.filter(|result| result.artifact.deleted_files > 0) else {
         return error;
     };
-    let deleted_files = filesystem.deleted_files;
+    let deleted_files = filesystem.artifact.deleted_files;
+    let artifact_reference = match (&filesystem.artifact_path, &filesystem.sha256) {
+        (Some(path), Some(sha256)) => serde_json::json!({ "path": path, "sha256": sha256 }),
+        _ => serde_json::Value::Null,
+    };
+    let failure_note = if filesystem.artifact_path.is_some() {
+        "文件清理证据已发布，随后数据库执行返回错误；没有数据库执行报告与 auction.retention.purge 审计"
+    } else {
+        "文件清理已经执行但独立证据文件未能发布；数据库清理未执行，也没有 auction.retention.purge 审计"
+    };
     let document = serde_json::json!({
         "format": RETENTION_PURGE_RECEIPT_FORMAT,
         "created_at": Timestamp::now(),
@@ -37,10 +44,11 @@ pub(super) fn execution_failed(
         "dry_run_created_at": receipt.created_at,
         "database": receipt.database_retention.database_name,
         "execution": null,
-        "filesystem": filesystem,
+        "filesystem": &filesystem.artifact,
+        "filesystem_artifact": artifact_reference,
         "mutation_executed": true,
         "notes": [
-            "加密诊断文件已按批准上限删除，随后数据库执行返回错误；没有数据库执行报告与 auction.retention.purge 审计",
+            failure_note,
             "预校验类错误（如回执过期）不删除任何数据库行；执行期错误可能已有批次提交，须人工核对",
             "重新执行 db retention-dry-run 并逐族重新批准后再清理",
         ],
@@ -79,8 +87,9 @@ fn failure_code(error: &RetentionPurgeError) -> &'static str {
         RetentionPurgeError::TableNotPurgeable => "table_not_purgeable",
         RetentionPurgeError::CandidateCountInvalid => "candidate_count_invalid",
         RetentionPurgeError::FilesystemInvalid => "filesystem_invalid",
+        RetentionPurgeError::FilesystemArtifactReplay => "filesystem_artifact_replay",
         RetentionPurgeError::CountOverflow => "count_overflow",
-        RetentionPurgeError::Query { .. } => "query_failed",
         RetentionPurgeError::Commit { .. } => "commit_failed",
+        RetentionPurgeError::Query { .. } => "query_failed",
     }
 }

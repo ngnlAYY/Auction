@@ -29,7 +29,7 @@ pub struct ForumTopicCursor {
 impl ForumTopicCursor {
     /// 覆盖该楼层的页号（0 基）。
     pub const fn page(&self) -> u32 {
-        (self.post_number - 1) / FORUM_POSTS_PER_PAGE
+        self.post_number.saturating_sub(1) / FORUM_POSTS_PER_PAGE
     }
 
     /// 游标必须指向真实用户楼层（系统日志楼层之后）且带规范数字 post ID。
@@ -73,10 +73,12 @@ pub fn forum_topic_scan_pages(
 
 /// 一次主题读取的分页覆盖。
 ///
-/// 增量扫描只包含固定楼层页与游标页之后的分页，`preview.posts` 因此可能跳层；
-/// `post_numbers` 保存每条帖子在主题内的绝对楼层，供命令账本与系统日志使用。
+/// 增量扫描只包含固定楼层页与游标页之后的分页，`preview.posts` 因此可能跳层。
+/// `fixed_post_numbers` 对应目录首帖之后已持久化的目录续页与系统日志楼；
+/// `post_numbers` 只对应系统日志之后的用户回帖，且保留其绝对楼层。
 pub struct ForumTopicScan {
     pub preview: AdminForumPreviewResult,
+    pub fixed_post_numbers: Vec<u32>,
     pub post_numbers: Vec<u32>,
     pub mode: ForumTopicScanMode,
     /// 远端主题按 HTTP 分页发现的总页数；读取器不知道时为 None。
@@ -86,10 +88,25 @@ pub struct ForumTopicScan {
 }
 
 impl ForumTopicScan {
-    /// 楼层必须与帖子一一对应；不满足时按解析失败处理，不能靠索引推测楼层。
+    /// 固定帖与用户帖楼层必须分别连续且与预览帖子一一对应。
     pub fn validate(&self) -> Result<(), AdminForumPreviewError> {
         self.preview.validate()?;
-        if self.post_numbers.len() != self.preview.posts.len() {
+        let fixed_numbers_valid = self.fixed_post_numbers.is_empty()
+            && self.preview.posts.is_empty()
+            || self.fixed_post_numbers.first() == Some(&2)
+                && self
+                    .fixed_post_numbers
+                    .windows(2)
+                    .all(|pair| pair[1].checked_sub(pair[0]) == Some(1));
+        let replies_follow_fixed = self.post_numbers.iter().all(|number| *number >= 3)
+            && self.post_numbers.first().is_none_or(|first| {
+                self.fixed_post_numbers.last().is_none_or(|fixed| first > fixed)
+            });
+        if self.fixed_post_numbers.len() + self.post_numbers.len() != self.preview.posts.len()
+            || !fixed_numbers_valid
+            || !replies_follow_fixed
+            || self.post_numbers.windows(2).any(|pair| pair[0] >= pair[1])
+        {
             return Err(AdminForumPreviewError::ParseFailed);
         }
         Ok(())
@@ -101,6 +118,7 @@ impl fmt::Debug for ForumTopicScan {
         formatter
             .debug_struct("ForumTopicScan")
             .field("preview", &self.preview)
+            .field("fixed_post_count", &self.fixed_post_numbers.len())
             .field("post_count", &self.post_numbers.len())
             .field("first_post_number", &self.post_numbers.first())
             .field("last_post_number", &self.post_numbers.last())

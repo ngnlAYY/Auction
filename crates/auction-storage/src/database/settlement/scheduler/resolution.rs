@@ -15,30 +15,51 @@ pub(super) async fn complete_postgres(
     claim: &SettlementWorkClaim,
     completed_at: Timestamp,
 ) -> Result<(), auction_application::core::RepositoryError> {
+    let mut transaction = pool.begin().await.map_err(map_storage_error)?;
+    // 先锁定 workflow 行；首写必须持有当前未过期租约，同命令的既有标记仍可安全重放。
+    let completion_command_id: Option<uuid::Uuid> = sqlx::query_scalar(
+        r#"SELECT settlement_complete_command_id
+           FROM public.auctions
+           WHERE id = $1 AND status = 'settled' AND settlement_workflow_id = $2
+           FOR UPDATE"#,
+    )
+    .bind(claim.auction_id.as_uuid())
+    .bind(claim.workflow_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(map_storage_error)?
+    .ok_or_else(|| repository_error("结算 workflow 完成 fence 已失效"))?;
+    if completion_command_id == Some(claim.settlement_command_id.as_uuid()) {
+        transaction.commit().await.map_err(map_storage_error)?;
+        return Ok(());
+    }
+
+    // 在同一行锁下由 PostgreSQL 比较同精度的租约截止，避免 Rust 纳秒值与数据库微秒值失配。
     let result = sqlx::query(
         r#"UPDATE public.auctions
            SET settlement_complete_command_id = $3,
                settlement_next_attempt_at = NULL,
                settlement_last_error_code = NULL,
-               updated_at = CASE
-                   WHEN settlement_complete_command_id IS NULL THEN $4
-                   ELSE updated_at
-               END
+               updated_at = $4
            WHERE id = $1 AND status = 'settled' AND settlement_workflow_id = $2
-             AND (settlement_next_attempt_at IS NULL OR settlement_next_attempt_at = $5)
-             AND (settlement_complete_command_id IS NULL OR settlement_complete_command_id = $3)"#,
+             AND settlement_complete_command_id IS NULL
+             AND settlement_next_attempt_at = $5
+             AND settlement_next_attempt_at > clock_timestamp()"#,
     )
     .bind(claim.auction_id.as_uuid())
     .bind(claim.workflow_id)
     .bind(claim.settlement_command_id.as_uuid())
     .bind(completed_at)
     .bind(claim.lease_until)
-    .execute(pool)
+    .execute(&mut *transaction)
     .await
     .map_err(map_storage_error)?;
     if result.rows_affected() != 1 {
+        // 领取用 SKIP LOCKED，返回围栏拒绝前须等待回滚释放本行。
+        transaction.rollback().await.map_err(map_storage_error)?;
         return Err(repository_error("结算 workflow 完成 fence 已失效"));
     }
+    transaction.commit().await.map_err(map_storage_error)?;
     Ok(())
 }
 

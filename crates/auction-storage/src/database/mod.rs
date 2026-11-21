@@ -109,8 +109,9 @@ pub use maintenance::retention::purge::{
     RETENTION_PURGE_APPROVAL_FORMAT, RETENTION_PURGE_DEFAULT_BATCH_SIZE,
     RETENTION_PURGE_DRY_RUN_MAX_DURATION_SECONDS, RETENTION_PURGE_MAX_BATCH_SIZE,
     RETENTION_PURGE_MIN_BATCH_SIZE, RETENTION_PURGE_POLICY_VERSION, RETENTION_PURGE_RECEIPT_FORMAT,
-    RETENTION_PURGE_RECEIPT_MAX_AGE_SECONDS, RetentionPurgeApproval, RetentionPurgeError,
-    RetentionPurgeFamilyResult, RetentionPurgeFilesystemResult, RetentionPurgeOutcome,
+    RETENTION_PURGE_RECEIPT_MAX_AGE_SECONDS, RetentionPurgeApproval,
+    RetentionPurgeApprovalTokenInput, RetentionPurgeError, RetentionPurgeFamilyResult,
+    RetentionPurgeFilesystemArtifactRef, RetentionPurgeFilesystemResult, RetentionPurgeOutcome,
     RetentionPurgeReport, RetentionPurgeRequest, RetentionPurgeTableApproval,
     RetentionPurgeTableResult, retention_purge_approval_token,
 };

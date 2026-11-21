@@ -9,7 +9,7 @@ use auction_observability::{WorkerLoop, WorkerRecorder};
 use tokio::task::JoinSet;
 
 use super::delivery;
-use super::delivery::run_delivery_cycle;
+use super::delivery::cycle::run_delivery_cycle;
 use super::error::WorkerError;
 use super::model::PersistentWorker;
 use super::operations::{OperationsAlertLoopAction, run_operations_alert_loop};

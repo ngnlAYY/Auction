@@ -6,21 +6,31 @@
 use std::collections::HashSet;
 
 use auction_application::settlement::{
-    SettlementReturnCaseSummary, SettlementReturnCommandResult, SettlementReturnCustody,
-    SettlementReturnDetail, SettlementReturnDispatch, SettlementReturnEvent, SettlementReturnPage,
-    SettlementReturnTake,
+    SettlementReturnAssetLocation, SettlementReturnCaseSummary, SettlementReturnCommandResult,
+    SettlementReturnCustody, SettlementReturnDetail, SettlementReturnDispatch,
+    SettlementReturnMatch, SettlementReturnPage, SettlementReturnReason, SettlementReturnTake,
 };
 use auction_contracts::{
+    AdminSettlementReturnAction, AdminSettlementReturnBlocker,
     AdminSettlementReturnBlockerResponse, AdminSettlementReturnCommandResponse,
     AdminSettlementReturnCustodyResponse, AdminSettlementReturnDetailResponse,
-    AdminSettlementReturnDispatchResponse, AdminSettlementReturnEventResponse,
-    AdminSettlementReturnListResponse, AdminSettlementReturnSummaryResponse,
+    AdminSettlementReturnDispatchResponse, AdminSettlementReturnListResponse,
+    AdminSettlementReturnMatchState, AdminSettlementReturnPlan, AdminSettlementReturnReason,
+    AdminSettlementReturnStatus, AdminSettlementReturnSummaryResponse,
     AdminSettlementReturnTakeResponse, AdminStrictPaginationResponse,
 };
-use auction_domain::{SettlementReturnAction, SettlementReturnCaseStatus};
+use auction_domain::{
+    SettlementReturnAction, SettlementReturnBlocker, SettlementReturnCaseStatus,
+    SettlementReturnPlan, valid_text,
+};
 use uuid::Uuid;
 
 use crate::mapping::timestamp;
+
+mod events;
+mod validation;
+
+pub(super) use events::map_event;
 
 /// 映射一页列表；`page`、`limit` 与 `offset` 是本次请求的回显与校验依据。
 pub(super) fn map_page(
@@ -31,7 +41,11 @@ pub(super) fn map_page(
 ) -> Option<AdminSettlementReturnListResponse> {
     let count = i64::try_from(result.items.len()).ok()?;
     // 总数与当前页读自同一快照：非空页的末行不可能越过总数。
-    if count > limit
+    if page < 1
+        || limit < 1
+        || offset < 0
+        || page.checked_sub(1)?.checked_mul(limit)? != offset
+        || count > limit
         || result.total < 0
         || (count > 0 && result.total < offset.checked_add(count)?)
     {
@@ -49,6 +63,7 @@ pub(super) fn map_summary(
     summary: SettlementReturnCaseSummary,
 ) -> Option<AdminSettlementReturnSummaryResponse> {
     if summary.case_version < 1
+        || !valid_summary_binding(&summary)
         || !matches!(summary.world_id.as_str(), "main" | "isekai")
         || summary.credits < 0
         || summary.cod < 0
@@ -59,9 +74,9 @@ pub(super) fn map_summary(
     Some(AdminSettlementReturnSummaryResponse {
         return_id: summary.return_mail_id.to_string(),
         case_version: summary.case_version,
-        status: summary.status.as_str().to_owned(),
-        match_state: summary.match_state.as_str().to_owned(),
-        reason_code: summary.reason.as_str().to_owned(),
+        status: admin_status(summary.status),
+        match_state: admin_match_state(summary.match_state),
+        reason_code: admin_reason(summary.reason),
         world_id: summary.world_id,
         external_mail_id: summary.external_mail_id,
         received_at: timestamp(summary.received_at),
@@ -75,7 +90,7 @@ pub(super) fn map_summary(
         credits: summary.credits,
         cod: summary.cod,
         attachment_count: summary.attachment_count,
-        plan: summary.plan.map(|plan| plan.as_str().to_owned()),
+        plan: summary.plan.map(admin_plan),
         resend_limit: summary.resend_limit,
         resends_used: summary.resends_used,
         asset_location: summary.asset_location.as_str().to_owned(),
@@ -83,6 +98,22 @@ pub(super) fn map_summary(
         updated_at: timestamp(summary.updated_at),
         closed_at: summary.closed_at.map(timestamp),
     })
+}
+fn valid_summary_binding(summary: &SettlementReturnCaseSummary) -> bool {
+    let bound = summary.obligation_id.is_some();
+    let has_dispatch = summary.delivery_id.is_some();
+    bound == summary.obligation_kind.is_some()
+        && bound == summary.auction_id.is_some()
+        && bound == summary.lot_id.is_some()
+        && has_dispatch == summary.dispatch_no.is_some()
+        && has_dispatch == summary.recipient.is_some()
+        && summary.obligation_id.is_none_or(|id| !id.is_nil())
+        && summary.auction_id.is_none_or(|id| !id.is_nil())
+        && summary.lot_id.is_none_or(|id| !id.is_nil())
+        && summary.delivery_id.is_none_or(|id| !id.is_nil())
+        && summary.dispatch_no.is_none_or(|dispatch_no| dispatch_no > 0)
+        && summary.recipient.as_deref().is_none_or(|value| valid_text(value, 256))
+        && summary.asset_location == SettlementReturnAssetLocation::of(summary.status, has_dispatch)
 }
 
 /// 映射详情；摘要必须正是请求的案件，事件版本严格递增，派发编号严格递增，允许动作与阻断
@@ -93,16 +124,17 @@ pub(super) fn map_detail(
 ) -> Option<AdminSettlementReturnDetailResponse> {
     if detail.summary.return_mail_id != requested
         || !strictly_increasing(detail.events.iter().map(|event| event.case_version))
-        || !strictly_increasing(
-            detail.dispatches.iter().map(|dispatch| i64::from(dispatch.dispatch_no)),
-        )
-        || detail.events.iter().any(|event| !event.details.is_object())
+        || detail.events.iter().any(|event| event.case_version < 1)
+        || !valid_dispatch_projection(&detail)
+        || detail.take.as_ref().is_some_and(|take| !valid_take(take))
         // 核验能力不可用只说明待重新核验的案件为何不前进，其他状态出现即投影不一致。
         || (detail.recheck_unavailable
             && detail.summary.status != SettlementReturnCaseStatus::RecheckPending)
         // 领回能力不可用同理只说明待领回的案件为何不前进。
         || (detail.take_unavailable
             && detail.summary.status != SettlementReturnCaseStatus::TakePending)
+        || detail.custody.is_some() != (detail.summary.status == SettlementReturnCaseStatus::Held)
+        || detail.custody.as_ref().is_some_and(|custody| !valid_custody(custody))
         // 结果未知的案件必有原因，其他状态没有。
         || detail.take_unknown_reason.is_some()
             != (detail.summary.status == SettlementReturnCaseStatus::TakeUnknown)
@@ -119,24 +151,22 @@ pub(super) fn map_detail(
     if !complete {
         return None;
     }
+    let events = detail.events.into_iter().map(map_event).collect::<Option<Vec<_>>>()?;
+
     Some(AdminSettlementReturnDetailResponse {
         summary: map_summary(detail.summary)?,
-        events: detail.events.into_iter().map(map_event).collect(),
+        events,
         dispatches: detail.dispatches.into_iter().map(map_dispatch).collect(),
         take: detail.take.map(map_take),
         resend_dispatch_no: detail.resend_dispatch_no,
         custody: detail.custody.map(map_custody),
-        allowed_actions: detail
-            .allowed_actions
-            .into_iter()
-            .map(|action| action.as_str().to_owned())
-            .collect(),
+        allowed_actions: detail.allowed_actions.into_iter().map(admin_action).collect(),
         blockers: detail
             .blockers
             .into_iter()
             .map(|(action, blocker)| AdminSettlementReturnBlockerResponse {
-                action: action.as_str().to_owned(),
-                blocker: blocker.as_str().to_owned(),
+                action: admin_action(action),
+                blocker: admin_blocker(blocker),
             })
             .collect(),
         recheck_unavailable: detail.recheck_unavailable,
@@ -152,9 +182,9 @@ pub(super) fn map_command_result(
     AdminSettlementReturnCommandResponse {
         command_id: result.command_id.as_uuid().to_string(),
         return_id: result.return_mail_id.to_string(),
-        action: result.action.as_str().to_owned(),
+        action: admin_action(result.action),
         case_version: result.case_version,
-        status: result.status.as_str().to_owned(),
+        status: admin_status(result.status),
     }
 }
 
@@ -167,15 +197,201 @@ fn strictly_increasing(mut values: impl Iterator<Item = i64>) -> bool {
     })
 }
 
-fn map_event(event: SettlementReturnEvent) -> AdminSettlementReturnEventResponse {
-    AdminSettlementReturnEventResponse {
-        case_version: event.case_version,
-        event_kind: event.event_kind,
-        occurred_at: timestamp(event.occurred_at),
-        actor_id: event.actor_id,
-        command_id: event.command_id.map(|command_id| command_id.as_uuid().to_string()),
-        details: event.details,
+fn admin_status(value: SettlementReturnCaseStatus) -> AdminSettlementReturnStatus {
+    use auction_contracts::AdminSettlementReturnStatus as Dto;
+    use auction_domain::SettlementReturnCaseStatus as Source;
+
+    match value {
+        Source::Quarantined => Dto::Quarantined,
+        Source::RecheckPending => Dto::RecheckPending,
+        Source::AwaitingDecision => Dto::AwaitingDecision,
+        Source::TakePending => Dto::TakePending,
+        Source::TakeUnknown => Dto::TakeUnknown,
+        Source::ResendPending => Dto::ResendPending,
+        Source::Held => Dto::Held,
+        Source::Resent => Dto::Resent,
+        Source::InboxClosed => Dto::InboxClosed,
+        Source::Reviewed => Dto::Reviewed,
     }
+}
+
+fn admin_match_state(value: SettlementReturnMatch) -> AdminSettlementReturnMatchState {
+    use auction_application::settlement::SettlementReturnMatch as Source;
+    use auction_contracts::AdminSettlementReturnMatchState as Dto;
+
+    match value {
+        Source::Untrusted => Dto::Untrusted,
+        Source::Unbound => Dto::Unbound,
+        Source::FulfillmentTerminal => Dto::FulfillmentTerminal,
+        Source::ManualReconcile => Dto::ManualReconcile,
+    }
+}
+
+fn admin_reason(value: SettlementReturnReason) -> AdminSettlementReturnReason {
+    use auction_application::settlement::SettlementReturnReason as Source;
+    use auction_contracts::AdminSettlementReturnReason as Dto;
+
+    match value {
+        Source::SourceUnproven => Dto::SourceUnproven,
+        Source::EvidenceInvalid => Dto::EvidenceInvalid,
+        Source::ObligationUnknown => Dto::ObligationUnknown,
+        Source::SubjectKindMismatch => Dto::SubjectKindMismatch,
+        Source::DeliveryUnsent => Dto::DeliveryUnsent,
+        Source::WorldMismatch => Dto::WorldMismatch,
+        Source::DispatchUnknown => Dto::DispatchUnknown,
+        Source::DispatchAmbiguous => Dto::DispatchAmbiguous,
+        Source::DispatchAlreadyReturned => Dto::DispatchAlreadyReturned,
+        Source::DispatchSuperseded => Dto::DispatchSuperseded,
+        Source::BodyUnproven => Dto::BodyUnproven,
+        Source::ReturnedAssetsMatch => Dto::ReturnedAssetsMatch,
+        Source::ReturnedAssetsMismatch => Dto::ReturnedAssetsMismatch,
+        Source::ReceivedBeforeSend => Dto::ReceivedBeforeSend,
+    }
+}
+
+fn admin_action(value: SettlementReturnAction) -> AdminSettlementReturnAction {
+    use auction_contracts::AdminSettlementReturnAction as Dto;
+    use auction_domain::SettlementReturnAction as Source;
+
+    match value {
+        Source::ReclaimAndResend => Dto::ReclaimAndResend,
+        Source::ReclaimAndHold => Dto::ReclaimAndHold,
+        Source::ResendFromCustody => Dto::ResendFromCustody,
+        Source::CloseInbox => Dto::CloseInbox,
+        Source::Acknowledge => Dto::Acknowledge,
+        Source::Recheck => Dto::Recheck,
+        Source::RetryTake => Dto::RetryTake,
+    }
+}
+
+fn admin_blocker(value: SettlementReturnBlocker) -> AdminSettlementReturnBlocker {
+    use auction_contracts::AdminSettlementReturnBlocker as Dto;
+    use auction_domain::SettlementReturnBlocker as Source;
+
+    match value {
+        Source::Untrusted => Dto::Untrusted,
+        Source::Unbound => Dto::Unbound,
+        Source::AssetsMismatch => Dto::AssetsMismatch,
+        Source::StateConflict => Dto::StateConflict,
+        Source::ResendLimit => Dto::ResendLimit,
+        Source::ObligationIneligible => Dto::ObligationIneligible,
+        Source::ProofRequired => Dto::ProofRequired,
+        Source::SendUnresolved => Dto::SendUnresolved,
+        Source::ObservationRequired => Dto::ObservationRequired,
+    }
+}
+
+fn admin_plan(value: SettlementReturnPlan) -> AdminSettlementReturnPlan {
+    use auction_contracts::AdminSettlementReturnPlan as Dto;
+    use auction_domain::SettlementReturnPlan as Source;
+
+    match value {
+        Source::Resend => Dto::Resend,
+        Source::Hold => Dto::Hold,
+    }
+}
+
+fn valid_dispatch(dispatch: &SettlementReturnDispatch) -> bool {
+    let authorized = match dispatch.dispatch_no {
+        1 => dispatch.authorized_by.is_none(),
+        _ => dispatch.authorized_by.is_some_and(|return_id| !return_id.is_nil()),
+    };
+    authorized
+        && !dispatch.delivery_id.is_nil()
+        && valid_delivery_timeline(
+            dispatch.delivery_status.as_deref(),
+            dispatch.sending_at,
+            dispatch.completed_at,
+        )
+}
+
+fn valid_delivery_timeline(
+    status: Option<&str>,
+    sending_at: Option<auction_time::Timestamp>,
+    completed_at: Option<auction_time::Timestamp>,
+) -> bool {
+    if sending_at.is_some_and(|time| time.timestamp_micros() == 0)
+        || completed_at.is_some_and(|time| time.timestamp_micros() == 0)
+        || completed_at.zip(sending_at).is_some_and(|(completed, sending)| completed < sending)
+    {
+        return false;
+    }
+    match status {
+        None => sending_at.is_none() && completed_at.is_none(),
+        Some("prepared" | "pending" | "claimed") => sending_at.is_none() && completed_at.is_none(),
+        Some("sending") => sending_at.is_some() && completed_at.is_none(),
+        Some("succeeded") => sending_at.is_some() && completed_at.is_some(),
+        Some("failed" | "manual_reconcile") => completed_at.is_some(),
+        Some(_) => false,
+    }
+}
+
+fn valid_take(take: &SettlementReturnTake) -> bool {
+    let delivery_id = take.delivery_id.is_some_and(|id| !id.is_nil());
+    let status_valid = take.delivery_status.as_deref().is_none_or(|status| {
+        matches!(
+            status,
+            "prepared"
+                | "pending"
+                | "claimed"
+                | "sending"
+                | "succeeded"
+                | "failed"
+                | "manual_reconcile"
+        )
+    });
+    let failure_valid = take.failure_code.as_deref().is_none_or(|code| {
+        valid_text(code, 128)
+            && !code.is_empty()
+            && code
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+    });
+    let proof_valid = take.proven_at.is_none_or(|time| time.timestamp_micros() != 0);
+    status_valid
+        && failure_valid
+        && proof_valid
+        && match take.execution_state.as_str() {
+            "pending" => {
+                take.delivery_id.is_none()
+                    && take.delivery_status.is_none()
+                    && take.failure_code.is_none()
+                    && take.proven_at.is_none()
+            }
+            "enqueued" => {
+                delivery_id
+                    && take.delivery_status.as_deref().is_some_and(|status| {
+                        matches!(status, "prepared" | "pending" | "claimed" | "sending")
+                    })
+                    && take.failure_code.is_none()
+                    && take.proven_at.is_none()
+            }
+            "satisfied" => {
+                delivery_id
+                    && take.delivery_status.as_deref() == Some("succeeded")
+                    && take.failure_code.is_none()
+                    && take.proven_at.is_some()
+            }
+            "manual_reconcile" => {
+                delivery_id
+                    && take.delivery_status.as_deref().is_some_and(|status| {
+                        matches!(status, "succeeded" | "failed" | "manual_reconcile")
+                    })
+                    && take.failure_code.is_some()
+                    && take.proven_at.is_none()
+            }
+            _ => false,
+        }
+}
+fn valid_custody(custody: &SettlementReturnCustody) -> bool {
+    valid_text(&custody.beneficiary, 256)
+        && custody.credits >= 0
+        && custody.equipment_ids.iter().all(|id| {
+            (1..=32).contains(&id.len())
+                && id.bytes().all(|byte| byte.is_ascii_digit())
+                && id.bytes().any(|byte| byte != b'0')
+        })
+        && custody.equipment_ids.iter().collect::<HashSet<_>>().len() == custody.equipment_ids.len()
 }
 
 fn map_dispatch(dispatch: SettlementReturnDispatch) -> AdminSettlementReturnDispatchResponse {
@@ -207,11 +423,53 @@ fn map_custody(custody: SettlementReturnCustody) -> AdminSettlementReturnCustody
     }
 }
 
+fn valid_dispatch_projection(detail: &SettlementReturnDetail) -> bool {
+    if detail.summary.obligation_id.is_none()
+        && (!detail.dispatches.is_empty() || detail.resend_dispatch_no.is_some())
+    {
+        return false;
+    }
+    for (index, dispatch) in detail.dispatches.iter().enumerate() {
+        let expected_no = u32::try_from(index).ok().and_then(|value| value.checked_add(1));
+        if expected_no != Some(dispatch.dispatch_no) || !valid_dispatch(dispatch) {
+            return false;
+        }
+    }
+    if let Some(delivery_id) = detail.summary.delivery_id
+        && !detail.summary.dispatch_no.is_some_and(|dispatch_no| {
+            detail.dispatches.iter().any(|dispatch| {
+                dispatch.dispatch_no == dispatch_no && dispatch.delivery_id == delivery_id
+            })
+        })
+    {
+        return false;
+    }
+
+    let latest_authorized = detail
+        .dispatches
+        .iter()
+        .filter(|dispatch| dispatch.authorized_by == Some(detail.summary.return_mail_id))
+        .map(|dispatch| dispatch.dispatch_no)
+        .max();
+    match (detail.resend_dispatch_no, latest_authorized) {
+        (None, None) => true,
+        (Some(expected), Some(authorized)) => expected == authorized,
+        (Some(expected), None) => {
+            let next = detail
+                .dispatches
+                .last()
+                .map_or(Some(1), |dispatch| dispatch.dispatch_no.checked_add(1));
+            expected > 1 && next == Some(expected)
+        }
+        (None, Some(_)) => false,
+    }
+}
 #[cfg(test)]
 mod tests {
     use auction_application::settlement::{
         SettlementReturnAssetLocation, SettlementReturnCaseSummary, SettlementReturnDetail,
-        SettlementReturnEvent, SettlementReturnMatch, SettlementReturnPage, SettlementReturnReason,
+        SettlementReturnDispatch, SettlementReturnEvent, SettlementReturnMatch,
+        SettlementReturnPage, SettlementReturnReason,
     };
     use auction_contracts::{
         ADMIN_SETTLEMENT_RETURN_ACTIONS, ADMIN_SETTLEMENT_RETURN_ASSET_LOCATIONS,
@@ -228,7 +486,7 @@ mod tests {
     use serde_json::json;
     use uuid::Uuid;
 
-    use super::{map_detail, map_page, map_summary};
+    use super::{map_detail, map_event, map_page, map_summary};
 
     const CASE: Uuid = Uuid::from_u128(0x0f8f_ad5b_d9cb_469f_a165_7086_7728_950e);
 
@@ -274,7 +532,11 @@ mod tests {
                     occurred_at: at,
                     actor_id: None,
                     command_id: None,
-                    details: json!({"match_state": "manual_reconcile"}),
+                    details: json!({
+                        "match_state": "manual_reconcile",
+                        "reason_code": "returned_assets_match",
+                        "dispatch_no": 1,
+                    }),
                 },
                 SettlementReturnEvent {
                     case_version: 2,
@@ -282,10 +544,23 @@ mod tests {
                     occurred_at: at,
                     actor_id: None,
                     command_id: None,
-                    details: json!({"dispatch_no": 1}),
+                    details: json!({
+                        "match_state": "manual_reconcile",
+                        "reason_code": "returned_assets_match",
+                        "delivery_id": Uuid::from_u128(5),
+                        "dispatch_no": 1,
+                        "verified_version": 1,
+                    }),
                 },
             ],
-            dispatches: Vec::new(),
+            dispatches: vec![SettlementReturnDispatch {
+                dispatch_no: 1,
+                delivery_id: Uuid::from_u128(5),
+                delivery_status: Some("succeeded".to_owned()),
+                sending_at: Some(at),
+                completed_at: Some(at),
+                authorized_by: None,
+            }],
             take: None,
             resend_dispatch_no: None,
             custody: None,
@@ -378,9 +653,15 @@ mod tests {
     fn summary_maps_closed_names_and_rejects_corrupt_values() {
         let mapped = map_summary(summary()).expect("合法摘要");
         assert_eq!(mapped.return_id, CASE.to_string());
-        assert_eq!(mapped.status, "awaiting_decision");
-        assert_eq!(mapped.match_state, "manual_reconcile");
-        assert_eq!(mapped.reason_code, "returned_assets_match");
+        assert_eq!(mapped.status, auction_contracts::AdminSettlementReturnStatus::AwaitingDecision);
+        assert_eq!(
+            mapped.match_state,
+            auction_contracts::AdminSettlementReturnMatchState::ManualReconcile
+        );
+        assert_eq!(
+            mapped.reason_code,
+            auction_contracts::AdminSettlementReturnReason::ReturnedAssetsMatch
+        );
         assert_eq!(mapped.obligation_kind.as_deref(), Some("seller_payout"));
         assert_eq!(mapped.asset_location, "returned_in_inbox");
         assert_eq!(mapped.received_at, "2026-11-16T01:02:03.000000Z");
@@ -411,6 +692,48 @@ mod tests {
         );
     }
 
+    /// 事件 kind 与逐 kind 细节都在序列化前闭集校验；历史 held 只接受空对象。
+    #[test]
+    fn event_mapping_rejects_unknown_kinds_and_detail_shapes() {
+        let at = Timestamp::from_ymd_hms(2026, 11, 16, 1, 2, 3).expect("时间");
+        let make = |event_kind: &str, details| SettlementReturnEvent {
+            case_version: 1,
+            event_kind: event_kind.to_owned(),
+            occurred_at: at,
+            actor_id: None,
+            command_id: None,
+            details,
+        };
+
+        let held = map_event(make("held", json!({}))).expect("legacy empty held event");
+        assert_eq!(held.event_kind, auction_contracts::AdminSettlementReturnEventKind::Held);
+        assert!(map_event(make("held", json!({"next": "hold"}))).is_none());
+        assert!(map_event(make("future_event", json!({}))).is_none());
+        assert!(
+            map_event(make(
+                "opened",
+                json!({
+                    "match_state": "manual_reconcile",
+                    "reason_code": "returned_assets_match",
+                    "dispatch_no": null,
+                    "unexpected": true,
+                }),
+            ))
+            .is_none()
+        );
+        assert!(
+            map_event(make(
+                "opened",
+                json!({
+                    "match_state": "manual_reconcile",
+                    "reason_code": "returned_assets_match",
+                    "dispatch_no": null,
+                }),
+            ))
+            .is_some()
+        );
+    }
+
     /// 详情：动作闭集被允许动作与阻断原因恰好覆盖一次；身份不符、事件乱序或细节不是对象时
     /// 失败关闭。
     #[test]
@@ -418,12 +741,30 @@ mod tests {
         let mapped = map_detail(detail(), CASE).expect("合法详情");
         assert_eq!(
             mapped.allowed_actions,
-            ["reclaim_and_resend", "reclaim_and_hold", "close_inbox"]
+            [
+                auction_contracts::AdminSettlementReturnAction::ReclaimAndResend,
+                auction_contracts::AdminSettlementReturnAction::ReclaimAndHold,
+                auction_contracts::AdminSettlementReturnAction::CloseInbox,
+            ]
         );
         assert_eq!(mapped.blockers.len(), 4);
-        assert_eq!(mapped.blockers[0].action, "resend_from_custody");
-        assert_eq!(mapped.blockers[0].blocker, "state_conflict");
+        assert_eq!(
+            mapped.blockers[0].action,
+            auction_contracts::AdminSettlementReturnAction::ResendFromCustody
+        );
+        assert_eq!(
+            mapped.blockers[0].blocker,
+            auction_contracts::AdminSettlementReturnBlocker::StateConflict
+        );
         assert_eq!(mapped.events.len(), 2);
+        assert_eq!(
+            mapped.events[0].event_kind,
+            auction_contracts::AdminSettlementReturnEventKind::Opened
+        );
+        assert_eq!(
+            mapped.events[1].event_kind,
+            auction_contracts::AdminSettlementReturnEventKind::RecheckRebound
+        );
 
         assert!(map_detail(detail(), Uuid::from_u128(9)).is_none(), "不是请求的案件");
         let mut missing = detail();
@@ -446,6 +787,7 @@ mod tests {
         assert!(!map_detail(detail(), CASE).expect("合法详情").recheck_unavailable);
         let mut waiting = detail();
         waiting.summary.status = SettlementReturnCaseStatus::RecheckPending;
+        waiting.summary.asset_location = SettlementReturnAssetLocation::Unverified;
         waiting.recheck_unavailable = true;
         assert!(map_detail(waiting, CASE).expect("待核验详情").recheck_unavailable);
         let mut inconsistent = detail();
@@ -459,6 +801,7 @@ mod tests {
         assert!(!map_detail(detail(), CASE).expect("合法详情").take_unavailable);
         let mut waiting = detail();
         waiting.summary.status = SettlementReturnCaseStatus::TakePending;
+        waiting.summary.asset_location = SettlementReturnAssetLocation::TakeInProgress;
         waiting.take_unavailable = true;
         assert!(map_detail(waiting, CASE).expect("待领回详情").take_unavailable);
         let mut inconsistent = detail();
@@ -473,6 +816,7 @@ mod tests {
         assert_eq!(map_detail(detail(), CASE).expect("合法详情").take_unknown_reason, None);
         let mut unknown = detail();
         unknown.summary.status = SettlementReturnCaseStatus::TakeUnknown;
+        unknown.summary.asset_location = SettlementReturnAssetLocation::LocationUnknown;
         unknown.take_unknown_reason = Some(SettlementReturnTakeUnknownReason::MailMissing);
         assert_eq!(
             map_detail(unknown.clone(), CASE).expect("结果未知详情").take_unknown_reason.as_deref(),

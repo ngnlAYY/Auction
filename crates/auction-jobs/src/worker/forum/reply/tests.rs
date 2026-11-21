@@ -453,9 +453,10 @@ impl ForumTopicReader for FakeTopicReader {
     ) -> ApplicationFuture<'_, ForumTopicScan> {
         Box::pin(async move {
             let preview = self.fetch_topic(world, thread_id).await?;
-            let post_numbers = (2..).take(preview.posts.len()).collect();
+            let post_numbers = (3..).take(preview.posts.len().saturating_sub(1)).collect();
             Ok(ForumTopicScan {
                 preview,
+                fixed_post_numbers: vec![2],
                 post_numbers,
                 mode: ForumTopicScanMode::Full,
                 page_count: None,

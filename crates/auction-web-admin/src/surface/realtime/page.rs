@@ -78,6 +78,11 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let realtime_query = use_realtime_query_state();
     let query = realtime_query.location;
     let query_state = query.state;
+    let selected_failure_page = use_memo(move || query_state.read().failure_page);
+    use_effect(move || {
+        let _ = selected_failure_page.read();
+        selected_failure.set(None);
+    });
     let event_pagination =
         use_admin_pagination("realtime-events", &["event_page_size"], Some(200), 1_000_000);
     let failure_pagination =
@@ -614,7 +619,7 @@ mod tests {
         AdminApiFailure, AdminWriteFailure, RealtimeFailure, RealtimeFailurePage, RealtimeLagPage,
         Rejection, replay_realtime_failure,
     };
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         button, click_button, has_live_text, mount_writer,
     };
     use crate::surface::pagination::use_admin_pagination;

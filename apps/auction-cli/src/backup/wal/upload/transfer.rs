@@ -1,7 +1,10 @@
 //! 目标存储、单段与基础备份上传、回执写入与本地清理。
 
-use std::fs;
-use std::path::Path;
+use std::{
+    fs,
+    io::{Seek, SeekFrom},
+    path::Path,
+};
 
 use anyhow::Context;
 use auction_config::AppConfig;
@@ -9,12 +12,14 @@ use auction_integrations::{BackupObject, R2BackupStore};
 
 use super::BASE_UPLOAD_FORMAT;
 use super::report::{BaseObject, BaseReport, BaseUploadRecord, BaseUploaded, Failed};
+use crate::backup::wal::model::manifest::{
+    BaseReceipt, BaseStaged, Retention, Staged, WalUploadReceipt,
+};
 use crate::backup::wal::model::{
-    BASE_RECEIPT_FORMAT, BASE_RECEIPT_SUFFIX, BaseReceipt, BaseStaged, Retention, Staged,
-    WalUploadReceipt, base_receipt_path, wal_upload_path,
+    BASE_RECEIPT_FORMAT, BASE_RECEIPT_SUFFIX, base_receipt_path, wal_upload_path,
 };
 use crate::backup::wal::staging::{replace_staged_file, temp_path};
-use crate::support::digest::sha256_file;
+use crate::support::digest::sha256_reader;
 use crate::support::files;
 
 /// WAL 上传证据的权限：上传器以 auction 运行、PostgreSQL archive_command 以 postgres 运行，
@@ -47,20 +52,35 @@ pub(super) fn store(config: &AppConfig) -> anyhow::Result<R2BackupStore> {
     )?)
 }
 
+/// 同一描述符上校验长度和摘要，并将已复核的 inode rewind 后交给上传器。
+async fn open_hashed(path: &Path) -> anyhow::Result<(fs::File, u64, String)> {
+    let mut file = files::open_regular(path)?;
+    let bytes = file.metadata().context("读取待上传文件元数据失败")?.len();
+    let hashing_file = file.try_clone().context("复制待上传文件描述符失败")?;
+    let (sha256, hashed_bytes) = tokio::task::spawn_blocking(move || sha256_reader(hashing_file))
+        .await
+        .context("等待待上传文件摘要任务失败")?
+        .context("读取待上传文件摘要失败")?;
+    if hashed_bytes != bytes {
+        anyhow::bail!("待上传文件在摘要读取期间改变大小");
+    }
+    file.seek(SeekFrom::Start(0)).context("重置待上传文件位置失败")?;
+    Ok((file, bytes, sha256))
+}
+
 /// 上传单个暂存段：本地长度与 manifest 一致、摘要由本机计算，远端只做长度与完整回读校验。
 pub(super) async fn upload_one(
     store: &R2BackupStore,
     wal_prefix: &str,
     item: &Staged,
 ) -> anyhow::Result<BackupObject> {
-    let cipher_bytes = fs::symlink_metadata(&item.cipher)
-        .with_context(|| format!("读取 WAL 密文失败：{}", item.cipher.display()))?
-        .len();
+    let (file, cipher_bytes, sha256) = open_hashed(&item.cipher).await?;
     if cipher_bytes != item.record.cipher_bytes {
         anyhow::bail!("WAL 密文长度与 manifest 不一致");
     }
-    let sha256 = sha256_file(&item.cipher).await?;
-    let file = files::open_regular(&item.cipher)?;
+    if item.record.cipher_sha256.as_deref() != Some(sha256.as_str()) {
+        anyhow::bail!("WAL 密文 SHA-256 与 manifest 不一致，或旧 manifest 缺少摘要");
+    }
     let key = format!("{wal_prefix}/{}", file_name(&item.cipher)?);
     let object = store.upload_verified(&key, file, cipher_bytes, &sha256).await?;
     Ok(object)
@@ -72,25 +92,19 @@ pub(super) async fn upload_base(
     base_prefix: &str,
     item: &BaseStaged,
 ) -> anyhow::Result<BaseUploaded> {
-    let cipher_bytes = fs::symlink_metadata(&item.cipher)
-        .with_context(|| format!("读取基础备份密文失败：{}", item.cipher.display()))?
-        .len();
+    let (cipher_file, cipher_bytes, sha256) = open_hashed(&item.cipher).await?;
     if cipher_bytes != item.record.cipher_bytes {
         anyhow::bail!("基础备份密文长度与 manifest 不一致");
     }
-    let sha256 = sha256_file(&item.cipher).await?;
     if sha256 != item.record.cipher_sha256 {
         anyhow::bail!("基础备份密文 SHA-256 与 manifest 不一致");
     }
-    let manifest_bytes = fs::symlink_metadata(&item.manifest)
-        .with_context(|| format!("读取基础备份 manifest 失败：{}", item.manifest.display()))?
-        .len();
-    let manifest_sha256 = sha256_file(&item.manifest).await?;
+    let (manifest_file, manifest_bytes, manifest_sha256) = open_hashed(&item.manifest).await?;
     let directory = format!("{base_prefix}/{}", item.backup_id);
     let archive = store
         .upload_verified(
             &format!("{directory}/{}", file_name(&item.cipher)?),
-            files::open_regular(&item.cipher)?,
+            cipher_file,
             cipher_bytes,
             &sha256,
         )
@@ -98,7 +112,7 @@ pub(super) async fn upload_base(
     let manifest = store
         .upload_verified(
             &format!("{directory}/{}", file_name(&item.manifest)?),
-            files::open_regular(&item.manifest)?,
+            manifest_file,
             manifest_bytes,
             &manifest_sha256,
         )

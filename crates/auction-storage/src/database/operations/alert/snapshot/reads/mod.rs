@@ -9,7 +9,7 @@ use auction_time::Timestamp;
 use crate::database::DatabaseStore;
 
 mod accounts;
-mod fulfillment;
+pub(super) mod fulfillment;
 mod operations;
 mod settlement;
 
@@ -17,9 +17,6 @@ use self::accounts::{credential_snapshot, forum_snapshot, mail_snapshot, notific
 use self::fulfillment::fulfillment_snapshot;
 use self::operations::{lifecycle_snapshot, process_snapshot, reconciliation_snapshot};
 use self::settlement::{delivery_snapshot, recovery_snapshot};
-
-#[cfg(feature = "test-db")]
-pub(super) use self::fulfillment::FULFILLMENT_SNAPSHOT;
 
 pub(crate) async fn snapshot_postgres(
     store: &DatabaseStore,

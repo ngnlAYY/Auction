@@ -35,7 +35,9 @@ pub(super) fn require_runtime_owner(path: &Path, state: &UnitState) -> anyhow::R
     let file = std::fs::symlink_metadata(path).context("读取 Admin runtime 文件失败")?;
     let parent = path.parent().context("Admin runtime 缺少父目录")?;
     let directory = std::fs::symlink_metadata(parent).context("读取 Admin runtime 父目录失败")?;
-    if file.uid() != uid
+    if !file.file_type().is_file()
+        || !directory.file_type().is_dir()
+        || file.uid() != uid
         || directory.uid() != uid
         || directory.permissions().mode() & 0o300 != 0o300
     {

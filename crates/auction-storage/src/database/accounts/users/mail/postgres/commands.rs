@@ -49,7 +49,7 @@ pub(crate) async fn register_postgres(
                 }
 
                 let rows = sqlx::query(
-                    "SELECT id, username, status, key_status,
+                    "SELECT id, username, game_player_id, status, key_status,
                 (lower(username) = lower($1)) AS username_matches
          FROM public.users
          WHERE lower(username) = lower($1)
@@ -124,12 +124,13 @@ pub(crate) async fn register_postgres(
                                 (id, user_id, source_command_id,
                                  previous_username, next_username,
                                  previous_game_player_id, next_game_player_id, created_at)
-                             VALUES ($1, $2, $1, $3, $4, $3, $4, $5)",
+                             VALUES ($1, $2, $1, $3, $4, $5, $4, $6)",
                                     )
                                     .bind(write.command.command_id.as_uuid())
                                     .bind(user.id)
                                     .bind(&user.username)
                                     .bind(&write.command.username)
+                                    .bind(&user.game_player_id)
                                     .bind(write.command.now)
                                     .execute(&mut *transaction)
                                     .await
@@ -251,7 +252,7 @@ pub(crate) async fn rebind_postgres(
                 }
 
                 let rows = sqlx::query(
-                    "SELECT id, username, status, key_status, public_key_hash
+                    "SELECT id, username, game_player_id, status, key_status, public_key_hash
          FROM public.users
          WHERE public_key_hash = $1
             OR lower(username) = lower($2)
@@ -342,7 +343,7 @@ pub(crate) async fn rebind_postgres(
                                     .bind(&command.next_username)
                                     .bind(
                                         source
-                                            .try_get::<String, _>("username")
+                                            .try_get::<String, _>("game_player_id")
                                             .map_err(map_storage_error)?,
                                     )
                                     .bind(&command.next_username)

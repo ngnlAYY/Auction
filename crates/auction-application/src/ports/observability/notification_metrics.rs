@@ -101,12 +101,19 @@ impl NotificationKind {
         if operation != Some("send") {
             return None;
         }
-        match (origin_kind, template) {
-            ("lot_watch", Some("lot_watch")) => Some(Self::LotWatchMail),
-            ("operations_alert", Some("operations_alert")) => Some(Self::OperationsAlert),
-            (_, Some(template)) => Self::from_template(template),
-            _ => None,
+        let origin = crate::ports::mail::MailDeliveryOrigin::from_name(origin_kind)?;
+        let expected_origin = template.and_then(|template| {
+            crate::ports::mail::MailNotificationTemplate::from_name(template)
+                .map(|template| template.binding().origin)
+                .or_else(|| {
+                    (template == "lot_watch_pm")
+                        .then_some(crate::ports::mail::MailDeliveryOrigin::LotWatch)
+                })
+        });
+        if expected_origin != Some(origin) {
+            return None;
         }
+        Self::from_template(template?)
     }
 
     /// 由 MoogleMail 冻结模板键识别通知种类。
@@ -244,12 +251,8 @@ impl NotificationFailure {
             "lease_expired" | "lease_expired_outcome_unknown" => Self::LeaseExpiredOutcomeUnknown,
             "invalid_payload" => Self::InvalidPayload,
             "protocol_drift" => Self::ProtocolDrift,
-            _ => match category {
-                Some("protocol_drift") => Self::ProtocolDrift,
-                Some("insufficient_postage") => Self::InsufficientPostage,
-                Some("write_rejected") => Self::SendRejected,
-                _ => Self::Other,
-            },
+            _ if category == Some("protocol_drift") => Self::ProtocolDrift,
+            _ => Self::Other,
         }
     }
 }

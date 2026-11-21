@@ -25,8 +25,8 @@ mod transition;
 #[cfg(test)]
 mod tests;
 
-pub(super) use deadlines::session_lifetime_millis;
-pub(super) use transition::step;
+pub(in crate::surface::auth) use deadlines::session_lifetime_millis;
+pub(in crate::surface::auth) use transition::step;
 
 /// 可读的 CSRF Cookie 仅用于本地判断会话代际。
 #[derive(Clone, PartialEq, Eq)]

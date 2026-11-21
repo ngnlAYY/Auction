@@ -482,10 +482,18 @@ impl PublicSessionSync {
             .window
             .add_event_listener_with_callback("storage", guard.storage.as_ref().unchecked_ref())
             .ok()?;
-        guard
+        if guard
             .window
             .add_event_listener_with_callback("focus", guard.focus.as_ref().unchecked_ref())
-            .ok()?;
+            .is_err()
+        {
+            let _ = guard.window.remove_event_listener_with_callback(
+                "storage",
+                guard.storage.as_ref().unchecked_ref(),
+            );
+            return None;
+        }
+
         Some(guard)
     }
 }

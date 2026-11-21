@@ -45,25 +45,28 @@ pub(crate) fn use_admin_pagination(
     maximum: Option<i64>,
     max_offset: i64,
 ) -> AdminPagination {
+    let size_key = keys.first().copied();
     let query = use_query_state(
         keys,
         move |pairs| {
-            pairs.iter().find(|(key, _)| key == keys[0]).map_or_else(
+            size_key.and_then(|key| pairs.iter().find(|(name, _)| name == key)).map_or_else(
                 || preferences::load(scope, maximum),
                 |(_, value)| preferences::parse(value, maximum).unwrap_or(10),
             )
         },
-        move |size| vec![(keys[0].to_owned(), size.to_string())],
+        move |size| size_key.map_or_else(Vec::new, |key| vec![(key.to_owned(), size.to_string())]),
     );
     let size = query.state;
     // 初次访问也固定有效数量，之后筛选/排序/翻页生成的每条历史都会继承它。
     // 仅规范 URL，不保存偏好；返回旧条目不会被后来保存的偏好污染。
     use_effect(move || {
-        write_query_pairs(
-            keys,
-            &[(keys[0].to_owned(), size().to_string())],
-            QueryWriteMode::Replace,
-        );
+        if let Some(key) = size_key {
+            write_query_pairs(
+                keys,
+                &[(key.to_owned(), size().to_string())],
+                QueryWriteMode::Replace,
+            );
+        }
     });
     AdminPagination { query, scope, keys, maximum, max_offset }
 }
@@ -206,7 +209,13 @@ pub(crate) fn AdminPager(
                 if !can_change_page_size.call(()) { return; }
                 // 先固定离开历史项的旧数量，随后由原页面 push 首页，再 replace 新数量。
                 // 各 hook 只写自己拥有的键，保留筛选、排序及未知参数。
-                write_query_pairs(pagination.keys, &[(pagination.keys[0].to_owned(), pagination.size().to_string())], QueryWriteMode::Replace);
+                if let Some(key) = pagination.keys.first() {
+                    write_query_pairs(
+                        pagination.keys,
+                        &[(key.to_string(), pagination.size().to_string())],
+                        QueryWriteMode::Replace,
+                    );
+                }
                 if !on_size_reset.call(()) {
                     on_page_change.call(1);
                 }

@@ -232,22 +232,20 @@
   }
 
   /*
-   * 展开菜单：顶栏变成固定在顶部的覆盖层，导航链接（含设置入口）排在栏下。
-   * 外壳补上与顶栏等高的上内距，页面内容不会因此跳动。
+   * 展开菜单：顶栏保持在文档流中并吸附顶部，较长菜单在顶栏自身滚动，页面内容按实际高度后移。
    */
-  .public-console:has(.public-shell__nav--open) {
-    padding-block-start: calc(3.5rem + var(--border-width) + env(safe-area-inset-top, 0px));
-  }
 
-  .public-console .console-ticker:has(.public-shell__nav--open) {
-    position: fixed;
-    inset-block-start: 0;
-    inset-inline: 0;
-    grid-template-rows: auto auto auto;
-    max-block-size: 100dvh;
-    overflow-y: auto;
-    box-shadow: var(--shadow-2);
-    overscroll-behavior: contain;
+  @supports selector(.public-console:has(.public-shell__nav--open)) {
+    .public-console .console-ticker:has(.public-shell__nav--open) {
+      position: sticky;
+      inset-block-start: 0;
+      inset-inline: 0;
+      grid-template-rows: auto auto auto;
+      max-block-size: 100dvh;
+      overflow-y: auto;
+      box-shadow: var(--shadow-2);
+      overscroll-behavior: contain;
+    }
   }
 
   .public-console .console-ticker .public-shell__nav--open {

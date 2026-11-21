@@ -5,14 +5,12 @@ use std::{future::Future, pin::Pin};
 use auction_time::Timestamp;
 use sqlx::Postgres;
 
-use super::mapping::{map_storage_error, repository_error};
+use super::mapping::map_storage_error;
+use crate::database::repository_error;
 use crate::database::settlement::funding::evidence_error;
 
-mod activate;
-mod prepare;
-
-pub(super) use activate::activate_postgres;
-pub(super) use prepare::prepare_postgres;
+pub(in crate::database::settlement::fulfillment) mod activate;
+pub(in crate::database::settlement::fulfillment) mod prepare;
 
 type DeliveryTransactionFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, DeliveryTransactionError>> + Send + 'a>>;

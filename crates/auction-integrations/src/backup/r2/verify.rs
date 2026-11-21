@@ -19,7 +19,7 @@ impl R2BackupStore {
         bytes: u64,
         sha256: &str,
     ) -> Result<Option<BackupObject>, BackupStoreError> {
-        let path = Path::parse(key).map_err(|_| BackupStoreError::Configuration)?;
+        let path = Path::parse(key)?;
         let metadata = match self.store.head(&path).await {
             Ok(metadata) => metadata,
             Err(object_store::Error::NotFound { .. }) => return Ok(None),
@@ -56,7 +56,7 @@ impl R2BackupStore {
 
     /// 有界读取无秘密的完成记录；不向调用方返回远端错误正文。
     pub async fn read_record(&self, key: &str) -> Result<Vec<u8>, BackupStoreError> {
-        let path = Path::parse(key).map_err(|_| BackupStoreError::Configuration)?;
+        let path = Path::parse(key)?;
         let result = self.store.get(&path).await.map_err(|error| match error {
             object_store::Error::NotFound { .. } => BackupStoreError::RemoteRecord,
             error => BackupStoreError::from_store(error),
@@ -78,7 +78,7 @@ impl R2BackupStore {
 
     /// 枚举某月全部完成记录名称；调用方施加整次预算，并校验格式和引用的全部对象。
     pub async fn completion_records(&self, prefix: &str) -> Result<Vec<String>, BackupStoreError> {
-        let path = Path::parse(prefix).map_err(|_| BackupStoreError::Configuration)?;
+        let path = Path::parse(prefix)?;
         let mut stream = self.store.list(Some(&path));
         let mut records = Vec::new();
         while let Some(metadata) = poll_fn(|context| stream.as_mut().poll_next(context)).await {

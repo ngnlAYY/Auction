@@ -19,22 +19,28 @@ export interface CredentialsPanelProps {
 export function CredentialsPanel(props: CredentialsPanelProps): JSX.Element {
   const credentials = createValueMemo(() => props.snapshot.credentials.data);
   const availability = createValueMemo(() => credentials()?.availability ?? []);
-  const sortedAvailability = createValueMemo(() =>
-    availability()
-      .slice()
-      .sort((left, right) => {
-        if (left.world === "main" && right.world === "main") {
-          return 0;
-        }
-        if (left.world === "main") {
-          return -1;
-        }
-        if (right.world === "main") {
-          return 1;
-        }
-        return compareText(left.world, right.world);
-      }),
-  );
+  const compareAvailability = (
+    left: AdminCredentialAvailability,
+    right: AdminCredentialAvailability,
+  ): number => {
+    if (left.world === "main" && right.world === "main") {
+      return 0;
+    }
+    if (left.world === "main") {
+      return -1;
+    }
+    if (right.world === "main") {
+      return 1;
+    }
+    return compareText(left.world, right.world);
+  };
+  const sortedAvailability = createValueMemo(() => {
+    const values = availability();
+    return typeof values.toSorted === "function"
+      ? values.toSorted(compareAvailability)
+      : values.slice().sort(compareAvailability);
+  });
+
   return (
     <section class="admin-dashboard-panel" aria-labelledby="dashboard-credentials-title">
       <h2 id="dashboard-credentials-title">{t("dashboard-legacy-cookie-readiness-by-world")}</h2>

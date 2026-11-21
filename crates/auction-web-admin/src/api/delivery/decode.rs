@@ -124,7 +124,7 @@ pub(super) fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, 
     }
     let created_at = parse_delivery_time(&value.created_at).ok_or(())?;
     let updated_at = parse_delivery_time(&value.updated_at).ok_or(())?;
-    let lease_expires_at = parse_optional_delivery_time(value.lease_expires_at.as_ref())?;
+    let _lease_expires_at = parse_optional_delivery_time(value.lease_expires_at.as_ref())?;
     let claimed_at = parse_optional_delivery_time(value.claimed_at.as_ref())?;
     let sending_at = parse_optional_delivery_time(value.sending_at.as_ref())?;
     let completed_at = parse_optional_delivery_time(value.completed_at.as_ref())?;
@@ -140,7 +140,7 @@ pub(super) fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, 
         || is_zero_delivery_time(created_at)
         || is_zero_delivery_time(updated_at)
         || updated_at < created_at
-        || lease_expires_at.is_some_and(is_zero_delivery_time)
+        || claimed_at.is_some_and(is_zero_delivery_time)
         || !valid_optional_text(value.external_reference.as_deref())
         || !valid_optional_text(value.failure_code.as_deref())
         || !valid_optional_text(value.reason_code.as_deref())

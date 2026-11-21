@@ -211,11 +211,11 @@ fn deserialize_optional_nonempty_string<'de, D>(deserializer: D) -> Result<Optio
 where
     D: serde::Deserializer<'de>,
 {
-    let value = String::deserialize(deserializer)?;
-    if value.is_empty() {
+    let value = Option::<String>::deserialize(deserializer)?;
+    if value.as_ref().is_some_and(String::is_empty) {
         return Err(serde::de::Error::custom("可选文本字段不能是空字符串"));
     }
-    Ok(Some(value))
+    Ok(value)
 }
 
 /// 预览 lot 详情沿用摘要字段，并附加完整公开装备投影。

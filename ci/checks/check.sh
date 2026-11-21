@@ -8,7 +8,7 @@ check_layout() {
 
 	# 所有规则共用一次文件清单，避免按每个 crate 反复遍历源码树。
 	source_files=$(rg --files apps crates)
-	flat=$(awk -F/ '/\/src\/[^/]+$/ { name=$NF; if (name != "lib.rs" && name != "main.rs") print }' <<<"$source_files")
+	flat=$(awk -F/ '/\/src\/[^\/]+$/ { name=$NF; if (name != "lib.rs" && name != "main.rs") print }' <<<"$source_files")
 	if [[ -n "$flat" ]]; then
 		printf '%s\n' "源码实现不得平铺在 src 根目录：" >&2
 		printf '%s\n' "$flat" >&2
@@ -23,7 +23,7 @@ check_layout() {
             ARGV[i] = ""
           }
         }
-        /^(apps|crates)\/[^/]+\/src\/[^/]+\// {
+        /^(apps|crates)\/[^\/]+\/src\/[^\/]+\// {
           root = $0
           sub(/\/src\/.*/, "/src", root)
           found[root] = 1
@@ -196,7 +196,7 @@ check_public_redaction() {
 	# Caddyfile 的 Cloudflare 回源网段是公开的固定配置，按文件豁免。
 	shopt -s nullglob
 	fixture_roots=(./{apps,crates}/*/tests/fixtures)
-	roots+=("${fixture_roots[@]}" ./{apps,crates}/*/tests/assets-fixture)
+	roots+=("${fixture_roots[@]}")
 	shopt -u nullglob
 	ipv4='(?-u:\b)(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?-u:\b)'
 	status=0

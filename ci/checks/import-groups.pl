@@ -30,7 +30,14 @@ my $non_code = qr{
     (?=[/"'bcr])
     (?: //[^\n]*
     | (?<comment> /\* (?: [^*/]++ | /(?!\*) | \*(?!/) | (?&comment) )* \*/ )
-    | (?:br|cr|r)(?<hashes>\#*)".*?"\k<hashes>
+    | (?:br|cr|r)(?<hashes>\#*)"(?:(?!"\k<hashes>(?!\#))[\s\S])*"\k<hashes>
+    | (?:b|c)?"(?:\\.|[^"\\])*"
+    | b?'(?:\\(?:u\{[0-9a-fA-F_]+\}|x[0-9a-fA-F]{2}|.)|[^'\\\n])'
+    )
+}xs;
+my $literal_only = qr{
+    (?=["'bcr])
+    (?: (?:br|cr|r)(?<hashes>\#*)"(?:(?!"\k<hashes>(?!\#))[\s\S])*"\k<hashes>
     | (?:b|c)?"(?:\\.|[^"\\])*"
     | b?'(?:\\(?:u\{[0-9a-fA-F_]+\}|x[0-9a-fA-F]{2}|.)|[^'\\\n])'
     )
@@ -44,11 +51,11 @@ sub group_of {
 
 # 从 $start 起识别一个导入块；返回 (块结束行, 违规说明或 undef)。
 sub check_block {
-    my ($lines, $start, $local) = @_;
+    my ($lines, $masked_lines, $comment_lines, $start, $local) = @_;
     my ($i, $indent, @groups, @gaps) = ($start);
     my ($pending_attrs, $blank_before) = (0, 0);
     while ($i < @$lines) {
-        my $line = $lines->[$i];
+        my $line = $masked_lines->[$i];
         if ($line =~ /^\s*$/) {
             return ($i, undef) if $pending_attrs;
             $blank_before++;
@@ -64,14 +71,15 @@ sub check_block {
         $indent //= $this_indent;
         last if $this_indent ne $indent;
         my ($end, $depth, $comment) = ($i, 0, 0);
-        while (1) {
-            my $text = $lines->[$end];
-            $comment ||= $text =~ m{//};
+        while ($end < @$lines) {
+            my $text = $masked_lines->[$end];
+            $comment ||= $comment_lines->[$end] =~ m{//};
             $depth += () = $text =~ /\{/g;
             $depth -= () = $text =~ /\}/g;
             last if $depth <= 0 && $text =~ /;\s*$/;
             $end++;
         }
+        return (scalar(@$lines), '导入语句缺少结束分号') if $end >= @$lines;
         return ($end + 1, undef) if $comment;
         push @groups, group_of($first, $local);
         push @gaps, $blank_before;
@@ -145,6 +153,9 @@ sub check_region {
         $masked =~ /\Gpub\s*\([^()]*\)\s+/gc unless $public;
         if ($masked =~ /\Guse\s+([^;]*);/gc) {
             my ($tree, $end) = ($1, pos($masked));
+            while ($tree =~ /\bas\s+([A-Za-z_][A-Za-z0-9_]*)/g) {
+                $region_local->{$1} = 1;
+            }
             if (!$public) {
                 # `use { … }` 总括分组没有首段，由 layout 门禁拒绝；这里只按位置检查。
                 my ($first) = $tree =~ /^(?:::\s*)?([A-Za-z_]\w*)/;
@@ -164,11 +175,13 @@ sub check_region {
             $offset = $end;
             next;
         }
-        if ($masked =~ /\Gmod\s+\w+\s*;/gc) {
+        if ($masked =~ /\Gmod\s+(\w+)\s*;/gc) {
+            $region_local->{$1} = 1;
             $offset = pos($masked);
             next;
         }
-        if ($masked =~ /\Gmod\s+\w+\s*\{/gc) {
+        if ($masked =~ /\G(?:pub(?:\([^()]*\))?\s+)?mod\s+(\w+)\s*\{/gc) {
+            $region_local->{$1} = 1;
             $offset = check_region(pos($masked), 1);
             return undef unless defined $offset;
             next;
@@ -187,32 +200,44 @@ for my $file (@files) {
     my @lines = <$handle>;
     chomp @lines;
     my $text = join "\n", @lines;
-    my %local = map { $_ => 1 } ($text =~ /^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([a-z_][a-z0-9_]*)\s*;/mg),
-        ($text =~ /\bas\s+([A-Za-z_][A-Za-z0-9_]*)\s*[;,}]/g);
+    (my $masked_file = "$text\n") =~ s{$non_code}{ (my $blank = $&) =~ tr/\n/ /c; $blank }ge;
+    (my $comment_text = "$text\n") =~ s{$literal_only}{ (my $blank = $&) =~ tr/\n/ /c; $blank }ge;
+    my @masked_lines = split /\n/, $masked_file, -1;
+    pop @masked_lines if @masked_lines && $masked_lines[-1] eq '';
+    my @comment_lines = split /\n/, $comment_text, -1;
+    pop @comment_lines if @comment_lines && $comment_lines[-1] eq '';
+
+    # The module parser skips function and macro bodies; use it to collect only real module imports
+    # and declarations, then rerun with the complete local-name set for order validation.
+    my %local;
+    ($region_file, $region_local, @region_failures) = ($file, \%local);
+    $masked = $masked_file;
+    my $structure_valid = defined check_region(0, 0);
+    @region_failures = ();
+    $structure_valid = defined check_region(0, 0) if $structure_valid;
+    push @region_failures, "$file: 无法识别模块结构（括号不平衡），导入区未检查"
+        unless $structure_valid;
+
     my ($i, $at_block_start) = (0, 1);
-    while ($i < @lines) {
-        my $line = $lines[$i];
+    while ($i < @masked_lines) {
+        my $line = $masked_lines[$i];
         my $j = $i;
-        $j++ while $at_block_start && $j < @lines && $lines[$j] =~ /^\s*#\[/
-            && $lines[$j] !~ /^\s*#\[cfg\(test\)\]/;
-        if ($at_block_start && $j < @lines && $lines[$j] =~ $use_start) {
-            my ($end, $failure) = check_block(\@lines, $i, \%local);
+        $j++ while $at_block_start && $j < @masked_lines && $masked_lines[$j] =~ /^\s*#\[/
+            && $masked_lines[$j] !~ /^\s*#\[cfg\(test\)\]/;
+        if ($at_block_start && $j < @masked_lines && $masked_lines[$j] =~ $use_start) {
+            my ($end, $failure) =
+                check_block(\@masked_lines, \@masked_lines, \@comment_lines, $i, \%local);
             push @failures, sprintf('%s:%d: %s', $file, $i + 1, $failure) if $failure;
             ($i, $at_block_start) = ($end, 0);
             next;
         }
         my $stripped = $line =~ s/^\s+|\s+$//gr;
-        $at_block_start = $stripped eq '' || $stripped =~ m{^//!} || $stripped =~ /^#!/
+        $at_block_start = $stripped eq '' || $stripped =~ /^#!/
             || ($stripped =~ /\{$/ && $line =~ /^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s/)
             || $line =~ $mod_decl
             || ($stripped =~ /^#\[/ && $at_block_start);
         $i++;
     }
-
-    ($region_file, $region_local, @region_failures) = ($file, \%local);
-    ($masked = "$text\n") =~ s{$non_code}{ (my $blank = $&) =~ tr/\n/ /c; $blank }ge;
-    push @region_failures, "$file: 无法识别模块结构（括号不平衡），导入区未检查"
-        unless defined check_region(0, 0);
     push @failures, @region_failures;
 }
 if (@failures) {

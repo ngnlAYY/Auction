@@ -41,6 +41,7 @@ fn decode_runtime_switches(body: &str) -> Result<RuntimeSwitchListResponse, Stri
     if !closed_subset(&database_names)
         || !closed_subset(&applied_names)
         || !applied_names.iter().all(|name| database_names.contains(name))
+        || !database_names.contains(&"external_access_paused")
     {
         return Err("invalid_response".to_owned());
     }

@@ -47,11 +47,12 @@ struct TopicBaseline {
     scan: ScanWindow,
     /// 已确认导入过的帖子；跨扫描保留，避免同一帖的后续命令替代首次确认终点。
     seen_imports: HashSet<String>,
+    seen_imports_truncated: bool,
     touched: u64,
 }
 
 struct EstimatorState {
-    active: Option<ActiveScan>,
+    active: HashMap<AuctionId, ActiveScan>,
     topics: HashMap<AuctionId, TopicBaseline>,
     evicted: HashSet<AuctionId>,
     eviction_order: VecDeque<AuctionId>,
@@ -70,7 +71,7 @@ impl ReplyDelayEstimator {
         Self {
             observer,
             state: Mutex::new(EstimatorState {
-                active: None,
+                active: HashMap::new(),
                 topics: HashMap::new(),
                 evicted: HashSet::new(),
                 eviction_order: VecDeque::new(),
@@ -91,8 +92,9 @@ impl ReplyDelayEstimator {
         post_ids: impl IntoIterator<Item = String>,
     ) -> ReplyDelayScanGuard<'_> {
         let mut state = lock_state(&self.state);
-        if let Some(active) = state.active.take() {
-            flush_scan(&self.observer, &mut state, active, false);
+        let mut events = Vec::new();
+        if let Some(active) = state.active.remove(&auction_id) {
+            events.extend(flush_scan(&mut state, active, false));
         }
         let token = state.next_token;
         state.next_token = state.next_token.wrapping_add(1).max(1);
@@ -105,20 +107,27 @@ impl ReplyDelayEstimator {
             }
             ids.insert(post_id);
         }
-        state.active = Some(ActiveScan {
-            token,
+        state.active.insert(
             auction_id,
-            world: forum_world(world),
-            phase: reply_delay_phase(phase),
-            started,
-            completed,
-            post_ids: ids,
-            truncated,
-            candidates: Vec::new(),
-            candidate_ids: HashSet::new(),
-            overflow_ids: HashSet::new(),
-        });
-        ReplyDelayScanGuard { estimator: self, token, finished: false }
+            ActiveScan {
+                token,
+                auction_id,
+                world: forum_world(world),
+                phase: reply_delay_phase(phase),
+                started,
+                completed,
+                post_ids: ids,
+                truncated,
+                candidates: Vec::new(),
+                candidate_ids: HashSet::new(),
+                overflow_ids: HashSet::new(),
+            },
+        );
+        drop(state);
+        for event in events {
+            self.observer.observe(event);
+        }
+        ReplyDelayScanGuard { estimator: self, auction_id, token, finished: false }
     }
 
     /// 在命令账本首次插入返回后调用；同一扫描窗口内同一帖只保留第一次确认。
@@ -130,70 +139,96 @@ impl ReplyDelayEstimator {
         post_id: &str,
         confirmed_at: Instant,
     ) {
-        let mut state = lock_state(&self.state);
-        // 同一帖只认第一次导入确认；先前不完整扫描或已采样帖子的后续命令不再覆盖终点。
-        if state.topics.get(&auction_id).is_some_and(|topic| topic.seen_imports.contains(post_id)) {
-            return;
-        }
-        let Some(active) = state.active.as_mut() else {
-            record_sample(
-                &self.observer,
-                forum_world(world),
-                reply_delay_phase(phase),
-                ReplyDelaySampleOutcome::MissingBaseline,
-            );
-            return;
-        };
-        if active.auction_id != auction_id {
-            record_sample(
-                &self.observer,
-                active.world,
-                active.phase,
-                ReplyDelaySampleOutcome::CoverageUnknown,
-            );
-            return;
-        }
-        if !active.post_ids.contains(post_id) {
-            let outcome = if active.truncated {
-                ReplyDelaySampleOutcome::StateEvicted
+        let event = {
+            let mut state = lock_state(&self.state);
+            if let Some(topic) = state.topics.get(&auction_id) {
+                if topic.seen_imports.contains(post_id) {
+                    return;
+                }
+                if topic.seen_imports_truncated {
+                    Some(sample_event(
+                        forum_world(world),
+                        reply_delay_phase(phase),
+                        ReplyDelaySampleOutcome::StateEvicted,
+                    ))
+                } else {
+                    observe_active_import(
+                        state.active.get_mut(&auction_id),
+                        world,
+                        phase,
+                        post_id,
+                        confirmed_at,
+                    )
+                }
             } else {
-                ReplyDelaySampleOutcome::CoverageUnknown
-            };
-            record_sample(&self.observer, active.world, active.phase, outcome);
-            return;
-        }
-        if active.candidate_ids.contains(post_id) {
-            return;
-        }
-        if active.candidate_ids.len() >= MAX_CANDIDATES_PER_SCAN {
-            if active.overflow_ids.insert(post_id.to_owned()) {
-                record_sample(
-                    &self.observer,
-                    active.world,
-                    active.phase,
-                    ReplyDelaySampleOutcome::StateEvicted,
-                );
+                observe_active_import(
+                    state.active.get_mut(&auction_id),
+                    world,
+                    phase,
+                    post_id,
+                    confirmed_at,
+                )
             }
-            return;
+        };
+        if let Some(event) = event {
+            self.observer.observe(event);
         }
-        active.candidate_ids.insert(post_id.to_owned());
-        active.candidates.push((post_id.to_owned(), confirmed_at));
     }
 
-    fn finish_scan(&self, token: u64, complete: bool) {
-        let mut state = lock_state(&self.state);
-        let Some(active) = state.active.take() else { return };
-        if active.token != token {
-            state.active = Some(active);
-            return;
+    fn finish_scan(&self, auction_id: AuctionId, token: u64, complete: bool) {
+        let events = {
+            let mut state = lock_state(&self.state);
+            let Some(active) = state.active.remove(&auction_id) else { return };
+            if active.token != token {
+                state.active.insert(auction_id, active);
+                return;
+            }
+            flush_scan(&mut state, active, complete)
+        };
+        for event in events {
+            self.observer.observe(event);
         }
-        flush_scan(&self.observer, &mut state, active, complete);
     }
+}
+fn observe_active_import(
+    active: Option<&mut ActiveScan>,
+    world: SettlementWorld,
+    phase: ForumReplyPhase,
+    post_id: &str,
+    confirmed_at: Instant,
+) -> Option<ExternalMetricsEvent> {
+    let Some(active) = active else {
+        return Some(sample_event(
+            forum_world(world),
+            reply_delay_phase(phase),
+            ReplyDelaySampleOutcome::MissingBaseline,
+        ));
+    };
+    if !active.post_ids.contains(post_id) {
+        let outcome = if active.truncated {
+            ReplyDelaySampleOutcome::StateEvicted
+        } else {
+            ReplyDelaySampleOutcome::CoverageUnknown
+        };
+        return Some(sample_event(active.world, active.phase, outcome));
+    }
+    if active.candidate_ids.contains(post_id) {
+        return None;
+    }
+    if active.candidate_ids.len() >= MAX_CANDIDATES_PER_SCAN {
+        return active.overflow_ids.insert(post_id.to_owned()).then(|| {
+            sample_event(active.world, active.phase, ReplyDelaySampleOutcome::StateEvicted)
+        });
+    }
+    active.candidate_ids.insert(post_id.to_owned());
+    active.candidates.push((post_id.to_owned(), confirmed_at));
+    None
 }
 
 /// 扫描结束或取消时收口；取消不是零延迟样本。
 pub(super) struct ReplyDelayScanGuard<'a> {
     estimator: &'a ReplyDelayEstimator,
+    auction_id: AuctionId,
     token: u64,
     finished: bool,
 }
@@ -201,35 +236,32 @@ pub(super) struct ReplyDelayScanGuard<'a> {
 impl ReplyDelayScanGuard<'_> {
     pub(super) fn finish(mut self, complete: bool) {
         self.finished = true;
-        self.estimator.finish_scan(self.token, complete);
+        self.estimator.finish_scan(self.auction_id, self.token, complete);
     }
 }
 
 impl Drop for ReplyDelayScanGuard<'_> {
     fn drop(&mut self) {
         if !self.finished {
-            self.estimator.finish_scan(self.token, false);
+            self.estimator.finish_scan(self.auction_id, self.token, false);
         }
     }
 }
 
 fn flush_scan(
-    observer: &Arc<dyn ExternalMetricsObserver>,
     state: &mut EstimatorState,
     active: ActiveScan,
     complete: bool,
-) {
+) -> Vec<ExternalMetricsEvent> {
+    let mut events = Vec::new();
     if !complete {
-        for (_, confirmed_at) in &active.candidates {
-            let _ = confirmed_at;
-            record_sample(
-                observer,
+        for _ in &active.candidates {
+            events.push(sample_event(
                 active.world,
                 active.phase,
                 ReplyDelaySampleOutcome::CoverageUnknown,
-            );
+            ));
         }
-        // 不完整扫描也可能已提交命令；记住这些帖子，后续命令不能替代首次确认终点。
         if let Some(topic) = state.topics.get_mut(&active.auction_id) {
             for post_id in active
                 .candidates
@@ -237,10 +269,12 @@ fn flush_scan(
                 .map(|(post_id, _)| post_id)
                 .chain(active.overflow_ids.iter())
             {
-                remember_seen_import(&mut topic.seen_imports, post_id);
+                if !remember_seen_import(&mut topic.seen_imports, post_id) {
+                    topic.seen_imports_truncated = true;
+                }
             }
         }
-        return;
+        return events;
     }
     let was_evicted = state.evicted.remove(&active.auction_id);
     if was_evicted {
@@ -254,14 +288,14 @@ fn flush_scan(
             ReplyDelaySampleOutcome::MissingBaseline
         };
         for _ in &active.candidates {
-            record_sample(observer, active.world, active.phase, outcome);
+            events.push(sample_event(active.world, active.phase, outcome));
         }
     } else if let Some(baseline) = baseline {
         for (post_id, confirmed_at) in &active.candidates {
             match sample_outcome(&baseline.scan, &active, post_id, *confirmed_at) {
                 SampleResult::NotNew => {}
                 SampleResult::Observed { lower, midpoint, upper } => {
-                    observer.observe(ExternalMetricsEvent::ForumReplyDelayEstimate {
+                    events.push(ExternalMetricsEvent::ForumReplyDelayEstimate {
                         world: active.world,
                         phase: active.phase,
                         method: ReplyDelayMethod::PollWindow,
@@ -269,34 +303,35 @@ fn flush_scan(
                         midpoint,
                         upper,
                     });
-                    record_sample(
-                        observer,
+                    events.push(sample_event(
                         active.world,
                         active.phase,
                         ReplyDelaySampleOutcome::Observed,
-                    );
+                    ));
                 }
-                SampleResult::StateEvicted => record_sample(
-                    observer,
+                SampleResult::StateEvicted => events.push(sample_event(
                     active.world,
                     active.phase,
                     ReplyDelaySampleOutcome::StateEvicted,
-                ),
-                SampleResult::ClockInvalid => record_sample(
-                    observer,
+                )),
+                SampleResult::ClockInvalid => events.push(sample_event(
                     active.world,
                     active.phase,
                     ReplyDelaySampleOutcome::ClockInvalid,
-                ),
+                )),
             }
         }
     }
-    let mut seen_imports =
-        state.topics.remove(&active.auction_id).map_or_default(|topic| topic.seen_imports);
+    let previous = state.topics.remove(&active.auction_id);
+    let mut seen_imports_truncated =
+        previous.as_ref().is_some_and(|topic| topic.seen_imports_truncated);
+    let mut seen_imports = previous.map_or_default(|topic| topic.seen_imports);
     for post_id in
         active.candidates.iter().map(|(post_id, _)| post_id).chain(active.overflow_ids.iter())
     {
-        remember_seen_import(&mut seen_imports, post_id);
+        if !remember_seen_import(&mut seen_imports, post_id) {
+            seen_imports_truncated = true;
+        }
     }
     let scan = ScanWindow {
         started: active.started,
@@ -305,7 +340,10 @@ fn flush_scan(
     };
     state.next_touch = state.next_touch.wrapping_add(1).max(1);
     let touched = state.next_touch;
-    state.topics.insert(active.auction_id, TopicBaseline { scan, seen_imports, touched });
+    state.topics.insert(
+        active.auction_id,
+        TopicBaseline { scan, seen_imports, seen_imports_truncated, touched },
+    );
     if state.topics.len() > MAX_TOPICS
         && let Some(oldest) = state
             .topics
@@ -316,12 +354,17 @@ fn flush_scan(
     {
         remember_evicted(state, oldest);
     }
+    events
 }
 
-fn remember_seen_import(seen_imports: &mut HashSet<String>, post_id: &str) {
-    if seen_imports.len() < MAX_POST_IDS_PER_SCAN {
-        seen_imports.insert(post_id.to_owned());
+fn remember_seen_import(seen_imports: &mut HashSet<String>, post_id: &str) -> bool {
+    if seen_imports.contains(post_id) {
+        return true;
     }
+    if seen_imports.len() >= MAX_POST_IDS_PER_SCAN {
+        return false;
+    }
+    seen_imports.insert(post_id.to_owned())
 }
 
 enum SampleResult {
@@ -371,18 +414,17 @@ fn lock_state(state: &Mutex<EstimatorState>) -> std::sync::MutexGuard<'_, Estima
     }
 }
 
-fn record_sample(
-    observer: &Arc<dyn ExternalMetricsObserver>,
+fn sample_event(
     world: ForumWorld,
     phase: ReplyDelayPhase,
     outcome: ReplyDelaySampleOutcome,
-) {
-    observer.observe(ExternalMetricsEvent::ForumReplyDelaySample {
+) -> ExternalMetricsEvent {
+    ExternalMetricsEvent::ForumReplyDelaySample {
         world,
         phase,
         method: ReplyDelayMethod::PollWindow,
         outcome,
-    });
+    }
 }
 
 fn remember_evicted(state: &mut EstimatorState, auction_id: AuctionId) {

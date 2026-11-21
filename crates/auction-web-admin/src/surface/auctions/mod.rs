@@ -12,18 +12,13 @@ use crate::api::fetch_admin_auctions;
 
 mod actions;
 mod create;
-mod editor;
+pub(in crate::surface) mod editor;
 mod forum;
 mod presentation;
 mod table;
 
 use actions::{AdminAuctionDraftDialogs, AdminAuctionNotice, use_auction_drafts};
-#[cfg(test)]
-pub(super) use editor::tests as draft_page_tests;
-pub(super) use editor::{
-    DraftFeedback, DraftRead, DraftRefreshButton, DraftWriteFeedback, close_edit_draft,
-    close_matching_draft, focus_draft_field_after_render, observe_draft_write, use_draft_page,
-};
+pub(super) use editor::use_draft_page;
 use table::AdminAuctionTable;
 
 fn invalidates_auction_list(entity: &str) -> bool {

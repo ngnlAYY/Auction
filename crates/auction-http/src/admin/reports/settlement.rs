@@ -153,10 +153,12 @@ pub(super) fn valid_settlement_report(report: &SettlementReport, auction_id: Uui
                     None => return false,
                 };
                 if lot.tax_amount > 0 {
-                    movement_count += 1;
+                    let Some(next) = movement_count.checked_add(1) else { return false };
+                    movement_count = next;
                 }
                 if lot.compensation_amount > 0 {
-                    movement_count += 1;
+                    let Some(next) = movement_count.checked_add(1) else { return false };
+                    movement_count = next;
                 }
             }
             let Some(closing_balance) = settlement

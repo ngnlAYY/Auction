@@ -10,8 +10,9 @@ use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
-use super::mapping::{map_storage_error, repository_error, validate_claim_identity};
+use super::mapping::{map_storage_error, validate_claim_identity};
 use crate::database::operations::audit_health::AuditWriteResult as _;
+use crate::database::repository_error;
 
 enum ReconcileTransactionError {
     Storage(sqlx::Error),

@@ -447,3 +447,69 @@ test.each([
     );
   },
 );
+
+test("http_replay_transport_exception_returns_a_transient_result：补读传输异常保持在 Result 边界", async () => {
+  const brokenResponse = {
+    status: 200,
+    statusText: "OK",
+    get headers(): Headers {
+      throw new Error("response metadata failed");
+    },
+  } as unknown as Response;
+  await withSocket(
+    null,
+    () => brokenResponse,
+    async (after) => {
+      const result = await subscribeAuctionRealtime(
+        0,
+        AUCTION_ID,
+        "main",
+        () => true,
+        new AbortController().signal,
+      );
+      expect(after).toEqual([0]);
+      expect(result).toMatchObject({
+        ok: false,
+        error: { kind: "transient", detail: "invalid_response", closeCode: null },
+      });
+    },
+  );
+});
+
+test("websocket_buffer_overflow_closes_and_recovers_through_http_catch_up：握手补读期间帧数有界", async () => {
+  const replayGate = Promise.withResolvers<Response>();
+  const replayStarted = Promise.withResolvers<void>();
+  await withSocket(
+    null,
+    () => {
+      replayStarted.resolve();
+      return replayGate.promise;
+    },
+    async (after, created, sockets) => {
+      const subscription = subscribeAuctionRealtime(
+        0,
+        AUCTION_ID,
+        "main",
+        () => true,
+        new AbortController().signal,
+      );
+      const socket = await created;
+      await replayStarted.promise;
+      for (let index = 0; index < 257; index += 1) {
+        socket.dispatchEvent(new MessageEvent("message", { data: `frame-${index}` }));
+      }
+      expect(socket.readyState).toBe(SocketStub.CLOSING);
+      replayGate.resolve(replayPage([], 0));
+      expect(await subscription).toMatchObject({
+        ok: false,
+        error: {
+          kind: "transient",
+          detail: "实时 WebSocket 读取失败：WebSocket 接收队列超过上限",
+          closeCode: null,
+        },
+      });
+      expect(after).toEqual([0]);
+      expect(sockets).toHaveLength(1);
+    },
+  );
+});

@@ -1,7 +1,7 @@
 //! Public 竞价与代理竞价操作面板。
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
 
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
@@ -16,23 +16,62 @@ use crate::surface::session::login_href_for_current_location;
 use crate::surface::{commands, use_auction_bid_refresh};
 
 type ProxyRead = Result<Option<OwnedProxy>, String>;
-
 type AuctionProxySnapshots = BTreeMap<String, BTreeMap<String, Option<OwnedProxy>>>;
+type AuctionProxyGenerations = BTreeMap<String, BTreeMap<String, u64>>;
 
-/// 一份缓存只属于外壳确认的单个身份，授权按场次与拍品分别保存。
+const MAX_PROXY_SNAPSHOTS: usize = 128;
+
+#[derive(Default)]
+struct ProxySnapshotState {
+    snapshots: AuctionProxySnapshots,
+    latest_generation: AuctionProxyGenerations,
+    insertion_order: VecDeque<(String, String)>,
+}
+
+/// 一份有界缓存只属于外壳确认的单个身份，授权按场次与拍品分别保存。
 #[derive(Clone, Default)]
-pub(crate) struct CatalogProxySnapshots(Rc<RefCell<AuctionProxySnapshots>>);
+pub(crate) struct CatalogProxySnapshots(Rc<RefCell<ProxySnapshotState>>);
 
 impl CatalogProxySnapshots {
-    fn remember(&self, auction_id: String, lot_id: String, result: &ProxyRead) {
-        // 同场暂时读取失败不抹掉已确认的授权；失败结果由本次读取显示，不能用于授权写入。
-        if let Ok(snapshot) = result {
-            self.0.borrow_mut().entry(auction_id).or_default().insert(lot_id, snapshot.clone());
+    fn begin(&self, auction_id: &str, lot_id: &str, generation: u64) {
+        self.0
+            .borrow_mut()
+            .latest_generation
+            .entry(auction_id.to_owned())
+            .or_default()
+            .insert(lot_id.to_owned(), generation);
+    }
+
+    fn remember(&self, auction_id: String, lot_id: String, generation: u64, result: &ProxyRead) {
+        let Ok(snapshot) = result else { return };
+        let mut state = self.0.borrow_mut();
+        if state.latest_generation.get(&auction_id).and_then(|lots| lots.get(&lot_id))
+            != Some(&generation)
+        {
+            return;
+        }
+        state.insertion_order.retain(|key| key != &(auction_id.clone(), lot_id.clone()));
+        state.insertion_order.push_back((auction_id.clone(), lot_id.clone()));
+        state.snapshots.entry(auction_id).or_default().insert(lot_id, snapshot.clone());
+        while state.insertion_order.len() > MAX_PROXY_SNAPSHOTS {
+            let Some((old_auction, old_lot)) = state.insertion_order.pop_front() else { break };
+            if let Some(lots) = state.snapshots.get_mut(&old_auction) {
+                lots.remove(&old_lot);
+                if lots.is_empty() {
+                    state.snapshots.remove(&old_auction);
+                }
+            }
+            if let Some(lots) = state.latest_generation.get_mut(&old_auction) {
+                lots.remove(&old_lot);
+                if lots.is_empty() {
+                    state.latest_generation.remove(&old_auction);
+                }
+            }
         }
     }
 
     fn get(&self, auction_id: &str, lot_id: &str) -> Option<Option<OwnedProxy>> {
-        self.0.borrow().get(auction_id)?.get(lot_id).cloned()
+        self.0.borrow().snapshots.get(auction_id)?.get(lot_id).cloned()
     }
 }
 
@@ -142,6 +181,7 @@ pub(crate) fn LiveCatalogActions(
                     let snapshots = commands
                         .and_then(commands::CompetitionCommands::current)
                         .and_then(|store| store.proxy_snapshots(user_id).cloned())?;
+                    snapshots.begin(&auction_id, &lot_id, generation);
                     Some((generation, snapshots))
                 })
                 .flatten();
@@ -153,7 +193,7 @@ pub(crate) fn LiveCatalogActions(
                     }
                     Ok(proxy)
                 });
-                snapshots.remember(auction_id, lot_id, &result);
+                snapshots.remember(auction_id, lot_id, generation, &result);
                 Some((generation, result))
             }
         }
@@ -928,8 +968,9 @@ pub(super) mod tests {
     #[test]
     fn only_a_successful_check_changes_the_confirmed_snapshot() {
         let snapshots = CatalogProxySnapshots::default();
-        let remember = |result| snapshots.remember(AUCTION.to_owned(), LOT.to_owned(), &result);
         let failure = Err("network_error".to_owned());
+        snapshots.begin(AUCTION, LOT, 1);
+        let remember = |result| snapshots.remember(AUCTION.to_owned(), LOT.to_owned(), 1, &result);
         remember(failure.clone());
         assert_eq!(snapshots.get(AUCTION, LOT), None);
         remember(Ok(Some(waiting_proxy())));

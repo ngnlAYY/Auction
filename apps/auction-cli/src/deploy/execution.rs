@@ -65,12 +65,8 @@ pub(super) async fn deploy_locked(
         .context("创建停机备份失败")
         .map_err(|error| stopped_before_install(error, install_dir))?;
     let manifest_path = archive.with_file_name(format!("{}.manifest", manifest.archive_file_name));
-    let new_cli = artifact
-        .binary("auction-cli")
-        .context("制品缺少 auction-cli")
-        .map_err(|error| stopped_before_install(error, install_dir))?
-        .path
-        .clone();
+    // require_artifact_cli 已证明当前映像与制品内 CLI 字节一致；子进程复用该映像，不重开可变制品路径。
+    let new_cli = Path::new("/proc/self/exe");
     let old_cli = install_dir.join("auction-cli");
     progress("用旧 CLI 校验备份");
     gates::verify_backup_with_cli(&old_cli, plan.config_dir.path(), &manifest_path, database)
@@ -78,11 +74,11 @@ pub(super) async fn deploy_locked(
         .context("旧 CLI 校验备份失败")
         .map_err(|error| stopped_before_install(error, install_dir))?;
     progress("用新 CLI 校验备份");
-    gates::verify_backup_with_cli(&new_cli, plan.config_dir.path(), &manifest_path, database)
+    gates::verify_backup_with_cli(new_cli, plan.config_dir.path(), &manifest_path, database)
         .await
         .context("新 CLI 校验备份失败")
         .map_err(|error| stopped_before_install(error, install_dir))?;
-    context.set_backup_id(Some(&manifest.archive_file_name));
+    context.set_backup_id(Some(&manifest.archive_file_name))?;
     let context: &ReceiptContext = context;
 
     // 回滚记录与其部署回执必须共享同一标识（`rollback` 按 `deploy_receipt_id` 读回执），
@@ -248,22 +244,28 @@ fn install_failed(
     install_dir: &Path,
     record_dir: &Path,
 ) -> anyhow::Error {
-    if failure.restored {
-        return failure.error.context(format!(
+    match failure.outcome {
+        install::InstallRecoveryOutcome::Restored
+        | install::InstallRecoveryOutcome::UntouchedVerified => failure.error.context(format!(
             "安装制品程序失败：三角色已停止，迁移尚未执行，{} 中的四个程序已复核为部署前的旧程序\
-             （换回明细见下）；{}",
+             （安装现场明细见下）；{}",
             install_dir.display(),
             restart_old_version(install_dir)
-        ));
+        )),
+        install::InstallRecoveryOutcome::UntouchedUnverified => failure.error.context(format!(
+            "安装制品程序失败：三角色已停止，迁移尚未执行；{} 中没有替换任何程序，但安装目录及程序\
+             身份未能复核。不要启动服务；按 ops/deploy/RECOVERY.md 的“重建安装目录信任”核对并修复后再处置",
+            install_dir.display()
+        )),
+        install::InstallRecoveryOutcome::Mixed => failure.error.context(format!(
+            "安装制品程序失败且自动换回未完成：三角色已停止，迁移尚未执行；{} 中的程序可能新旧混合，\
+             旧程序完整保留在 {}（摘要见 {}）。按 ops/deploy/RECOVERY.md 的“安装中途失败的手工换回”\
+             核对摘要后再启动；不要用制品 CLI 执行 service start（它会先执行新迁移）",
+            install_dir.display(),
+            record_dir.join("bin").display(),
+            record_dir.join(install::RECORD_FILE).display()
+        )),
     }
-    failure.error.context(format!(
-        "安装制品程序失败且自动换回未完成：三角色已停止，迁移尚未执行；{} 中的程序可能新旧混合，\
-         旧程序完整保留在 {}（摘要见 {}）。按 ops/deploy/RECOVERY.md 的“安装中途失败的手工换回”\
-         核对摘要后再启动；不要用制品 CLI 执行 service start（它会先执行新迁移）",
-        install_dir.display(),
-        record_dir.join("bin").display(),
-        record_dir.join(install::RECORD_FILE).display()
-    ))
 }
 
 /// 安装目录是旧程序、数据库未迁移时的恢复命令：只能用安装目录中的旧 CLI 启动。
@@ -280,7 +282,7 @@ mod tests {
     use std::path::Path;
 
     use super::{install_failed, stopped_before_install};
-    use crate::deploy::install::InstallArtifactFailure;
+    use crate::deploy::install::{InstallArtifactFailure, InstallRecoveryOutcome};
 
     /// 停机后、安装前的失败交给入口写通用回执，错误给出安装目录中旧 CLI 的恢复命令（含
     /// --state-dir，漏传会让部署锁与回执落到默认目录）并警告不要用制品 CLI；原始原因保留在
@@ -300,31 +302,40 @@ mod tests {
         assert!(text.ends_with("创建停机备份失败: pg_dump 失败"), "{text}");
     }
 
-    /// 安装中途失败的指引取决于自动换回：已换回并复核时给出安装目录 CLI 的启动命令；未完成
-    /// 时只指向人工换回与回滚记录，不给任何启动命令。
+    /// 仅实际换回或完整复核可信的未改动安装目录才得到启动指引；未验证与混合状态均禁止启动。
     #[test]
-    fn install_failure_guidance_follows_the_swap_back_result() {
+    fn install_failure_guidance_requires_verified_install_state() {
         let install_dir = Path::new("/opt/auction/bin");
         let record_dir = Path::new("/var/lib/auction/deployment/rollback/r1");
-        let restored = install_failed(
-            InstallArtifactFailure {
-                error: anyhow::anyhow!("原子替换程序失败"), restored: true
-            },
-            install_dir,
-            record_dir,
-        );
-        let text = format!("{restored:#}");
-        assert!(text.contains("已复核为部署前的旧程序") && text.contains("迁移尚未执行"), "{text}");
-        assert!(text.contains("/opt/auction/bin/auction-cli service start"), "{text}");
-        assert!(text.contains("不要用制品 CLI"), "{text}");
+        let failure = |outcome| InstallArtifactFailure {
+            error: anyhow::anyhow!("原子替换程序失败"),
+            outcome,
+        };
 
-        let mixed = install_failed(
-            InstallArtifactFailure {
-                error: anyhow::anyhow!("原子替换程序失败"), restored: false
-            },
+        for outcome in [InstallRecoveryOutcome::Restored, InstallRecoveryOutcome::UntouchedVerified]
+        {
+            let safe = install_failed(failure(outcome), install_dir, record_dir);
+            let text = format!("{safe:#}");
+            assert!(
+                text.contains("已复核为部署前的旧程序") && text.contains("迁移尚未执行"),
+                "{text}"
+            );
+            assert!(text.contains("/opt/auction/bin/auction-cli service start"), "{text}");
+            assert!(text.contains("不要用制品 CLI"), "{text}");
+        }
+
+        let unverified = install_failed(
+            failure(InstallRecoveryOutcome::UntouchedUnverified),
             install_dir,
             record_dir,
         );
+        let text = format!("{unverified:#}");
+        assert!(text.contains("没有替换任何程序") && text.contains("身份未能复核"), "{text}");
+        assert!(text.contains("重建安装目录信任"), "{text}");
+        assert!(!text.contains("service start") && !text.contains("systemctl start"), "{text}");
+        assert!(!text.contains("可能新旧混合"), "{text}");
+
+        let mixed = install_failed(failure(InstallRecoveryOutcome::Mixed), install_dir, record_dir);
         let text = format!("{mixed:#}");
         assert!(text.contains("自动换回未完成") && text.contains("可能新旧混合"), "{text}");
         assert!(text.contains("安装中途失败的手工换回"), "{text}");

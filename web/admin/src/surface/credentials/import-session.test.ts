@@ -11,6 +11,7 @@ import {
   createAdminRequestHarness,
   installWriteFetch,
   parseJsonObject,
+  TEST_SESSION,
 } from "../../api/api-request-fixture";
 import type { AdminCredential } from "../../api/credentials";
 import { registerAdminSessionHost } from "../../api/session";
@@ -106,15 +107,7 @@ async function withImport(
   const session = registerAdminSessionHost({
     check() {},
     writesAllowed: allowed,
-    confirmed: () => ({
-      actor: "fixture",
-      csrfToken: "csrf-fixture",
-      csrf_token: "csrf-fixture",
-      expiresAt: 1n,
-      absoluteExpiresAt: 2n,
-      serverTime: 0n,
-      receivedAtMillis: 0,
-    }),
+    confirmed: () => TEST_SESSION,
   });
   const fetch = installWriteFetch((_request, init, index) => {
     const reply = replies[index];

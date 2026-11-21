@@ -102,11 +102,7 @@ impl DatabaseStore {
             let transaction = match self.pool().begin_with(begin_statement(policy.isolation)).await
             {
                 Ok(transaction) => transaction,
-                Err(_) => {
-                    return Err(E::from(SettlementTransactionError::Failed(
-                        "PostgreSQL 结算事务无法开始".to_owned(),
-                    )));
-                }
+                Err(error) => return Err(E::from(map_sql_error(error))),
             };
             let mut transaction = PostgresCompetitionTransaction::new(transaction);
 

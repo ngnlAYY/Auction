@@ -73,7 +73,7 @@ pub(super) fn bids(bids: Vec<PlayerSupportBid>) -> Element {
                                 th { scope: "col", {t!("support-lot-number")} }
                                 th { scope: "col", {t!("support-amount")} }
                                 th { scope: "col", {t!("support-mechanism")} }
-                                th { scope: "col", {t!("delivery-status")} }
+                                th { scope: "col", {t!("support-lot-status")} }
                                 th { scope: "col", {t!("support-created-at")} }
                             }
                         }

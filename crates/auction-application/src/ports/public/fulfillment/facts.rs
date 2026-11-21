@@ -90,6 +90,10 @@ impl PublicFulfillmentLot {
             || !auction_domain::valid_text(&self.seller_name, 256)
             || self.buyer_name.as_deref().is_some_and(|name| !auction_domain::valid_text(name, 256))
             || self.final_price.is_some_and(|price| price < 0)
+            || self.lot_status == "sold"
+                && (self.buyer_name.is_none() || self.final_price.is_some_and(|price| price <= 0))
+            || self.lot_status == "unsold"
+                && (self.buyer_name.is_some() || self.final_price.is_some_and(|price| price != 0))
             || self.obligations.iter().any(|obligation| {
                 obligation.execution_state.is_none() && obligation.delivery_status.is_some()
             })

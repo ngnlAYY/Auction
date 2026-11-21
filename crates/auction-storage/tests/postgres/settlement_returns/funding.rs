@@ -684,9 +684,10 @@ async fn postgres_return_cash_resend_conserves_funding() {
         .fetch_all(pool)
         .await
         .expect("读取派发资金绑定");
-        assert!(
-            bindings.contains(&resending.original) && bindings.contains(&resending.resend),
-            "两次派发都留有只追加的资金绑定（{label}）：{bindings:?}"
+        assert_eq!(
+            bindings,
+            [resending.original, resending.resend],
+            "恰有首寄与补寄两条只追加资金绑定（{label}）"
         );
         pool.close().await;
     }

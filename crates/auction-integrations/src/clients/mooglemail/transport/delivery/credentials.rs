@@ -24,7 +24,7 @@ impl MoogleMailDeliveryTransport {
         &self,
         world: MoogleMailWorld,
     ) -> Result<PreparedMoogleMailCredentials, DeliveryTransportError> {
-        let mut session = self
+        let session = self
             .credentials
             .begin_exclusive(world, MoogleMailOperation::Send)
             .await

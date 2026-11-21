@@ -401,7 +401,7 @@ mod tests {
         RuntimeSwitchCard, pause_refresh_millis, pause_state, reason_error_text,
     };
     use crate::api::ExternalAccessPauseAttempt;
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         RecordRead, assert_field, button, click_button, has_live_text, mount_writer, settle_writer,
         submit_button_disabled, writer_form,
     };

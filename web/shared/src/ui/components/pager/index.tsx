@@ -62,20 +62,28 @@ export interface PagerProps {
  * 页码与总量变化时尝试纠偏。可选页受总量约束，显示值以已提交的页码为准。
  */
 export function Pager(props: PagerProps): JSX.Element {
-  const pageSize = createValueMemo(() => Math.max(props.pageSize, 1));
+  const pageSize = createValueMemo(() =>
+    Number.isSafeInteger(props.pageSize) && props.pageSize > 0 ? props.pageSize : 1,
+  );
+  const appliedPage = createValueMemo(() =>
+    Number.isSafeInteger(props.page) && props.page > 0 ? props.page : 1,
+  );
   const totalPages = createValueMemo(() => {
-    const total = props.total ?? null;
+    const rawTotal = props.total ?? null;
+    const total =
+      rawTotal === null ? null : Number.isSafeInteger(rawTotal) && rawTotal >= 0 ? rawTotal : 0;
     const raw =
       total === null
         ? props.hasMore === true
-          ? saturatingAdd(props.page, 1)
-          : props.page
+          ? saturatingAdd(appliedPage(), 1)
+          : appliedPage()
         : total <= 0
           ? 1
           : 1 + Math.floor((total - 1) / pageSize());
-    return Math.min(Math.max(raw, 1), Math.max(props.maxPage ?? Number.MAX_SAFE_INTEGER, 1));
+    const rawMaximum = props.maxPage ?? Number.MAX_SAFE_INTEGER;
+    const maximum = Number.isSafeInteger(rawMaximum) && rawMaximum > 0 ? rawMaximum : 1;
+    return Math.min(Math.max(raw, 1), maximum);
   });
-  const appliedPage = createValueMemo(() => Math.max(props.page, 1));
   const validPage = createValueMemo(() => Math.min(appliedPage(), totalPages()));
   const jumpPage = createCell(untrack(appliedPage).toString());
   const clampRejected = createCell(false);

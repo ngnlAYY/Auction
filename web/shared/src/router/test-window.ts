@@ -23,6 +23,7 @@ interface FakeHistory {
 }
 
 interface FakeWindow extends EventTarget {
+  readonly document: object;
   readonly location: URL;
   readonly history: FakeHistory;
   readonly writes: { mode: "push" | "replace"; url: URL }[];
@@ -85,6 +86,7 @@ function createFakeWindow(initialUrl: string, initialState: unknown): FakeWindow
     forward: () => traverse(index + 1),
   };
   const fake = Object.assign(events, {
+    document: {},
     location,
     history,
     writes,

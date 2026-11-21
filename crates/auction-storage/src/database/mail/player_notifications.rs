@@ -178,9 +178,15 @@ const SEASON_REMINDER_FACTS_SQL: &str = r#"WITH boundary AS (
                  SELECT 1
                  FROM public.deliveries AS delivery
                  WHERE delivery.origin_kind = 'season_reminder'
-                   AND delivery.origin_id = 'season_reminder:'
-                       || (extract(epoch FROM boundary.at))::bigint::text
-                       || ':' || COALESCE(obligation.recipient_game_identity, recipient.username)
+                  AND delivery.origin_id = 'season_reminder:'
+                      || CASE
+                             WHEN boundary.at = date_trunc('second', boundary.at)
+                             THEN floor(extract(epoch FROM boundary.at))::bigint::text
+                             ELSE 'ns' || (
+                                 (extract(epoch FROM boundary.at) * 1000000000)::numeric(20, 0)::text
+                             )
+                         END
+                      || ':' || COALESCE(obligation.recipient_game_identity, recipient.username)
              )
        ),
        -- 限额只作用于 (冻结边界, 收件人) 组；最终查询必须取回这些组的全部义务，
@@ -465,8 +471,11 @@ mod tests {
                 FROM pg_temp.settlement_obligations AS obligation;
              INSERT INTO pg_temp.deliveries
                 SELECT 'season_reminder',
-                       'season_reminder:' || (extract(epoch FROM auction.intake_opens_at))::bigint
-                           || ':carol'
+                       'season_reminder:' || CASE
+                           WHEN auction.intake_opens_at = date_trunc('second', auction.intake_opens_at)
+                           THEN floor(extract(epoch FROM auction.intake_opens_at))::bigint::text
+                           ELSE 'ns' || ((extract(epoch FROM auction.intake_opens_at) * 1000000000)::numeric(20, 0)::text)
+                       END || ':carol'
                 FROM pg_temp.auctions AS auction;",
         )
         .await?;

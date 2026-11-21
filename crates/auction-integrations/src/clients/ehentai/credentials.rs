@@ -21,6 +21,7 @@ pub struct EhentaiCookie(Arc<EhentaiCookieValue>);
 struct EhentaiCookieValue {
     value: String,
     revoked: AtomicBool,
+    use_lock: tokio::sync::Mutex<()>,
 }
 
 impl EhentaiCookie {
@@ -34,7 +35,11 @@ impl EhentaiCookie {
         }
         let value = String::from_utf8(value.to_vec())
             .map_err(|_| EhentaiError::credential(EhentaiOperation::CreateTopic))?;
-        Ok(Self(Arc::new(EhentaiCookieValue { value, revoked: AtomicBool::new(false) })))
+        Ok(Self(Arc::new(EhentaiCookieValue {
+            value,
+            revoked: AtomicBool::new(false),
+            use_lock: tokio::sync::Mutex::new(()),
+        })))
     }
 
     /// 返回仅供建立单次 HTTP header 使用的 Cookie 文本。
@@ -45,8 +50,13 @@ impl EhentaiCookie {
     pub(super) fn is_active(&self) -> bool {
         !self.0.revoked.load(Ordering::Acquire)
     }
+    pub(super) async fn lock_for_use(&self) -> Option<tokio::sync::MutexGuard<'_, ()>> {
+        let guard = self.0.use_lock.lock().await;
+        self.is_active().then_some(guard)
+    }
 
-    fn revoke(&self) {
+    async fn revoke(&self) {
+        let _guard = self.0.use_lock.lock().await;
         self.0.revoked.store(true, Ordering::Release);
     }
 }
@@ -262,14 +272,11 @@ impl EhentaiCredentialSession {
 
     pub(super) async fn invalidate_current(&mut self) -> Result<(), EhentaiError> {
         let current = &self.current;
-        // 先同步撤销已准备的 PM、分页和发帖会话；失效回写取消或失败不能复活这些克隆。
-        current.cookie.revoke();
+        // 等已开始的物理请求离开使用段，再禁止克隆凭据继续发出请求。
+        current.cookie.revoke().await;
         {
-            let mut candidates = self.set.candidates.lock().map_err(safe_diagnostics::warn_map(
-                "forum_credentials",
-                "lock_revocation",
-                || EhentaiError::credential(EhentaiOperation::FetchTopic),
-            ))?;
+            let mut candidates =
+                self.set.candidates.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             candidates.retain(|candidate| candidate.key != current.key);
         }
         if let (Some(persistent_id), Some(invalidator)) =

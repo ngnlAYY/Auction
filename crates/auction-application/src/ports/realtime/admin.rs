@@ -16,6 +16,8 @@ pub const MAX_REALTIME_ADMIN_PAGE_SIZE: i64 = 200;
 
 /// Admin realtime 数字分页允许的最大偏移量，避免深分页把数据库退化为无界扫描。
 pub const MAX_REALTIME_ADMIN_OFFSET: i64 = 1_000_000;
+/// replay payload 的最大序列化尺寸。
+pub const MAX_REALTIME_REPLAY_PAYLOAD_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RealtimeEventListRequest {
@@ -259,7 +261,8 @@ impl RealtimeReplayCommand {
             && !self.failure_id.is_nil()
             && self.schema_version > 0
             && self.public_payload.is_object()
-            && valid_required_text(&self.actor_id, 128)
+            && serde_json::to_vec(&self.public_payload)
+                .is_ok_and(|payload| payload.len() <= MAX_REALTIME_REPLAY_PAYLOAD_BYTES)
             && auction_domain::valid_optional_text(self.request_id.as_deref(), 128, false)
             && self.created_at.timestamp_micros() != 0
     }

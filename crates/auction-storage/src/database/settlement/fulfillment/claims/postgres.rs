@@ -6,10 +6,10 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use super::row::map_claim;
+use crate::database::repository_error;
 use crate::database::settlement::fulfillment::eligibility::recovery_allows_execution;
 use crate::database::settlement::fulfillment::mapping::{
-    ClaimMappingError, map_claim_execution_identity, map_storage_error, repository_error,
-    validate_claim_context,
+    ClaimMappingError, map_claim_execution_identity, map_storage_error, validate_claim_context,
 };
 use crate::database::settlement::fulfillment::reconcile::manual_reconcile_in_transaction;
 

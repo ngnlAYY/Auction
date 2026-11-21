@@ -377,10 +377,10 @@ fn observations(metadata: &Value) -> Result<Vec<DeliveryAdminSentEvidence>, Deli
     let mut items = Vec::new();
     for kind in SENT_OBSERVATION_KINDS.into_iter().chain(["compose_discard"]) {
         let Some(observation) = metadata.get(kind) else { continue };
+        if !valid_observation_optional_fields(observation) {
+            return Err(DeliveryAdminError::Unavailable);
+        }
         let (external_mail_id, observed_at, attachments) = if kind == "compose_discard" {
-            if !observation.is_object() {
-                continue;
-            }
             let mid = observation.get("mid").or_else(|| observation.get("external_mail_id"));
             (
                 text(mid),
@@ -389,7 +389,7 @@ fn observations(metadata: &Value) -> Result<Vec<DeliveryAdminSentEvidence>, Deli
             )
         } else {
             let decoded = decode_sent_observation(observation)
-                .map_err(|error| map_storage_error(sqlx::Error::Decode(Box::new(error))))?;
+                .map_err(|_| DeliveryAdminError::Unavailable)?;
             (Some(decoded.mid.to_owned()), decoded.observed_at, decoded.attachments)
         };
         let reference = match external_mail_id.as_deref() {
@@ -426,6 +426,30 @@ fn observations(metadata: &Value) -> Result<Vec<DeliveryAdminSentEvidence>, Deli
     Ok(items)
 }
 
+fn valid_observation_optional_fields(observation: &Value) -> bool {
+    observation.is_object()
+        && observation.get("observed_at").is_none_or(|value| {
+            value.as_str().is_some_and(|text| Timestamp::parse_from_rfc3339(text).is_ok())
+        })
+        && observation.get("sent_at").is_none_or(|value| {
+            value.as_str().is_some_and(|text| Timestamp::parse_from_rfc3339(text).is_ok())
+        })
+        && ["recipient", "subject", "receipt"]
+            .into_iter()
+            .all(|key| observation.get(key).is_none_or(Value::is_string))
+        && observation.get("body_digest").is_none_or(|value| digest(Some(value)).is_some())
+        && observation.get("collected").is_none_or(Value::is_boolean)
+        && ["cod_pending", "remaining_credits", "remaining_equipment_count"].into_iter().all(
+            |key| {
+                observation
+                    .get(key)
+                    .is_none_or(|value| value.as_i64().is_some_and(|amount| amount >= 0))
+            },
+        )
+        && observation.get("remaining_equipment_ids").is_none_or(|value| {
+            value.as_array().is_some_and(|ids| ids.iter().all(Value::is_string))
+        })
+}
 fn timestamp(value: Option<&Value>) -> Option<Timestamp> {
     value.and_then(Value::as_str).and_then(|text| Timestamp::parse_from_rfc3339(text).ok())
 }

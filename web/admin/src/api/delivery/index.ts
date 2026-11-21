@@ -39,7 +39,7 @@ import {
   writeOutcomeUnknown,
 } from "../failure";
 import type { AdminSessionHost } from "../session";
-import { trimRustWhitespace } from "../session-time";
+import { parseStrictRfc3339, trimRustWhitespace } from "../session-time";
 import {
   type PreparedJsonCommand,
   prepareJsonCommandOnce,
@@ -47,13 +47,16 @@ import {
   sendJsonPreview,
   sendPreparedJsonWrite,
 } from "../transport";
-import { MAX_JSON_SAFE_INTEGER, validSafeText, validSuccessCode } from "../validation";
+import { MAX_JSON_SAFE_INTEGER, validCount, validSafeText, validSuccessCode } from "../validation";
 import { strictDeliveryEnvelopeSchema } from "./decode";
 import { decodePlayerSupport, playerSupportUrl } from "./player-support";
 import { decodeConfirmation, decodeDetailWithActions, decodePreview } from "./responses";
 
 /** 与服务端 `MAX_PLAYER_SUPPORT_ROWS` 对齐；超过即视为损坏响应。 */
 export const MAX_PLAYER_SUPPORT_ROWS = 50;
+
+const PREPARED_ACKNOWLEDGEMENTS = new WeakSet<PreparedAcknowledgeDeliveryCommand>();
+const PREPARED_SENT_PROOFS = new WeakSet<PreparedSentProofCommand>();
 
 /** 玩家支持用户检索词的 UTF-8 字节上限，与服务端 `MAX_PLAYER_SUPPORT_USER_LEN` 对齐。 */
 export const MAX_PLAYER_SUPPORT_USER_BYTES = 256;
@@ -154,7 +157,9 @@ export function prepareSentProofCommand(command: SentProofCommand): SentProofCom
     if (!prepared.ok) {
       return err(prepared.error);
     }
-    return ok(Object.freeze({ commandId, command: frozen, body: prepared.value }));
+    const preparedCommand = Object.freeze({ commandId, command: frozen, body: prepared.value });
+    PREPARED_SENT_PROOFS.add(preparedCommand);
+    return ok(preparedCommand);
   };
 }
 
@@ -185,7 +190,9 @@ export function prepareAcknowledgeDelivery(
     if (!prepared.ok) {
       return err(prepared.error);
     }
-    return ok(Object.freeze({ commandId, command: frozen, body: prepared.value }));
+    const preparedCommand = Object.freeze({ commandId, command: frozen, body: prepared.value });
+    PREPARED_ACKNOWLEDGEMENTS.add(preparedCommand);
+    return ok(preparedCommand);
   };
 }
 
@@ -270,6 +277,9 @@ export async function acknowledgeDelivery(
   prepared: PreparedAcknowledgeDeliveryCommand,
   signal: AbortSignal,
 ): Promise<Result<AdminDeliveryAcknowledgeResponse, AdminWriteFailure>> {
+  if (!PREPARED_ACKNOWLEDGEMENTS.has(prepared)) {
+    return err(writeNotSent("invalid_delivery_command"));
+  }
   const { deliveryId, expectedFencingVersion } = prepared.command;
   const url = `/api/v1/admin/deliveries/${deliveryId}/acknowledge`;
   const response = await sendPreparedJsonWrite(
@@ -319,6 +329,9 @@ export async function confirmDeliverySentProof(
   prepared: PreparedSentProofCommand,
   signal: AbortSignal,
 ): Promise<Result<AdminDeliverySentProofResponse, AdminWriteFailure>> {
+  if (!PREPARED_SENT_PROOFS.has(prepared)) {
+    return err(writeNotSent("invalid_delivery_command"));
+  }
   const { deliveryId } = prepared.command;
   const { commandId } = prepared;
   const url = `/api/v1/admin/deliveries/${deliveryId}/sent-proof/confirm`;
@@ -433,14 +446,44 @@ function snapshotSentEvidence(
 ): Result<AdminDeliverySentEvidenceRequest, AdminApiFailure> {
   const originalBodyDigest = adminDeliveryDigest32(evidence.original_body_digest);
   const observedBodyDigest = adminDeliveryDigest32(evidence.observed_body_digest);
+  const sentMinute =
+    typeof evidence.sent_minute === "string" ? parseStrictRfc3339(evidence.sent_minute) : null;
+  const observedAt =
+    typeof evidence.observed_at === "string" ? parseStrictRfc3339(evidence.observed_at) : null;
+  if (
+    evidence.schema_version !== 1 ||
+    evidence.world_id !== "main" ||
+    typeof evidence.external_mail_id !== "string" ||
+    !/^[1-9][0-9]{0,63}$/u.test(evidence.external_mail_id) ||
+    typeof evidence.sender_uid !== "string" ||
+    !/^[1-9][0-9]{0,63}$/u.test(evidence.sender_uid) ||
+    typeof evidence.sender_name !== "string" ||
+    !validSafeText(evidence.sender_name, 256) ||
+    typeof evidence.recipient !== "string" ||
+    !validSafeText(evidence.recipient, 256) ||
+    typeof evidence.subject !== "string" ||
+    !validSafeText(evidence.subject, 512) ||
+    sentMinute === null ||
+    sentMinute % 60_000_000_000n !== 0n ||
+    observedAt === null ||
+    observedAt < sentMinute ||
+    typeof evidence.collected !== "boolean" ||
+    typeof evidence.receipt !== "string" ||
+    utf8ByteLength(evidence.receipt) > 2048 ||
+    !Array.isArray(evidence.equipment_ids) ||
+    evidence.equipment_ids.length > 1 ||
+    evidence.equipment_ids.some((id) => typeof id !== "string" || !/^[1-9][0-9]{0,63}$/u.test(id))
+  ) {
+    return err(adminApiFailureClient("invalid_request"));
+  }
   if (
     originalBodyDigest === null ||
     observedBodyDigest === null ||
     !Number.isSafeInteger(evidence.schema_version) ||
     evidence.schema_version < 0 ||
     evidence.schema_version > 0xffff ||
-    !Number.isSafeInteger(evidence.remaining_credits) ||
-    !Number.isSafeInteger(evidence.cod_pending)
+    !validCount(evidence.remaining_credits) ||
+    !validCount(evidence.cod_pending)
   ) {
     return err(adminApiFailureClient("invalid_request"));
   }

@@ -144,6 +144,7 @@ struct LoadStats {
     conflicts: usize,
     exhausted: usize,
     other_failures: usize,
+    post_commit_notify_failures: usize,
     latencies_micros: Vec<u64>,
     commit_micros: Vec<u64>,
     /// 提交后单独发送唤醒的耗时（含取连接与自动提交）；不并入 commit_micros。
@@ -160,6 +161,7 @@ impl LoadStats {
         self.exhausted += other.exhausted;
         self.other_failures += other.other_failures;
         self.latencies_micros.extend(other.latencies_micros);
+        self.post_commit_notify_failures += other.post_commit_notify_failures;
         self.commit_micros.extend(other.commit_micros);
         self.post_commit_notify_micros.extend(other.post_commit_notify_micros);
     }
@@ -183,6 +185,7 @@ impl LoadStats {
             "conflicts": self.conflicts,
             "exhausted": self.exhausted,
             "other_failures": self.other_failures,
+            "post_commit_notify_failures": self.post_commit_notify_failures,
             "latency_p50_us": self.percentile_micros(0.50),
             "latency_p95_us": self.percentile_micros(0.95),
             "latency_max_us": self.latencies_micros.iter().copied().max().unwrap_or(0),
@@ -222,22 +225,16 @@ fn report_dir() -> PathBuf {
     )
 }
 
-pub(crate) fn write_report(name: &str, report: &Value) -> PathBuf {
+pub(crate) fn write_report(name: &str, report: &Value) -> Result<PathBuf, String> {
     let directory = report_dir();
-    if let Err(error) = std::fs::create_dir_all(&directory) {
-        println!("无法创建报告目录 {}：{error}", directory.display());
-        return directory;
-    }
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| format!("无法创建报告目录 {}：{error}", directory.display()))?;
     let path = directory.join(format!("{name}.json"));
-    match serde_json::to_string_pretty(report) {
-        Ok(rendered) => {
-            if let Err(error) = std::fs::write(&path, rendered) {
-                println!("无法写入报告 {}：{error}", path.display());
-            }
-        }
-        Err(error) => println!("无法序列化报告：{error}"),
-    }
-    path
+    let rendered =
+        serde_json::to_string_pretty(report).map_err(|error| format!("无法序列化报告：{error}"))?;
+    std::fs::write(&path, rendered)
+        .map_err(|error| format!("无法写入报告 {}：{error}", path.display()))?;
+    Ok(path)
 }
 
 /// 写入合成历史：只有已结算场次、已成交 lot、买家与逐 lot 结算，形状与真实投影一致。
@@ -679,7 +676,7 @@ async fn perf_price_history_index_and_plans() {
         "without_index": baseline.iter().map(|(label, summary)| (label.clone(), summary.to_json())).collect::<BTreeMap<_, _>>(),
         "results_identical": results_match,
     });
-    let path = write_report("price-history-plans", &report);
+    let path = write_report("price-history-plans", &report).expect("持久化价格历史计划报告");
     println!("价格历史计划报告：{}", path.display());
     pool.close().await;
 }
@@ -752,16 +749,26 @@ async fn run_contention(
                             stats.commit_micros.push(
                                 u64::try_from(commit_elapsed.as_micros()).unwrap_or(u64::MAX),
                             );
+                            let mut notification_failed = false;
                             if notify == NotifyMode::AfterCommit {
                                 // 提交后再发送；独立自动提交事务，不延长原事务提交。
                                 let notify_started = Instant::now();
-                                let _ = sqlx::query("SELECT public.signal_delivery_ready()")
-                                    .execute(&pool)
-                                    .await;
+                                notification_failed =
+                                    sqlx::query("SELECT public.signal_delivery_ready()")
+                                        .execute(&pool)
+                                        .await
+                                        .is_err();
+                                if notification_failed {
+                                    stats.post_commit_notify_failures += 1;
+                                }
                                 stats.post_commit_notify_micros.push(
                                     u64::try_from(notify_started.elapsed().as_micros())
                                         .unwrap_or(u64::MAX),
                                 );
+                            }
+                            if notification_failed {
+                                stats.other_failures += 1;
+                                break;
                             }
                             stats.latencies_micros.push(
                                 u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX),
@@ -854,11 +861,16 @@ async fn run_contention_deferred(
                     match result {
                         Ok(commit_elapsed) => {
                             // 提交后补号：真实路径在 runner 内完成，失败由 relay 兜底。
-                            let _ = sqlx::query(allocation_sql)
+                            if sqlx::query(allocation_sql)
                                 .bind(&stream_key)
                                 .bind(256_i64)
                                 .execute(&pool)
-                                .await;
+                                .await
+                                .is_err()
+                            {
+                                stats.other_failures += 1;
+                                break;
+                            }
                             stats.commit_micros.push(
                                 u64::try_from(commit_elapsed.as_micros()).unwrap_or(u64::MAX),
                             );
@@ -1234,7 +1246,7 @@ async fn perf_bid_hotspot_and_notify_commit() {
         "deferred_sequence": deferred.to_json(),
         "applied_state_versions": applied,
     });
-    let path = write_report("bid-hotspot-load", &report);
+    let path = write_report("bid-hotspot-load", &report).expect("持久化热点负载报告");
     println!("热点负载报告：{}", path.display());
     pool.close().await;
 }
@@ -1327,7 +1339,7 @@ async fn perf_anonymous_read_burst_does_not_starve_bids() {
             "bids": bids_with_gated.to_json(),
         },
     });
-    let path = write_report("read-burst-load", &report);
+    let path = write_report("read-burst-load", &report).expect("持久化读取突发报告");
     println!("混合负载报告：{}", path.display());
     pool.close().await;
 }
@@ -1457,10 +1469,7 @@ async fn perf_delivery_wakeup_commit_path() {
     .expect("建立测量用唤醒触发器");
 
     let trigger_path =
-        run_delivery_wakeup_load(&pool, concurrency, per_task, NotifyMode::InTransaction)
-            .await
-            .expect("旧触发器路径");
-
+        run_delivery_wakeup_load(&pool, concurrency, per_task, NotifyMode::InTransaction).await;
     sqlx::query("DROP TRIGGER perf_delivery_ready_after_insert ON public.deliveries")
         .execute(&owner_pool)
         .await
@@ -1469,6 +1478,7 @@ async fn perf_delivery_wakeup_commit_path() {
         .execute(&owner_pool)
         .await
         .expect("删除测量用触发器函数");
+    let trigger_path = trigger_path.expect("旧触发器路径");
 
     let after_commit =
         run_delivery_wakeup_load(&pool, concurrency, per_task, NotifyMode::AfterCommit)
@@ -1506,7 +1516,7 @@ async fn perf_delivery_wakeup_commit_path() {
         "trigger_in_transaction": trigger_path.to_json(),
         "notify_after_commit": after_commit.to_json(),
     });
-    let path = write_report("delivery-wakeup-commit", &report);
+    let path = write_report("delivery-wakeup-commit", &report).expect("持久化投递唤醒报告");
     println!("投递唤醒报告：{}", path.display());
     pool.close().await;
 }

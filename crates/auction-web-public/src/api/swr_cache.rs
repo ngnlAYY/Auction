@@ -40,8 +40,10 @@ pub(crate) const LIVE_TTL_MILLIS: u64 = 60_000;
 /// 目录视图的缓存有效期：拍卖列表、价格历史、历史场次与履约进度；变化频率低，失效仍由事件
 /// 与外壳轮询触发。
 pub(crate) const CATALOG_TTL_MILLIS: u64 = 15_000;
-/// 单线程内存缓存条目上限；筛选与分页组合可能很多，失效只标记过期、不删除条目，超出上限时
-/// 淘汰最早写入的条目。
+/// Retry-After windows are independent of response bodies; keep their thread-local index bounded too.
+const MAX_RETRY_AFTER_ENTRIES: usize = 128;
+
+/// Single-thread cache entry limit.
 const MAX_ENTRIES: usize = 128;
 
 /// 单次缓存读取的请求结果分类；由调用方的 fetch 闭包在完整校验后构造。
@@ -155,7 +157,9 @@ impl Future for WaitPending {
         if self.0.done.get() {
             return Poll::Ready(());
         }
-        self.0.wakers.borrow_mut().push(context.waker().clone());
+        if !self.0.wakers.borrow().iter().any(|waker| waker.will_wake(context.waker())) {
+            self.0.wakers.borrow_mut().push(context.waker().clone());
+        }
         Poll::Pending
     }
 }
@@ -265,7 +269,7 @@ where
     F: FnOnce(Option<String>) -> Fut,
     Fut: Future<Output = FetchOutcome<T, E>>,
 {
-    read_or_fetch(url, ttl_millis, now_millis, fetch).await.map(|read| read.value)
+    read_or_fetch(url, ttl_millis, now_millis, fetch).await.and_then(|read| read.deliver(url))
 }
 
 /// 读取公开 URL：命中未过期且未被失效的条目时不调用 fetch；否则把旧条目的 ETag 交给 fetch
@@ -405,13 +409,26 @@ pub(super) fn remember_retry_after(
     STORE.with_borrow_mut(|store| {
         store.retry_after.retain(|_, prior| prior.not_before > now);
         // 响应头先于正文发布时限。取消旧请求、完成命令或收到较短等待时间都不能提前发这条 GET。
-        if not_before > now
-            && store.retry_after.get(url).is_none_or(|prior| prior.not_before <= not_before)
+        if let Some(prior) = store.retry_after.get(url)
+            && prior.not_before > not_before
         {
+            return prior.clone();
+        }
+        if not_before > now
+            && store.retry_after.len() >= MAX_RETRY_AFTER_ENTRIES
+            && let Some(expired) = store
+                .retry_after
+                .iter()
+                .min_by_key(|(_, window)| window.not_before)
+                .map(|(key, _)| key.clone())
+        {
+            store.retry_after.remove(&expired);
+        }
+        if not_before > now {
             store.retry_after.insert(url.to_owned(), window.clone());
         }
-    });
-    window
+        window.clone()
+    })
 }
 
 /// 使全部公开读缓存过期；实时事件与命令结果等在权威快照可能变化后调用。

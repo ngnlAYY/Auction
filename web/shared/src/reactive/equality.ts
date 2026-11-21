@@ -13,7 +13,15 @@ export function structuralEquals(left: unknown, right: unknown): boolean {
     if (!Array.isArray(right) || left.length !== right.length) {
       return false;
     }
-    return left.every((item, index) => structuralEquals(item, right[index]));
+    for (let index = 0; index < left.length; index += 1) {
+      if (index in left !== index in right) {
+        return false;
+      }
+      if (index in left && !structuralEquals(left[index], right[index])) {
+        return false;
+      }
+    }
+    return true;
   }
   if (Array.isArray(right)) {
     return false;

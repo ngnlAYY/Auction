@@ -5,7 +5,7 @@ import * as v from "valibot";
 const HEX = "[0-9a-fA-F]";
 const HYPHENATED = `${HEX}{8}-${HEX}{4}-${HEX}{4}-${HEX}{4}-${HEX}{12}`;
 const UUID_PATTERN = new RegExp(
-  `^(?:${HEX}{32}|${HYPHENATED}|\\{${HYPHENATED}\\}|[uU][rR][nN]:[uU][uU][iI][dD]:${HYPHENATED})$`,
+  `^(?:${HEX}{32}|${HYPHENATED}|\\{${HYPHENATED}\\}|[uU][rR][nN]:[uU][uU][iI][dD]:${HYPHENATED})(?![\\s\\S])`,
 );
 
 /** 后端 `uuid::Uuid`：校验后保留收到时的原始字符串。 */

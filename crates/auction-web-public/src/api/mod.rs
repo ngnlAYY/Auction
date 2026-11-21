@@ -78,8 +78,8 @@ pub(crate) use rules::{DOCUMENT_UNPUBLISHED, RulesDocument, SiteDocument, fetch_
 pub(crate) use session::PUBLIC_SESSION_CHANGE_STORAGE_KEY;
 pub(crate) use session::{
     PublicSession, PublicSessionApiError, PublicSessionCheckTrigger, PublicSessionEvidenceTrigger,
-    SessionIdentity, SessionIdentityEvidence, SessionRefreshReason, fetch_public_session,
-    login_public, logout_public,
+    SessionIdentity, SessionIdentityEvidence, SessionIdentityObservation, SessionRefreshReason,
+    fetch_public_session, login_public, logout_public,
 };
 #[cfg(test)]
 pub(crate) use session::{SessionHttpFixture, SessionRequest};

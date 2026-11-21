@@ -101,9 +101,14 @@ pub(super) fn SetupInput(
                         disabled: busy,
                         onclick: move |_| {
                             if busy { return; }
-                            draft.write().generate_admin_secret();
-                            issues.write().retain(|issue| !field.related(issue.field));
-                            reveal_secret.set(true);
+                            if draft.write().generate_admin_secret() {
+                                issues.write().retain(|issue| !field.related(issue.field));
+                                reveal_secret.set(true);
+                            } else {
+                                let key = validation::issue(&draft.read(), field)
+                                    .unwrap_or("setup-field-invalid");
+                                issues.set(vec![SetupIssue { field, key }]);
+                            }
                         },
                         {t!("setup-admin-secret-generate")}
                     }

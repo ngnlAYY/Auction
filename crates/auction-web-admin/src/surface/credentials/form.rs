@@ -687,7 +687,7 @@ pub(super) mod import_tests {
         AdminApiFailure, AdminSessionWritePermission, AdminWriteFailure, WriteDispatchStub,
         WriteTransportStub,
     };
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         RecordRead, assert_field, button, click_button, command_button, has_live_text, has_text,
         init_i18n, mount_writer, settle_writer,
     };

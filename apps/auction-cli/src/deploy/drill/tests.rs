@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -14,6 +15,7 @@ impl Drop for TempFile {
 }
 
 fn artifact() -> Artifact {
+    let path = std::env::current_exe().expect("当前测试程序路径");
     Artifact {
         root: PathBuf::from("/srv/artifact"),
         package: "auction-rust-0.1.0-aaaaaaaaaaaa".to_owned(),
@@ -21,7 +23,8 @@ fn artifact() -> Artifact {
         source_fingerprint: "b".repeat(64),
         binaries: vec![ArtifactBinary {
             name: "auction-cli",
-            path: PathBuf::from("/srv/artifact/bin/auction-cli"),
+            file: File::open(&path).expect("固定真实制品文件句柄"),
+            path,
             sha256: "c".repeat(64),
             bytes: 1,
         }],
@@ -44,9 +47,9 @@ fn receipt() -> Value {
             "version": "0.1.0",
             "commit": "a".repeat(40),
             "package": "auction-rust-0.1.0-aaaaaaaaaaaa",
-            "package_sha256": "0".repeat(64),
+            "package_sha256": "f".repeat(64),
             "cli_sha256": "c".repeat(64),
-            "previous_version": "schema-94",
+            "previous_version": "auction-rust-0.0.9-bbbbbbbbbbbb",
         },
         "backup": {
             "created_at": "2026-11-05T03:05:00Z",
@@ -131,6 +134,8 @@ fn requirements<'a>(artifact: &'a Artifact) -> Requirements<'a> {
         artifact,
         current_version: 94,
         expected_version: 96,
+        previous_package: "auction-rust-0.0.9-bbbbbbbbbbbb",
+        package_sha256: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         protection_window_minutes: 60,
         max_age_days: 7,
         now: fixture_now(),
@@ -193,6 +198,17 @@ fn candidate_identity_and_interval_must_match() {
 
     let mut value = receipt();
     value["artifact"]["commit"] = json!("f".repeat(40));
+    assert!(check(&value, &artifact).is_err());
+
+    let mut value = receipt();
+    value["artifact"]["version"] = json!("0.0.9");
+    assert!(check(&value, &artifact).is_err());
+    let mut value = receipt();
+    value["artifact"]["package_sha256"] = json!("e".repeat(64));
+    assert!(check(&value, &artifact).is_err());
+
+    let mut value = receipt();
+    value["artifact"]["previous_version"] = json!("auction-rust-0.0.8-cccccccccccc");
     assert!(check(&value, &artifact).is_err());
 }
 

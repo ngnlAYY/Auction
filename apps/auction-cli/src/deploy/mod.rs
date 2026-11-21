@@ -19,7 +19,7 @@ use crate::cli::DeployArgs;
 use crate::config_dir::ConfigDir;
 use crate::receipt::{Action, ReceiptContext};
 use crate::service::{self, Systemctl};
-use crate::support::files::PrivateDirectory;
+use crate::support::{digest::is_lower_hex, files::PrivateDirectory};
 
 pub(crate) mod artifact;
 mod drill;
@@ -61,6 +61,7 @@ async fn run_inspected(
         actor,
         install_dir: explicit_install_dir,
         backup_dir,
+        package_sha256,
         migration_drill_receipt,
         drill_max_age_days,
         send_gate_timeout_seconds,
@@ -94,7 +95,8 @@ async fn run_inspected(
     }
     // 观测到的数据库版本不等于旧角色程序的内嵌 schema：回退保留当前 CLI 后两者可以不同。旧角色
     // 的身份（含 schema）只按程序摘要从回执绑定，停机后保留时再以副本摘要绑定一次写入回滚记录。
-    let installed_roles = installed_roles_identity(state.directory(), &install_dir)?;
+    let (installed_roles, previous_package) =
+        installed_roles_identity(state.directory(), &install_dir)?;
     let drill = if expected_version > current_version {
         let path = migration_drill_receipt.as_deref().with_context(|| {
             format!(
@@ -102,6 +104,8 @@ async fn run_inspected(
                  必须提供 --migration-drill-receipt"
             )
         })?;
+        let (previous_package, package_sha256) =
+            drill_package_inputs(package_sha256.as_deref(), previous_package.as_deref())?;
         Some(
             drill::inspect(
                 path,
@@ -109,6 +113,8 @@ async fn run_inspected(
                     artifact,
                     current_version,
                     expected_version,
+                    previous_package,
+                    package_sha256,
                     protection_window_minutes: shutdown.protection_window_minutes,
                     max_age_days: drill_max_age_days,
                     now: Timestamp::now(),
@@ -219,13 +225,11 @@ async fn run_inspected(
         .await),
     }
 }
-
-/// 停机前按安装目录当前三角色程序的摘要查找它们的身份，只用于 dry-run 与报告；摘要读不到时为
-/// null。回滚记录中的身份在停机后按保留副本的摘要重新绑定，不沿用这里的结果。
+/// 从最新成功且三角色摘要匹配的部署回执取得旧角色身份与包名；未知包名保留为 None。
 fn installed_roles_identity(
     state: &PrivateDirectory,
     install_dir: &Path,
-) -> anyhow::Result<serde_json::Value> {
+) -> anyhow::Result<(serde_json::Value, Option<String>)> {
     let binaries = install_dir_artifacts(install_dir)
         .into_iter()
         .filter_map(|artifact| {
@@ -239,7 +243,24 @@ fn installed_roles_identity(
             })
         })
         .collect::<Vec<_>>();
-    Ok(serde_json::to_value(installed_identity(state, &binaries).roles)?)
+    let identity = installed_identity(state, &binaries);
+    let package = identity.roles.package.clone();
+    Ok((serde_json::to_value(identity.roles)?, package))
+}
+
+fn drill_package_inputs<'a>(
+    package_sha256: Option<&'a str>,
+    previous_package: Option<&'a str>,
+) -> anyhow::Result<(&'a str, &'a str)> {
+    let package_sha256 =
+        package_sha256.context("含迁移部署必须提供已校验 Release tarball 的 --package-sha256")?;
+    if !is_lower_hex(package_sha256, 64) {
+        anyhow::bail!("--package-sha256 必须是 64 位小写十六进制 SHA-256");
+    }
+    let previous_package = previous_package
+        .filter(|package| !package.is_empty() && !package.chars().any(char::is_control))
+        .context("无法从摘要匹配的成功部署回执确定当前角色制品包；拒绝迁移部署")?;
+    Ok((previous_package, package_sha256))
 }
 
 #[cfg(test)]

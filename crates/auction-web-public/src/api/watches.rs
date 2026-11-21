@@ -12,10 +12,10 @@ use gloo_net::http::Request;
 use serde_json::Value;
 
 use super::clock::send_response;
-use super::session::{
-    SessionIdentity, SessionIdentityObservation, decode_account_identity_response,
-    decode_observed_account_read,
+use super::session::identity::{
+    SessionIdentity, SessionIdentityObservation, SessionRefreshReason, request_public_session_check,
 };
+use super::session::transport::{decode_account_identity_response, decode_observed_account_read};
 use super::{CommandError, TransportError};
 
 /// 整场集合有界且不能截断；缺项只有在完整权威读取后才表示 false/version 0。
@@ -107,6 +107,7 @@ pub(crate) async fn set_lot_watch(
         Box::pin(std::future::ready(Ok(response))) as super::clock::HttpFixtureFuture
     });
     let observation = SessionIdentityObservation::start();
+    let owner_observation = SessionIdentityObservation::user_owner();
     let response = send_response(
         |abort_signal| {
             Request::put(&format!("/api/v1/lots/{lot_id}/watch"))
@@ -122,7 +123,7 @@ pub(crate) async fn set_lot_watch(
     .map_err(|error| failure(error.code(), 0))?;
     let status = response.status();
     let result: PublicSetLotWatchResponse =
-        decode_account_identity_response(response, Some(user_id), |value| {
+        decode_account_identity_response(response, Some(user_id), &owner_observation, |value| {
             exact_fields(value, &["user_id", "auction_id", "watch"])
                 && value.get("watch").is_some_and(valid_watch_value)
         })
@@ -136,7 +137,10 @@ pub(crate) async fn set_lot_watch(
     {
         return Err(failure("invalid_response", status));
     }
-    observation.publish(SessionIdentity::UserId(result.user_id.clone()));
+    if !observation.publish(SessionIdentity::UserId(result.user_id.clone())) {
+        request_public_session_check(SessionRefreshReason::CookieChanged);
+        return Err(failure("session_changed", status));
+    }
     Ok(result)
 }
 

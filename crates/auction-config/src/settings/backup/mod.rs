@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::validation::validate_restricted_https_url;
+use super::validation::url::validate_restricted_https_url;
 use super::{AppConfig, ConfigError};
 
 mod offsite;

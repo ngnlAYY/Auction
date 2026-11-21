@@ -5,6 +5,66 @@ import { integer, optionalNullable, strictStruct, uint32, withDefault } from "..
 import type { AdminStrictPaginationResponse } from "./pagination";
 import { AdminStrictPaginationResponseSchema } from "./pagination";
 
+const ADMIN_DELIVERY_ORIGIN_KINDS = [
+  "settlement",
+  "settlement_recovery_action",
+  "settlement_return_action",
+  "user_key",
+  "manual",
+  "mail_intake",
+  "operations_alert",
+  "lot_watch",
+  "seller_summary",
+  "season_reminder",
+] as const;
+const ADMIN_DELIVERY_CATEGORIES = [
+  "outbid",
+  "account",
+  "intake",
+  "settlement",
+  "equipment",
+  "operations",
+  "manual",
+] as const;
+const ADMIN_DELIVERY_DISPOSITION_KINDS = [
+  "auto_sent_proof",
+  "operator_sent_confirmation",
+  "admin_failed",
+  "equipment_loss",
+  "cod_returned",
+  "recovery_equipment_recovered",
+  "legacy_self",
+  "preflight_retired",
+  "operator_acknowledged",
+] as const;
+const ADMIN_DELIVERY_OBLIGATION_KINDS = [
+  "winner_equipment_cod",
+  "winner_payment_carrier_cod",
+  "winner_equipment_handoff",
+  "seller_payout",
+  "buyer_refund",
+  "unsold_return",
+  "withdrawn_return",
+] as const;
+const ADMIN_DELIVERY_BUSINESS_STATES = ["ready", "blocked", "contingent"] as const;
+const ADMIN_DELIVERY_RECOVERY_STAGES = [
+  "awaiting_payment",
+  "payment_overdue",
+  "delivering_equipment",
+  "reclaiming",
+  "relist_pending",
+  "refunding",
+  "completed",
+] as const;
+const ADMIN_PLAYER_SUPPORT_CHANNELS = ["mm", "pm", "pending"] as const;
+const ADMIN_PLAYER_SUPPORT_REFERENCE_KINDS = [
+  "delivery",
+  "obligation",
+  "notification",
+  "lot",
+  "auction",
+] as const;
+
 /** Admin delivery 安全投影；不包含 payload、lease token 或原始 result metadata。
  *
  * `cod` 只表示经过 owner 校验后从版本化 send payload 提取的金额；其余三个结果字段同样由
@@ -17,7 +77,7 @@ export const AdminDeliveryResponseSchema = strictStruct({
   /** 来源闭集。结算退件 Take（`settlement_return_action`）只在列表、详情与玩家支持请求带
    * `include=settlement_returns` 时出现：缺省列表与玩家支持投递分区不含这类投递，缺省详情
    * 拒绝读取，升级前的页面不会读到它不认识的来源。 */
-  origin_kind: v.string(),
+  origin_kind: v.picklist(ADMIN_DELIVERY_ORIGIN_KINDS),
   origin_id: v.string(),
   recipient: v.string(),
   cod: optionalNullable(integer),
@@ -25,7 +85,7 @@ export const AdminDeliveryResponseSchema = strictStruct({
   /** 冻结模板键；Return/Take 等无模板投递省略。 */
   template: optionalNullable(v.string()),
   /** 发送类别闭集；旧载荷或非 Send 操作省略。 */
-  category: optionalNullable(v.string()),
+  category: optionalNullable(v.picklist(ADMIN_DELIVERY_CATEGORIES)),
   /** 投递载荷世界；旧载荷按 `main` 归属。 */
   world: optionalNullable(v.string()),
   /** 围栏前退役原因；只在确定未写入外部系统时出现。 */
@@ -262,7 +322,7 @@ export const AdminDeliveryDispositionResponseSchema = strictStruct({
   command_id: v.string(),
   /** 处置种类。缺省详情响应只输出已发布的闭集；`recovery_equipment_recovered` 只在请求带
    * `include=settlement_returns` 时输出，升级前的页面不会读到它不认识的值。 */
-  kind: v.string(),
+  kind: v.picklist(ADMIN_DELIVERY_DISPOSITION_KINDS),
   occurred_at: v.string(),
   status: optionalNullable(v.string()),
   fencing_version: optionalNullable(integer),
@@ -282,8 +342,8 @@ export const AdminDeliveryObligationResponseSchema = strictStruct({
   auction_id: v.string(),
   lot_id: v.string(),
   world_id: v.string(),
-  obligation_kind: v.string(),
-  business_state: v.string(),
+  obligation_kind: v.picklist(ADMIN_DELIVERY_OBLIGATION_KINDS),
+  business_state: v.picklist(ADMIN_DELIVERY_BUSINESS_STATES),
   amount: integer,
   fulfillment_state: optionalNullable(v.string()),
   fulfillment_error_code: optionalNullable(v.string()),
@@ -296,7 +356,7 @@ export type AdminDeliveryObligationResponse = v.InferOutput<
 /** 投递来源义务对应的恢复记录摘要。 */
 export const AdminDeliveryRecoveryResponseSchema = strictStruct({
   recovery_id: v.string(),
-  stage: v.string(),
+  stage: v.picklist(ADMIN_DELIVERY_RECOVERY_STAGES),
   resolution: optionalNullable(v.string()),
   payment_deadline_at: v.string(),
   payment_obligation_id: v.string(),
@@ -520,8 +580,8 @@ export const AdminPlayerSupportObligationResponseSchema = strictStruct({
   auction_id: v.string(),
   lot_id: v.string(),
   world_id: v.string(),
-  obligation_kind: v.string(),
-  business_state: v.string(),
+  obligation_kind: v.picklist(ADMIN_DELIVERY_OBLIGATION_KINDS),
+  business_state: v.picklist(ADMIN_DELIVERY_BUSINESS_STATES),
   amount: integer,
   fulfillment_state: optionalNullable(v.string()),
   fulfillment_error_code: optionalNullable(v.string()),
@@ -535,7 +595,7 @@ export type AdminPlayerSupportObligationResponse = v.InferOutput<
 export const AdminPlayerSupportNotificationResponseSchema = strictStruct({
   notification_id: v.string(),
   /** `mm`、`pm` 或 `pending`。 */
-  channel: v.string(),
+  channel: v.picklist(ADMIN_PLAYER_SUPPORT_CHANNELS),
   kind: optionalNullable(v.string()),
   lot_id: optionalNullable(v.string()),
   auction_id: optionalNullable(v.string()),
@@ -552,7 +612,7 @@ export type AdminPlayerSupportNotificationResponse = v.InferOutput<
 
 /** 命中的参考编号实体；`kind` 为 `delivery`、`obligation`、`notification`、`lot` 或 `auction`。 */
 export const AdminPlayerSupportReferenceResponseSchema = strictStruct({
-  kind: v.string(),
+  kind: v.picklist(ADMIN_PLAYER_SUPPORT_REFERENCE_KINDS),
   id: v.string(),
 });
 

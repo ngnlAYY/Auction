@@ -42,6 +42,8 @@ impl EhentaiClient {
     ) -> Result<(Vec<u8>, StatusCode), EhentaiError> {
         let ForumRequestScope { metrics_world, cookie } = scope;
         self.wait_rate(operation, metrics_world, metrics_operation).await?;
+        let _cookie_use =
+            cookie.lock_for_use().await.ok_or_else(|| EhentaiError::credential(operation))?;
         let mut request = self
             .client
             .get(target)

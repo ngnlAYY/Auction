@@ -175,10 +175,11 @@ impl WorkerSentLookupRequest {
     }
 }
 
-/// 单个 Sent 候选的安全快照；Debug 不复述收件人与标题。
+/// 单个 world + MID Sent 候选的安全快照；Debug 不复述收件人与标题。
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerSentLookupCandidate {
+    pub world: String,
     pub external_mail_id: String,
     pub recipient: String,
     pub subject: String,
@@ -188,6 +189,12 @@ pub struct WorkerSentLookupCandidate {
     pub remaining_equipment_ids: Vec<String>,
     pub collected: bool,
     pub observed_at: Timestamp,
+}
+
+impl WorkerSentLookupCandidate {
+    pub fn validate(&self) -> bool {
+        matches!(self.world.as_str(), "main" | "isekai")
+    }
 }
 
 impl std::fmt::Debug for WorkerSentLookupCandidate {
@@ -203,11 +210,12 @@ impl std::fmt::Debug for WorkerSentLookupCandidate {
             .field("remaining_equipment_ids", &self.remaining_equipment_ids)
             .field("collected", &self.collected)
             .field("observed_at", &self.observed_at)
+            .field("world", &self.world)
             .finish()
     }
 }
 
-/// Sent 核查的有界结果；`status` 使用既有闭集名称。
+/// Sent 核查的有界结果；每个候选都绑定请求 world，`status` 使用既有闭集名称。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerSentLookupResponse {
@@ -216,6 +224,16 @@ pub struct WorkerSentLookupResponse {
     pub pages_scanned: u32,
     pub observed_at: Timestamp,
     pub candidates: Vec<WorkerSentLookupCandidate>,
+}
+impl WorkerSentLookupResponse {
+    pub fn validate_for_world(&self, world: &str) -> bool {
+        matches!(world, "main" | "isekai")
+            && self.observed_at.timestamp_nanos_opt().is_some()
+            && self
+                .candidates
+                .iter()
+                .all(|candidate| candidate.validate() && candidate.world == world)
+    }
 }
 
 /// 恢复后核对：单轮扫描的页数上限与配置校验上限一致。
@@ -259,7 +277,7 @@ impl WorkerRecoveryForumTarget {
     }
 }
 
-/// 单轮恢复扫描请求；`include_*` 允许第二阶段只读取指定 MID 的详情。
+/// 单轮恢复扫描请求；`include_*` 允许第二阶段只读取指定 world + MID 的详情。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerRecoveryScanRequest {
@@ -393,6 +411,7 @@ impl WorkerRecoveryScanResponse {
                     && !entry.sender.is_empty()
                     && !entry.subject.is_empty()
             })
+            && self.sent_details.iter().all(WorkerSentLookupCandidate::validate)
             && self.forum.iter().all(|post| {
                 matches!(post.world.as_str(), "main" | "isekai")
                     && auction_domain::valid_positive_decimal(&post.thread_id, 32)

@@ -29,8 +29,16 @@ pub struct BidFormInput {
 
 /// 普通出价输入固定使用 K 单位；向上取整保证非整千的旧起拍价不会生成低于最低价的默认值。
 fn default_bid_units(next_bid: i64) -> String {
-    let units = next_bid / CREDIT_K + i64::from(next_bid % CREDIT_K > 0);
-    units.max(1).to_string()
+    rounded_minimum_bid(next_bid).map_or_else(String::new, |amount| (amount / CREDIT_K).to_string())
+}
+
+fn rounded_minimum_bid(next_bid: i64) -> Option<i64> {
+    if next_bid <= 0 {
+        return None;
+    }
+    let units = next_bid / CREDIT_K + i64::from(next_bid % CREDIT_K != 0);
+    let amount = units.checked_mul(CREDIT_K)?;
+    (amount <= MAX_PUBLIC_BID_AMOUNT).then_some(amount)
 }
 
 /// 普通出价只接受纯数字 K 单位，避免把代理表单保留的 M/K 缩写规则扩散到确认流程。
@@ -101,7 +109,7 @@ fn bid_form(input: BidFormInput) -> Element {
     let mut command = command;
     let confirming = (command.confirmation)().is_some();
     let bidding_open = can_bid && lot_status == "live";
-    let limit_reached = next_bid > MAX_PUBLIC_BID_AMOUNT;
+    let limit_reached = rounded_minimum_bid(next_bid).is_none();
     let blocked = blocked || !bidding_open || limit_reached;
     let blocked_reason = if !bidding_open {
         t!("bid-unavailable")
@@ -126,7 +134,10 @@ fn bid_form(input: BidFormInput) -> Element {
         }
         // 只有尚未发送的表单可以准备命令；外壳再次检查同拍品互斥后才发送。
         if let Some(pending) = (command.confirmation)() {
-            if pending.amount > MAX_PUBLIC_BID_AMOUNT {
+            if pending.amount <= 0
+                || pending.amount > MAX_PUBLIC_BID_AMOUNT
+                || pending.amount % CREDIT_K != 0
+            {
                 command.cancel_confirmation();
                 validation.set(Some(t!("bid-invalid-amount")));
                 return;

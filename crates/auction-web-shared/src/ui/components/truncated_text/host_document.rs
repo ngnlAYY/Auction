@@ -29,6 +29,7 @@ pub(super) enum ElementKind {
 #[derive(Clone)]
 pub(super) struct DomElement {
     pub(super) id: String,
+    identity: Rc<()>,
     kind: ElementKind,
     pub(super) parent: Option<Rc<DomElement>>,
     pub(super) modal_selector_unsupported: bool,
@@ -85,7 +86,7 @@ impl DomElement {
     }
 
     pub(super) fn contains(&self, other: &Self) -> bool {
-        other.ancestors().any(|element| element.id == self.id)
+        other.ancestors().any(|element| Rc::ptr_eq(&element.identity, &self.identity))
     }
 
     pub(super) fn bounding_box(&self) -> [f64; 4] {
@@ -219,10 +220,12 @@ impl TooltipBrowserFixture {
     }
 
     pub(super) fn add_element(&self, id: &str, kind: ElementKind, parent: Option<DomElement>) {
+        assert!(!self.nodes.borrow().contains_key(id), "duplicate host fixture element ID: {id}");
         self.nodes.borrow_mut().insert(
             id.to_owned(),
             DomElement {
                 id: id.to_owned(),
+                identity: Rc::new(()),
                 kind,
                 parent: parent.map(Rc::new),
                 modal_selector_unsupported: self.modal_selector_unsupported,

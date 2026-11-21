@@ -231,7 +231,17 @@ export async function withSetup(
 /** 作用域结束时还原浏览器、传输、页面表和响应式挂载。 */
 export async function withLayout(
   check: (fixture: Fixture) => Promise<void>,
-  { start = SOURCE_ROUTE.pattern, authenticate = true, deferOnBoot = "" } = {},
+  {
+    start = SOURCE_ROUTE.pattern,
+    authenticate = true,
+    deferOnBoot = "",
+    onRouterCreated,
+  }: {
+    readonly start?: string;
+    readonly authenticate?: boolean;
+    readonly deferOnBoot?: string;
+    readonly onRouterCreated?: (router: Router) => void;
+  } = {},
 ): Promise<void> {
   const layout = await loadRenderModule<Layout>(
     new URL("./route-load-fixture.tsx", import.meta.url).pathname,
@@ -272,6 +282,7 @@ export async function withLayout(
         flush();
       });
       const router = createRouter({ routes: [...ADMIN_ROUTES, SOURCE_ROUTE] });
+      onRouterCreated?.(router);
       const main = createElement("div", { id: "main", "aria-busy": "true" });
       document.add(main);
       insert(

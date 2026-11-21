@@ -260,7 +260,28 @@ fn verify_detail(
     sender: &str,
 ) -> Result<(), ForumPmError> {
     let document = Html::parse_document(source);
-    if sender_identity(&document, target)? != sender {
+    let expected_ids = target
+        .query_pairs()
+        .filter(|(key, _)| key == "MSID")
+        .map(|(_, value)| value.into_owned())
+        .collect::<Vec<_>>();
+    if expected_ids.len() != 1 || !valid_post_id(&expected_ids[0]) {
+        return Err(ForumPmError::Protocol);
+    }
+    let identity_selector = pm_selector!("input[name='skinurlbits']")?;
+    let mut identities = document.select(identity_selector);
+    let identity = identities.next().ok_or(ForumPmError::Protocol)?;
+    if identities.next().is_some() {
+        return Err(ForumPmError::Protocol);
+    }
+    let reference = identity.attr("value").ok_or(ForumPmError::Protocol)?;
+    let (_, pairs) = read_link(
+        target,
+        &format!("index.php?{reference}"),
+        &["act", "CODE", "VID", "MSID", "cal_id"],
+    )?;
+    require_sent(&pairs, "03")?;
+    if pairs.get("MSID") != expected_ids.first() || sender_identity(&document, target)? != sender {
         return Err(ForumPmError::Protocol);
     }
     let body_selector = pm_selector!(".postcolor")?;

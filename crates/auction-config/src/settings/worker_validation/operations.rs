@@ -3,7 +3,7 @@
 use auction_domain::valid_text;
 
 use super::super::{ConfigError, MoogleMailWorkerConfig, OperationsAlertWorkerConfig, Role};
-use crate::settings::secrets::AppSecrets;
+use crate::settings::secrets::model::AppSecrets;
 
 pub(crate) fn validate_operations_alert_worker(
     role: Role,

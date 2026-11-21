@@ -74,7 +74,7 @@ impl EhentaiClient {
         cookie: &EhentaiCookie,
         scan: &mut ForumTopicScanGuard,
     ) -> Result<AdminForumPreviewResult, EhentaiError> {
-        self.fetch_topic_scan(world, thread_id, cookie, scan, None, 0)
+        self.fetch_topic_scan(world, thread_id, cookie, scan, None, 2)
             .await
             .map(|scan| scan.preview)
     }
@@ -189,7 +189,14 @@ impl EhentaiClient {
         }
         let page_post_counts =
             pages.iter().map(|(offset, page)| (*offset, page.post_count())).collect::<Vec<_>>();
-        let post_numbers = topic_post_numbers(&page_post_counts, operation)?;
+        let all_post_numbers = topic_post_numbers(&page_post_counts, operation)?;
+        let fixed_count = usize::try_from(fixed_through_post_number.saturating_sub(1))
+            .map_err(safe_diagnostics::warn_map("forum_topic", "convert_fixed_post_count", || {
+                EhentaiError::protocol(operation, false)
+            }))?
+            .min(all_post_numbers.len());
+        let fixed_post_numbers = all_post_numbers[..fixed_count].to_vec();
+        let post_numbers = all_post_numbers[fixed_count..].to_vec();
         let parsed_pages = pages.into_iter().map(|(_, page)| page).collect();
         let preview = parser.parse_html_pages(parsed_pages).map_err(safe_diagnostics::warn_map(
             "forum_topic",
@@ -198,6 +205,7 @@ impl EhentaiClient {
         ))?;
         let result = ForumTopicScan {
             preview,
+            fixed_post_numbers,
             post_numbers,
             mode,
             page_count: Some(total_pages),

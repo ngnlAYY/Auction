@@ -270,7 +270,7 @@ impl MoogleMailSender {
                     reason: auction_application::mail::MailScanReason::PageLimit,
                 },
             );
-            // 超限也推进每日校验时间，避免每个维护轮重复整箱扫描；水位只缩短下一轮前缀。
+            // 页数受限只推进可见水位，保留完整校验待重试。
             self.remember_sent_scan(
                 cookie,
                 world,
@@ -280,7 +280,7 @@ impl MoogleMailSender {
                         observed_at: summary.sent_at,
                     }
                 }),
-                true,
+                false,
             )
             .await;
             return Ok(ScannedSentSummaries {

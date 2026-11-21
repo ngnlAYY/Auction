@@ -43,8 +43,10 @@ pub fn assess_delivery(
         queue_latency: snapshot.claimed > 0
             && reached(snapshot.oldest_claimed_age_seconds, OPERATIONS_ALERT_QUEUE_LATENCY_AGE),
         pending: snapshot.pending >= policy.delivery_pending_count_threshold
-            || snapshot.oldest_pending_age_seconds
-                >= policy.delivery_pending_age_threshold.as_secs() as i64,
+            || threshold_reached(
+                snapshot.oldest_pending_age_seconds,
+                policy.delivery_pending_age_threshold,
+            ),
         returned_mail: snapshot.returned_mail_manual_reconcile
             >= policy.delivery_manual_reconcile_count_threshold,
         manual_reconcile: snapshot.manual_reconcile
@@ -59,8 +61,10 @@ pub fn assess_fulfillment(
     let actionable = snapshot.pending.saturating_add(snapshot.blocked);
     let waiting_overdue = snapshot.waiting_prerequisite
         >= policy.fulfillment_backlog_count_threshold
-        && snapshot.oldest_prerequisite_wait_age_seconds
-            >= policy.fulfillment_backlog_age_threshold.as_secs() as i64;
+        && threshold_reached(
+            snapshot.oldest_prerequisite_wait_age_seconds,
+            policy.fulfillment_backlog_age_threshold,
+        );
     let backlog = if waiting_overdue {
         actionable.saturating_add(snapshot.waiting_prerequisite)
     } else {
@@ -73,7 +77,7 @@ pub fn assess_fulfillment(
     };
     FulfillmentAssessment {
         backlog: backlog >= policy.fulfillment_backlog_count_threshold
-            || oldest_backlog_age >= policy.fulfillment_backlog_age_threshold.as_secs() as i64,
+            || threshold_reached(oldest_backlog_age, policy.fulfillment_backlog_age_threshold),
         failed: snapshot.failed > 0,
         manual_reconcile: snapshot.manual_reconcile > 0,
         collection_overdue: snapshot.collection_overdue > 0,
@@ -86,8 +90,10 @@ pub fn assess_recovery(
 ) -> RecoveryAssessment {
     RecoveryAssessment {
         payment_overdue: snapshot.payment_overdue_count >= policy.recovery_overdue_count_threshold
-            || snapshot.oldest_overdue_age_seconds
-                >= policy.recovery_overdue_age_threshold.as_secs() as i64,
+            || threshold_reached(
+                snapshot.oldest_overdue_age_seconds,
+                policy.recovery_overdue_age_threshold,
+            ),
         payment_mail_unsent: snapshot.payment_mail_unsent_count > 0,
         relist_pending: snapshot.relist_pending_count > 0,
         failed_action: snapshot.failed_action_count > 0,
@@ -95,8 +101,12 @@ pub fn assess_recovery(
     }
 }
 
+fn threshold_reached(age_seconds: i64, threshold: Duration) -> bool {
+    u64::try_from(age_seconds).is_ok_and(|age| age >= threshold.as_secs())
+}
+
 fn reached(age_seconds: i64, threshold: Duration) -> bool {
-    age_seconds >= i64::try_from(threshold.as_secs()).unwrap_or(i64::MAX)
+    threshold_reached(age_seconds, threshold)
 }
 
 #[cfg(test)]

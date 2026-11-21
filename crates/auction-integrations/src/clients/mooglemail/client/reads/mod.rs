@@ -24,7 +24,6 @@ mod sent_boundary;
 mod sent_scope;
 use self::scope::{read_unavailable, unavailable};
 pub(super) use scope::WriteBarrier;
-pub(super) use scope::lock_incoming_segment;
 
 pub(crate) use lists::{
     MoogleMailIncomingList, MoogleMailIncomingPrefix, MoogleMailSentList, MoogleMailSentPrefix,
@@ -147,6 +146,7 @@ impl Drop for MoogleMailReadDocument {
 
 #[cfg(test)]
 mod tests {
+    use super::scope::lock_incoming_segment;
     use super::*;
 
     #[tokio::test]

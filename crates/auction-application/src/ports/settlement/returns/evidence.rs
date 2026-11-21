@@ -38,8 +38,15 @@ struct SettlementReturnEvidence {
     #[serde(default)]
     body_digest: Option<String>,
     /// 原正文末行派发引用原文；首寄退件没有。
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_dispatch_reference")]
     dispatch_reference: Option<String>,
+}
+
+fn deserialize_dispatch_reference<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    String::deserialize(deserializer).map(Some)
 }
 
 impl SettlementReturnEvidence {
@@ -444,7 +451,14 @@ fn dispatch_binding(
     match obligation.dispatch_lookup {
         SettlementReturnDispatchLookup::Ambiguous => return Err(R::DispatchAmbiguous),
         SettlementReturnDispatchLookup::AlreadyReturned => return Err(R::DispatchAlreadyReturned),
-        SettlementReturnDispatchLookup::Missing | SettlementReturnDispatchLookup::Unique => {}
+        SettlementReturnDispatchLookup::Missing => {
+            return Err(match request {
+                SettlementReturnDispatchRequest::First => R::DeliveryUnsent,
+                SettlementReturnDispatchRequest::Resend(_) => R::DispatchUnknown,
+                SettlementReturnDispatchRequest::Invalid => R::EvidenceInvalid,
+            });
+        }
+        SettlementReturnDispatchLookup::Unique => {}
     }
     match request {
         SettlementReturnDispatchRequest::Invalid => Err(R::EvidenceInvalid),

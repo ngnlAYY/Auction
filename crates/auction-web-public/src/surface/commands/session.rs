@@ -13,7 +13,8 @@ use crate::api::{
 };
 use crate::surface::account::preference_reload::PreferenceReloadRevision;
 use crate::surface::session::SessionCommandScope;
-use crate::surface::watches::{WatchSessionRevision, invalidate_lot_watches};
+use crate::surface::watches::WatchSessionRevision;
+use crate::surface::watches::cache::invalidate_lot_watches;
 use crate::surface::{PublicCommandOwner, PublicSessionResource};
 
 /// 外壳的统一会话刷新入口及两个命令宿主的身份投影。
@@ -134,22 +135,27 @@ impl ConfirmedIdentity {
                             session.set(Some(confirmed));
                         }
                     }
-                    SessionIdentity::UserId(_) if changed || confirmed_logout => {
-                        // 用户 ID 已能确定归属；新写入仍需完整会话快照。
+                    SessionIdentity::UserId(_) if changed || confirmed_logout || cookie_written => {
+                        // 用户 ID 已能确定归属；Cookie 写入后的会话快照须在既有复核前失效。
                         session.clear();
-                        if !cookie_written {
+                        if cookie_written {
+                            self.authority.clear();
+                        } else {
                             recheck_after_evidence.set(true);
                         }
                     }
                     SessionIdentity::UserId(_) => {}
                 }
             }
-            SessionIdentityEvidence::ExpectedUserRejected(expected_user) => {
-                // 冲突只否定这次请求的预期用户；保留其他已确认归属并暂停重试。
-                if self.owner.peek().as_deref() == Some(expected_user.as_str()) {
-                    self.set_owner(None);
-                    self.ended_elsewhere.set(false);
+            SessionIdentityEvidence::ExpectedUserRejected { user_id, observed_revision } => {
+                // 丢弃请求期间若身份已推进，迟到的冲突不能清除新身份的快照。
+                if *self.revision.peek() != observed_revision
+                    || self.owner.peek().as_deref() != Some(user_id.as_str())
+                {
+                    return;
                 }
+                self.set_owner(None);
+                self.ended_elsewhere.set(false);
                 session.clear();
                 recheck_after_evidence.set(true);
             }
@@ -499,17 +505,20 @@ mod tests {
     use dioxus::prelude::*;
 
     use super::{
-        PublicSessionChecks, can_submit_new, identity_confirmed, use_public_session_checks,
+        PublicSessionChecks, SessionAuthority, can_submit_new, identity_confirmed,
+        use_public_session_checks,
     };
     use crate::api::{
-        HttpFixtureFuture, PublicSession, PublicSessionApiError, SessionRefreshReason,
-        SessionRequest, TransportError, login_public, logout_public, set_session_preference,
+        HttpFixtureFuture, PublicSession, PublicSessionApiError, PublicSessionEvidenceTrigger,
+        SessionIdentityObservation, SessionRefreshReason, SessionRequest, TransportError,
+        login_public, logout_public, set_session_preference,
     };
     use crate::surface::account::preference_reload::PreferenceReloadRevision;
     use crate::surface::commands::session_fixture::{self, ExpiryClock, ResponseGate};
     use crate::surface::commands::{
         use_command_session_provider, use_competition_commands_provider,
     };
+    use crate::surface::session::SessionCommandScope;
     use crate::surface::watches::{
         LotWatchButton, LotWatchScope, SkipWatchReads, WatchSessionRevision, load_watch_cache,
         save_watch_cache, use_lot_watched, use_watch_command_owner,
@@ -550,6 +559,9 @@ mod tests {
         result: Signal<Option<Result<(), String>>>,
         watch_refresh: Signal<u64>,
         preference_reload: Signal<u64>,
+        authority: SessionAuthority,
+        evidence: Option<PublicSessionEvidenceTrigger>,
+        command_scope: Option<SessionCommandScope>,
     }
 
     #[component]
@@ -564,9 +576,14 @@ mod tests {
             check,
             ..
         } = use_public_session_checks(commands);
+        let authority = SessionAuthority(Signal::new(None));
         let mut result = use_signal(|| None);
         let mutate = use_callback(move |request| {
-            spawn(async move {
+            let (evidence, command_scope) = CONTROLS.with(|controls| {
+                let current = controls.get().expect("会话测试控件");
+                (current.evidence, current.command_scope.expect("外壳命令作用域"))
+            });
+            command_scope.spawn(async move {
                 let response = match request {
                     SessionRequest::Login(key) => login_public(key.to_owned())
                         .await
@@ -574,7 +591,10 @@ mod tests {
                         .map_err(PublicSessionApiError::into_read_code),
                     SessionRequest::Logout(user_id) => logout_public(user_id.to_owned()).await,
                     SessionRequest::SetPreference(user_id, command) => {
-                        set_session_preference(user_id, command, || {
+                        let observation = SessionIdentityObservation::from_trigger(
+                            evidence.expect("外壳身份证据入口"),
+                        );
+                        set_session_preference(user_id, command, observation, || {
                             can_submit_new(
                                 Some(user_id),
                                 owner.peek().as_deref(),
@@ -602,6 +622,10 @@ mod tests {
         if watch_projection.is_none_or(|projection| !projection.read_enabled) {
             provide_context(SkipWatchReads);
         }
+        let (authority, evidence, command_scope) =
+            CONTROLS.get().map_or((authority, None, None), |current| {
+                (current.authority, current.evidence, current.command_scope)
+            });
         CONTROLS.set(Some(Controls {
             session,
             state,
@@ -612,14 +636,34 @@ mod tests {
             result,
             watch_refresh,
             preference_reload,
+            authority,
+            evidence,
+            command_scope,
         }));
         rsx! {
+            SessionAuthorityProbe {}
             if observe_watches {
                 for user_id in owner() {
                     MarkedAuction { key: "{user_id}", user_id }
                 }
             }
         }
+    }
+
+    #[component]
+    fn SessionAuthorityProbe() -> Element {
+        let evidence = use_context::<PublicSessionEvidenceTrigger>();
+        let command_scope = use_context::<SessionCommandScope>();
+        let authority = SessionAuthority::use_context();
+        CONTROLS.with(|controls| {
+            if let Some(mut current) = controls.get() {
+                current.authority = authority;
+                current.evidence = Some(evidence);
+                current.command_scope = Some(command_scope);
+                controls.set(Some(current));
+            }
+        });
+        rsx! {}
     }
 
     #[derive(Default)]
@@ -667,6 +711,7 @@ mod tests {
     }
 
     fn mount_harness(mut dom: VirtualDom) -> (VirtualDom, Controls) {
+        CONTROLS.set(None);
         dom.rebuild_in_place();
         settle(&mut dom);
         let controls = CONTROLS.get().unwrap();
@@ -695,6 +740,7 @@ mod tests {
     #[test]
     fn signed_in_boot_reuses_the_first_locked_get_for_cookie_sync() {
         session_fixture::reset();
+        CONTROLS.set(None);
         session_fixture::script([
             session_fixture::read(Some(USER)).under_lock(),
             session_fixture::reply(
@@ -892,6 +938,38 @@ mod tests {
             assert_eq!(controls.owner.peek().as_deref(), Some(current_user));
             assert_eq!(controls.can_retry(), current_user == USER);
         }
+    }
+
+    #[test]
+    fn successful_same_user_cookie_write_clears_stale_authority_and_rechecks_once() {
+        let (mut dom, controls) = mount();
+        assert!(controls.authority.confirmed().is_some());
+        let request = SessionRequest::SetPreference(USER, &PREFERENCE);
+        let read = Rc::new(ResponseGate::default());
+        session_fixture::script([
+            session_fixture::reply(
+                request,
+                Ok(session_fixture::response(
+                    200,
+                    format!(
+                        r#"{{"code":"ok","message":"成功","data":{{"user_id":"{USER}","duration_seconds":60,"version":2,"expires_at":"2090-01-01T12:01:00Z"}}}}"#
+                    ),
+                )),
+            )
+            .under_lock(),
+            read.hold_read(Some(USER)).under_lock(),
+        ]);
+        dom.in_runtime(|| controls.mutate.call(request));
+        settle(&mut dom);
+        assert!(read.waiting());
+        assert_eq!(*controls.result.peek(), Some(Ok(())));
+        assert!(controls.authority.confirmed().is_none());
+        assert_eq!(session_fixture::take_requests(), ["PUT preference", "GET"]);
+        read.release();
+        settle(&mut dom);
+        session_fixture::assert_consumed();
+        assert!(session_fixture::take_requests().is_empty());
+        assert!(controls.authority.confirmed().is_some());
     }
 
     #[test]

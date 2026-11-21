@@ -74,7 +74,7 @@ impl ProxyAuthorization {
             || self.authorization_sequence == 0
             || self.usage_number == 0
             || self.state_version == 0
-            || !self.maximum_amount.is_credit_grid_aligned()
+            || !self.maximum_amount.is_valid_bid_input()
         {
             return Err(DomainError::InvalidBidState("代理授权快照缺少有效身份或版本"));
         }

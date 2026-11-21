@@ -350,7 +350,7 @@ mod tests {
 
     use super::{CommandReceipts, FocusTargets, PendingCommandNotices, record_button_id};
     use crate::api::{AdminWriteEndpoint, AdminWriteFailure};
-    use crate::surface::auctions::draft_page_tests::{button, click_button, mount_writer};
+    use crate::surface::auctions::editor::tests::{button, click_button, mount_writer};
     use crate::surface::pending::{
         CommandDelivery, CommandIdentity, CommandNotice, PendingCommandHost, use_pending_commands,
     };

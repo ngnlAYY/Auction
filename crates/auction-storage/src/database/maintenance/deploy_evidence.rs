@@ -7,7 +7,7 @@ use sqlx::Row;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::database::migrations::read_compatibility_suffix;
+use crate::database::migrations::compatibility::read_compatibility_suffix;
 use crate::database::{DatabaseStore, MigrationCompatibilityEntry, set_read_only_limits};
 
 /// 部署前在途发送投影；只含内部标识与时间，不含收件人、正文或凭据。

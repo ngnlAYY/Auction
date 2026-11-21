@@ -64,8 +64,13 @@ impl PriorityGateState {
 
     /// 登记一个等待者；前台排在所有前台之后，仍先于后台。
     pub(super) fn register(&mut self, class: GateClass) -> GateTicket {
-        let ticket = GateTicket(self.next_ticket);
-        self.next_ticket = self.next_ticket.wrapping_add(1);
+        let ticket = loop {
+            let candidate = GateTicket(self.next_ticket);
+            self.next_ticket = self.next_ticket.wrapping_add(1);
+            if !self.is_registered(candidate) {
+                break candidate;
+            }
+        };
         match class {
             GateClass::Foreground => {
                 let index = self

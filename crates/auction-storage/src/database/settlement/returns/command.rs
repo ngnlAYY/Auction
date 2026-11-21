@@ -24,7 +24,7 @@ use super::resend::{authorize_resend, close_fulfillment};
 use super::retry::requeue_retried_take;
 use super::take::{insert_action, take_command_id};
 use crate::database::TrackedTransaction as Transaction;
-use crate::database::mail::delivery::settlement_return_take_conflicts;
+use crate::database::mail::delivery::disposition::settlement_return_take_conflicts;
 use crate::database::settlement::fulfillment::{
     lock_settlement_delivery_eligibility, recovery_allows_execution_now,
 };

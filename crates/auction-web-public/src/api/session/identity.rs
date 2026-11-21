@@ -15,7 +15,7 @@ pub(crate) enum SessionIdentity {
 /// Cookie 当前归属的证据；请求失败与普通 401 不属于此类型。
 pub(crate) enum SessionIdentityEvidence {
     Current { identity: SessionIdentity, cookie_written: bool },
-    ExpectedUserRejected(String),
+    ExpectedUserRejected { user_id: String, observed_revision: u64 },
 }
 
 /// 发给外壳的身份证据入口及本页身份修订。
@@ -35,13 +35,41 @@ pub(crate) struct SessionIdentityObservation {
 }
 
 impl SessionIdentityObservation {
-    pub(in crate::api) fn start() -> Self {
+    pub(crate) fn start() -> Self {
         Self::observe(|trigger| trigger.revision)
+    }
+    /// 在组件事件作用域中固定外壳回调，供之后的异步写入收口使用。
+    pub(crate) fn from_trigger(trigger: PublicSessionEvidenceTrigger) -> Self {
+        let revision = trigger.revision;
+        Self {
+            source: Some((trigger.apply, revision, *revision.peek())),
+            session_revision: get_revision(PUBLIC_SESSION_CHANGE_STORAGE_KEY),
+            confirmed_logout: get_revision(LOGOUT_REVISION_KEY),
+            login_revision: PublicSessionCheckTrigger::login_revision(),
+        }
     }
 
     /// 同一身份的例行会话读取不淘汰同代在途标记集合。
     pub(in crate::api) fn watch_collection() -> Self {
         Self::observe(|trigger| trigger.owner_revision)
+    }
+
+    pub(in crate::api) fn user_owner() -> Self {
+        Self::observe(|trigger| trigger.revision)
+    }
+
+    pub(in crate::api) fn reject_expected_user(&self, user_id: &str) -> bool {
+        let Some((apply, _, observed_revision)) = self.source else {
+            return false;
+        };
+        if !self.current() {
+            return false;
+        }
+        apply.call(SessionIdentityEvidence::ExpectedUserRejected {
+            user_id: user_id.to_owned(),
+            observed_revision,
+        });
+        true
     }
 
     fn observe(select_revision: impl FnOnce(PublicSessionEvidenceTrigger) -> Signal<u64>) -> Self {
@@ -89,11 +117,12 @@ impl SessionIdentityObservation {
         }
         true
     }
-}
-
-/// 已完成的 Cookie 写入由同一个浏览器锁保证顺序，即使重登同一账号也使旧读证据过期。
-pub(in crate::api) fn publish_cookie_identity(identity: SessionIdentity) {
-    publish_identity(SessionIdentityEvidence::Current { identity, cookie_written: true });
+    /// 写入锁内的成功响应直接确认 Cookie 身份；复用请求开始时捕获的外壳回调，避免 await 后依赖当前作用域。
+    pub(in crate::api) fn publish_cookie_write(&self, identity: SessionIdentity) {
+        if let Some((apply, _, _)) = self.source {
+            apply.call(SessionIdentityEvidence::Current { identity, cookie_written: true });
+        }
+    }
 }
 
 pub(super) fn publish_read_identity(identity: SessionIdentity) {
@@ -197,10 +226,36 @@ pub(in crate::api) fn observe_public_session_failure(
     code: &str,
     expected_user: Option<&str>,
 ) {
-    if observe_expected_user_rejection(Some(status), Some(code), expected_user) {
+    observe_public_session_failure_inner(status, code, expected_user, None);
+}
+
+pub(in crate::api) fn observe_public_session_failure_observed(
+    status: u16,
+    code: &str,
+    expected_user: Option<&str>,
+    observation: &SessionIdentityObservation,
+) {
+    observe_public_session_failure_inner(status, code, expected_user, Some(observation));
+}
+
+fn observe_public_session_failure_inner(
+    status: u16,
+    code: &str,
+    expected_user: Option<&str>,
+    observation: Option<&SessionIdentityObservation>,
+) {
+    if observe_expected_user_rejection(Some(status), Some(code), expected_user, observation) {
         broadcast_session_change();
+    } else if status == 409
+        && code == "session_changed"
+        && expected_user.is_some()
+        && observation.is_some_and(|observation| !observation.current())
+    {
+        // 迟到的旧用户冲突不能覆盖新宿主，但当前 Cookie 仍须重新核验并通知其他标签页。
+        broadcast_session_change();
+        request_public_session_check(SessionRefreshReason::CookieChanged);
     } else if status == 401 {
-        notify_public_session_change(SessionRefreshReason::AuthenticationFailed);
+        request_public_session_check(SessionRefreshReason::AuthenticationFailed);
     }
 }
 
@@ -209,19 +264,14 @@ pub(super) fn observe_expected_user_rejection(
     status: Option<u16>,
     code: Option<&str>,
     expected_user: Option<&str>,
+    observation: Option<&SessionIdentityObservation>,
 ) -> bool {
     if (status, code) == (Some(409), Some("session_changed"))
-        && let Some(user_id) = expected_user
+        && let (Some(user_id), Some(observation)) = (expected_user, observation)
     {
-        publish_identity(SessionIdentityEvidence::ExpectedUserRejected(user_id.to_owned()));
-        return true;
+        return observation.reject_expected_user(user_id);
     }
     false
-}
-
-pub(in crate::api) fn notify_public_session_change(reason: SessionRefreshReason) {
-    broadcast_session_change();
-    request_public_session_check(reason);
 }
 
 /// 未发送的命令只复核本页；Cookie 未改变，无需广播新的主修订。

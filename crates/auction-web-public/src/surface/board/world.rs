@@ -51,10 +51,12 @@ pub(crate) fn WorldPicker(mut selected_world: Signal<String>) -> Element {
     if current_disabled {
         options.push(current.clone());
     }
+    let fallback_origin = current.clone();
     use_effect(use_reactive((&fallback,), move |(fallback,)| {
         let Some(fallback) = fallback else { return };
-        // 目录返回时地址可能已经换到指定场次或无效深链；只有仍无显式场次才可纠偏。
-        if selected_world() == fallback
+        // 目录返回后地址可能已经换到指定场次或无效深链；只有触发纠偏的世界仍有效才写回。
+        if selected_world() != fallback_origin
+            || selected_world() == fallback
             || has_auction_target(read_public_query().auction_parameter())
         {
             return;
@@ -75,7 +77,16 @@ pub(crate) fn WorldPicker(mut selected_world: Signal<String>) -> Element {
                 onchange: move |event| {
                     let world = event.value();
                     if history_owns_world_filter {
-                        selected_world.set(world);
+                        let applied = update_public_query_state(
+                            shell_query_state,
+                            |query| *query = world_switch_query(query, &world, false),
+                            QueryWriteMode::Push,
+                        );
+                        if applied {
+                            selected_world.set(world);
+                        } else {
+                            restore_select_value(&event, &selected_world.peek());
+                        }
                         return;
                     }
                     // 补偿池等页面也用 `auction` 参数，只有看板上的往期场次随世界切换离开。

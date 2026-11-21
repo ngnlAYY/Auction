@@ -19,6 +19,7 @@ use crate::database::storage_error;
 pub(super) struct RegistrationUser {
     pub(super) id: Uuid,
     pub(super) username: String,
+    pub(super) game_player_id: String,
     pub(super) status: String,
     pub(super) key_status: String,
     pub(super) username_matches: bool,
@@ -28,6 +29,7 @@ pub(super) fn registration_user(row: &PgRow) -> Result<RegistrationUser, Applica
     Ok(RegistrationUser {
         id: row.try_get("id").map_err(map_storage_error)?,
         username: row.try_get("username").map_err(map_storage_error)?,
+        game_player_id: row.try_get("game_player_id").map_err(map_storage_error)?,
         status: row.try_get("status").map_err(map_storage_error)?,
         key_status: row.try_get("key_status").map_err(map_storage_error)?,
         username_matches: row.try_get("username_matches").map_err(map_storage_error)?,

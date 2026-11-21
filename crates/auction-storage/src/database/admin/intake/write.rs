@@ -71,8 +71,13 @@ pub(super) async fn add_admin_intake_inner(
     .fetch_optional(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
-    if player_status.as_deref() == Some("blacklisted") {
-        return Err(CompetitionTransactionError::AdminIntakeSellerBlacklisted);
+    match player_status.as_deref() {
+        Some("blacklisted") => {
+            return Err(CompetitionTransactionError::AdminIntakeSellerBlacklisted);
+        }
+        None => return Err(CompetitionTransactionError::AdminIntakeUnavailable),
+        Some("active") => {}
+        Some(_) => return Err(CompetitionTransactionError::InvalidState),
     }
 
     let existing_equipment = sqlx::query_scalar::<_, Uuid>(

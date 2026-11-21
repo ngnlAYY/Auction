@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use prometheus::{Encoder, Gauge, GaugeVec, Opts, Registry, TextEncoder};
 
+use super::audit::AuditMetricsCollector;
 use super::{
-    audit::{AuditMetricsCollector, AuditMetricsSource},
+    audit::AuditMetricsSource,
     business::PrometheusBusinessRecorder,
     http::HttpRecorder,
     migration::{self, MigrationReadinessRecorder},

@@ -10,7 +10,7 @@
 
 - 由执行人获准后操作本机或隔离实例；**不能连接生产数据库、复用生产 unit/socket/缓存目录，或向游戏、论坛、R2、打卡与 tracing 服务发请求**。主机/容器网络只放行隔离 PG、独立缓存及本机探针；禁用邮件/论坛仅是第二道边界，恢复库中仍有真实凭据和历史待办。
 - 目标必须 PG18 独立实例/端口，示例为 `127.0.0.1:55432`；数据库名仍为 `auction`（manifest 绑定原库名摘要），若源库不同，逐处替换。不能用生产实例上的另一个库冒充隔离，也不能修改 manifest 绕过库名绑定。先人工核对实例身份、监听端口、磁盘余量与其他连接。
-- 把 CI 候选制品解压到 `/srv/auction-drill/candidate/`，校验包摘要和包内 `SHA256SUMS`，记录版本、完整提交、包摘要与新 CLI 摘要。保留当前线上版本的旧制品于 `/srv/auction-drill/previous/`，用于测量停机排空。演练必须使用待部署制品；任何迁移、二进制或相关配置变更后重做并生成新回执。
+- 把 CI 候选制品解压到 `/srv/auction-drill/candidate/`，校验外层 tarball 与包内 `SHA256SUMS`，记录版本、完整提交、package 名、外层 tarball SHA-256 和新 CLI 摘要。`artifact.previous_version` 必须填写当前已安装三个角色的 package ID：按安装目录三个角色程序 SHA-256 匹配最新成功 deploy/rollback 回执的 `deploy.roles.package`；不得填数据库 schema 或 CLI package。找不到该摘要匹配身份时停止演练/部署，不推测旧 package。演练必须使用待部署制品；任何迁移、二进制或相关配置变更后重做并生成新回执。
 - 创建独立 `/srv/auction-drill/config/`，三角色使用同一个隔离 `common_file`，runtime 要么三者同用隔离副本，要么三者都省略。敏感 TOML 中的 PG 与维护连接都指向隔离端口；维护库为 `postgres`，应用库为原库名；保存备份所需的历史数据密钥，敏感文件 0600，不把连接串、Cookie、密钥、玩家信息或 TOML 原文写进回执。
 - 在有效配置中关闭 `[worker.mooglemail]`、`[worker.forum]`、`[worker.operations_alert]` 和 `[auction.schedule]` 的 `enabled`；runtime 若接管 schedule，也须关闭其 `operations.schedule.enabled`。关闭 tracing/异机备份，打卡地址留空。`auction.schedule.enabled=false` 只停止新排期创建，Worker 仍可处理恢复库中的既有生命周期/结算，所有变化仅允许进入隔离副本。
 - Public/Admin 仅监听本机独立端口（示例 `18090/18091`），Public 使用独立 realtime consumer；Worker control 启用，socket 使用 `/srv/auction-drill/run/worker/control.sock`，目录、组和 peer allowlist 按[ops/config/README.md#worker](../config/README.md#worker)准备。Admin 的 worker control 路径与之匹配。用新 CLI 的 `config check --strict` 和 `config show worker` 核对有效配置，不能只修改被 runtime 覆盖的 fallback。
@@ -160,7 +160,7 @@ auction-cli --config-dir /etc/auction service restart \
 | 回执字段 | 通过条件 |
 | --- | --- |
 | `format` / `operator` / `reviewer` / `date_utc` | `auction-migration-drill.v1`；执行人与审核人不同；日期不晚于今天且不超过 `--drill-max-age-days` |
-| `artifact` | `commit`、`package`、`cli_sha256` 与本次待部署制品完全一致，`package_sha256` 为 64 位小写十六进制 |
+| `artifact` | `commit`、`package`、`cli_sha256` 与本次待部署制品一致；`package_sha256` 与 `deploy --package-sha256` 传入的已校验外层 Release tarball SHA-256 完全一致且为 64 位小写十六进制；`previous_version` 必须等于按当前三个角色摘要匹配的最新成功部署回执 `deploy.roles.package`，不是 schema 或 CLI package |
 | `backup` | `verify_result = "verified"`、`schema_version` 等于当前数据库版本、`created_at` 非空、`database_name_sha256` 有效；`files` 恰好各一条 `archive`/`manifest` |
 | `postgres` | `major = 18`、`isolated = true`、`server_version` 以 `18.` 开头、host/port/database/instance_label 有效 |
 | `restore` | `result = "passed"`，含耗时、restore 回执与 preflight 证据 |

@@ -13,18 +13,26 @@ use std::{
     io::{ErrorKind, Read, Write},
     os::{
         fd::{AsRawFd, FromRawFd},
-        unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
+        unix::{
+            ffi::OsStrExt,
+            fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+        },
     },
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::disk::{DiskUsage, usage};
-use super::trust::{Facts, Kind, first_untrusted};
-use super::{effective_uid, ensure_private_dir, sync_parent};
+use super::super::disk::{DiskUsage, usage};
+use super::super::{effective_uid, ensure_private_dir, sync_parent};
+use super::path_helpers::{
+    name_component, open_trusted_ancestors, require_private_file, require_safe_path,
+};
+mod entry_lock;
+mod removal;
+use self::entry_lock::lock_directory_entries;
 
 /// [`PrivateDirectory::read`] 的读取上限：目录内只放小型记录与回执。
 pub(crate) const MAX_READ_BYTES: u64 = 1024 * 1024;
@@ -57,8 +65,8 @@ impl PrivateDirectory {
     pub(crate) fn prepare(path: &Path) -> anyhow::Result<Self> {
         require_safe_path(path)?;
         ensure_private_dir(path)?;
-        require_safe_path(path)?;
-        let directory = Self::open_existing(path)?;
+        let directory =
+            Self::open_trusted(path, false)?.context("创建后无法通过安全目录遍历固定私有目录")?;
         directory.sync()?;
         sync_parent(path)?;
         Ok(directory)
@@ -82,29 +90,54 @@ impl PrivateDirectory {
     /// 必须已存在：不替调用方建立祖先，避免把本应 0755 的公共父目录建成 0700。`create` 为假且
     /// 目录不存在时返回 None。
     pub(crate) fn open_trusted(path: &Path, create: bool) -> anyhow::Result<Option<Self>> {
-        require_safe_path(path)?;
+        let parent_path = path.parent().context("私有目录路径缺少父目录")?;
+        let parent = match open_trusted_ancestors(parent_path) {
+            Ok(parent) => parent,
+            Err(error)
+                if !create
+                    && error.chain().any(|cause| {
+                        cause
+                            .downcast_ref::<std::io::Error>()
+                            .is_some_and(|io| io.kind() == ErrorKind::NotFound)
+                    }) =>
+            {
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        };
+        let name = path.file_name().context("私有目录路径缺少名称")?;
+        let name = CString::new(name.as_bytes()).context("私有目录名称包含 NUL")?;
+        let _entry_lock = lock_directory_entries(&parent)?;
         if create {
-            match fs::DirBuilder::new().mode(0o700).create(path) {
-                Ok(()) => sync_parent(path)?,
-                Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
-                Err(error) => {
+            // SAFETY：parent fd 已逐级固定并验证，name 是单个普通路径分量。
+            if unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) } == 0 {
+                parent.sync_all().context("同步私有目录父目录失败")?;
+            } else {
+                let error = std::io::Error::last_os_error();
+                if error.kind() != ErrorKind::AlreadyExists {
                     return Err(error).with_context(|| {
                         format!("创建私有目录失败（父目录须已存在）：{}", path.display())
                     });
                 }
             }
         }
-        let directory = match OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-            .open(path)
-        {
-            Ok(directory) => directory,
-            Err(error) if !create && error.kind() == ErrorKind::NotFound => return Ok(None),
-            Err(error) => {
-                return Err(error).with_context(|| format!("打开私有目录失败：{}", path.display()));
-            }
+        // SAFETY：parent fd 及单分量 name 已验证；禁止跟随替换成符号链接的最终目录项。
+        let descriptor = unsafe {
+            libc::openat(
+                parent.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
         };
+        if descriptor < 0 {
+            let error = std::io::Error::last_os_error();
+            if !create && error.kind() == ErrorKind::NotFound {
+                return Ok(None);
+            }
+            return Err(error).with_context(|| format!("打开私有目录失败：{}", path.display()));
+        }
+        // SAFETY：openat 成功，descriptor 由当前调用独占拥有。
+        let directory = unsafe { File::from_raw_fd(descriptor) };
         let directory = Self::pinned(path.to_owned(), directory)?;
         directory.verify_path()?;
         Ok(Some(directory))
@@ -114,11 +147,48 @@ impl PrivateDirectory {
     /// inode）。祖先被改名、目录被移走或被替换时失败关闭。
     pub(crate) fn verify_path(&self) -> anyhow::Result<()> {
         require_safe_path(&self.path)?;
-        let current = fs::symlink_metadata(&self.path).with_context(|| {
-            format!("私有目录已不在原路径（祖先被改名或目录被移走）：{}", self.path.display())
-        })?;
+        let parent_path = self.path.parent().context("私有目录路径缺少父目录")?;
+        let parent = open_trusted_ancestors(parent_path)?;
+        let name = self.path.file_name().context("私有目录路径缺少名称")?;
+        let name = CString::new(name.as_bytes()).context("私有目录名称包含 NUL")?;
+        // SAFETY: parent is pinned and name is one NUL-free component; the returned descriptor is owned below.
+        let descriptor = unsafe {
+            libc::openat(
+                parent.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if descriptor < 0 {
+            return Err(std::io::Error::last_os_error())
+                .with_context(|| format!("私有目录已不在原路径：{}", self.path.display()));
+        }
+        // SAFETY: openat returned a new descriptor owned by this call.
+        let current = unsafe { File::from_raw_fd(descriptor) };
+        let current_metadata = current.metadata().context("读取当前私有目录元数据失败")?;
         let pinned = self.directory.metadata().context("读取私有目录元数据失败")?;
-        if current.dev() != pinned.dev() || current.ino() != pinned.ino() {
+        let mut entry = std::mem::MaybeUninit::<libc::stat>::zeroed();
+        // SAFETY: parent and name are valid; entry points to writable stat storage.
+        if unsafe {
+            libc::fstatat(
+                parent.as_raw_fd(),
+                name.as_ptr(),
+                entry.as_mut_ptr(),
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        } != 0
+        {
+            return Err(std::io::Error::last_os_error())
+                .with_context(|| format!("复核私有目录路径失败：{}", self.path.display()));
+        }
+        // SAFETY: fstatat initialized entry after returning success.
+        let entry = unsafe { entry.assume_init() };
+        if current_metadata.dev() != pinned.dev()
+            || current_metadata.ino() != pinned.ino()
+            || entry.st_dev != pinned.dev()
+            || entry.st_ino != pinned.ino()
+            || entry.st_mode & libc::S_IFMT != libc::S_IFDIR
+        {
             anyhow::bail!(
                 "私有目录路径已指向另一个目录（祖先被改名或目录被替换）：{}",
                 self.path.display()
@@ -131,6 +201,7 @@ impl PrivateDirectory {
     /// 必须归当前账号、禁止 group/other 访问，且与本目录在同一文件系统。`create` 为假且子目录
     /// 不存在时返回 None。
     pub(crate) fn open_child(&self, name: &str, create: bool) -> anyhow::Result<Option<Self>> {
+        let _entry_lock = create.then(|| lock_directory_entries(&self.directory)).transpose()?;
         if create {
             self.make_child(name)?;
         }
@@ -148,6 +219,7 @@ impl PrivateDirectory {
 
     /// 新建子目录：已存在即失败，用于只追加、不覆盖的记录目录。
     pub(crate) fn create_child(&self, name: &str) -> anyhow::Result<Self> {
+        let _entry_lock = lock_directory_entries(&self.directory)?;
         if !self.make_child(name)? {
             anyhow::bail!("私有子目录已存在，拒绝覆盖：{}", self.path.join(name).display());
         }
@@ -159,12 +231,7 @@ impl PrivateDirectory {
 
     /// 子目录必须留在同一文件系统，保证其中的文件纳入父目录的水位门禁。
     pub(crate) fn child(&self, name: &str) -> anyhow::Result<Self> {
-        name_component(name)?;
-        let child = Self::prepare(&self.path.join(name))?;
-        if child.directory.metadata()?.dev() != self.directory.metadata()?.dev() {
-            anyhow::bail!("私有子目录不得跨文件系统");
-        }
-        Ok(child)
+        self.open_child(name, true)?.context("创建后无法打开私有子目录")
     }
 
     /// 目录所在文件系统的容量；读取的是已固定的描述符，不重新解析路径。
@@ -210,6 +277,7 @@ impl PrivateDirectory {
 
     /// 新建只写文件（`O_EXCL`，不跟随符号链接），权限由调用方给出；已存在即失败。
     pub(crate) fn create_file(&self, name: &str, mode: libc::mode_t) -> anyhow::Result<File> {
+        let _entry_lock = lock_directory_entries(&self.directory)?;
         self.open_at(name, libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL, mode)
             .with_context(|| format!("新建文件失败：{}", self.path.join(name).display()))
     }
@@ -252,6 +320,7 @@ impl PrivateDirectory {
     /// `replace` 为假时无覆盖发布（回执、终态与完成事实）；只有运行中状态允许原子替换。
     /// 两种都先同步文件再同步目录。
     pub(crate) fn write(&self, name: &str, bytes: &[u8], replace: bool) -> anyhow::Result<()> {
+        let _entry_lock = lock_directory_entries(&self.directory)?;
         let target = name_component(name)?;
         let temporary_name = format!(".{}.partial", Uuid::new_v4());
         let temporary = name_component(&temporary_name)?;
@@ -280,18 +349,38 @@ impl PrivateDirectory {
             if status != 0 {
                 return Err(std::io::Error::last_os_error()).context("发布私有文件失败");
             }
+            temporary_created = false;
             Ok(())
         })();
         // 成功改名已移走临时名；失败路径只回收本次 create_new 的临时名。
-        if temporary_created {
-            let _ = self.unlink(&temporary_name);
+        let cleanup = if temporary_created {
+            match self.unlink(&temporary_name) {
+                Err(error)
+                    if error.chain().any(|cause| {
+                        cause
+                            .downcast_ref::<std::io::Error>()
+                            .is_some_and(|io| io.kind() == ErrorKind::NotFound)
+                    }) =>
+                {
+                    Ok(())
+                }
+                result => result,
+            }
+        } else {
+            Ok(())
+        };
+        match result {
+            Err(primary) => match cleanup {
+                Ok(()) => Err(primary),
+                Err(cleanup) => Err(primary.context(format!("清理私有临时文件失败：{cleanup:#}"))),
+            },
+            Ok(()) => self.sync().context("私有文件已原子发布，但同步目录失败；请核对目标状态"),
         }
-        result?;
-        self.sync()
     }
 
     /// 私有普通文件先同步 0600 权限，再无覆盖发布；也用于原样保留无效记录。
     pub(crate) fn publish_file(&self, source: &str, target: &str) -> anyhow::Result<()> {
+        let _entry_lock = lock_directory_entries(&self.directory)?;
         let file = self.open(source)?;
         file.set_permissions(fs::Permissions::from_mode(0o600)).context("设置私有文件权限失败")?;
         file.sync_all().context("同步私有文件失败")?;
@@ -312,35 +401,7 @@ impl PrivateDirectory {
             return Err(std::io::Error::last_os_error()).context("无覆盖发布私有文件失败");
         }
         self.sync()
-    }
-
-    pub(crate) fn remove(&self, name: &str, expected: FileIdentity) -> anyhow::Result<()> {
-        if FileIdentity::of(&self.open(name)?.metadata()?) != expected {
-            anyhow::bail!("私有文件身份或大小已变化，停止删除");
-        }
-        self.unlink(name)?;
-        self.sync()
-    }
-
-    pub(crate) fn remove_child(&self, child: &Self) -> anyhow::Result<()> {
-        let name =
-            child.path.file_name().and_then(|name| name.to_str()).context("子目录名称无效")?;
-        if child.path != self.path.join(name) || !child.names()?.is_empty() {
-            anyhow::bail!("只允许删除已确认的空子目录");
-        }
-        let actual = self.open_at(name, libc::O_RDONLY | libc::O_DIRECTORY, 0)?.metadata()?;
-        let expected = child.directory.metadata()?;
-        if actual.dev() != expected.dev() || actual.ino() != expected.ino() {
-            anyhow::bail!("子目录身份变化");
-        }
-        let name = name_component(name)?;
-        // SAFETY：父目录句柄有效，名称为已核对身份的单分量目录；内核拒绝非空目录和符号链接。
-        if unsafe { libc::unlinkat(self.directory.as_raw_fd(), name.as_ptr(), libc::AT_REMOVEDIR) }
-            != 0
-        {
-            return Err(std::io::Error::last_os_error()).context("删除空子目录失败");
-        }
-        self.sync()
+            .context("私有文件已无覆盖发布，但目录同步失败；发布已提交，持久性未知，请核对目标状态")
     }
 
     pub(crate) fn sync(&self) -> anyhow::Result<()> {
@@ -399,8 +460,15 @@ impl PrivateDirectory {
 
     fn pinned(path: PathBuf, directory: File) -> anyhow::Result<Self> {
         let metadata = directory.metadata().context("读取私有目录元数据失败")?;
-        if !metadata.is_dir() || metadata.uid() != effective_uid() || metadata.mode() & 0o077 != 0 {
-            anyhow::bail!("私有目录必须归当前账号所有且禁止 group/other 访问：{}", path.display());
+        if !metadata.is_dir()
+            || metadata.uid() != effective_uid()
+            || metadata.mode() & 0o077 != 0
+            || metadata.mode() & 0o700 != 0o700
+        {
+            anyhow::bail!(
+                "私有目录必须归当前账号所有、owner 位为 0700 且禁止 group/other 访问：{}",
+                path.display()
+            );
         }
         Ok(Self { path, directory })
     }
@@ -413,156 +481,5 @@ impl PrivateDirectory {
             return Err(std::io::Error::last_os_error()).context("删除私有目录项失败");
         }
         Ok(())
-    }
-}
-
-fn name_component(name: &str) -> anyhow::Result<CString> {
-    if name.is_empty()
-        || name == "."
-        || name == ".."
-        || name.contains(['/', '\\'])
-        || name.chars().any(char::is_control)
-    {
-        anyhow::bail!("私有目录项必须是无控制字符的单个文件名");
-    }
-    CString::new(name).context("私有目录项名称无效")
-}
-
-fn require_private_file(file: &File) -> anyhow::Result<()> {
-    let metadata = file.metadata().context("读取私有文件元数据失败")?;
-    if !metadata.is_file()
-        || metadata.nlink() != 1
-        || metadata.uid() != effective_uid()
-        || metadata.mode() & 0o077 != 0
-    {
-        anyhow::bail!("私有文件必须是当前账号所有的单链接 owner-only 普通文件");
-    }
-    Ok(())
-}
-
-/// 路径须为不含 `.`/`..` 的绝对路径；从根开始已存在的每一级（含目录本身）都须是归 root 或
-/// 当前账号、禁止 group/other 写入的真实目录（root 的 sticky 目录除外，判定见
-/// [`first_untrusted`]），到第一个不存在的层级为止。
-fn require_safe_path(path: &Path) -> anyhow::Result<()> {
-    if !path.is_absolute()
-        || path.components().any(|part| matches!(part, Component::ParentDir | Component::CurDir))
-    {
-        anyhow::bail!("私有目录必须为不含 . 或 .. 的绝对路径：{}", path.display());
-    }
-    let mut prefix = PathBuf::new();
-    let mut levels = Vec::new();
-    for part in path.components() {
-        prefix.push(part.as_os_str());
-        let metadata = match fs::symlink_metadata(&prefix) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == ErrorKind::NotFound => break,
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("读取私有目录祖先失败：{}", prefix.display()));
-            }
-        };
-        let facts = Facts::of(&metadata);
-        levels.push((prefix.clone(), facts));
-        // 非目录（含符号链接）无法作为祖先，判定在这一级结束，不再穿过它读取下一级。
-        if facts.kind != Kind::Directory {
-            break;
-        }
-    }
-    let chain = levels.iter().map(|(_, facts)| *facts).collect::<Vec<_>>();
-    if let Some((index, problem)) = first_untrusted(&chain, effective_uid()) {
-        let prefix = levels.get(index).map_or(path, |(prefix, _)| prefix.as_path());
-        anyhow::bail!(
-            "私有目录的祖先必须是 root 或当前账号所有、禁止他人写入的真实目录：{}（{problem}）",
-            prefix.display()
-        );
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
-
-    use uuid::Uuid;
-
-    use super::PrivateDirectory;
-
-    struct TempRoot(PathBuf);
-
-    impl TempRoot {
-        fn new() -> Self {
-            let root = std::env::temp_dir().join(format!("auction-private-dir-{}", Uuid::new_v4()));
-            fs::create_dir(&root).expect("建立临时目录");
-            fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).expect("设置权限");
-            Self(root)
-        }
-    }
-
-    impl Drop for TempRoot {
-        fn drop(&mut self) {
-            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    /// 无覆盖发布不改写已有证据；可替换发布用于运行中状态。
-    #[test]
-    fn write_never_overwrites_without_replace() {
-        let root = TempRoot::new();
-        let directory = PrivateDirectory::prepare(&root.0.join("receipts")).expect("准备私有目录");
-        directory.write("a.json", b"first", false).expect("首次发布");
-        assert!(directory.write("a.json", b"second", false).is_err());
-        assert_eq!(directory.read("a.json").expect("读取"), b"first");
-        directory.write("a.json", b"third", true).expect("可替换发布");
-        assert_eq!(directory.read("a.json").expect("读取"), b"third");
-        let names = directory.names().expect("枚举");
-        assert_eq!(names, vec!["a.json".to_owned()], "失败与成功路径都不残留临时名");
-    }
-
-    /// 祖先目录允许 group 写入时拒绝准备私有目录：他人可以替换其中的目录项。
-    #[test]
-    fn group_writable_ancestor_is_rejected() {
-        let root = TempRoot::new();
-        let shared = root.0.join("shared");
-        fs::create_dir(&shared).expect("建立祖先目录");
-        fs::set_permissions(&shared, fs::Permissions::from_mode(0o770)).expect("设置权限");
-        let error = PrivateDirectory::prepare(&shared.join("receipts"))
-            .err()
-            .expect("group 可写祖先必须拒绝");
-        assert!(format!("{error:#}").contains("祖先"), "{error:#}");
-        assert!(!shared.join("receipts").exists(), "拒绝前不创建目录");
-    }
-
-    /// `open_existing` 只核对目录本身：祖先对 group 可写不影响打开，目录本身对 group 开放或
-    /// 是符号链接时拒绝。
-    #[test]
-    fn open_existing_checks_only_the_directory_itself() {
-        let root = TempRoot::new();
-        let shared = root.0.join("shared");
-        fs::create_dir(&shared).expect("建立祖先目录");
-        fs::set_permissions(&shared, fs::Permissions::from_mode(0o770)).expect("设置权限");
-        let receipts = shared.join("receipts");
-        fs::create_dir(&receipts).expect("建立目录");
-        fs::set_permissions(&receipts, fs::Permissions::from_mode(0o700)).expect("设置权限");
-        let directory = PrivateDirectory::open_existing(&receipts).expect("祖先不在核对范围");
-        directory.write("a.json", b"{}", false).expect("发布");
-
-        fs::set_permissions(&receipts, fs::Permissions::from_mode(0o750)).expect("设置权限");
-        assert!(PrivateDirectory::open_existing(&receipts).is_err(), "目录本身必须 owner-only");
-        let link = shared.join("link");
-        std::os::unix::fs::symlink(&receipts, &link).expect("创建符号链接");
-        assert!(PrivateDirectory::open_existing(&link).is_err(), "拒绝符号链接");
-        assert!(PrivateDirectory::open_existing(&shared.join("missing")).is_err());
-    }
-
-    /// 目录本身对 group 开放时拒绝，不放宽为可用的私有目录。
-    #[test]
-    fn non_private_directory_is_rejected() {
-        let root = TempRoot::new();
-        let open = root.0.join("open");
-        fs::create_dir(&open).expect("建立目录");
-        fs::set_permissions(&open, fs::Permissions::from_mode(0o750)).expect("设置权限");
-        assert!(PrivateDirectory::prepare(&open).is_err());
-        assert!(PrivateDirectory::prepare(&root.0.join("..").join("x")).is_err(), "拒绝 ..");
     }
 }

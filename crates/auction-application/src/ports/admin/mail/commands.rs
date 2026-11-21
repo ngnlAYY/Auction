@@ -1,10 +1,9 @@
 //! Admin Mail owner 的状态命令和命令账本模型。
 
-use auction_domain::CommandId;
-use auction_domain::valid_optional_text;
+use auction_domain::{CommandId, valid_optional_text, valid_text};
 
 use super::errors::AdminMailError;
-use super::limits::{MAX_ADMIN_MAILBOX_KEY_BYTES, valid_text};
+use super::limits::MAX_ADMIN_MAILBOX_KEY_BYTES;
 use crate::ports::core::RequestHash;
 
 #[derive(Debug, Clone)]

@@ -304,6 +304,8 @@ impl MoogleMailSender {
                     )
                 }
             })?;
+        // 从最终发送 POST 开始即按可能成功收口；调用方取消时不得把未知写入误当成未发送。
+        *write_started = true;
         let response = self.client.post(&compose, cookie, form).await?;
         let (failure, confirmation) = self.parser.inspect_send_response(&response, request.world);
         if let Some(failure) =

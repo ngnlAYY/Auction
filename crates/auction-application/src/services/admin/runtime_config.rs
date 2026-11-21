@@ -199,15 +199,14 @@ where
                 self.finish_pending(guard, row).await.map(|_| ())
             }
         } else {
-            let _ = self
-                .commands
+            self.commands
                 .mark_unknown(
                     row.command_id,
                     row.request_hash,
                     "file_conflict".to_owned(),
                     self.clock.now(),
                 )
-                .await;
+                .await?;
             Err(AdminRuntimeConfigError::ReconciliationRequired.into())
         }
     }
@@ -240,15 +239,14 @@ where
             return self.apply_verified(guard, stored).await;
         }
         if current.fingerprint != stored.old_fingerprint {
-            let _ = self
-                .commands
+            self.commands
                 .mark_unknown(
                     stored.command_id,
                     stored.request_hash,
                     "file_conflict".to_owned(),
                     self.clock.now(),
                 )
-                .await;
+                .await?;
             return Err(AdminRuntimeConfigError::ReconciliationRequired.into());
         }
 

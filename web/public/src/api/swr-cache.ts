@@ -26,6 +26,7 @@
 // 当时最新的下限判定，重读在途期间命令失效同样生效。
 // 他人竞价等事件触发的普通失效仍允许繁忙时先显示最后已知快照。
 
+import { createPromiseResolvers } from "@auction/web-shared/platform/promise";
 import { err, ok, type Result, unreachable } from "@auction/web-shared/result";
 
 /** 实时视图的缓存有效期：当前拍卖、当前 lots、lot 详情与竞价日志。 */
@@ -168,8 +169,13 @@ export function rememberPublicReadRetryAfter(
     (previous === undefined || window.notBefore >= previous.notBefore)
   ) {
     STORE.retryAfter.set(url, window);
+    while (STORE.retryAfter.size > MAX_ENTRIES) {
+      const oldest = STORE.retryAfter.keys().next().value;
+      if (oldest === undefined) break;
+      STORE.retryAfter.delete(oldest);
+    }
   }
-  return window;
+  return STORE.retryAfter.get(url) ?? window;
 }
 
 /** 仅供测试使用：当前缓存条目数。 */
@@ -182,22 +188,37 @@ export function hasEntryForTest(url: string): boolean {
   return STORE.entries.has(url);
 }
 
-/** 在途请求结束或读登记被驱逐时唤醒等待方，不携带结果。 */
+/** 在途请求完成或被缺失响应头驱逐等待资格时唤醒等待方，不携带结果。 */
 class Pending {
   done = false;
+  /** 缺失响应头到达后，等待方可发起新读；本请求仍可写缓存，直到被新请求取代。 */
+  waitersReleased = false;
+  /** 本请求收到缺失响应头后，失去缓存写入与回退资格。 */
+  invalidated = false;
+  /** 缺失头撤销本请求的旧值回退资格，但不否决仍在途的新正文。 */
+  fallbackInvalidated = false;
   readonly revision: number;
   readonly promise: Promise<void>;
   #resolve: (() => void) | null = null;
 
   constructor(revision: number) {
     this.revision = revision;
-    this.promise = new Promise<void>((resolve) => {
-      this.#resolve = resolve;
-    });
+    const pending = createPromiseResolvers<void>();
+    this.promise = pending.promise;
+    this.#resolve = pending.resolve;
+  }
+
+  releaseWaiters(): void {
+    this.waitersReleased = true;
+    this.#wakeWaiters();
   }
 
   finish(): void {
     this.done = true;
+    this.#wakeWaiters();
+  }
+
+  #wakeWaiters(): void {
     const resolve = this.#resolve;
     if (resolve !== null) {
       this.#resolve = null;
@@ -208,7 +229,7 @@ class Pending {
 
 /** 等待在途登记释放；调用方被取消时立即返回 `false`。 */
 function waitForPending(pending: Pending, signal: AbortSignal): Promise<boolean> {
-  if (pending.done) {
+  if (pending.done || pending.waitersReleased) {
     return Promise.resolve(true);
   }
   if (signal.aborted) {
@@ -359,7 +380,11 @@ export async function readOrFetch<T, E>(
     entry.current && Math.max(0, now() - entry.storedAt) < ttlMillis;
   // 命令后的权威重读必须独立于命令前发出的请求，避免被旧请求阻塞或受其结果影响。
   let pending = STORE.pending.get(url);
-  while (pending !== undefined && pending.revision >= STORE.fallbackFloor) {
+  while (
+    pending !== undefined &&
+    pending.revision >= STORE.fallbackFloor &&
+    !pending.waitersReleased
+  ) {
     if (!(await waitForPending(pending, signal))) {
       return err(abortError);
     }
@@ -386,6 +411,7 @@ export async function readOrFetch<T, E>(
     }
     const revision = guard.pending.revision;
     const cached = lookup<T>(url, typeId);
+
     if (cached !== undefined && fresh(cached)) {
       if (signal.aborted) {
         return err(abortError);
@@ -396,11 +422,16 @@ export async function readOrFetch<T, E>(
     const evictMissingSnapshot = () => {
       if (evicted) return;
       evicted = true;
-      // 发请求的先后不能证明服务端处理的先后。按地址驱逐并撤销在途登记，防止迟到响应恢复快照。
+      // 缺失头立即驱逐当前快照，只撤销发出该读取的写入资格。
       STORE.entries.delete(url);
-      const pending = STORE.pending.get(url);
-      STORE.pending.delete(url);
-      pending?.finish();
+      guard.pending.invalidated = true;
+      const currentPending = STORE.pending.get(url);
+      if (guard.ownsRequest()) {
+        guard.release();
+      } else if (currentPending !== undefined) {
+        currentPending.fallbackInvalidated = true;
+        currentPending.releaseWaiters();
+      }
     };
     // 过期与已被失效的条目带旧 ETag 再验证：正文未变时 304 直接复用，不重传整页。
     const outcome = await fetch(cached?.etag ?? null, evictMissingSnapshot);
@@ -413,8 +444,8 @@ export async function readOrFetch<T, E>(
     }
     switch (outcome.kind) {
       case "changed":
-        // 失去在途登记的旧结果只能交还原调用方。
-        if (guard.ownsRequest()) {
+        // 只有仍有效的登记可以写入；失效请求仍可向原调用方交付结果。
+        if (guard.ownsRequest() && !guard.pending.invalidated) {
           store(url, typeId, outcome.value, outcome.etag, now(), revision);
         }
         return ok(current(outcome.value));
@@ -422,20 +453,30 @@ export async function readOrFetch<T, E>(
         if (cached === undefined) {
           throw new Error("未提供 ETag 的读取不应返回 304");
         }
-        // 期间没有再发生失效时，304 将已确认的快照标回当前修订号。
-        if (guard.ownsRequest()) {
-          touch(url, now(), revision);
+        // 被替换的请求仍可向原调用方交付其捕获的快照，但不能确认或覆盖当前条目。
+        if (!guard.ownsRequest() || STORE.entries.get(url) !== cached.source) {
+          return ok(current(cached.value));
         }
+        touch(url, now(), revision);
         return ok(current(cached.value));
       case "transport":
       case "busy":
-        // 命令可能推进回退下限，404/410 可能撤销登记；按失败返回时的状态判定。
-        if (cached !== undefined && guard.ownsRequest() && fallbackAllowed(cached.revision)) {
+        // 命令推进回退下限或缺失响应头使在途读失效时，均按失败返回时的状态判定。
+        if (
+          cached !== undefined &&
+          guard.ownsRequest() &&
+          !guard.pending.invalidated &&
+          !guard.pending.fallbackInvalidated &&
+          fallbackAllowed(cached.revision)
+        ) {
           return ok({
             value: cached.value,
             staleFallback: cached.storedAt,
             deliverFallback: () =>
-              fallbackAllowed(cached.revision) && STORE.entries.get(url) === cached.source
+              !guard.pending.invalidated &&
+              !guard.pending.fallbackInvalidated &&
+              fallbackAllowed(cached.revision) &&
+              STORE.entries.get(url) === cached.source
                 ? ok(cached.value)
                 : err(outcome.error),
           });

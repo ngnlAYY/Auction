@@ -34,6 +34,7 @@ import {
   CredentialFieldError,
   credentialFieldErrorsDefault,
   credentialFieldErrorsSet,
+  credentialFieldId,
   credentialFieldIssue,
   credentialFieldIssueMessage,
   useCredentialFields,
@@ -273,7 +274,12 @@ export function CredentialRow(props: CredentialRowProps): JSX.Element {
               class="admin-btn-danger"
               disabled={busy() || blocked()}
               // 点击时复制安全投影，确认框持有点击瞬间的独立快照。
-              onClick={() => props.onDelete(copyCredential(props.credential))}
+              onClick={() => {
+                if (!readIsCurrent() || blocked() || busy()) {
+                  return;
+                }
+                props.onDelete(copyCredential(props.credential));
+              }}
             >
               {t("admin-credentials-action-delete")}
             </button>
@@ -369,7 +375,10 @@ function CredentialRenameDialog(props: CredentialRenameDialogProps): JSX.Element
           fields.show(errors);
           if (labelIssue !== null) {
             focusElementById(focusId());
-            announcer.announce(credentialFieldIssueMessage(labelIssue));
+            announcer.announceOnBlur(
+              credentialFieldId("label"),
+              credentialFieldIssueMessage(labelIssue),
+            );
             return;
           }
           props.onSave(label);

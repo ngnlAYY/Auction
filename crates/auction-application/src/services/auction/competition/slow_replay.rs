@@ -1,12 +1,12 @@
 //! 慢速代理账本结果与原命令的只读绑定校验。
-//! 重放不能受当前资格、生命周期或新金额上限影响；只核对历史计划能证明的命令、授权与世代，
-//! 不重新执行竞价，也不要求未变更的授权快照出现在旧计划中。
+//! 重放不能受当前资格、生命周期或新金额上限影响；只核对历史计划中的命令、授权、世代和活动
+//! 授权快照，不重新执行竞价。
 
 use auction_domain::{
     BidMechanism, CompetitionPlan, ProxyMode, ProxyStatus, ProxyTerminalReason, ProxyTransitionKind,
 };
 
-use super::legacy_ledger::deterministic_id;
+use super::legacy_ledger::ids::deterministic_id;
 use crate::errors::ApplicationError;
 use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
@@ -46,7 +46,14 @@ pub(super) fn validate(
                 && bid.mechanism == BidMechanism::Proxy
                 && plan.active_proxy_id == Some(command.authorization_id)
                 && plan.proxy_transitions.is_empty()
-                && plan.proxy_states.is_empty()
+                && matches!(
+                    plan.proxy_states.as_slice(),
+                    [state]
+                        if state.id == command.authorization_id
+                            && state.lot_id == command.lot_id
+                            && state.mode == ProxyMode::Slow
+                            && state.status == ProxyStatus::Active
+                )
         }
         [] => {
             // 无竞价的终态必须留下当前授权的唯一转换；不能把无效果计划当成已执行。

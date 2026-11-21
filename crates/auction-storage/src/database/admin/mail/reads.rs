@@ -56,8 +56,9 @@ pub(super) async fn dashboard_snapshot_postgres(
                 CASE WHEN state.paused THEN (
                     SELECT command.created_at FROM public.mail_admin_commands AS command
                     WHERE command.mailbox_key = state.mailbox_key
-                      AND (command.result_payload ->> 'paused')::boolean
-                    ORDER BY command.created_at DESC LIMIT 1
+                      AND command.result_payload -> 'paused' = 'true'::jsonb
+                    ORDER BY command.created_at DESC, command.command_id DESC
+                    LIMIT 1
                 ) END AS paused_since
          FROM public.mail_poll_state AS state
          ORDER BY state.mailbox_key ASC
@@ -175,6 +176,12 @@ pub(super) async fn get_intake_postgres(
     store: &crate::database::DatabaseStore,
     intake_id: Uuid,
 ) -> Result<Option<AdminMailIntakeDetail>, ApplicationError> {
+    // Intake metadata and delivery references must describe one committed database snapshot.
+    let mut transaction = store
+        .pool()
+        .begin_read_snapshot()
+        .await
+        .map_err(|error| storage_error_from(error, "开启邮件入站详情读取事务失败"))?;
     let row = sqlx::query(
         "SELECT id, mailbox_key, external_mail_id, world_id, mail_kind, status,
                 decision_code, received_at, processed_at, sender, subject,
@@ -183,10 +190,14 @@ pub(super) async fn get_intake_postgres(
          FROM public.inbound_mail WHERE id = $1",
     )
     .bind(intake_id)
-    .fetch_optional(store.pool())
+    .fetch_optional(&mut *transaction)
     .await
     .map_err(|error| storage_error_from(error, "读取 PostgreSQL 邮件入站详情失败"))?;
     let Some(row) = row else {
+        transaction
+            .commit()
+            .await
+            .map_err(|error| storage_error_from(error, "提交邮件入站详情空快照事务失败"))?;
         return Ok(None);
     };
     let summary = map_intake_summary(&row)?;
@@ -200,8 +211,11 @@ pub(super) async fn get_intake_postgres(
     let delivery_ids = metadata
         .delivery_ids
         .iter()
-        .filter_map(|value| Uuid::parse_str(value).ok())
-        .collect::<Vec<_>>();
+        .map(|value| {
+            Uuid::parse_str(value)
+                .map_err(|_| ApplicationError::AdminMail(AdminMailError::InvalidProjection))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let deliveries = if delivery_ids.is_empty() {
         Vec::new()
     } else {
@@ -233,12 +247,25 @@ pub(super) async fn get_intake_postgres(
                )
              ORDER BY id",
         )
-        .bind(delivery_ids)
+        .bind(&delivery_ids)
         .bind(world_id)
         .bind(external_mail_id)
-        .fetch_all(store.pool())
+        .fetch_all(&mut *transaction)
         .await
         .map_err(|error| storage_error_from(error, "读取邮件关联 delivery 失败"))?;
+        let returned_ids = rows
+            .iter()
+            .map(|row| {
+                row.try_get::<Uuid, _>("id")
+                    .map_err(|error| storage_error_from(error, "读取邮件关联 delivery 标识失败"))
+            })
+            .collect::<Result<std::collections::HashSet<_>, _>>()?;
+        if rows.len() != delivery_ids.len()
+            || returned_ids.len() != delivery_ids.len()
+            || returned_ids != delivery_ids.iter().copied().collect()
+        {
+            return Err(ApplicationError::AdminMail(AdminMailError::InvalidProjection));
+        }
         rows.iter().map(map_intake_delivery).collect::<Result<Vec<_>, _>>()?
     };
     let message_display = row
@@ -254,6 +281,10 @@ pub(super) async fn get_intake_postgres(
     if deliveries.iter().any(|value| !value.validate()) {
         return Err(ApplicationError::AdminMail(AdminMailError::InvalidProjection));
     }
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交邮件入站详情读取事务失败"))?;
     Ok(Some(AdminMailIntakeDetail {
         summary,
         metadata,

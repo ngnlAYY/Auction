@@ -177,38 +177,15 @@ export interface CredentialFieldFeedback {
   reset(fields: readonly CredentialField[]): void;
 }
 
-/** 逐字段的“是否已编辑”标记；与错误表一样固定为五项。 */
-type CredentialFieldEdited = readonly [boolean, boolean, boolean, boolean, boolean];
-
-function credentialFieldEditedDefault(): CredentialFieldEdited {
-  return [false, false, false, false, false];
-}
-
-/** 替换某个字段的编辑标记并返回新元组；不修改传入的元组。 */
-function credentialFieldEditedSet(
-  edited: CredentialFieldEdited,
-  field: CredentialField,
-  value: boolean,
-): CredentialFieldEdited {
-  const index = credentialFieldIndex(field);
-  return [
-    index === 0 ? value : edited[0],
-    index === 1 ? value : edited[1],
-    index === 2 ? value : edited[2],
-    index === 3 ? value : edited[3],
-    index === 4 ? value : edited[4],
-  ];
-}
-
 /** 为一次凭据表单创建字段错误状态；离焦提示共用页面提供的播报器。 */
 export function useCredentialFields(announcer: FieldAnnouncer): CredentialFieldFeedback {
+  const touched = new Set<CredentialField>();
   const errors: Cell<CredentialFieldErrors> = createCell(credentialFieldErrorsDefault());
-  const edited: Cell<CredentialFieldEdited> = createCell(credentialFieldEditedDefault());
   return {
     error: (field) => credentialFieldErrorsGet(errors(), field),
     show: (next) => errors.set(next),
     edited: (field, value) => {
-      edited.update((current) => credentialFieldEditedSet(current, field, true));
+      touched.add(field);
       const previous = credentialFieldErrorsGet(errors.peek(), field);
       if (previous !== null) {
         const issue = credentialFieldIssue(field, value);
@@ -219,11 +196,10 @@ export function useCredentialFields(announcer: FieldAnnouncer): CredentialFieldF
       }
     },
     blurred: (field, value) => {
-      // 首次交互到离焦才提示；仍有效的服务端错误保留至输入发生变化。
-      const index = credentialFieldIndex(field);
-      if (edited.peek()[index] !== true) {
+      if (!touched.has(field)) {
         return;
       }
+      // 离焦时提示；仍有效的服务端错误保留至输入发生变化。
       const issue = credentialFieldIssue(field, value);
       if (issue === null) {
         return;
@@ -238,14 +214,8 @@ export function useCredentialFields(announcer: FieldAnnouncer): CredentialFieldF
       errors.update((current) => {
         let next = current;
         for (const field of fields) {
+          touched.delete(field);
           next = credentialFieldErrorsSet(next, field, null);
-        }
-        return next;
-      });
-      edited.update((current) => {
-        let next = current;
-        for (const field of fields) {
-          next = credentialFieldEditedSet(next, field, false);
         }
         return next;
       });

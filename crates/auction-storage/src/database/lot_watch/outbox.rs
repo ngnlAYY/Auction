@@ -164,6 +164,7 @@ impl LotWatchReminderStore for DatabaseStore {
 #[derive(Debug)]
 struct ClaimedEvent {
     event_id: Uuid,
+    attempts: i32,
     event_kind: String,
     lot_id: Uuid,
     user_id: Uuid,
@@ -193,7 +194,7 @@ async fn process_batch(
             batch.claimed.saturating_add(u16::try_from(claimed.len()).unwrap_or(u16::MAX));
         for event in claimed {
             match process_claimed(store, &event, worker_id).await {
-                Ok(queued_delivery) => {
+                Ok(Some(queued_delivery)) => {
                     batch.completed = batch.completed.saturating_add(1);
                     // 通知在投递入队事务提交之后单独发送，不延长提交的 NOTIFY 锁；
                     // 发送失败只降低及时性，Worker 的轮询扫描仍会领取已提交投递。
@@ -210,9 +211,10 @@ async fn process_batch(
                         );
                     }
                 }
+                Ok(None) => {}
                 Err(error) => {
                     batch.retried = batch.retried.saturating_add(1);
-                    release_claim(store, &event.event_id, worker_id, error).await;
+                    release_claim(store, &event.event_id, worker_id, event.attempts, error).await;
                     tracing::warn!(
                         event_id = %event.event_id,
                         lot_id = %event.lot_id,
@@ -276,7 +278,7 @@ async fn claim_events(
                FOR UPDATE SKIP LOCKED
            ) AS due
            WHERE event.event_id = due.event_id
-           RETURNING event.event_id, event.event_kind, event.lot_id, event.user_id,
+           RETURNING event.event_id, event.attempts, event.event_kind, event.lot_id, event.user_id,
                      event.bid_id, event.occurred_at"#,
     )
     .bind(worker_id)
@@ -295,6 +297,7 @@ async fn claim_events(
         .map(|row| {
             Ok(ClaimedEvent {
                 event_id: row.try_get("event_id").map_err(storage_row_error)?,
+                attempts: row.try_get("attempts").map_err(storage_row_error)?,
                 event_kind: row.try_get("event_kind").map_err(storage_row_error)?,
                 lot_id: row.try_get("lot_id").map_err(storage_row_error)?,
                 user_id: row.try_get("user_id").map_err(storage_row_error)?,
@@ -309,13 +312,13 @@ fn storage_row_error(error: sqlx::Error) -> auction_application::core::Applicati
     storage_error_from(error, "读取标记事件字段失败")
 }
 
-/// 处理单条事件；处理事务与 `status = 'done'` 同一事务提交。
-/// 返回提交事务是否入队了新的 `lot_watch` 投递；调用方在提交后发送唤醒。
+/// 处理单条事件；租约已失效时返回 None，不执行事实写入。
+/// 处理事务与 `status = 'done'` 同一事务提交；成功值表示是否入队新的 `lot_watch` 投递。
 async fn process_claimed(
     store: &DatabaseStore,
     event: &ClaimedEvent,
     worker_id: &str,
-) -> Result<bool, &'static str> {
+) -> Result<Option<bool>, &'static str> {
     let mut transaction = store
         .pool()
         .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
@@ -323,23 +326,40 @@ async fn process_claimed(
         .map_err(sql_failure("begin_failed"))?;
     let owned: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM public.lot_watch_events
-         WHERE event_id = $1 AND status = 'processing' AND lease_owner = $2)",
+         WHERE event_id = $1 AND status = 'processing' AND lease_owner = $2
+           AND attempts = $3 AND lease_expires_at > clock_timestamp())",
     )
     .bind(event.event_id)
     .bind(worker_id)
+    .bind(event.attempts)
     .fetch_one(&mut *transaction)
     .await
     .map_err(sql_failure("claim_check_failed"))?;
     if !owned {
         let _ = transaction.rollback().await;
-        return Ok(false);
+        return Ok(None);
     }
-    // 即使租约被并发回收，同一 lot 的处理仍按 advisory 锁串行，保证领先周期顺序。
+    // advisory 锁等待可能跨过租约；取得后按领取 attempt、owner 与数据库时钟复核，再应用事实。
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
         .bind(event.lot_id.to_string())
         .execute(&mut *transaction)
         .await
         .map_err(sql_failure("lot_lock_failed"))?;
+    let still_owned: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM public.lot_watch_events
+         WHERE event_id = $1 AND status = 'processing' AND lease_owner = $2
+           AND attempts = $3 AND lease_expires_at > clock_timestamp())",
+    )
+    .bind(event.event_id)
+    .bind(worker_id)
+    .bind(event.attempts)
+    .fetch_one(&mut *transaction)
+    .await
+    .map_err(sql_failure("claim_check_failed"))?;
+    if !still_owned {
+        let _ = transaction.rollback().await;
+        return Ok(None);
+    }
     // 与显式取消/重新标记命令共用 lot 行锁：`set_lot_watch` 先在 `lock_watch_lot` 取同一
     // 行锁，再在 `write_watch` 里写 `lot_watches` 并 `invalidate`。没有这把锁时取消可以先
     // 提交，随后本事务才读到 `watched = true` 并插入新通知，该通知逃过撤销；用户重新标记
@@ -400,14 +420,25 @@ async fn process_claimed(
         _ => return Err("unknown_event_kind"),
     };
 
+    // 在锁定当前 attempt 后取一次墙钟，同时决定租约是否有效和完成时间。
     let updated = sqlx::query(
-        "UPDATE public.lot_watch_events
-         SET status = 'done', completed_at = clock_timestamp(),
+        "WITH owned AS MATERIALIZED (
+             SELECT event_id FROM public.lot_watch_events
+             WHERE event_id = $1 AND status = 'processing' AND lease_owner = $2 AND attempts = $3
+             FOR UPDATE
+         ), completion AS MATERIALIZED (
+             SELECT event_id, clock_timestamp() AS completed_at FROM owned
+         )
+         UPDATE public.lot_watch_events AS event
+         SET status = 'done', completed_at = completion.completed_at,
              lease_owner = NULL, lease_expires_at = NULL, last_error_code = NULL
-         WHERE event_id = $1 AND status = 'processing' AND lease_owner = $2",
+         FROM completion
+         WHERE event.event_id = completion.event_id
+           AND event.lease_expires_at > completion.completed_at",
     )
     .bind(event.event_id)
     .bind(worker_id)
+    .bind(event.attempts)
     .execute(&mut *transaction)
     .await
     .map_err(sql_failure("complete_failed"))?;
@@ -416,7 +447,7 @@ async fn process_claimed(
         return Err("claim_lost");
     }
     transaction.commit().await.map_err(sql_failure("commit_failed"))?;
-    Ok(queued_delivery)
+    Ok(Some(queued_delivery))
 }
 
 async fn load_bid(
@@ -486,18 +517,21 @@ async fn release_claim(
     store: &DatabaseStore,
     event_id: &Uuid,
     worker_id: &str,
+    attempts: i32,
     error_class: &'static str,
 ) {
     if let Err(error) = sqlx::query(
         "UPDATE public.lot_watch_events
          SET status = 'pending', lease_owner = NULL, lease_expires_at = NULL,
-             last_error_code = $3,
+             last_error_code = $4,
              next_attempt_at = clock_timestamp()
                  + make_interval(secs => least(power(2, least(attempts, 6)), 60))
-         WHERE event_id = $1 AND status = 'processing' AND lease_owner = $2",
+         WHERE event_id = $1 AND status = 'processing' AND lease_owner = $2
+           AND attempts = $3",
     )
     .bind(event_id)
     .bind(worker_id)
+    .bind(attempts)
     .bind(error_class)
     .execute(store.pool())
     .await

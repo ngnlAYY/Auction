@@ -5,7 +5,9 @@ use auction_application::admin::{
     AdminCredentialDeleteResult, AdminCredentialDeleteWrite, AdminCredentialError,
     AdminCredentialImportWrite, AdminCredentialMutationWrite, AdminCredentialStatus,
 };
-use auction_application::core::{ApplicationError, RequestHash};
+use auction_application::core::{
+    ApplicationError, RequestHash, TransactionFailure, TransactionPolicy,
+};
 use uuid::Uuid;
 
 use super::errors::admin_error;
@@ -20,9 +22,12 @@ pub(super) async fn import_postgres(
     store: &crate::database::DatabaseStore,
     write: AdminCredentialImportWrite,
 ) -> Result<AdminCredentialCommandResult, ApplicationError> {
-    store
-        .pool()
-        .observe_transaction(auction_observability::DatabaseTransactionOwner::Admin, async {
+    crate::database::retry_conflicts(
+        store.pool(),
+        auction_observability::DatabaseTransactionOwner::Admin,
+        usize::from(TransactionPolicy::serializable().max_attempts),
+        ApplicationError::is_serialization_conflict,
+        || async {
             validate_import_write(&write)?;
             let mut transaction = store
                 .pool()
@@ -106,17 +111,21 @@ pub(super) async fn import_postgres(
                 .await
                 .map_err(|error| storage_error_from(error, "提交凭据导入事务失败"))?;
             Ok(result)
-        })
-        .await
+        },
+    )
+    .await
 }
 
 pub(super) async fn mutate_postgres(
     store: &crate::database::DatabaseStore,
     write: AdminCredentialMutationWrite,
 ) -> Result<AdminCredentialCommandResult, ApplicationError> {
-    store
-        .pool()
-        .observe_transaction(auction_observability::DatabaseTransactionOwner::Admin, async {
+    crate::database::retry_conflicts(
+        store.pool(),
+        auction_observability::DatabaseTransactionOwner::Admin,
+        usize::from(TransactionPolicy::serializable().max_attempts),
+        ApplicationError::is_serialization_conflict,
+        || async {
             validate_mutation_write(&write)?;
             let mut transaction = store
                 .pool()
@@ -205,17 +214,21 @@ pub(super) async fn mutate_postgres(
                 .await
                 .map_err(|error| storage_error_from(error, "提交凭据修改事务失败"))?;
             Ok(result)
-        })
-        .await
+        },
+    )
+    .await
 }
 
 pub(super) async fn delete_postgres(
     store: &crate::database::DatabaseStore,
     write: AdminCredentialDeleteWrite,
 ) -> Result<AdminCredentialCommandResult, ApplicationError> {
-    store
-        .pool()
-        .observe_transaction(auction_observability::DatabaseTransactionOwner::Admin, async {
+    crate::database::retry_conflicts(
+        store.pool(),
+        auction_observability::DatabaseTransactionOwner::Admin,
+        usize::from(TransactionPolicy::serializable().max_attempts),
+        ApplicationError::is_serialization_conflict,
+        || async {
             validate_delete_write(&write)?;
             let mut transaction = store
                 .pool()
@@ -274,19 +287,26 @@ pub(super) async fn delete_postgres(
                 },
             )
             .await?;
-            sqlx::query("DELETE FROM public.credential_keys WHERE id = $1 AND state_version = $2")
-                .bind(write.credential_id)
-                .bind(write.expected_state_version)
-                .execute(&mut *transaction)
-                .await
-                .map_err(map_storage_error)?;
+            let deleted_rows = sqlx::query(
+                "DELETE FROM public.credential_keys WHERE id = $1 AND state_version = $2",
+            )
+            .bind(write.credential_id)
+            .bind(write.expected_state_version)
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_storage_error)?
+            .rows_affected();
+            if deleted_rows != 1 {
+                return Err(admin_error(AdminCredentialError::StoredResultCorrupt));
+            }
             transaction
                 .commit()
                 .await
                 .map_err(|error| storage_error_from(error, "提交凭据删除事务失败"))?;
             Ok(result)
-        })
-        .await
+        },
+    )
+    .await
 }
 
 pub(super) async fn find_command_in_transaction(

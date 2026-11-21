@@ -1804,6 +1804,7 @@ support-deliveries-title = 傳送
 support-notifications-title = 通知
 support-empty = 此分區沒有紀錄。
 support-lot = 拍品
+support-lot-status = 拍品狀態
 support-world = 世界
 support-lot-number = 拍品序號
 support-amount = 金額

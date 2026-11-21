@@ -111,16 +111,9 @@ pub(in crate::database::recovery::commands) async fn confirm_postgres_once(
     // （不变量 2、4、6、8）。
     close_voided_fulfillments(&mut transaction, &recovery, &command, now).await?;
 
-    let relist = relist_recovery(
-        &mut transaction,
-        &recovery,
-        &lot,
-        command.command_id,
-        preview_event_id,
-        command.action,
-        now,
-    )
-    .await?;
+    let relist =
+        relist_recovery(&mut transaction, &recovery, &lot, preview_event_id, command.action, now)
+            .await?;
 
     let next_state_version = recovery
         .state_version

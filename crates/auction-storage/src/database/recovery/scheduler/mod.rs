@@ -11,14 +11,16 @@ use auction_domain::CommandId;
 use auction_time::Timestamp;
 use uuid::Uuid;
 
-use self::actions::{
-    claim_action_postgres, link_action_postgres, manual_action_postgres,
-    mark_action_enqueued_postgres, mark_action_satisfied_postgres, observe_action_postgres,
-    release_action_postgres,
+use self::actions::claim::claim_action_postgres;
+use self::actions::delivery::activation::mark_action_enqueued_postgres;
+use self::actions::delivery::observation::observe_action_postgres;
+use self::actions::delivery::prepare::link_action_postgres;
+use self::actions::resolution::{
+    manual_action_postgres, mark_action_satisfied_postgres, release_action_postgres,
 };
 use self::advance::advance_postgres;
 use self::mapping::valid_failure_code;
-use self::returns::record_return_postgres;
+use self::returns::record::record_return_postgres;
 use crate::database::DatabaseStore;
 mod actions;
 mod advance;

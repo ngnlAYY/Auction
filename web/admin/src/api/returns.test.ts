@@ -4,7 +4,9 @@ import { expect, test } from "bun:test";
 import {
   AdminSettlementReturnCommandResponseSchema,
   AdminSettlementReturnDetailResponseSchema,
+  AdminSettlementReturnHandleRequestSchema,
   AdminSettlementReturnListResponseSchema,
+  AdminSettlementReturnRecheckRequestSchema,
   type AdminSettlementReturnSummaryResponse,
   AdminSettlementReturnSummaryResponseSchema,
 } from "@auction/contracts/dto/admin/returns";
@@ -39,6 +41,43 @@ const DEFAULT_FILTERS = {
   world: "",
 };
 const CLOSED_AT = "2026-11-16T02:00:00Z";
+
+test("handle_and_recheck_requests_have_separate_closed_shapes", () => {
+  const base = { command_id: CASE, expected_version: 2 };
+  expect(
+    decode(AdminSettlementReturnHandleRequestSchema, { ...base, action: "close_inbox" }).ok,
+  ).toBe(true);
+  expect(decode(AdminSettlementReturnHandleRequestSchema, { ...base, action: "recheck" }).ok).toBe(
+    false,
+  );
+  expect(decode(AdminSettlementReturnRecheckRequestSchema, base).ok).toBe(true);
+  expect(decode(AdminSettlementReturnRecheckRequestSchema, { ...base, action: "recheck" }).ok).toBe(
+    false,
+  );
+});
+
+test("return_command_requests_require_uuid_and_positive_safe_version", () => {
+  expect(
+    decode(AdminSettlementReturnHandleRequestSchema, {
+      command_id: "bad",
+      expected_version: 1,
+      action: "acknowledge",
+    }).ok,
+  ).toBe(false);
+  expect(
+    decode(AdminSettlementReturnHandleRequestSchema, {
+      command_id: CASE,
+      expected_version: 0,
+      action: "acknowledge",
+    }).ok,
+  ).toBe(false);
+  expect(
+    decode(AdminSettlementReturnRecheckRequestSchema, {
+      command_id: CASE,
+      expected_version: Number.MAX_SAFE_INTEGER + 1,
+    }).ok,
+  ).toBe(false);
+});
 const LIST_PATH = "/api/v1/admin/settlement-returns";
 
 test("list_url_accepts_only_contract_filters", async () => {
@@ -85,20 +124,42 @@ function summary(value: unknown) {
 }
 
 test("summary_rejects_unknown_names_and_inconsistent_closure", () => {
-  expect(validSummary(summary(returnSummary()))).toBe(true);
+  const valid = returnSummary();
+  expect(validSummary(summary(valid))).toBe(true);
   for (const [key, value] of Object.entries({
     status: "open",
     asset_location: "in_bot",
     reason_code: "other",
-    world_id: "third",
-    credits: -1,
-    closed_at: CLOSED_AT,
   })) {
-    expect(validSummary(summary({ ...returnSummary(), [key]: value })), key).toBe(false);
+    expect(
+      decode(AdminSettlementReturnSummaryResponseSchema, { ...valid, [key]: value }).ok,
+      key,
+    ).toBe(false);
   }
-  const held = { ...returnSummary(), status: "held" };
-  expect(validSummary(summary(held))).toBe(false);
-  expect(validSummary(summary({ ...held, closed_at: CLOSED_AT }))).toBe(true);
+  const unknownWorld = decode(AdminSettlementReturnSummaryResponseSchema, {
+    ...valid,
+    world_id: "third",
+  });
+  expect(unknownWorld.ok).toBe(true);
+  if (unknownWorld.ok) {
+    expect(validSummary(unknownWorld.value)).toBe(false);
+  }
+  const negativeCredits = decode(AdminSettlementReturnSummaryResponseSchema, {
+    ...valid,
+    credits: -1,
+  });
+  expect(negativeCredits.ok).toBe(true);
+  if (negativeCredits.ok) {
+    expect(validSummary(negativeCredits.value)).toBe(false);
+  }
+  const openButClosed = summary({ ...valid, closed_at: CLOSED_AT });
+  expect(validSummary(openButClosed)).toBe(false);
+  expect(decode(AdminSettlementReturnSummaryResponseSchema, { ...valid, extra: true }).ok).toBe(
+    false,
+  );
+  const held = summary({ ...valid, status: "held" });
+  expect(validSummary(held)).toBe(false);
+  expect(validSummary(summary({ ...valid, status: "held", closed_at: CLOSED_AT }))).toBe(true);
 });
 
 test("page_rows_must_match_filters_and_echo", () => {
@@ -131,10 +192,10 @@ test("detail_requires_partition_order_and_dispatch_shape", () => {
     }),
   ).toBe(false);
   expect(
-    valid({
+    decode(AdminSettlementReturnDetailResponseSchema, {
       ...data,
       blockers: [{ ...data.blockers[0], blocker: "busy" }, ...data.blockers.slice(1)],
-    }),
+    }).ok,
   ).toBe(false);
   expect(valid({ ...data, events: [firstEvent, { ...secondEvent, case_version: 1 }] })).toBe(false);
   expect(valid({ ...data, dispatches: [{ ...data.dispatches[0], dispatch_no: 2 }] })).toBe(false);
@@ -166,8 +227,45 @@ test("detail_requires_partition_order_and_dispatch_shape", () => {
   };
   expect(valid({ ...takeUnknown, take_unknown_reason: "assets_claimable" })).toBe(true);
   expect(valid(takeUnknown)).toBe(false);
-  expect(valid({ ...takeUnknown, take_unknown_reason: "operator_declared" })).toBe(false);
+  expect(
+    decode(AdminSettlementReturnDetailResponseSchema, {
+      ...takeUnknown,
+      take_unknown_reason: "operator_declared",
+    }).ok,
+  ).toBe(false);
   expect(valid({ ...data, take_unknown_reason: "mail_missing" })).toBe(false);
+});
+
+test("event_details_reject_unknown_keys_and_keep_legacy_held_empty", () => {
+  const { data, firstEvent, secondEvent } = returnDetail();
+  expect(decode(AdminSettlementReturnDetailResponseSchema, data).ok).toBe(true);
+  expect(
+    decode(AdminSettlementReturnDetailResponseSchema, {
+      ...data,
+      events: [{ ...firstEvent, details: { ...firstEvent.details, body: "leak" } }, secondEvent],
+    }).ok,
+  ).toBe(false);
+  expect(
+    decode(AdminSettlementReturnDetailResponseSchema, {
+      ...data,
+      events: [firstEvent, { ...secondEvent, event_kind: "held", details: {} }],
+    }).ok,
+  ).toBe(true);
+  expect(
+    decode(AdminSettlementReturnDetailResponseSchema, {
+      ...data,
+      events: [firstEvent, { ...secondEvent, event_kind: "held", details: { reason: "x" } }],
+    }).ok,
+  ).toBe(false);
+  expect(
+    decode(AdminSettlementReturnDetailResponseSchema, {
+      ...data,
+      events: [
+        { ...firstEvent, details: { ...firstEvent.details, match_state: "future_state" } },
+        secondEvent,
+      ],
+    }).ok,
+  ).toBe(false);
 });
 
 test("command_result_must_echo_the_request", () => {

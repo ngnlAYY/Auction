@@ -52,7 +52,13 @@ function lotsResponse({
     {
       ...envelope,
       data: {
-        auction: { ...auction, id, world_id: world, status },
+        auction: {
+          ...auction,
+          id,
+          world_id: world,
+          status,
+          preview_opened_at: status === "preview" ? auction.preview_scheduled_at : null,
+        },
         lots: empty ? [] : [{ ...lot, auction_id: id, equipment_name: name, status: lotStatus }],
         pagination: { page, page_size: 50, total },
       },

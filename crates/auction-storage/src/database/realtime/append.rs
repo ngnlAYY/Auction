@@ -25,7 +25,8 @@ pub(crate) struct SequencedEvent<'a> {
     pub(crate) schema_version: i32,
     pub(crate) payload: Value,
     pub(crate) state_version: i64,
-    pub(crate) origin_command_id: Uuid,
+    /// 只关联 `auction_commands` 中的命令；专用命令账本的来源事件留空。
+    pub(crate) origin_command_id: Option<Uuid>,
     /// 同时作为流计数行的 `updated_at` 与事件的 `created_at`；`None` 取事务时间，结算路径
     /// 传入业务发生时间。
     pub(crate) created_at: Option<Timestamp>,

@@ -314,6 +314,17 @@ is_deeply($templates->{calls}[0]{arguments}[1][3],
     { type => 'template', value => '深尾', interpolated => 1, start => 19, end => 54 }, '插值模板 token');
 is_deeply(literals($templates), [['/* not a comment */ //', 2], ['plain${still}', 3]], '字面量中的注释符和转义插值');
 
+my $template_line_comment = parse_typescript(<<'TS');
+const label = `${"value" // t("ghost")
+  + t("inside")}`;
+t("after");
+TS
+is_deeply(
+    [map { $_->{key} } @{ $template_line_comment->{calls} }],
+    ['inside', 'after'],
+    '模板插值里的行注释不会遮蔽后续调用',
+);
+
 my $crossed = parse_typescript(<<'TS');
 `${ "一
 `" } ${ "二

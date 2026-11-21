@@ -2,9 +2,19 @@
 
 use auction_contracts::SetupDatabaseRequest;
 
-/// 字段顺序同时决定渲染、错误摘要和首个错误焦点的顺序。
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum SetupField {
+macro_rules! setup_fields {
+    ($($field:ident),+ $(,)?) => {
+        #[repr(usize)]
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+        pub(super) enum SetupField {
+            $($field),+
+        }
+
+        const SETUP_FIELD_INDEXED: &[SetupField] = &[$(SetupField::$field),+];
+    };
+}
+
+setup_fields! {
     DatabaseHost,
     DatabasePort,
     DatabaseUsername,
@@ -30,6 +40,15 @@ pub(super) enum SetupField {
     WorkerPoll,
     RealtimePoll,
 }
+
+const SETUP_FIELD_COUNT: usize = SETUP_FIELD_INDEXED.len();
+const _: () = {
+    let mut index = 0;
+    while index < SETUP_FIELD_INDEXED.len() {
+        assert!(SETUP_FIELD_INDEXED[index] as usize == index);
+        index += 1;
+    }
+};
 
 impl SetupField {
     pub(super) const DATABASE_TARGET: [Self; 3] =
@@ -189,7 +208,7 @@ impl DatabaseTarget {
 /// 固定字段集的短生命周期草稿；不实现 Debug，避免敏感输入被意外记录。
 #[derive(Clone, PartialEq)]
 pub(super) struct SetupDraft {
-    values: [String; 24],
+    values: [String; SETUP_FIELD_COUNT],
     pub(super) metrics_enabled: bool,
     pub(super) schedule_enabled: bool,
     pub(super) confirmed_database_target: Option<DatabaseTarget>,
@@ -249,11 +268,13 @@ impl SetupDraft {
         *previous = value;
     }
 
-    /// 两个独立 v4 UUID 共含 244 位随机熵；使用既有系统/浏览器安全随机源，不降级。
-    pub(super) fn generate_admin_secret(&mut self) {
-        let secret = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+    pub(super) fn generate_admin_secret(&mut self) -> bool {
+        let first = uuid::Uuid::new_v4();
+        let second = uuid::Uuid::new_v4();
+        let secret = format!("{}{}", first.simple(), second.simple());
         self.set(SetupField::AdminSecret, secret.clone());
         self.set(SetupField::AdminConfirmation, secret);
+        true
     }
 
     /// 只恢复性能与日志草稿；凭据、站点、监听端口和业务开关不受影响。

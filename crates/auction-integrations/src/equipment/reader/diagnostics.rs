@@ -11,8 +11,8 @@ use auction_application::mail::{
     MailEquipmentObservation, PreparedMailEvidence,
 };
 
-use super::super::parser::EquipmentParseError;
 use super::{DiagnosticReporter, EquipmentSourceAdapter};
+use crate::equipment::parser::EquipmentParseError;
 use crate::safe_diagnostics;
 
 pub(super) fn prepare_observation(

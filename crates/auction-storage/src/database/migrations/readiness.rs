@@ -8,11 +8,11 @@ use auction_observability::MigrationReadinessBranch;
 use sqlx::{Postgres, Row, postgres::PgRow};
 
 use super::compatibility::{check_compatible_suffix, read_compatibility_suffix};
+use super::history::postgres_history_matches;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::{
     DatabaseStore, postgres_expected_migration_version, set_read_only_limits, storage_error,
 };
-
 // 与 HTTP 底层检查采用同一上限；heartbeat 和 supervisor 的独立调用也不能无限等待。
 const CHECK_TIMEOUT: Duration = Duration::from_millis(750);
 
@@ -135,7 +135,7 @@ async fn assess_history(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| readiness_error(error, "解码 readiness 迁移版本失败"))?;
     let database_version = versions.last().copied().unwrap_or(0);
-    if super::postgres_history_matches(rows, expected_version) {
+    if postgres_history_matches(rows, expected_version) {
         return Ok(Assessment {
             strict: true,
             compatible: true,
@@ -147,7 +147,7 @@ async fn assess_history(
         return Ok(Assessment::rejected(MigrationReadinessBranch::Behind, database_version));
     }
     let prefix_len = versions.partition_point(|version| *version <= expected_version);
-    if !super::postgres_history_matches(&rows[..prefix_len], expected_version)
+    if !postgres_history_matches(&rows[..prefix_len], expected_version)
         || database_version == expected_version
     {
         return Ok(Assessment::rejected(

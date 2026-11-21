@@ -123,7 +123,7 @@ pub(super) async fn advance_postgres(
                 auction_domain::RecoveryAdvance::DeferPaymentReminder => {
                     // 付款邮件（含 COD/载体）尚无发送证明时不提前提醒，
                     // 只延后本轮并记录可观测审计；不修改冻结的 payment_deadline_at。
-                    sqlx::query(
+                    let updated = sqlx::query(
                         r#"UPDATE public.settlement_recoveries
                            SET next_attempt_at = $2, updated_at = $3
                            WHERE id = $1 AND stage = $4 AND state_version = $5"#,
@@ -138,6 +138,9 @@ pub(super) async fn advance_postgres(
                     .execute(&mut *transaction)
                     .await
                     .map_err(map_storage_error)?;
+                    if updated.rows_affected() != 1 {
+                        return Err(repository_error("recovery case 状态 fence 已失效"));
+                    }
                     sqlx::query(
                         r#"INSERT INTO public.audit_records
                                (id, occurred_at, actor_type, actor_id, action, entity_type,

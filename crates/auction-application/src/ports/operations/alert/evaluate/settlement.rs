@@ -8,9 +8,10 @@ use super::super::model::{
     OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot, OperationsAlertPolicy,
     OperationsAlertRecoverySnapshot, OperationsAlertSourceObservation,
 };
+use super::super::signals::thresholds::reached;
 use super::super::signals::{
     OPERATIONS_ALERT_ACCOUNT_BUSY_AGE, OperationsAlertKind, OperationsAlertSignal,
-    OperationsAlertSource, reached,
+    OperationsAlertSource,
 };
 
 pub(super) fn evaluate_delivery(

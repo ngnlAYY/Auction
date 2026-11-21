@@ -6,8 +6,8 @@
 //! 记录中的保留程序只经记录目录的固定描述符读取（[`RecordDirectory`]）。
 
 use std::{
-    fs::{File, OpenOptions},
-    os::unix::fs::OpenOptionsExt,
+    fs::File,
+    io::{Seek, SeekFrom},
     path::Path,
 };
 
@@ -15,7 +15,6 @@ use anyhow::Context;
 
 use super::artifact::Artifact;
 use crate::app::progress;
-use crate::support::digest::sha256_path;
 
 mod record;
 mod restore;
@@ -32,12 +31,19 @@ pub(crate) use trust::{RunAccount, require_install_dir};
 use self::record::copy_contents;
 use self::trust::PinnedInstallDir;
 
-/// 制品或旧程序安装失败；`restored` 为真表示本次替换范围内的程序已复核为换回所用回滚记录中的
-/// 程序（deploy 是部署前的四个程序，rollback 是回退前的三个角色）。
+/// 安装失败后的安装目录状态；只有内容和信任属性均已复核的状态才能给出启动指引。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InstallRecoveryOutcome {
+    UntouchedUnverified,
+    UntouchedVerified,
+    Restored,
+    Mixed,
+}
+
 #[derive(Debug)]
 pub(crate) struct InstallArtifactFailure {
     pub(crate) error: anyhow::Error,
-    pub(crate) restored: bool,
+    pub(crate) outcome: InstallRecoveryOutcome,
 }
 
 /// 安装制品中的四个程序；临时文件与目标同目录，摘要、属主与权限复核后才 rename 覆盖。
@@ -53,7 +59,7 @@ pub(crate) fn install_artifact(
 ) -> Result<(), InstallArtifactFailure> {
     let programs = artifact.binaries.iter().map(|binary| Program {
         name: binary.name,
-        source: Source::Artifact(&binary.path),
+        source: Source::Artifact(&binary.file),
         sha256: &binary.sha256,
         bytes: binary.bytes,
     });
@@ -77,7 +83,7 @@ pub(crate) fn install_retained(
             // 记录已在读取时校验过三个角色；缺项说明记录在内存中被改动，什么都还没有替换。
             return Err(InstallArtifactFailure {
                 error: anyhow::anyhow!("回滚记录缺少 {name}"),
-                restored: true,
+                outcome: InstallRecoveryOutcome::UntouchedUnverified,
             });
         };
         programs.push(Program {
@@ -90,21 +96,16 @@ pub(crate) fn install_retained(
     install_programs(programs.into_iter(), install_dir, reverse, reverse_directory)
 }
 
-/// 待安装程序的来源：制品中的文件按路径以 O_NOFOLLOW 打开（内容由制品摘要证明）；回滚记录中的
-/// 保留程序只经记录目录的固定描述符打开。
+/// 待安装程序的来源：制品程序使用已校验且固定的文件描述符；回滚记录中的保留程序只经记录目录的固定描述符打开。
 enum Source<'a> {
-    Artifact(&'a Path),
+    Artifact(&'a File),
     Retained(&'a RecordDirectory),
 }
 
 impl Source<'_> {
     fn open(&self, name: &str) -> anyhow::Result<File> {
         match self {
-            Self::Artifact(path) => OpenOptions::new()
-                .read(true)
-                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
-                .open(path)
-                .with_context(|| format!("读取待安装程序失败：{}", path.display())),
+            Self::Artifact(file) => file.try_clone().context("复制已校验制品程序句柄失败"),
             Self::Retained(directory) => directory.open_program(name).with_context(|| {
                 format!("读取待安装程序失败：{}", directory.path().join("bin").join(name).display())
             }),
@@ -130,15 +131,11 @@ fn install_programs<'a>(
 ) -> Result<(), InstallArtifactFailure> {
     let directory = match PinnedInstallDir::open(install_dir) {
         Ok(directory) => directory,
-        // 还没有替换任何程序，无需换回；只有记录覆盖的程序摘要仍与记录一致时才声称原状。
+        // The directory was never pinned, so restoration cannot be asserted from path-based hashes.
         Err(error) => {
-            let restored = retained.binaries.iter().all(|binary| {
-                sha256_path(&install_dir.join(&binary.name))
-                    .is_ok_and(|(sha256, bytes)| sha256 == binary.sha256 && bytes == binary.bytes)
-            });
             return Err(InstallArtifactFailure {
                 error: error.context("安装前复核安装目录失败，没有替换任何程序"),
-                restored,
+                outcome: InstallRecoveryOutcome::UntouchedUnverified,
             });
         }
     };
@@ -181,6 +178,8 @@ fn install_one(
     let mut replaced = false;
     let result = (|| -> anyhow::Result<()> {
         let mut input = source.open(name)?;
+        // 制品句柄已固定，但 try_clone 共享文件偏移；每次安装前重置，支持复用已校验制品。
+        input.seek(SeekFrom::Start(0)).context("定位待安装程序开头失败")?;
         let metadata = input.metadata().context("读取待安装程序元数据失败")?;
         if !metadata.is_file() || metadata.len() != expected_bytes {
             anyhow::bail!("待安装程序不是符合记录大小的普通文件：{name}");

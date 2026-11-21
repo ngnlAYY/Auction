@@ -380,3 +380,58 @@ test("late_304_cannot_mark_a_pre_command_snapshot_fresh：迟到的 304 不能�
   );
   expect(calls.value).toBe(3);
 });
+
+test("late_missing_response_cannot_evict_a_newer_request_or_snapshot：旧 404 不得撤销命令后重读", async () => {
+  resetStoreForTest();
+  const url = "/api/v1/auctions/current?world=main";
+  const ttlMillis = 1;
+  const now = { value: 1_000 };
+  const calls = { value: 0 };
+  expect(await call(url, now, ttlMillis, calls, () => changed("old", "etag-old"))).toEqual(
+    ok("old"),
+  );
+  now.value += ttlMillis;
+
+  const oldOutcome = Promise.withResolvers<Outcome>();
+  let evictOldSnapshot = () => {};
+  const oldRead = readOrFetch(
+    url,
+    ttlMillis,
+    TYPE_ID,
+    async (etag, evictMissingSnapshot) => {
+      expect(etag).toBe("etag-old");
+      calls.value += 1;
+      evictOldSnapshot = evictMissingSnapshot;
+      return oldOutcome.promise;
+    },
+    ABORT_ERROR,
+    passiveSignal(),
+    () => now.value,
+  );
+  invalidateAfterCommand();
+
+  const newOutcome = Promise.withResolvers<Outcome>();
+  const newRead = getOrFetch(
+    url,
+    ttlMillis,
+    TYPE_ID,
+    async (etag) => {
+      expect(etag).toBe("etag-old");
+      calls.value += 1;
+      return newOutcome.promise;
+    },
+    ABORT_ERROR,
+    passiveSignal(),
+    () => now.value,
+  );
+  expect(calls.value).toBe(3);
+
+  // 命令后请求已接管在途登记；旧的 404 头只能驱逐它原本持有的快照与登记。
+  evictOldSnapshot();
+  newOutcome.resolve(changed("fresh", "etag-new"));
+  expect(await newRead).toEqual(ok("fresh"));
+  oldOutcome.resolve({ kind: "missing", error: "not_found" });
+  expect(await oldRead).toEqual(err("not_found"));
+  expect(await call(url, now, ttlMillis, calls, () => changed("unexpected"))).toEqual(ok("fresh"));
+  expect(calls.value).toBe(3);
+});

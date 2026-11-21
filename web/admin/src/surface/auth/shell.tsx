@@ -153,10 +153,13 @@ export function AdminAuthenticatedShell(props: {
   // 路由是响应式的；外壳初始化只需要首次挂载的快照，后续变化由下面的 effect 处理。
   const refreshRoute = createCell(untrack(currentRoute));
   // 浏览器前进/后退和页面内跳转也收起手机导航；页面焦点仍由路由 hook 接管。
-  createEffect(currentRoute, (route) => {
-    navigationOpen.set(false);
-    refreshAfterNavigation(route, refreshRoute, pendingRefresh, props.readinessRefresh);
-  });
+  createEffect(
+    () => currentRoute(),
+    (route) => {
+      navigationOpen.set(false);
+      refreshAfterNavigation(route, refreshRoute, pendingRefresh, props.readinessRefresh);
+    },
+  );
   useRouteFocus(() => routeFocusToken(currentRoute()), "admin-content");
 
   return (

@@ -88,7 +88,7 @@ export function preparationFailure(failureCode: string): JsonRecord {
   return failed;
 }
 
-/** Rust `delivery()` 的规范成功投影。 */
+/** Rust `delivery()` 的解码投影，显式补齐默认布尔值与可空 MID。 */
 export function delivery(): JsonRecord {
   return {
     id: DELIVERY_ID,
@@ -108,6 +108,8 @@ export function delivery(): JsonRecord {
     completed_at: time(1),
     external_reference: null,
     failure_code: "write_unknown",
+    take_required: false,
+    returned_mail_id: null,
     created_at: time(0),
     updated_at: time(1),
   };

@@ -381,6 +381,19 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         world_id: &'a str,
         delivery_id: Uuid,
     ) -> ApplicationFuture<'a, bool>;
+    /// 按本轮持久游标快照提交一次候选；同一 sweep id 的串行推进可回绕，旧快照不能覆盖新轮。
+    fn record_sweep_attempt_from<'a>(
+        &'a self,
+        world_id: &'a str,
+        delivery_id: Uuid,
+        start: Option<MoogleMailboxSweepPosition>,
+        sweep_id: Uuid,
+        failed_fence: Option<i64>,
+        oldest_visible: Option<Timestamp>,
+    ) -> ApplicationFuture<'a, bool> {
+        let _ = (start, sweep_id, failed_fence, oldest_visible);
+        self.record_sweep_attempt(world_id, delivery_id)
+    }
 
     /// 主世界中可能命中本轮可见 Sent 的失败投递，使用同一个持久游标。
     fn failed_sent_slots(
@@ -400,6 +413,19 @@ pub trait MoogleMailboxEvidenceStore: Send + Sync {
         _entry: Option<&'a MoogleMailboxSentEntry>,
     ) -> ApplicationFuture<'a, bool> {
         Box::pin(async { Ok(false) })
+    }
+    /// 在同一轮游标快照下登记失败投递的详情读取机会；兼容旧实现保留原端口回退。
+    fn begin_failed_sent_detail_from<'a>(
+        &'a self,
+        delivery_id: Uuid,
+        fencing_version: i64,
+        entry: Option<&'a MoogleMailboxSentEntry>,
+        start: Option<MoogleMailboxSweepPosition>,
+        sweep_id: Uuid,
+        oldest_visible: Timestamp,
+    ) -> ApplicationFuture<'a, bool> {
+        let _ = (start, sweep_id, oldest_visible);
+        self.begin_failed_sent_detail(delivery_id, fencing_version, entry)
     }
 
     /// 记录最近一次完整 Sent 枚举的页数观察；失败只影响告警观察，不阻断恢复。

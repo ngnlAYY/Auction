@@ -33,8 +33,7 @@ impl MoogleMailGateway {
             .checked_add(self.config.fetch_budget)
             .ok_or_else(|| configuration(world))?;
         let result = tokio::time::timeout_at(deadline, async {
-            let mut session =
-                self.credentials.begin_read(world, MoogleMailOperation::Balance).await?;
+            let session = self.credentials.begin_read(world, MoogleMailOperation::Balance).await?;
             let result = async {
                 let target = self.client.balance(world)?;
                 let document = self.client.get(&target, session.cookie()).await?;
@@ -93,7 +92,7 @@ impl MoogleMailGateway {
             .checked_add(self.config.fetch_budget)
             .ok_or_else(|| configuration(world))?;
         let result = tokio::time::timeout_at(deadline, async {
-            let mut session =
+            let session =
                 self.credentials.begin_read(world, MoogleMailOperation::Inventory).await?;
             let result = async {
                 let target = self.client.inventory(world, category);

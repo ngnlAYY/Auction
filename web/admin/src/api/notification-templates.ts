@@ -83,6 +83,7 @@ function validTemplateEntry(template: AdminMailTemplateDto): boolean {
     template.body !== "" &&
     template.default_body !== "" &&
     (template.revision > 0 || !template.customized) &&
+    template.usable === (mailTemplateBodyProblem(template, template.body) === null) &&
     (template.customized || (template.usable && template.body === template.default_body)) &&
     template.revision > 0 === (template.updated_by !== null) &&
     template.revision > 0 === (template.updated_at !== null) &&
@@ -217,7 +218,8 @@ export async function submitMailTemplate(
     accepted.key !== attempt.key ||
     accepted.revision !== nextRevision ||
     accepted.customized !== (attempt.body !== null) ||
-    (attempt.body !== null && accepted.body !== attempt.body)
+    (attempt.body !== null && accepted.body !== attempt.body) ||
+    (attempt.body === null && accepted.body !== accepted.default_body)
   ) {
     return err(writeOutcomeUnknown(invalidResponseError("mail template update")));
   }

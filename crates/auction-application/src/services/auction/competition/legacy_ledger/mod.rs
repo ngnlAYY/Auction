@@ -9,7 +9,7 @@
 mod bid;
 mod decode;
 mod encode;
-mod ids;
+pub(super) mod ids;
 mod proxy;
 mod proxy_result;
 mod replay;

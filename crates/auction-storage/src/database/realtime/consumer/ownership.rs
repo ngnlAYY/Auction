@@ -39,7 +39,14 @@ impl DatabaseStore {
             .pool()
             .acquire_reserved(auction_observability::DatabaseReservedPurpose::RealtimeOwnership)
             .await
-            .map_err(|_| RealtimeConsumerOwnershipError::Unavailable)?;
+            .map_err(|error| {
+                crate::database::log_discarded_sql_error(
+                    &error,
+                    "realtime_consumer_ownership_failed",
+                    "获取 realtime consumer 所有权连接失败",
+                );
+                RealtimeConsumerOwnershipError::Unavailable
+            })?;
         // 在锁查询前设置：响应到达前取消也必须关闭 session，不能把已持锁连接归池。
         connection.close_on_drop();
         let lock_name = format!("auction/public-realtime/v1/{consumer_key}");
@@ -48,7 +55,14 @@ impl DatabaseStore {
                 .bind(lock_name)
                 .fetch_one(&mut *connection)
                 .await
-                .map_err(|_| RealtimeConsumerOwnershipError::Unavailable)?;
+                .map_err(|error| {
+                    crate::database::log_discarded_sql_error(
+                        &error,
+                        "realtime_consumer_ownership_failed",
+                        "查询 realtime consumer 所有权失败",
+                    );
+                    RealtimeConsumerOwnershipError::Unavailable
+                })?;
         if !acquired {
             return Err(RealtimeConsumerOwnershipError::AlreadyOwned);
         }

@@ -13,6 +13,7 @@ use crate::surface::validation::focus_field;
 pub(in crate::surface) struct FieldAnnouncer {
     message: Signal<String>,
     field: Signal<Option<String>>,
+    generation: Signal<u64>,
     #[cfg(any(target_arch = "wasm32", test))]
     task: Signal<Option<Task>>,
 }
@@ -22,6 +23,7 @@ pub(in crate::surface) fn use_field_announcer() -> FieldAnnouncer {
     FieldAnnouncer {
         message: use_signal(String::new),
         field: use_signal(|| None),
+        generation: use_signal(|| 0_u64),
         #[cfg(any(target_arch = "wasm32", test))]
         task: use_signal(|| None),
     }
@@ -30,6 +32,8 @@ pub(in crate::surface) fn use_field_announcer() -> FieldAnnouncer {
 impl FieldAnnouncer {
     /// 表单提交或替换消息时撤销先前的播报。
     pub(in crate::surface) fn clear(mut self) {
+        let next_generation = self.generation.peek().wrapping_add(1);
+        self.generation.set(next_generation);
         #[cfg(any(target_arch = "wasm32", test))]
         {
             let task = self.task.write().take();
@@ -96,9 +100,14 @@ impl FieldAnnouncer {
         self.field.set(field_id.map(str::to_owned));
         cfg_select! {
             any(target_arch = "wasm32", test) => {
+                let mut message_signal = self.message;
+                let generation_signal = self.generation;
+                let expected_generation = *generation_signal.peek();
                 self.task.set(Some(spawn(async move {
                     wait_for_announcement(_delay_millis).await;
-                    self.message.set(message());
+                    if *generation_signal.peek() == expected_generation {
+                        message_signal.set(message());
+                    }
                 })));
             }
             _ => { self.message.set(message()); }

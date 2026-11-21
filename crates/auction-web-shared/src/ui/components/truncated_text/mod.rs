@@ -2,7 +2,7 @@
 
 mod document;
 #[cfg(not(target_arch = "wasm32"))]
-mod host_document;
+pub(super) mod host_document;
 mod interaction;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;

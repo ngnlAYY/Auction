@@ -45,7 +45,7 @@ impl MoogleMailGateway {
             .checked_add(self.config.fetch_budget)
             .ok_or_else(|| configuration(world))?;
         let result = tokio::time::timeout_at(deadline, async {
-            let mut session = self.credentials.begin_read(world, MoogleMailOperation::Sent).await?;
+            let session = self.credentials.begin_read(world, MoogleMailOperation::Sent).await?;
             match self
                 .read_sent_with_cookie(
                     world,
@@ -100,7 +100,7 @@ impl MoogleMailGateway {
             .checked_add(self.config.fetch_budget)
             .ok_or_else(|| configuration(request.world))?;
         let deadline = tokio::time::Instant::from_std(request.deadline.min(configured_deadline));
-        let mut session = tokio::time::timeout_at(
+        let session = tokio::time::timeout_at(
             deadline,
             self.credentials.begin_read(request.world, MoogleMailOperation::Sent),
         )

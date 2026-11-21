@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use super::accessors::{DEFAULT_WORKER_CONCURRENCY, DEFAULT_WORKER_POLL_INTERVAL_SECONDS};
 use super::model::AppConfig;
-use crate::settings::worker_validation::parse_public_base_url;
+use crate::settings::worker_validation::forum::parse_public_base_url;
 use crate::settings::{
     AuctionConfig, ConfigError, ForumSyncWorkerConfig, FulfillmentWorkerConfig,
     MoogleMailEquipmentFilterConfig, MoogleMailWorkerConfig, OperationsAlertWorkerConfig,
@@ -441,6 +441,16 @@ mod tests {
             !edited.mooglemail.send_classes.account_reply;
         edited.mooglemail.batch_size += 1;
         edited.mooglemail.fetch_timeout_seconds += 1;
+        edited.mooglemail.jitter_seconds += 1;
+        edited.mooglemail.fetch_attempts += 1;
+        edited.mooglemail.process_attempts += 1;
+        edited.mooglemail.item_timeout_seconds += 1;
+        edited.mooglemail.batch_timeout_seconds += 1;
+        edited.mooglemail.retry_base_seconds += 1;
+        edited.mooglemail.retry_maximum_seconds += 1;
+        edited.mooglemail.account_reply_window_seconds += 1;
+        edited.mooglemail.explanation_mail_window_seconds += 1;
+        edited.mooglemail.explanation_mail_limit += 1;
         edited.forum.poll_interval_seconds += 1;
         edited.forum.item_timeout_seconds += 1;
         edited.delivery.batch_limit += 1;

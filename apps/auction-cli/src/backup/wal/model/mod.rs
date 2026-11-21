@@ -5,8 +5,9 @@
 //! `PrivateDirectory`（它要求执行账号独占 0700）；这里只要求目录非符号链接且
 //! 禁止 other 写入，具体 owner/group 由部署方按 RECOVERY.md 设置。
 
-/// 归档 manifest 的格式名；字段只追加，旧文件继续可读。
-pub(super) const MANIFEST_FORMAT: &str = "auction-wal-archive.v1";
+/// 归档 manifest 现格式绑定 WAL 源内容摘要；旧格式仍可解析，但不能作为重复归档证明。
+pub(super) const MANIFEST_FORMAT: &str = "auction-wal-archive.v2";
+pub(super) const LEGACY_MANIFEST_FORMAT: &str = "auction-wal-archive.v1";
 /// 密文文件名固定为 `<段名>.zst.age`。
 pub(super) const CIPHER_SUFFIX: &str = ".zst.age";
 /// manifest 文件名固定为 `<段名>.zst.age.manifest.json`。
@@ -15,8 +16,9 @@ pub(super) const MANIFEST_SUFFIX: &str = ".zst.age.manifest.json";
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
 /// 上传完成后保留的持久证据；密文与 manifest 删除后仍能让 PostgreSQL 重试识别已归档。
 pub(super) const WAL_UPLOAD_SUFFIX: &str = ".wal-upload.json";
-/// WAL 上传证据格式名。
-pub(super) const WAL_UPLOAD_FORMAT: &str = "auction-wal-upload.v1";
+/// 新上传证据绑定 WAL 源内容摘要；旧格式仅为兼容读取，不能作为重试成功证明。
+pub(super) const WAL_UPLOAD_FORMAT: &str = "auction-wal-upload.v2";
+pub(super) const LEGACY_WAL_UPLOAD_FORMAT: &str = "auction-wal-upload.v1";
 /// age X25519 收件人公钥的 bech32 数据字符集。
 const BECH32: &[u8] = b"qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 
@@ -35,19 +37,15 @@ pub(super) const BASE_RECEIPT_FORMAT: &str = "auction-base-receipt.v1";
 /// 本地保留的基础备份份数：与 21 天生命周期规则对齐。
 pub(super) const BASE_RETENTION_KEEP: usize = 3;
 
-mod manifest;
-mod paths;
-mod scan;
-pub(super) use manifest::{
-    ArchiveManifest, BaseManifest, BaseReceipt, BaseStaged, Duplicate, Retention, SourceIdentity,
-    Staged, WalUploadReceipt,
-};
+pub(super) mod manifest;
+pub(super) mod paths;
+pub(super) mod scan;
+pub(super) use manifest::{SourceIdentity, WalUploadReceipt};
 pub(super) use paths::{
-    base_cipher_path, base_id, base_manifest_path, base_receipt_path, cipher_path, manifest_path,
-    require_staging_dir, retention_plan, source_identity, valid_recipient, valid_segment_name,
-    wal_upload_path,
+    base_receipt_path, cipher_path, manifest_path, require_staging_dir, retention_plan,
+    source_identity, valid_recipient, valid_segment_name, wal_upload_path,
 };
-pub(super) use scan::{classify, read_base_manifest, regular_or_none, staged};
+pub(super) use scan::{classify, staged};
 
 #[cfg(test)]
 mod tests;

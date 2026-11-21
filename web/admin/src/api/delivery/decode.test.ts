@@ -45,8 +45,11 @@ function projectedDelivery(fixture: unknown) {
 }
 
 function deliveryProjectionDecodes(value: unknown): boolean {
-  const parsed = requireDecoded(decode(AdminDeliveryResponseSchema, value), "投递投影 DTO");
-  return decodeDelivery(parsed).ok;
+  const parsed = decode(AdminDeliveryResponseSchema, value);
+  if (!parsed.ok) {
+    return false;
+  }
+  return decodeDelivery(parsed.value).ok;
 }
 
 test("delivery_origin_closed_set_covers_player_notifications", () => {

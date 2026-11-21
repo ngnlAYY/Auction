@@ -292,7 +292,7 @@ mod tests {
 
     use super::AdminBusinessWorlds;
     use crate::api::{AdminApiFailure, AdminBusinessWorld, AdminWriteEndpoint, AdminWriteFailure};
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         RecordRead, button, click_button, has_live_text, mount_writer, settle_writer,
     };
     use crate::surface::pending::{

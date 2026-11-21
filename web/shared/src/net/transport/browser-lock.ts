@@ -1,24 +1,11 @@
 // 原生 Web Locks 的有界、可取消独占作用域；不以标签页内互斥或浏览器存储伪造跨页锁。
 
+import { createPromiseResolvers } from "../../platform/promise";
 import { createTimeoutFuture } from "../../platform/timer";
 import { err, ok, type Result } from "../../result";
 
 /** 原生锁尚未获取，请求尚未发送；不能把这类前置失败当作未知外写。 */
 export type BrowserLockError = "unavailable" | "timeout";
-
-/** 一个可由两个协作者分别等待与完成的 Promise。 */
-function deferredPromise(): { readonly promise: Promise<void>; resolve(): void } {
-  let resolvePromise: (() => void) | null = null;
-  const promise = new Promise<void>((resolve) => {
-    resolvePromise = resolve;
-  });
-  return {
-    promise,
-    resolve() {
-      resolvePromise?.();
-    },
-  };
-}
 
 /**
  * 在原生独占锁内执行 `body`；只在安全上下文且浏览器提供 `navigator.locks` 时工作。
@@ -69,12 +56,9 @@ export async function withBrowserLock<T>(
   } catch {
     return err("unavailable");
   }
-  const grant = deferredPromise();
-  const held = deferredPromise();
-  let signalCancelled: (() => void) | null = null;
-  const cancelled = new Promise<"cancelled">((resolve) => {
-    signalCancelled = () => resolve("cancelled");
-  });
+  const grant = createPromiseResolvers<void>();
+  const held = createPromiseResolvers<void>();
+  const cancelled = createPromiseResolvers<"cancelled">();
   let abandoned = false;
   let released = false;
   const release = () => {
@@ -87,7 +71,7 @@ export async function withBrowserLock<T>(
     held.resolve();
   };
   const abortQueued = () => {
-    signalCancelled?.();
+    cancelled.resolve("cancelled");
     controller.abort();
   };
   signal?.addEventListener("abort", abortQueued, { once: true });
@@ -125,7 +109,7 @@ export async function withBrowserLock<T>(
     grant.promise.then(() => "granted" as const),
     settled,
     timeout.promise.then(() => "timeout" as const),
-    cancelled,
+    cancelled.promise,
   ]);
   timeout.cancel();
 

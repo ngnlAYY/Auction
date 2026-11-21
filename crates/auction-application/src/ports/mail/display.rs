@@ -144,7 +144,11 @@ impl MailDisplaySnapshot {
 
 fn authentication_subject(subject: &str) -> bool {
     let subject = subject.to_ascii_lowercase();
-    ["register", "rebind", "login", "auth", "key"].iter().any(|marker| subject.contains(marker))
+    let markers =
+        ["register", "registration", "rebind", "login", "auth", "authentication", "key", "rekey"];
+    subject
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .any(|token| markers.contains(&token))
 }
 
 fn key_fingerprint(key: &[u8], state: &RandomState) -> u64 {
@@ -224,7 +228,12 @@ fn credential_token_ranges(
         .filter_map(move |token| {
             let end = start + token.len();
             let range = (start, end);
-            start = end + 1;
+            start = text[end..]
+                .char_indices()
+                .find(|(_, character)| {
+                    character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
+                })
+                .map_or(text.len(), |(offset, _)| end + offset);
             // 历史投影没有附件明文，保守遮蔽所有独立的十位十六进制值。
             (token.len() == LOGIN_KEY_TEXT_LENGTH
                 || redact_bare_equipment

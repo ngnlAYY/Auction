@@ -18,7 +18,7 @@ struct LoadedSnapshot {
     started: Instant,
 }
 
-type Snapshot = Mutex<Option<LoadedSnapshot>>;
+type Snapshot = Mutex<Option<Arc<LoadedSnapshot>>>;
 
 struct Metrics {
     snapshot: Arc<Snapshot>,
@@ -64,7 +64,7 @@ impl SliMetrics {
     /// 只有完整成功轮次替换快照，不把截断或失败样本发布为零。
     pub fn publish(&self, snapshot: SliSnapshot, started: Instant) {
         if let Some(metrics) = &self.0 {
-            *lock(&metrics.snapshot) = Some(LoadedSnapshot { value: snapshot, started });
+            *lock(&metrics.snapshot) = Some(Arc::new(LoadedSnapshot { value: snapshot, started }));
             metrics.refreshes.with_label_values(&["success"]).inc();
             metrics.duration.observe(started.elapsed().as_secs_f64());
         }
@@ -79,7 +79,7 @@ impl SliMetrics {
     }
 }
 
-fn lock(snapshot: &Snapshot) -> MutexGuard<'_, Option<LoadedSnapshot>> {
+fn lock(snapshot: &Snapshot) -> MutexGuard<'_, Option<Arc<LoadedSnapshot>>> {
     match snapshot.lock() {
         Ok(snapshot) => snapshot,
         Err(poison) => poison.into_inner(),

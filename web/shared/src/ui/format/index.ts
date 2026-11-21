@@ -49,7 +49,7 @@ export function formatHeldDuration(nanoseconds: number): string {
 
 /** ppm 百分比：正数保留加号；负号使用数学减号；最多四位小数并去尾零。 */
 export function formatPpm(value: number, showPositive: boolean): string {
-  const magnitude = Math.abs(value);
+  const magnitude = Math.round(Math.abs(value));
   const whole = Math.trunc(magnitude / 10_000);
   const fraction = String(magnitude % 10_000)
     .padStart(4, "0")

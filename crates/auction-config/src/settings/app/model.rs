@@ -11,7 +11,7 @@ use serde::Deserialize;
 use super::load::RuntimeWorkerConfigSource;
 use crate::settings::backup::BackupConfig;
 use crate::settings::errors::ConfigError;
-use crate::settings::secrets::AppSecrets;
+use crate::settings::secrets::model::AppSecrets;
 use crate::settings::shutdown::{ShutdownFileConfig, ShutdownSettings};
 use crate::settings::{
     AuctionConfig, DatabasePoolConfig, DatabaseProfilesConfig, DatabaseRolesConfig,

@@ -140,6 +140,7 @@ async fn gone_evicts_lot_even_if_body_read_fails() {
             .expect("选择字节流"),
     );
     assert!(Reflect::set(&source, &JsValue::from_str("pull"), pull.as_ref()).expect("注册正文流"));
+    pull.forget();
     let stream = ReadableStream::new_with_underlying_source(&source).expect("构造拒绝读取的正文流");
     let init = ResponseInit::new();
     init.set_status(410);

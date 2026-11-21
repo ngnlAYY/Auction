@@ -5,14 +5,13 @@ use std::{collections::HashSet, mem::size_of};
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
 
-use super::super::scope::read_unavailable;
-use super::super::{MoogleMailReadRound, lock_incoming_segment};
+use super::super::scope::{lock_incoming_segment, read_unavailable};
 use super::segments::SegmentPlan;
 use super::{
     INCOMING_SCAN_SEGMENT_PAGES, MoogleMailIncomingList, MoogleMailIncomingPrefix, validate_pages,
 };
 use crate::clients::metrics::MailLockWaitGuard;
-use crate::clients::mooglemail::client::MoogleMailClient;
+use crate::clients::mooglemail::client::{MoogleMailClient, MoogleMailReadRound};
 use crate::clients::mooglemail::parser::{MoogleMailParser, MoogleMailSummary};
 use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation,
@@ -202,12 +201,17 @@ impl MoogleMailClient {
                     })
                     .sum::<usize>();
                 let mut stop = false;
-                for summary in &parsed.summaries {
+                let mut retained_summaries = 0;
+                for (index, summary) in parsed.summaries.iter().enumerate() {
                     match scan.observe(&summary.external_mail_id, summary.received_at) {
-                        Ok(auction_application::mail::MailPrefixPage::Continue) => {}
+                        Ok(auction_application::mail::MailPrefixPage::Continue) => {
+                            retained_summaries = index + 1;
+                        }
                         Ok(auction_application::mail::MailPrefixPage::Done) => {
                             anchor_found = true;
+                            retained_summaries = index + 1;
                             stop = true;
+                            break;
                         }
                         Err(reason) => {
                             issue = Some(reason);
@@ -217,7 +221,9 @@ impl MoogleMailClient {
                     }
                 }
                 if issue.is_none() {
-                    summaries.extend(parsed.summaries);
+                    let mut parsed_summaries = parsed.summaries;
+                    parsed_summaries.truncate(retained_summaries);
+                    summaries.extend(parsed_summaries);
                 }
                 bytes.merge(self.retain_list_bytes(
                     payload_bytes

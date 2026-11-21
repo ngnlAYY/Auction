@@ -4,6 +4,7 @@
 // 提交时冻结案件、版本、动作与 `command_id`。结果未知可在未决区原样重试，被明确拒绝时重读详情。
 
 import type {
+  AdminSettlementReturnAction,
   AdminSettlementReturnDetailResponse,
   AdminSettlementReturnSummaryResponse,
 } from "@auction/contracts/dto/admin/returns";
@@ -26,7 +27,7 @@ import { assetsText } from "./list";
 
 /** 一次待确认的动作：冻结读取时的案件版本，确认后原样提交。 */
 interface PendingAction {
-  readonly action: string;
+  readonly action: AdminSettlementReturnAction;
   readonly expectedVersion: number;
 }
 

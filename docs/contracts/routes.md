@@ -418,7 +418,7 @@ Public/Admin/Worker 可在业务 listener、control socket 之外启用独立出
 | POST | `/v1/mail/polls:trigger` | 触发一次邮件轮询 |
 | POST | `/v1/equipment/reads` | Admin 手工装备 URL 读取代为执行；请求只含 `world_id` 与公开装备链接 |
 | POST | `/v1/mail/sent:lookup` | CLI `mail inspect-sent` 的 Sent 只读核查代为执行 |
-| POST | `/v1/recovery/external:scan` | 恢复后核对在全局暂停下只读扫描 Sent、Read Mail 与指定论坛主题；请求不含凭据，响应只含 MID、截断后的列表字段与论坛楼层身份 |
+| POST | `/v1/recovery/external:scan` | 恢复后核对在全局暂停下只读扫描 Sent、Read Mail 与指定论坛主题；请求不含凭据，Sent 列表项、Read Mail 项与 Sent 详情均以 `world` + MID 标识，列表字段截断，论坛结果只含楼层身份 |
 | POST | `/v1/credentials/mail:check` | Admin 邮件 Cookie 在线校验代为执行；请求只含 `credential_id` 与 `expected_state_version`，响应只含回显的凭据 ID、状态版本与逐世界 `world`/`status`，不含 Cookie、余额或页面正文 |
 | GET | `/metrics` | Worker 指标 |
 

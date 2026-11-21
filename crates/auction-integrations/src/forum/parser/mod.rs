@@ -17,7 +17,7 @@ mod results;
 mod text;
 
 pub(crate) use model::ParsedHtmlPage;
-pub(super) use model::{CatalogParse, ParsedPost};
+pub(super) use model::ParsedPost;
 
 pub(super) const DEFAULT_START_PRICE: i64 = 50_000;
 pub(super) const CREDIT_GRID: i64 = 1_000;

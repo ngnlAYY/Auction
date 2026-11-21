@@ -75,6 +75,11 @@ async fn create_locked(
     if max_public_sessions == 0 {
         return Err(SessionError::SessionLimit.into());
     }
+    let active_at: Timestamp = sqlx::query_scalar("SELECT GREATEST(clock_timestamp(), $1)")
+        .bind(record.created_at)
+        .fetch_one(&mut **transaction)
+        .await
+        .map_err(map_sql_error)?;
     let active_count: i64 = sqlx::query_scalar(
         "SELECT count(*)
          FROM public.public_sessions
@@ -83,7 +88,7 @@ async fn create_locked(
              OR (expires_at > $2 AND absolute_expires_at > $2))",
     )
     .bind(record.user_id)
-    .bind(record.created_at)
+    .bind(active_at)
     .fetch_one(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
@@ -103,14 +108,14 @@ async fn create_locked(
                 LIMIT $3
              )
              UPDATE public.public_sessions AS session
-             SET revoked_at = GREATEST(session.created_at, $2)
+             SET revoked_at = GREATEST(session.created_at, session.last_activity_at, $2)
              FROM evicted
              WHERE session.token_hash = evicted.token_hash
                AND session.revoked_at IS NULL
              RETURNING session.token_hash",
         )
         .bind(record.user_id)
-        .bind(record.created_at)
+        .bind(active_at)
         .bind(evictions)
         .fetch_all(&mut **transaction)
         .await
@@ -196,7 +201,7 @@ pub(super) async fn touch_postgres(
               AND account.status = 'active' AND account.key_status = 'active'
          ), recorded_activity AS (
             UPDATE public.public_sessions AS session
-            SET last_activity_at = $1
+            SET last_activity_at = GREATEST(session.last_activity_at, $1)
             FROM current_session
             WHERE session.token_hash = current_session.token_hash
               AND session.revoked_at IS NULL
@@ -228,7 +233,7 @@ pub(super) async fn revoke_postgres(
 ) -> Result<(), ApplicationError> {
     sqlx::query(
         "UPDATE public.public_sessions
-         SET revoked_at = GREATEST(created_at, $1)
+         SET revoked_at = GREATEST(created_at, last_activity_at, $1)
          WHERE token_hash = $2 AND revoked_at IS NULL",
     )
     .bind(now)

@@ -5,7 +5,8 @@ use std::collections::HashSet;
 use auction_application::admin::AdminForumLot;
 
 use super::commands::parse_catalog_amount;
-use super::{CATALOG_CATEGORIES, CatalogParse, DEFAULT_START_PRICE};
+use super::model::CatalogParse;
+use super::{CATALOG_CATEGORIES, DEFAULT_START_PRICE};
 
 pub(super) fn parse_catalog(input: &str) -> Result<CatalogParse, ()> {
     let mut categories = Vec::new();
@@ -65,7 +66,7 @@ pub(super) fn parse_catalog(input: &str) -> Result<CatalogParse, ()> {
             None => DEFAULT_START_PRICE,
         };
         let (seller, current_bidder, current_price) =
-            seller_and_bid(description, &lower_description);
+            seller_and_bid(description, &lower_description)?;
         lots.push(AdminForumLot {
             code,
             category: category.to_owned(),
@@ -110,13 +111,15 @@ fn custom_start_price(lower: &str) -> Option<Result<i64, ()>> {
     Some(parse_catalog_amount(token))
 }
 
-fn seller_and_bid(description: &str, lower: &str) -> (Option<String>, Option<String>, Option<i64>) {
+type SellerAndBid = (Option<String>, Option<String>, Option<i64>);
+
+fn seller_and_bid(description: &str, lower: &str) -> Result<SellerAndBid, ()> {
     let Some(start) = lower.find("(seller:") else {
-        return (None, None, None);
+        return Ok((None, None, None));
     };
     let content_start = start + "(seller:".len();
     let Some(end_offset) = description[content_start..].find(')') else {
-        return (None, None, None);
+        return Ok((None, None, None));
     };
     let end = content_start + end_offset;
     let seller = description[content_start..end].trim().to_owned();
@@ -125,11 +128,12 @@ fn seller_and_bid(description: &str, lower: &str) -> (Option<String>, Option<Str
     if let Some(current_start) = lower_tail.find("| current:") {
         let current = tail[current_start + "| current:".len()..].trim_start();
         let lower_current = lower_tail[current_start + "| current:".len()..].trim_start();
-        let amount = current
+        let amount_token = current
             .split_whitespace()
             .next()
-            .map(|value| value.trim_matches(|character: char| matches!(character, ',' | ';')))
-            .and_then(|value| parse_catalog_amount(value).ok());
+            .ok_or(())?
+            .trim_matches(|character: char| matches!(character, ',' | ';'));
+        let amount = parse_catalog_amount(amount_token)?;
         let bidder = lower_current
             .find(" by ")
             .map(|start| {
@@ -140,10 +144,10 @@ fn seller_and_bid(description: &str, lower: &str) -> (Option<String>, Option<Str
                 strip_bid_source_suffix(strip_settlement_suffix(bidder)).to_owned()
             })
             .filter(|value| !value.is_empty());
-        return ((!seller.is_empty()).then_some(seller), bidder, amount);
+        return Ok(((!seller.is_empty()).then_some(seller), bidder, Some(amount)));
     }
     if lower_tail.contains("start:") {
-        return ((!seller.is_empty()).then_some(seller), None, None);
+        return Ok(((!seller.is_empty()).then_some(seller), None, None));
     }
     let fields = tail.split_whitespace().collect::<Vec<_>>();
     let mut bidder = None;
@@ -157,7 +161,7 @@ fn seller_and_bid(description: &str, lower: &str) -> (Option<String>, Option<Str
             break;
         }
     }
-    ((!seller.is_empty()).then_some(seller), bidder, price)
+    Ok(((!seller.is_empty()).then_some(seller), bidder, price))
 }
 
 /// 仅识别目录渲染器的终态尾注；不放宽用户竞价命令或金额解析。

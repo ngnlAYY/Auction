@@ -96,6 +96,10 @@ pub enum RetentionDryRunError {
 
     #[error("retention dry-run count exceeds the representable range")]
     CountOverflow,
+    #[error("retention dry-run session counts are inconsistent")]
+    InvalidSessionCounts,
+    #[error("retention session cutoff is later than the current snapshot time")]
+    InvalidCutoff,
 
     #[error("failed to query PostgreSQL retention dry-run counts at {stage}")]
     Query {

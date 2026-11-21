@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use super::super::install::{self, RollbackRecord};
+use super::super::install::{self, InstallRecoveryOutcome, RollbackRecord};
 use super::super::receipts::Failure;
 
 /// 回退停机后、安装前的失败：安装目录仍是回退前的程序，数据库未改变，处置见
@@ -41,27 +41,34 @@ pub(super) fn install_failed(
     record: &RollbackRecord,
     reverse_directory: &Path,
 ) -> anyhow::Error {
-    if failure.restored {
-        return failure.error.context(format!(
-            "安装旧角色程序失败：三角色已停止，{} 中的三个角色程序已复核为回退前的程序（换回明细\
-             见下），auction-cli 未被替换，数据库未改变（版本 {database_version}）；{}。本次的反向\
-             回滚记录 {} 带失败回执、保留的就是当前程序，省略 --receipt-id 的 rollback 会选中它并\
-             因目标与当前程序相同而拒绝",
+    match failure.outcome {
+        InstallRecoveryOutcome::Restored | InstallRecoveryOutcome::UntouchedVerified => {
+            failure.error.context(format!(
+                "安装旧角色程序失败：三角色已停止，{} 中的三个角色程序已复核为回退前的可信程序，\
+                 auction-cli 未被替换，数据库未改变（版本 {database_version}）；{}。本次的反向回滚记录 {}\
+                 带失败回执、保留的就是当前程序，省略 --receipt-id 的 rollback 会选中它并因目标与当前程序相同而拒绝",
+                install_dir.display(),
+                pre_rollback_recovery(install_dir, record),
+                reverse_directory.display()
+            ))
+        }
+        InstallRecoveryOutcome::UntouchedUnverified => failure.error.context(format!(
+            "安装旧角色程序失败：三角色已停止，{} 中没有替换任何程序，但安装目录及程序身份未能复核；\
+             数据库未改变（版本 {database_version}）。不要启动服务；按 ops/deploy/RECOVERY.md 的\
+             “重建安装目录信任”核对并修复后再处置",
+            install_dir.display()
+        )),
+        InstallRecoveryOutcome::Mixed => failure.error.context(format!(
+            "安装旧角色程序失败且自动换回未完成：三角色已停止，数据库未改变（版本 {database_version}），\
+             auction-cli 未被替换；{} 中的角色程序可能新旧混合，回退前的角色程序完整保留在 {}（摘要见 \
+             {}）。按 ops/deploy/RECOVERY.md 的“安装中途失败的手工换回”核对摘要并换回后再处置（原\
+             回滚记录 {}）；换回前不要启动服务",
             install_dir.display(),
-            pre_rollback_recovery(install_dir, record),
-            reverse_directory.display()
-        ));
+            reverse_directory.join("bin").display(),
+            reverse_directory.join(install::RECORD_FILE).display(),
+            record.record_id
+        )),
     }
-    failure.error.context(format!(
-        "安装旧角色程序失败且自动换回未完成：三角色已停止，数据库未改变（版本 {database_version}），\
-         auction-cli 未被替换；{} 中的角色程序可能新旧混合，回退前的角色程序完整保留在 {}（摘要见 \
-         {}）。按 ops/deploy/RECOVERY.md 的“安装中途失败的手工换回”核对摘要并换回后再处置（原\
-         回滚记录 {}）；换回前不要启动服务",
-        install_dir.display(),
-        reverse_directory.join("bin").display(),
-        reverse_directory.join(install::RECORD_FILE).display(),
-        record.record_id
-    ))
 }
 
 /// 安装目录仍是回退前的程序、数据库未改变时的处置：保留的 CLI 已在停机前核对为与数据库同版本，

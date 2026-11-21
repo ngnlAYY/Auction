@@ -209,26 +209,30 @@ pub(super) async fn issue(
     credit: Uuid,
     amount: i64,
 ) -> Result<(), FundingError> {
-    let (limit, used): (i64, i64) = sqlx::query_as(
-        r#"SELECT s.amount,
-                  COALESCE((
-                      SELECT sum(e.amount)
-                      FROM public.settlement_funding_entries e
-                      WHERE e.source_id=s.id
-                        AND e.kind IN ('issue','return')
-                  ),0)::bigint
-           FROM public.settlement_funding_sources s
-           WHERE s.id=$1
-             AND s.uid=$2"#,
+    if amount == 0 {
+        return Ok(());
+    }
+    // 运行账号只读取来源；分录触发器锁定来源并原子检查、更新累计发行额。
+    let row = sqlx::query(
+        r#"SELECT amount, proof_digest, issued_amount
+           FROM public.settlement_funding_sources
+           WHERE id=$1
+             AND uid=$2"#,
     )
     .bind(source)
     .bind(uid)
     .fetch_one(&mut **tx)
     .await
     .map_err(storage)?;
+    let limit: i64 = row.try_get("amount").map_err(storage)?;
+    let used: i64 = row.try_get("issued_amount").map_err(storage)?;
+    let proof_digest: Vec<u8> = row.try_get("proof_digest").map_err(storage)?;
+    let proof_digest: [u8; 32] = proof_digest.try_into().map_err(|_| FundingError::Storage)?;
     if amount < 0 || used.checked_add(amount).filter(|sum| *sum <= limit).is_none() {
         return Err(FundingError::Conflict);
     }
+    let source_command =
+        FundingMutation { command_id: command.command_id, request_digest: proof_digest };
     let changed = sqlx::query(
         r#"UPDATE public.settlement_funding_allocations
            SET amount=amount+$1,
@@ -249,7 +253,7 @@ pub(super) async fn issue(
     entry(
         tx,
         uid,
-        command,
+        &source_command,
         FundingEntry {
             debit: None,
             credit: Some(credit),
@@ -271,6 +275,9 @@ pub(super) async fn transfer(
 ) -> Result<(), FundingError> {
     if amount < 0 || debit == credit {
         return Err(FundingError::Invalid);
+    }
+    if amount == 0 {
+        return Ok(());
     }
     let changed = sqlx::query(
         r#"UPDATE public.settlement_funding_allocations

@@ -29,6 +29,7 @@ pub(super) struct SessionCounts {
     pub(super) expired: i64,
     pub(super) permanent_active: i64,
     pub(super) active: i64,
+    pub(super) grace: i64,
 }
 
 pub(super) async fn heartbeats(
@@ -133,6 +134,9 @@ pub(super) async fn sessions(
     cutoff: Timestamp,
     now: Timestamp,
 ) -> Result<SessionCounts, RetentionDryRunError> {
+    if cutoff > now {
+        return Err(RetentionDryRunError::InvalidCutoff);
+    }
     let statement = format!(
         "SELECT COUNT(*)::bigint AS total_rows,
                 COUNT(*) FILTER (WHERE revoked_at IS NOT NULL)::bigint AS revoked_rows,
@@ -142,8 +146,10 @@ pub(super) async fn sessions(
                 COUNT(*) FILTER (WHERE revoked_at IS NULL AND expires_at IS NULL)::bigint
                     AS permanent_active_rows,
                 COUNT(*) FILTER (
-                    WHERE revoked_at IS NULL AND expires_at > $2
-                )::bigint AS active_rows
+                    WHERE revoked_at IS NULL AND expires_at > $1 AND expires_at <= $2
+                )::bigint AS grace_rows,
+                COUNT(*) FILTER (WHERE revoked_at IS NULL AND expires_at > $2)::bigint
+                    AS active_rows
          FROM public.{}",
         crate::database::quote_identifier(table)
     );
@@ -169,6 +175,9 @@ pub(super) async fn sessions(
         active: row
             .try_get("active_rows")
             .map_err(|source| query_error("session_records", source))?,
+        grace: row
+            .try_get("grace_rows")
+            .map_err(|source| query_error("session_records", source))?,
     })
 }
 
@@ -177,13 +186,27 @@ pub(super) fn session_table_counts(
     counts: SessionCounts,
     rule_ids: Vec<String>,
 ) -> Result<RetentionTableDryRun, RetentionDryRunError> {
+    let category_total = add(
+        add(add(add(counts.revoked, counts.expired)?, counts.grace)?, counts.active)?,
+        counts.permanent_active,
+    )?;
+    if [
+        counts.total,
+        counts.revoked,
+        counts.expired,
+        counts.grace,
+        counts.active,
+        counts.permanent_active,
+    ]
+    .iter()
+    .any(|count| *count < 0)
+        || category_total != counts.total
+    {
+        return Err(RetentionDryRunError::InvalidSessionCounts);
+    }
     let candidates = add(counts.revoked, counts.expired)?;
     let excluded_active = add(counts.active, counts.permanent_active)?;
     let retained = sub(counts.total, candidates)?;
-    let grace = sub(retained, excluded_active)?;
-    if retained < 0 || grace < 0 {
-        return Err(RetentionDryRunError::CountOverflow);
-    }
     Ok(RetentionTableDryRun {
         table: table.to_owned(),
         rule_ids,
@@ -192,7 +215,7 @@ pub(super) fn session_table_counts(
         retained_rows: retained,
         blocked_rows: 0,
         excluded_active_rows: excluded_active,
-        grace_rows: grace,
+        grace_rows: counts.grace,
         unresolved_rows: 0,
     })
 }
@@ -211,8 +234,14 @@ mod tests {
 
     #[test]
     fn session_table_projection_partitions_total() {
-        let counts =
-            SessionCounts { total: 10, revoked: 2, expired: 3, permanent_active: 1, active: 3 };
+        let counts = SessionCounts {
+            total: 10,
+            revoked: 2,
+            expired: 3,
+            permanent_active: 1,
+            active: 3,
+            grace: 1,
+        };
         let table = session_table_counts("public_sessions", counts, vec!["rule".to_owned()])
             .expect("projection");
         assert_eq!(table.candidate_rows, 5);
@@ -228,8 +257,33 @@ mod tests {
 
     #[test]
     fn session_projection_rejects_inconsistent_counts() {
-        let counts =
-            SessionCounts { total: 1, revoked: 2, expired: 0, permanent_active: 0, active: 0 };
-        assert!(session_table_counts("public_sessions", counts, Vec::new()).is_err());
+        for counts in [
+            SessionCounts {
+                total: 1,
+                revoked: 2,
+                expired: 0,
+                permanent_active: 0,
+                active: 0,
+                grace: 0,
+            },
+            SessionCounts {
+                total: 5,
+                revoked: 1,
+                expired: 1,
+                permanent_active: 1,
+                active: 1,
+                grace: 0,
+            },
+            SessionCounts {
+                total: 1,
+                revoked: -1,
+                expired: 0,
+                permanent_active: 0,
+                active: 2,
+                grace: 0,
+            },
+        ] {
+            assert!(session_table_counts("public_sessions", counts, Vec::new()).is_err());
+        }
     }
 }

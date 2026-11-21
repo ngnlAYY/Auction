@@ -13,6 +13,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
+use super::handlers::error;
+
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 初始化期间的监听与后续行为，不读取业务角色配置。
@@ -78,12 +80,12 @@ pub(super) async fn enforce(
 ) -> Response {
     let policy = &boundary.policy;
     let response = if !permitted(policy, peer, request.headers(), request.method()) {
-        super::error(StatusCode::FORBIDDEN, "setup_origin").into_response()
+        error(StatusCode::FORBIDDEN, "setup_origin").into_response()
     } else {
         // 同时限制正文读取与异步处理；complete 的发布与终态确认之间没有可取消的 await。
         match tokio::time::timeout(REQUEST_TIMEOUT, next.run(request)).await {
             Ok(response) => response,
-            Err(_) => super::error(StatusCode::GATEWAY_TIMEOUT, "request_timeout").into_response(),
+            Err(_) => error(StatusCode::GATEWAY_TIMEOUT, "request_timeout").into_response(),
         }
     };
     finish_setup_response(response, policy, boundary.web_script_policy)

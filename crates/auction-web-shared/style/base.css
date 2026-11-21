@@ -948,11 +948,10 @@ table {
   }
 
   @media screen and (max-width: 48rem), screen and (max-width: 64rem) and (pointer: coarse) {
-    /* 手机分页与 PC 一样单行：‹ 当前页±1 › · 总数 · 每页数量。整行控件取 32px 才能在 360px
-       级屏幕放下；自定义数量与跳页只在 PC 提供，手机按 DOM 顺序隐藏，不复制或重挂载表单。 */
+    /* 分页按钮与字段在触控断点保持 --size-target；隐藏自定义数量和跳页控件，让较窄屏幕仍可单行显示。 */
     .ui-pager {
-      --size-control-compact: 2rem;
-      --field-min-block-size: var(--size-control-compact);
+      --size-control-compact: var(--size-target);
+      --field-min-block-size: var(--size-target);
       flex-wrap: nowrap;
       justify-content: space-between;
       gap: var(--space-2);
