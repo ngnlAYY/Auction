@@ -4,7 +4,7 @@ use auction_application::core::diagnostics::SafeErrorKind;
 use auction_application::delivery::{DeliverySendIntervals, DeliveryWorkClaim};
 use sqlx::Postgres;
 
-use super::cash::FenceError;
+use super::cash::transaction::FenceError;
 use crate::database::TrackedTransaction as Transaction;
 
 /// 分组锁先于资金 scope/world/lot/delivery，所有发送路径使用同一顺序。

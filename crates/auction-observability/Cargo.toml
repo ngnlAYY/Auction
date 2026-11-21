@@ -14,6 +14,7 @@ ignored = ["reqwest"]
 auction-application.workspace = true
 auction-process.workspace = true
 auction-time.workspace = true
+libc.workspace = true
 opentelemetry.workspace = true
 opentelemetry-otlp.workspace = true
 opentelemetry_sdk.workspace = true

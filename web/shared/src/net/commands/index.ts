@@ -112,7 +112,17 @@ export function useConfirmCommand<P, E>(): ConfirmCommand<P, E> {
       failure.set(null);
       submitting.set(true);
       tasks.spawn(async (context) => {
-        const result = await action(submitted, context.signal);
+        let result: Result<R, E>;
+        try {
+          result = await action(submitted, context.signal);
+        } catch (error) {
+          if (context.alive()) {
+            submitting.set(false);
+            confirmation.set(null);
+            uncertain.set(true);
+          }
+          throw error;
+        }
         if (!context.alive()) {
           return;
         }

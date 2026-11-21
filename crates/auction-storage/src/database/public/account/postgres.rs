@@ -280,7 +280,7 @@ async fn load_postgres_proxy_bids(
     if authorization_ids.is_empty() {
         return Ok(bids);
     }
-    // 每个授权仍按下一次 usage 的创建时间截断；分页及完整历史读取使用同一归属规则。
+    // 代理历史按各授权创建转换的 lot state_version 截断，避免时间戳相同或精度折叠时错配竞价。
     let mut rows = sqlx::query(
         "SELECT
             p.authorization_id,
@@ -297,8 +297,17 @@ async fn load_postgres_proxy_bids(
          FROM public.bid_proxy_authorizations AS p
          JOIN public.lots AS l ON l.id = p.lot_id
          CROSS JOIN LATERAL (
-            SELECT min(next_authorization.created_at) AS created_at
+            SELECT min(created_transition.resulting_state_version) AS state_version
+            FROM public.bid_proxy_authorization_transitions AS created_transition
+            WHERE created_transition.authorization_id = p.authorization_id
+              AND created_transition.transition_kind = 'created'
+         ) AS authorization_created
+         CROSS JOIN LATERAL (
+            SELECT min(created_transition.resulting_state_version) AS state_version
             FROM public.bid_proxy_authorizations AS next_authorization
+            JOIN public.bid_proxy_authorization_transitions AS created_transition
+              ON created_transition.authorization_id = next_authorization.authorization_id
+             AND created_transition.transition_kind = 'created'
             WHERE next_authorization.lot_id = p.lot_id
               AND next_authorization.user_id = p.user_id
               AND next_authorization.usage_number = p.usage_number + 1
@@ -310,8 +319,8 @@ async fn load_postgres_proxy_bids(
             WHERE b.lot_id = p.lot_id
               AND b.bidder_user_id = p.user_id
               AND b.mechanism = 'proxy'
-              AND b.created_at >= p.created_at
-              AND (next_authorization.created_at IS NULL OR b.created_at < next_authorization.created_at)
+              AND b.accepted_state_version >= authorization_created.state_version
+              AND (next_authorization.state_version IS NULL OR b.accepted_state_version < next_authorization.state_version)
             ORDER BY b.accepted_state_version DESC, b.fact_index DESC, b.id DESC
             LIMIT 1
          ) AS b

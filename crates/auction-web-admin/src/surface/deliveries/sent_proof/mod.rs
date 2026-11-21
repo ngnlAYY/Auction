@@ -14,9 +14,9 @@ mod render;
 mod state;
 mod validation;
 
-pub(super) use evidence::selectable_evidence;
-pub(super) use render::{SentProofDialog, evidence_kind_label};
-pub(super) use state::SentProofSubmission;
+pub(crate) use evidence::selectable_evidence;
+pub(crate) use render::{SentProofDialog, evidence_kind_label};
+pub(crate) use state::SentProofSubmission;
 
 #[cfg(test)]
 mod tests;

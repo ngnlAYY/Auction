@@ -6,11 +6,12 @@ use auction_time::Timestamp;
 use sqlx::Postgres;
 use uuid::Uuid;
 
-use super::mapping::{map_storage_error, repository_error};
+use super::mapping::map_storage_error;
 use super::recipient::{binding_matches, key_reply_user};
 use crate::database::delivery::audit::{
     DeliveryAudit, RELEASE, append as append_delivery_audit, worker_state_metadata,
 };
+use crate::database::repository_error;
 
 pub(super) async fn release_postgres(
     pool: &crate::database::TrackedPool<Postgres>,

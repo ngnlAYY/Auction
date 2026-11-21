@@ -13,6 +13,7 @@ use crate::database::recovery::commands::mapping::map_sql_error;
 use crate::database::recovery::commands::scope::RecoveryRow;
 use crate::database::recovery::commands::scope::RelistResult;
 
+/// 生成 Worker 重挂审计使用的稳定命令身份；该身份不属于 auction_commands。
 pub(in crate::database::recovery::commands) fn scheduled_relist_command_id(
     recovery_id: Uuid,
 ) -> CommandId {

@@ -39,7 +39,7 @@ pub(super) fn plan_ordinary_bid(
 
     let mut final_state = state;
     let mut transitions = Vec::new();
-    let mut proxy_states = Vec::new();
+    let mut proxy_states: Vec<ProxyAuthorization> = active.iter().copied().collect();
     let mut active_proxy_id = active.as_ref().map(|proxy| proxy.id);
     // 一次普通出价至多追加一次代理反超；固定两格避免为临时草稿分配或扩容。
     let mut drafts = [BidDraft {
@@ -66,6 +66,7 @@ pub(super) fn plan_ordinary_bid(
                 exhaust_proxy(active, command_id, ProxyTerminalReason::StrictlyDefeated)?;
             final_state = clear_slow_schedule(final_state)?;
             transitions.push(transition);
+            proxy_states.clear();
             proxy_states.push(after);
             active_proxy_id = None;
         } else if let Some(response) = response

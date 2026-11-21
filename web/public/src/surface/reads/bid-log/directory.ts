@@ -165,10 +165,11 @@ export function useReadRoundDirectory(
             const needed =
               query.auction.kind !== "invalid" &&
               !current.options.some((auction) => auction.id === id) &&
-              (id !== "" ||
-                (current.statuses.size === statuses.length &&
+              (id !== ""
+                ? thisStatus?.complete !== true
+                : current.statuses.size === statuses.length &&
                   thisStatus !== undefined &&
-                  couldPrecede(thisStatus, preferred, selectedScope)));
+                  couldPrecede(thisStatus, preferred, selectedScope));
             if (
               signal.aborted ||
               ((wantedOptions.peek() || needed) &&

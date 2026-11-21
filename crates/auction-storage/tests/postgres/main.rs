@@ -30,6 +30,7 @@ mod mail_templates;
 mod mailbox_sweep;
 mod maintenance_evidence;
 mod migration_compatibility;
+mod migration_integrity;
 mod operations_alert;
 mod realtime_relay;
 mod realtime_sequence;

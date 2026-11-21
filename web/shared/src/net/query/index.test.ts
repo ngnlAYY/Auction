@@ -9,7 +9,17 @@ import { installFakeWindow } from "../../router/test-window";
 import { useQueryState, writeQueryPairs } from ".";
 
 test("没有浏览器环境时不写入并返回 false", () => {
-  expect(writeQueryPairs(["page"], [["page", "2"]], "push")).toBe(false);
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  try {
+    Reflect.deleteProperty(globalThis, "window");
+    expect(writeQueryPairs(["page"], [["page", "2"]], "push")).toBe(false);
+  } finally {
+    if (previousWindow === undefined) {
+      Reflect.deleteProperty(globalThis, "window");
+    } else {
+      Object.defineProperty(globalThis, "window", previousWindow);
+    }
+  }
 });
 
 test("显式同地址写入照常创建历史项，缺省仍跳过", () => {

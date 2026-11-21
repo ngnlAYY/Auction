@@ -163,8 +163,9 @@ async fn run_service(
         auction_observability::ShutdownReason::ServerStopped
     };
     let drain = async {
-        join_background_task(&mut heartbeat_task, "public heartbeat").await;
-        join_background_task(&mut realtime_relay_task, "public realtime relay").await;
+        let heartbeat_result = join_background_task(&mut heartbeat_task, "public heartbeat").await;
+        let relay_result =
+            join_background_task(&mut realtime_relay_task, "public realtime relay").await;
         if let Some(publisher) = heartbeat.as_ref()
             && let Err(error) = publisher.publish_stopping().await
         {
@@ -178,11 +179,21 @@ async fn run_service(
             .drain_realtime_connections()
             .await
             .context("排空 Public 实时连接失败");
-        match (public_server_result(server_result), realtime_result) {
-            (Ok(()), result) => result,
-            (Err(error), Ok(())) => Err(error),
-            (Err(error), Err(realtime_error)) => Err(error.context(realtime_error)),
+        let server_result = public_server_result(server_result);
+        let mut errors = Vec::new();
+        if let Err(error) = heartbeat_result {
+            errors.push(format!("heartbeat task: {error:#}"));
         }
+        if let Err(error) = relay_result {
+            errors.push(format!("realtime relay task: {error:#}"));
+        }
+        if let Err(error) = server_result {
+            errors.push(format!("HTTP server: {error:#}"));
+        }
+        if let Err(error) = realtime_result {
+            errors.push(format!("realtime connection drain: {error:#}"));
+        }
+        if errors.is_empty() { Ok(()) } else { Err(anyhow::anyhow!(errors.join("; "))) }
     };
     let outcome =
         wait_for_drain(signals, Duration::from_secs(config.shutdown.drain_timeout_seconds), drain)
@@ -220,6 +231,7 @@ async fn run_service(
             Err(anyhow::anyhow!("public-api 排空被信号 {signal} 中断"))
         }
         Err(error) => {
+            *forced = true;
             force_public_tasks(&mut heartbeat_task, &mut realtime_relay_task, &mut server_task)
                 .await;
             Err(error).context("等待 public-api 排空失败")
@@ -237,16 +249,21 @@ fn abort_background_task(task: &Option<TaskGuard<()>>) {
     }
 }
 
-async fn join_background_task(task: &mut Option<TaskGuard<()>>, name: &'static str) {
+async fn join_background_task(
+    task: &mut Option<TaskGuard<()>>,
+    name: &'static str,
+) -> anyhow::Result<()> {
     let Some(task) = task else {
-        return;
+        return Ok(());
     };
     if let Some(Err(error)) = task.join().await
         && !error.is_cancelled()
     {
         let kind = join_error_kind(&error);
         tracing::warn!(task = name, kind, "回收 Public 后台任务失败");
+        return Err(anyhow::Error::new(error).context(format!("回收 {name} 后台任务失败")));
     }
+    Ok(())
 }
 
 async fn force_public_tasks(
@@ -257,11 +274,25 @@ async fn force_public_tasks(
     abort_background_task(heartbeat_task);
     abort_background_task(realtime_relay_task);
     server_task.abort();
-    join_background_task(heartbeat_task, "public heartbeat").await;
-    join_background_task(realtime_relay_task, "public realtime relay").await;
-    let _ = server_task.join().await;
+    let heartbeat_result = join_background_task(heartbeat_task, "public heartbeat").await;
+    let relay_result = join_background_task(realtime_relay_task, "public realtime relay").await;
+    let server_result = server_task.join().await;
+    let mut errors = Vec::new();
+    if let Err(error) = heartbeat_result {
+        errors.push(format!("heartbeat task: {error:#}"));
+    }
+    if let Err(error) = relay_result {
+        errors.push(format!("realtime relay task: {error:#}"));
+    }
+    if let Some(Err(error)) = server_result
+        && !error.is_cancelled()
+    {
+        errors.push(format!("HTTP server task: {error}"));
+    }
+    if !errors.is_empty() {
+        tracing::warn!(errors = %errors.join("; "), "强制关闭时回收 Public 任务失败");
+    }
 }
-
 fn public_server_result(
     result: Option<Result<std::io::Result<()>, tokio::task::JoinError>>,
 ) -> anyhow::Result<()> {

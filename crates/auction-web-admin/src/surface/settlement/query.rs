@@ -141,7 +141,8 @@ impl SettlementLocation {
 
     /// 将已经应用到页面的筛选写回历史，并同步成功写入的地址基准。
     pub(super) fn write(mut self, query: SettlementQuery, mode: QueryWriteMode) {
-        if write_query_pairs(SETTLEMENT_QUERY_KEYS, &settlement_query_pairs(&query), mode) {
+        let Some(pairs) = settlement_query_pairs(&query) else { return };
+        if write_query_pairs(SETTLEMENT_QUERY_KEYS, &pairs, mode) {
             self.address.set(SettlementAddress { query, refused_at: None });
         } else {
             // 拒写保留地址基准，匹配的目录响应仍可归并到本地筛选。
@@ -192,22 +193,25 @@ fn current_address() -> Option<String> {
     Some(address)
 }
 
-/// 序列化规则与旧版一致：默认值键省略，auction 与 sequence 成对写入。
-fn settlement_query_pairs(query: &SettlementQuery) -> Vec<(String, String)> {
+/// 序列化规则与旧版一致：默认值键省略；auction 有 ID 时必须同时有 sequence。
+fn settlement_query_pairs(query: &SettlementQuery) -> Option<Vec<(String, String)>> {
+    if !query.auction_id.is_empty() && query.sequence.is_none() {
+        return None;
+    }
     let mut pairs = Vec::new();
     if query.world_id != "all" {
         pairs.push(("world".to_owned(), query.world_id.clone()));
     }
     if let Some(sequence) = query.sequence {
         pairs.push(("sequence".to_owned(), sequence.to_string()));
-    }
-    if !query.auction_id.is_empty() {
-        pairs.push(("auction".to_owned(), query.auction_id.clone()));
+        if !query.auction_id.is_empty() {
+            pairs.push(("auction".to_owned(), query.auction_id.clone()));
+        }
     }
     if query.page > 1 {
         pairs.push(("page".to_owned(), query.page.to_string()));
     }
-    pairs
+    Some(pairs)
 }
 
 /// 将共享层认可的同页地址变化记入本页的位置版本。

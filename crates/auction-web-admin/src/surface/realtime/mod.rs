@@ -12,12 +12,12 @@ mod page;
 #[cfg(test)]
 mod testing;
 
-pub(super) use filter_field::{
+pub(in crate::surface) use filter_field::{
     FilterField, FilterValue, fetch_filtered, normalize_filter_input, normalize_filter_text,
 };
-pub(super) use filters::{QueryFilterInput, QueryFilterSelect};
-pub(super) use page::outbox_page;
+pub(in crate::surface) use filters::{QueryFilterInput, QueryFilterSelect};
+pub(crate) use page::outbox_page;
 #[cfg(test)]
-pub(super) use testing::{
+pub(in crate::surface) use testing::{
     TestPage, get_parameter, selected_options, submit_forms, text_attributes, use_test_history,
 };

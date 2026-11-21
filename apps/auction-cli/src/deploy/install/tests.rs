@@ -9,9 +9,9 @@ use uuid::Uuid;
 use super::restore::Swap;
 use super::trust::PinnedInstallDir;
 use super::{
-    FORMAT, InstallArtifactFailure, LEGACY_FORMAT, ROLE_BINARIES, RecordDirectory, RetainRequest,
-    RetainedIdentity, RollbackRecord, SchemaSource, install_artifact, install_retained, latest,
-    load, record_dir, retain,
+    FORMAT, InstallArtifactFailure, InstallRecoveryOutcome, LEGACY_FORMAT, ROLE_BINARIES,
+    RecordDirectory, RetainRequest, RetainedIdentity, RollbackRecord, SchemaSource,
+    install_artifact, install_retained, latest, load, record_dir, retain,
 };
 use crate::deploy::artifact::{Artifact, ArtifactBinary, REQUIRED_BINARIES};
 use crate::receipt::{CliIdentity, DeployRecord, RoleIdentity};
@@ -67,6 +67,7 @@ fn artifact(root: &Path) -> Artifact {
         fs::write(&path, format!("new-{name}")).expect("写入新程序");
         binaries.push(ArtifactBinary {
             name,
+            file: fs::File::open(&path).expect("固定真实制品文件句柄"),
             path,
             sha256: sha256_bytes(format!("new-{name}").as_bytes()),
             bytes: format!("new-{name}").len() as u64,
@@ -333,7 +334,10 @@ fn legacy_records_are_read_without_rewriting() {
 /// 保留旧程序时已分配、发布回执时实际使用的同一个标识。
 #[test]
 fn deploy_receipt_is_readable_from_retained_record_id() {
-    use crate::receipt::{Action, Outcome, ReceiptContext, read as read_receipt, record_deploy};
+    use crate::deploy::verification::install_dir_artifacts;
+    use crate::receipt::{
+        Action, MigrationRecord, Outcome, ReceiptContext, read as read_receipt, record_deploy,
+    };
 
     let root = TempRoot::new();
     let install = install_dir(root.path());
@@ -347,8 +351,13 @@ fn deploy_receipt_is_readable_from_retained_record_id() {
         Outcome::Succeeded,
         auction_time::Timestamp::now(),
         &context,
-        None,
-        Vec::new(),
+        Some(MigrationRecord {
+            before_version: 94,
+            after_version: 96,
+            expected_version: 96,
+            applied: 2,
+        }),
+        install_dir_artifacts(&install),
         complete_deploy_record(&install, record.record_id),
         None,
     )
@@ -408,10 +417,10 @@ fn install_failure_swaps_back_the_replaced_programs() {
     fs::write(root.path().join("artifact/bin/auction-public-api"), b"NEW-auction-public-api")
         .expect("改写制品程序");
 
-    let InstallArtifactFailure { error, restored } =
+    let InstallArtifactFailure { error, outcome } =
         install_artifact(&artifact, &install, &record, &directory).expect_err("第三个程序摘要不符");
     let text = format!("{error:#}");
-    assert!(restored, "{text}");
+    assert_eq!(outcome, InstallRecoveryOutcome::Restored, "{text}");
     assert!(
         text.contains("已把本次替换的 auction-worker、auction-admin-api 从回滚记录换回"),
         "{text}"
@@ -445,10 +454,10 @@ fn failed_swap_back_reports_current_digests() {
     fs::write(root.path().join("artifact/bin/auction-public-api"), b"NEW-auction-public-api")
         .expect("改写制品程序");
 
-    let InstallArtifactFailure { error, restored } =
+    let InstallArtifactFailure { error, outcome } =
         install_artifact(&artifact, &install, &record, &directory).expect_err("第三个程序摘要不符");
     let text = format!("{error:#}");
-    assert!(!restored, "{text}");
+    assert_eq!(outcome, InstallRecoveryOutcome::Mixed, "{text}");
     assert!(text.contains("自动换回未完成") && text.contains("换回失败：auction-worker"), "{text}");
     assert!(text.contains("与回滚记录不一致：auction-worker"), "{text}");
     let new_worker = sha256_bytes(b"new-auction-worker");
@@ -472,17 +481,43 @@ fn swap_back_restores_a_program_replaced_before_its_failure() {
 
     let omitted = swap.back(anyhow::anyhow!("安装后复核失败"), &[]);
     let text = format!("{:#}", omitted.error);
-    assert!(!omitted.restored, "{text}");
+    assert_eq!(omitted.outcome, InstallRecoveryOutcome::UntouchedUnverified, "{text}");
     assert!(text.contains("与回滚记录不一致：auction-worker"), "{text}");
 
-    let InstallArtifactFailure { error, restored } =
+    let InstallArtifactFailure { error, outcome } =
         swap.back(anyhow::anyhow!("安装后复核失败"), &["auction-worker"]);
     let text = format!("{error:#}");
-    assert!(restored, "{text}");
+    assert_eq!(outcome, InstallRecoveryOutcome::Restored, "{text}");
     assert!(text.contains("已把本次替换的 auction-worker 从回滚记录换回"), "{text}");
     assert!(text.ends_with("安装后复核失败"), "{text}");
     assert_eq!(read_install(&install, "auction-worker"), b"old-auction-worker");
     assert_sealed(&install, "auction-worker");
+}
+
+/// 第一个程序替换前失败且原目录的所有程序仍可信时，明确记录为已验证未改动，不冒充实际换回。
+#[test]
+fn untouched_install_failure_requires_full_trust_verification() {
+    let root = TempRoot::new();
+    let install = install_dir(root.path());
+    let state = root.state();
+    let (record, directory) = retain_all(&state, &install);
+    let pinned = PinnedInstallDir::open(&install).expect("固定可信安装目录");
+    let swap = Swap { retained: &record, record_directory: &directory, directory: &pinned };
+
+    let failure = swap.back(anyhow::anyhow!("第一个程序尚未替换"), &[]);
+    let text = format!("{:#}", failure.error);
+    assert_eq!(failure.outcome, InstallRecoveryOutcome::UntouchedVerified, "{text}");
+    assert!(text.contains("本次没有程序被替换") && text.contains("信任属性一致"), "{text}");
+    for name in REQUIRED_BINARIES {
+        assert_eq!(read_install(&install, name), format!("old-{name}").into_bytes(), "{name}");
+        assert_sealed(&install, name);
+    }
+    fs::set_permissions(install.join("auction-worker"), fs::Permissions::from_mode(0o644))
+        .expect("破坏 Worker 信任权限");
+    let unverified = swap.back(anyhow::anyhow!("第一个程序尚未替换"), &[]);
+    let text = format!("{:#}", unverified.error);
+    assert_eq!(unverified.outcome, InstallRecoveryOutcome::UntouchedUnverified, "{text}");
+    assert!(text.contains("本次没有程序被替换") && text.contains("信任属性"), "{text}");
 }
 
 /// rollback 的安装现场：安装目录已部署为新程序，`record` 保留部署前的四个旧程序，`reverse` 是
@@ -532,18 +567,18 @@ fn retained_install_failure_swaps_back_from_the_reverse_record() {
     )
     .expect("改写保留的旧程序");
 
-    let InstallArtifactFailure { error, restored } =
+    let InstallArtifactFailure { error, outcome } =
         site.install_retained().expect_err("第三个程序摘要不符");
     let text = format!("{error:#}");
-    assert!(restored, "{text}");
+    assert_eq!(outcome, InstallRecoveryOutcome::Restored, "{text}");
     assert!(
         text.contains("已把本次替换的 auction-worker、auction-admin-api 从回滚记录换回"),
         "{text}"
     );
-    assert!(text.contains("覆盖的 3 个程序摘要一致"), "{text}");
     assert!(text.ends_with("安装临时文件的摘要与期望不一致：auction-public-api"), "{text}");
     for name in REQUIRED_BINARIES {
         assert_eq!(read_install(&site.install, name), format!("new-{name}").into_bytes(), "{name}");
+        assert_sealed(&site.install, name);
     }
     let entries = fs::read_dir(&site.install).expect("安装目录").count();
     assert_eq!(entries, REQUIRED_BINARIES.len(), "失败与换回都不留下临时文件");
@@ -562,10 +597,10 @@ fn failed_retained_swap_back_reports_current_digests() {
     )
     .expect("改写保留的旧程序");
 
-    let InstallArtifactFailure { error, restored } =
+    let InstallArtifactFailure { error, outcome } =
         site.install_retained().expect_err("第三个程序摘要不符");
     let text = format!("{error:#}");
-    assert!(!restored, "{text}");
+    assert_eq!(outcome, InstallRecoveryOutcome::Mixed, "{text}");
     assert!(text.contains("自动换回未完成") && text.contains("换回失败：auction-worker"), "{text}");
     assert!(text.contains("与回滚记录不一致：auction-worker"), "{text}");
     assert!(!text.contains("auction-cli="), "rollback 的复核不含 CLI：{text}");
@@ -622,11 +657,13 @@ fn untrusted_install_dir_is_rejected_before_any_replacement() {
     let state = root.state();
     let (record, directory) = retain_all(&state, &install);
     fs::set_permissions(&install, fs::Permissions::from_mode(0o775)).expect("放宽安装目录");
-    let InstallArtifactFailure { error, restored } =
+    let InstallArtifactFailure { error, outcome } =
         install_artifact(&artifact(root.path()), &install, &record, &directory)
             .expect_err("不可信安装目录");
     let text = format!("{error:#}");
-    assert!(restored && text.contains("没有替换任何程序"), "{text}");
+    assert_eq!(outcome, InstallRecoveryOutcome::UntouchedUnverified, "{text}");
+    assert!(text.contains("没有替换任何程序"), "{text}");
+    assert!(!text.contains("service start") && !text.contains("systemctl start"), "{text}");
     for name in REQUIRED_BINARIES {
         assert_eq!(read_install(&install, name), format!("old-{name}").into_bytes(), "{name}");
     }
@@ -650,10 +687,10 @@ fn install_failure_receipt_records_the_actual_install_dir() {
     fs::remove_file(&blocked).expect("移除旧 Public 程序");
     fs::create_dir(&blocked).expect("以目录占住 Public 目标");
     fs::write(blocked.join("keep"), b"x").expect("目录非空");
-    let InstallArtifactFailure { error, restored } =
+    let InstallArtifactFailure { error, outcome } =
         install_artifact(&artifact, &install, &record, &directory).expect_err("第三个程序无法替换");
     let text = format!("{error:#}");
-    assert!(!restored, "{text}");
+    assert_eq!(outcome, InstallRecoveryOutcome::Mixed, "{text}");
     assert!(text.contains("原子替换程序失败"), "{text}");
     assert!(text.contains("与回滚记录不一致：auction-public-api"), "{text}");
     assert!(text.contains("auction-public-api=不可读"), "{text}");
@@ -683,6 +720,14 @@ fn install_failure_receipt_records_the_actual_install_dir() {
     assert_eq!(digest("worker"), Some(sha256_bytes(b"old-auction-worker")), "Worker 已换回");
     assert_eq!(digest("admin"), Some(sha256_bytes(b"old-auction-admin-api")), "Admin 已换回");
     assert_eq!(digest("public"), None, "无法读取的程序不伪造摘要");
+    let public = published
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.role == "public")
+        .expect("Public 程序记录");
+    assert_eq!(public.path.as_deref(), Some(blocked.to_str().expect("UTF-8 临时路径")));
+    assert_eq!(public.sha256, None, "目录目标不伪造摘要");
+    assert_eq!(public.bytes, None, "目录目标不伪造字节数");
     assert_eq!(fs::read_dir(state.path.join("receipts")).expect("回执目录").count(), 1);
     assert_eq!(latest(&state).expect("最新回滚记录").0.record_id, record.record_id);
 }

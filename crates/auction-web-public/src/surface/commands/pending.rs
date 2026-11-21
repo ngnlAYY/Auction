@@ -115,7 +115,11 @@ pub(super) fn initial_proxy_amount(minimum: i64) -> String {
     if !(1..=MAX_PUBLIC_BID_AMOUNT).contains(&minimum) {
         return String::new();
     }
-    let amount = (minimum + 999) / 1_000 * 1_000;
+    let units = minimum / 1_000 + i64::from(minimum % 1_000 != 0);
+    let Some(amount) = units.checked_mul(1_000).filter(|amount| *amount <= MAX_PUBLIC_BID_AMOUNT)
+    else {
+        return String::new();
+    };
     format_credit_amount(amount)
 }
 

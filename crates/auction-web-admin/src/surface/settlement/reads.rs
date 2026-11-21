@@ -335,7 +335,7 @@ mod tests {
     use crate::api::{
         AdminRecoveryReport, AdminSettlementCatalogEntry, AdminSettlementCatalogPage,
     };
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         RecordRead, button, mount_writer, settle_writer,
     };
     use crate::surface::realtime::text_attributes;

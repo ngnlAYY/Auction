@@ -93,6 +93,16 @@ solid_features=$(AUCTION_WEB_STACK=solid bash -c 'source "$1/ci/release/build-id
 	$(AUCTION_WEB_STACK=solid bash ci/release/release.sh web-feature admin) == web-solid ]] ||
 	fail 'solid 运行任务应让 Public 与 Admin 都用 web-solid'
 
+# 只有 release.yml 的 tag push 是正式包；手动选择同一 tag 仍须带候选标记。
+formal_suffix=$(GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push GITHUB_REF_TYPE=tag \
+	bash -c 'source "$1/ci/release/build-identity.sh"; release_candidate_suffix' _ "$repository_root") ||
+	fail '无法判定正式发行包后缀'
+[[ -z "$formal_suffix" ]] || fail "正式发行包不应带候选后缀：$formal_suffix"
+dispatch_suffix=$(GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF_TYPE=tag \
+	bash -c 'source "$1/ci/release/build-identity.sh"; release_candidate_suffix' _ "$repository_root") ||
+	fail '无法判定手动候选包后缀'
+[[ "$dispatch_suffix" == -candidate ]] || fail "手动 tag 构建必须带候选后缀：$dispatch_suffix"
+
 # 原生制品的输入指纹必须随实际技术栈变化；缺省不扫描 web/，Solid 加入 web/ 与栈标记。
 default_inputs=$(bash -c 'source "$1/ci/release/build-identity.sh"; build_inputs_fingerprint' _ "$repository_root") ||
 	fail '无法计算缺省原生输入指纹'
@@ -332,6 +342,23 @@ install_generated_directory "$install_fixture/next" "$install_fixture/current" |
 	fail '精确换入目录应成功'
 [[ -f "$install_fixture/current/new" && ! -e "$install_fixture/current/next" &&
 	! -e "$install_fixture/current/old" ]] || fail '换入应整体替换目标目录'
+parallel_fixture=$fixture/install-parallel
+for writer in a b; do
+	mkdir -p "$parallel_fixture/$writer"
+	printf '%s\n' "$writer" >"$parallel_fixture/$writer/payload"
+	done
+install_generated_directory "$parallel_fixture/a" "$parallel_fixture/current" &
+first_writer=$!
+install_generated_directory "$parallel_fixture/b" "$parallel_fixture/current" &
+second_writer=$!
+wait "$first_writer" || fail '并发换入 A 失败'
+wait "$second_writer" || fail '并发换入 B 失败'
+[[ -f "$parallel_fixture/current/payload" ]] || fail '并发换入后目标缺失'
+final_payload=$(<"$parallel_fixture/current/payload")
+[[ $final_payload == a || $final_payload == b ]] || fail '并发换入留下不完整目标'
+if compgen -G "$parallel_fixture/current.previous.*" >/dev/null; then
+	fail '并发换入留下备份目录'
+fi
 
 # brotli 封存的枚举与各步失败必须传出来；函数不能被进程替换或 || 左侧吞掉。
 compress_fixture=$fixture/compress
@@ -396,6 +423,46 @@ fi
 [[ $(<"$fixture/diagnostic") == *'无法写入 brotli 副本'* ]] ||
 	fail 'brotli 副本写入失败缺少诊断'
 
+# find 即使已经输出部分结果后失败，也不能被下游计数、体积或摘要命令掩盖。
+find_fixture=$fixture/find-partial
+mkdir -p "$find_fixture/public"
+printf 'asset\n' >"$find_fixture/public/index.html"
+if (
+	set +o pipefail
+	find() { printf 'partial\0'; return 42; }
+	web_count_files "$find_fixture/public" -type f
+) >"$fixture/out" 2>"$fixture/diagnostic"; then
+	fail 'find 部分输出后失败时文件计数不应成功'
+fi
+
+if (
+	set +o pipefail
+	find() { printf '1\n'; return 42; }
+	web_payload_sizes_dioxus public "$find_fixture"
+) >"$fixture/out" 2>"$fixture/diagnostic"; then
+	fail 'find 部分输出后失败时 payload 体积不应成功'
+fi
+
+if (
+	set +o pipefail
+	find() {
+		case " $* " in
+		*" -o "*) return 0 ;;
+		*) printf './index.html\0'; return 42 ;;
+		esac
+	}
+	web_payload_checksums "$find_fixture/public"
+) >"$fixture/out" 2>"$fixture/diagnostic"; then
+	fail 'find 部分输出后失败时 payload 摘要不应成功'
+fi
+
+if ! (
+	find() { printf './forbidden.map\0'; return 42; }
+	web_find_contains "$find_fixture/public" forbidden.map -type f
+); then
+	fail 'find 部分输出包含命中项时应先报告匹配'
+fi
+
 default_fingerprint=$(bash ci/release/release.sh source-fingerprint 2>/dev/null)
 [[ "$default_fingerprint" =~ ^[0-9a-f]{64}$ ]] || fail '缺省发布入口不应被 Solid 拒绝'
 
@@ -448,7 +515,7 @@ make_tagged_release_fixture "$tagged"
 if diagnostic=$(
 	(
 		cd "$tagged"
-		GITHUB_ACTIONS=true GITHUB_REF_TYPE=tag AUCTION_WEB_STACK=solid \
+		GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push GITHUB_REF_TYPE=tag AUCTION_WEB_STACK=solid \
 			CARGO_CALL_LOG="$tagged/calls.log" TOOL_SENTINEL_LOG="$tagged/tools.log" \
 			PATH="$tagged/bin:$PATH" bash ci/release/release.sh release-check --allow-dirty
 	) 2>&1
@@ -470,7 +537,7 @@ fi
 if diagnostic=$(
 	(
 		cd "$tagged"
-		GITHUB_ACTIONS=true GITHUB_REF_TYPE=tag AUCTION_WEB_STACK=solid \
+		GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push GITHUB_REF_TYPE=tag AUCTION_WEB_STACK=solid \
 			CARGO_CALL_LOG="$tagged/calls.log" TOOL_SENTINEL_LOG="$tagged/tools.log" \
 			PATH="$tagged/bin:$PATH" bash ci/release/release.sh package --allow-dirty
 	) 2>&1

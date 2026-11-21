@@ -3,7 +3,7 @@
 use auction_domain::DataKeyDomain;
 
 use super::model::AppConfig;
-use crate::settings::secrets::{RetiredDataKey, SecretString};
+use crate::settings::secrets::{RetiredDataKey, model::SecretString};
 use crate::settings::{HttpListenMode, Role};
 
 /// 省略 `worker.concurrency` 时的 Auction 主循环并发；启动校验与 getter 共用。

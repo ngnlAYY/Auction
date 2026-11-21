@@ -444,7 +444,7 @@ mod tests {
     use super::{AdminRecoveryDialog, AdminRecoveryRow, RecoveryConfirmationDraft, RecoveryRead};
     use super::{RecoveryReasonIssue, activates_buyer_refund, validate_recovery_reason};
     use crate::api::{AdminApiFailure, AdminRecovery};
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         button, click_button, has_live_text, init_i18n, mount_writer, settle_writer, writer_form,
     };
     use crate::surface::pending::{

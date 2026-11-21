@@ -49,6 +49,7 @@ impl EhentaiClient {
             isekai_board_id: config.isekai_board_id,
             ownership: None,
             write_progress: None,
+            topic_create_lock: Arc::new(tokio::sync::Mutex::new(())),
             external_metrics: auction_application::external_metrics::noop_external_metrics_observer(
             ),
         })

@@ -43,8 +43,9 @@ pub(crate) use returns::{
 };
 mod sent_lookup;
 
-use self::claims::claim_postgres;
-use self::delivery::{activate_postgres, prepare_postgres};
+use self::claims::postgres::claim_postgres;
+use self::delivery::activate::activate_postgres;
+use self::delivery::prepare::prepare_postgres;
 use self::mapping::{bounded_text, valid_failure_code};
 use self::reconcile::{
     fail_postgres, manual_reconcile_postgres, mark_failed_postgres, satisfy_postgres,

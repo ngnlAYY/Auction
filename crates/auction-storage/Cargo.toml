@@ -11,6 +11,7 @@ auction-application.workspace = true
 auction-domain.workspace = true
 auction-observability.workspace = true
 async-stream.workspace = true
+libc.workspace = true
 auction-time = { workspace = true, features = ["postgres"] }
 # 必填：周轮次的本地周一是 PostgreSQL date 列，经 jiff-sqlx 绑定与读取。
 jiff.workspace = true

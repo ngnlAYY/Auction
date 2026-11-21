@@ -164,6 +164,11 @@ impl AdminMailTransaction for PostgresMailTransaction {
                 serde_json::from_slice(&command.result_payload).map_err(|_| {
                     AdminMailTransactionError::Failed("邮件命令结果不是 JSON 对象".to_owned())
                 })?;
+            if !result_payload.is_object() {
+                return Err(AdminMailTransactionError::Failed(
+                    "邮件命令结果不是 JSON 对象".to_owned(),
+                ));
+            }
             sqlx::query(
                 "INSERT INTO public.mail_admin_commands
                     (command_id, command_kind, request_digest, mailbox_key, result_payload)
@@ -236,6 +241,7 @@ impl AdminMailTransaction for PostgresMailTransaction {
                      WHERE NOT EXISTS (
                          SELECT 1 FROM public.mail_poll_state WHERE mailbox_key = $1
                      )
+                     ON CONFLICT (mailbox_key) DO NOTHING
                      RETURNING mailbox_key, cursor_value, last_poll_at, next_poll_at,
                                consecutive_failures, paused, state_version, updated_at",
                 )
@@ -247,7 +253,7 @@ impl AdminMailTransaction for PostgresMailTransaction {
             } else {
                 sqlx::query(
                     "UPDATE public.mail_poll_state
-                     SET next_poll_at = GREATEST(last_poll_at, $1),
+                     SET next_poll_at = GREATEST(next_poll_at, last_poll_at, $1),
                          state_version = state_version + 1, updated_at = $1
                      WHERE mailbox_key = $2 AND state_version = $3
                        AND (claim_expires_at IS NULL OR claim_expires_at <= $1)

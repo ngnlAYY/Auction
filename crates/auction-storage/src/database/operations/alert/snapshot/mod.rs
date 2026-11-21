@@ -2,7 +2,7 @@
 
 mod disposition;
 mod observe;
-mod reads;
+pub(super) mod reads;
 
 pub(super) use disposition::apply_read_mode;
 pub(super) use observe::{observe_host_postgres, observe_postgres};
@@ -15,7 +15,7 @@ pub mod benchmark_sql {
     /// 履约水位与长期未领取清单：`$1` 观察时刻，`$2` 超期截止（可为 NULL），`$3` 是否读清单，
     /// `$4` 清单上限。
     pub fn fulfillment_snapshot_sql() -> &'static str {
-        super::reads::FULFILLMENT_SNAPSHOT
+        super::reads::fulfillment::FULFILLMENT_SNAPSHOT
     }
 
     /// 履约终态的配对口径（无参数）：同一语句返回迁移前口径与分类口径的失败计数。

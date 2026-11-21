@@ -64,8 +64,11 @@ function visibilityHandle(state: VisibilityState): PageVisibility {
         const hidden = document.hidden;
         state.hidden = hidden;
         if (!hidden) {
-          onVisible();
-          wakeWaiters(state);
+          try {
+            onVisible();
+          } finally {
+            wakeWaiters(state);
+          }
         }
       };
       try {

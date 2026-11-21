@@ -1259,7 +1259,7 @@ async fn postgres_failed_sent_sweep_skips_corrupt_observation_and_advances_curso
     assert!(!attempted);
     assert_eq!(healthy_metadata["sent_reference_sighting"]["mid"], mailbox.entry.external_mail_id);
 
-    // 模拟本轮处理坏行后停止，下一轮须从已提交的坏行位置之后继续。
+    // 直接重试损坏行不能回退同轮已由健康行推进的游标；下一轮从健康行后回绕到坏行。
     assert!(
         !store
             .begin_failed_sent_detail(
@@ -1268,12 +1268,12 @@ async fn postgres_failed_sent_sweep_skips_corrupt_observation_and_advances_curso
                 Some(&bad_entry)
             )
             .await
-            .expect("坏行仍提交游标并拒绝读取")
+            .expect("坏行仍拒绝详情读取")
     );
-    let batch = store.unproven_sends("main", 10).await.expect("下一轮读取持久游标");
-    assert_eq!(batch.position.expect("坏行后的游标").delivery_id, bad.delivery_id);
+    let batch = store.unproven_sends("main", 10).await.expect("读取最近处理位置");
+    assert_eq!(batch.position.expect("持久游标").delivery_id, healthy.delivery_id);
     let next = store.failed_sent_slots(batch.position, oldest, 1).await.expect("读取下一轮首位");
-    assert_eq!(next[0].delivery_id, healthy.delivery_id);
+    assert_eq!(next[0].delivery_id, bad.delivery_id);
     assert_eq!(failed_sent_sweep(&service).await.sent_observed, 0);
     assert_eq!(mailbox.detail_reads.load(Ordering::Relaxed), 1);
     pool.close().await;

@@ -17,7 +17,6 @@ use std::{
 
 use dioxus::prelude::*;
 
-// 构建号与信标共用同一份值。
 use crate::bootstrap::build_id;
 
 /// 服务端报告构建号的响应头；与 `auction-http` 的 `x-auction-build` 保持同一契约。

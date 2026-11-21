@@ -47,7 +47,9 @@ export function AdminLotTable(props: AdminLotTableProps): JSX.Element {
   const isEmpty = createValueMemo(() => props.page.lots.length === 0);
   const selectedPairs = createValueMemo(() => {
     const selected = selectedLot();
-    return selected === null ? [] : [selected];
+    return selected === null || !props.page.lots.some((lot) => lot.id === selected[0])
+      ? []
+      : [selected];
   });
 
   return (

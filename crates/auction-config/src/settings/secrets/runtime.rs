@@ -9,8 +9,10 @@ use crate::reader::read_toml_file;
 use crate::runtime::{RuntimeFileStoreError, read_runtime_file};
 use crate::settings::errors::ConfigError;
 use crate::settings::validation::{
-    resolve_http_security_origins, validate_http_listener, validate_http_security,
-    validate_metrics_listener, validate_session, validate_tracing,
+    listener::validate_http_listener,
+    metrics::validate_metrics_listener,
+    security::{resolve_http_security_origins, validate_http_security, validate_session},
+    tracing::validate_tracing,
 };
 use crate::settings::{
     HttpListenMode, HttpListenerConfig, HttpSecurityConfig, MetricsConfig, Role, SessionConfig,

@@ -45,7 +45,7 @@ where
         external_metrics,
         loop_kind,
     } = context;
-    let mut batch_deadline = std::time::Instant::now() + config.batch_timeout;
+    let batch_deadline = std::time::Instant::now() + config.batch_timeout;
     let metric_context = MailPollMetricContext {
         metrics: Arc::clone(&metrics),
         external_metrics: Arc::clone(&external_metrics),
@@ -260,7 +260,6 @@ where
                 .await;
                 // 业务结果及其超时已冻结；留证不占后续邮件的业务预算，也不更改重试分类。
                 if !pending_diagnostics.is_empty() {
-                    let retention_started = std::time::Instant::now();
                     for (index, pending) in pending_diagnostics.into_iter().enumerate() {
                         let diagnostic = pending.resolve().await;
                         if decision_diagnostic == Some(index)
@@ -271,12 +270,6 @@ where
                         {
                             decision.equipment_diagnostic = Some(diagnostic);
                         }
-                    }
-                    if let Some(extended) = batch_deadline.checked_add(retention_started.elapsed())
-                    {
-                        batch_deadline = extended;
-                    } else {
-                        tracing::warn!("MoogleMail diagnostic budget extension overflow");
                     }
                 }
                 let decision = match processed {

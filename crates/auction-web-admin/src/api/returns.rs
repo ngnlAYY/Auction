@@ -8,13 +8,13 @@ use std::collections::HashSet;
 
 use auction_contracts::{
     ADMIN_SETTLEMENT_RETURN_ACTIONS, ADMIN_SETTLEMENT_RETURN_ASSET_LOCATIONS,
-    ADMIN_SETTLEMENT_RETURN_BLOCKERS, ADMIN_SETTLEMENT_RETURN_CLOSED_STATUSES,
-    ADMIN_SETTLEMENT_RETURN_EVENT_KINDS, ADMIN_SETTLEMENT_RETURN_MATCH_STATES,
-    ADMIN_SETTLEMENT_RETURN_MAX_OFFSET, ADMIN_SETTLEMENT_RETURN_MAX_PAGE_SIZE,
-    ADMIN_SETTLEMENT_RETURN_OBLIGATION_KINDS, ADMIN_SETTLEMENT_RETURN_PLANS,
-    ADMIN_SETTLEMENT_RETURN_REASONS, ADMIN_SETTLEMENT_RETURN_STATUSES,
-    ADMIN_SETTLEMENT_RETURN_TAKE_STATES, ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS,
-    AdminSettlementReturnHandleRequest, AdminSettlementReturnRecheckRequest, ApiResponse,
+    ADMIN_SETTLEMENT_RETURN_MATCH_STATES, ADMIN_SETTLEMENT_RETURN_MAX_OFFSET,
+    ADMIN_SETTLEMENT_RETURN_MAX_PAGE_SIZE, ADMIN_SETTLEMENT_RETURN_OBLIGATION_KINDS,
+    ADMIN_SETTLEMENT_RETURN_STATUSES, ADMIN_SETTLEMENT_RETURN_TAKE_STATES,
+    ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS, AdminSettlementReturnAction,
+    AdminSettlementReturnHandleAction, AdminSettlementReturnHandleRequest,
+    AdminSettlementReturnMatchState, AdminSettlementReturnRecheckRequest,
+    AdminSettlementReturnStatus, ApiResponse,
 };
 pub(crate) use auction_contracts::{
     AdminSettlementReturnCommandResponse as SettlementReturnCommandResult,
@@ -99,33 +99,47 @@ pub(crate) async fn submit_settlement_return_action(
     command_id: Uuid,
     return_id: String,
     expected_version: i64,
-    action: String,
+    action: AdminSettlementReturnAction,
 ) -> Result<SettlementReturnCommandResult, AdminWriteFailure> {
     if command_id.is_nil()
         || !valid_uuid(&return_id)
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&expected_version)
-        || !ADMIN_SETTLEMENT_RETURN_ACTIONS.contains(&action.as_str())
     {
         return Err(AdminWriteFailure::not_sent("invalid_settlement_return_command"));
     }
-    let result = if action == "recheck" {
+    let result = if action == AdminSettlementReturnAction::Recheck {
         post_command(
             &format!("/api/v1/admin/settlement-returns/{return_id}/recheck"),
             &AdminSettlementReturnRecheckRequest { command_id, expected_version },
         )
         .await?
     } else {
+        let action = match action {
+            AdminSettlementReturnAction::ReclaimAndResend => {
+                AdminSettlementReturnHandleAction::ReclaimAndResend
+            }
+            AdminSettlementReturnAction::ReclaimAndHold => {
+                AdminSettlementReturnHandleAction::ReclaimAndHold
+            }
+            AdminSettlementReturnAction::ResendFromCustody => {
+                AdminSettlementReturnHandleAction::ResendFromCustody
+            }
+            AdminSettlementReturnAction::CloseInbox => {
+                AdminSettlementReturnHandleAction::CloseInbox
+            }
+            AdminSettlementReturnAction::Acknowledge => {
+                AdminSettlementReturnHandleAction::Acknowledge
+            }
+            AdminSettlementReturnAction::RetryTake => AdminSettlementReturnHandleAction::RetryTake,
+            AdminSettlementReturnAction::Recheck => unreachable!("recheck was handled above"),
+        };
         post_command(
             &format!("/api/v1/admin/settlement-returns/{return_id}/handle"),
-            &AdminSettlementReturnHandleRequest {
-                command_id,
-                expected_version,
-                action: action.clone(),
-            },
+            &AdminSettlementReturnHandleRequest { command_id, expected_version, action },
         )
         .await?
     };
-    if !valid_command_result(&result, command_id, &return_id, &action, expected_version) {
+    if !valid_command_result(&result, command_id, &return_id, action, expected_version) {
         return Err(AdminWriteFailure::invalid_response("settlement return command"));
     }
     Ok(result)
@@ -194,22 +208,26 @@ pub(crate) fn valid_page(
         ids.insert(item.return_id.as_str())
             && valid_summary(item)
             && (!filters.open_only || item.closed_at.is_none())
-            && (filters.status.is_empty() || item.status == filters.status)
-            && (filters.match_state.is_empty() || item.match_state == filters.match_state)
+            && (filters.status.is_empty() || status_matches(item.status, &filters.status))
+            && (filters.match_state.is_empty()
+                || match_state_matches(item.match_state, &filters.match_state))
             && (filters.obligation_kind.is_empty()
                 || item.obligation_kind.as_deref() == Some(filters.obligation_kind.as_str()))
             && (filters.world.is_empty() || item.world_id == filters.world)
     })
 }
 
-/// 案件摘要的闭集与形状校验；结案时刻与已结案状态必须一致。
+/// 案件摘要形状校验；结案时刻与已结案状态必须一致。
 pub(crate) fn valid_summary(item: &SettlementReturnSummary) -> bool {
-    let closed = ADMIN_SETTLEMENT_RETURN_CLOSED_STATUSES.contains(&item.status.as_str());
+    let closed = matches!(
+        item.status,
+        AdminSettlementReturnStatus::Held
+            | AdminSettlementReturnStatus::Resent
+            | AdminSettlementReturnStatus::InboxClosed
+            | AdminSettlementReturnStatus::Reviewed
+    );
     valid_uuid(&item.return_id)
         && (1..=MAX_JSON_SAFE_INTEGER).contains(&item.case_version)
-        && ADMIN_SETTLEMENT_RETURN_STATUSES.contains(&item.status.as_str())
-        && ADMIN_SETTLEMENT_RETURN_MATCH_STATES.contains(&item.match_state.as_str())
-        && ADMIN_SETTLEMENT_RETURN_REASONS.contains(&item.reason_code.as_str())
         && matches!(item.world_id.as_str(), "main" | "isekai")
         && valid_safe_text(&item.external_mail_id, 256)
         && valid_admin_time(&item.received_at)
@@ -225,7 +243,6 @@ pub(crate) fn valid_summary(item: &SettlementReturnSummary) -> bool {
         && item.recipient.as_deref().is_none_or(|value| valid_safe_text(value, 256))
         && valid_count(item.credits)
         && valid_count(item.cod)
-        && item.plan.as_deref().is_none_or(|plan| ADMIN_SETTLEMENT_RETURN_PLANS.contains(&plan))
         && ADMIN_SETTLEMENT_RETURN_ASSET_LOCATIONS.contains(&item.asset_location.as_str())
         && valid_admin_time(&item.created_at)
         && valid_admin_time(&item.updated_at)
@@ -236,18 +253,11 @@ pub(crate) fn valid_summary(item: &SettlementReturnSummary) -> bool {
 /// 详情：摘要正是请求的案件；事件与派发按版本/编号严格递增；动作闭集被允许动作与阻断原因恰好
 /// 覆盖一次。
 pub(crate) fn valid_detail(detail: &SettlementReturnDetail, requested: &str) -> bool {
-    let mut actions = HashSet::with_capacity(ADMIN_SETTLEMENT_RETURN_ACTIONS.len());
-    let partition = detail
-        .allowed_actions
-        .iter()
-        .map(String::as_str)
-        .chain(detail.blockers.iter().map(|blocker| blocker.action.as_str()))
-        .all(|action| ADMIN_SETTLEMENT_RETURN_ACTIONS.contains(&action) && actions.insert(action))
-        && actions.len() == ADMIN_SETTLEMENT_RETURN_ACTIONS.len()
-        && detail
-            .blockers
-            .iter()
-            .all(|blocker| ADMIN_SETTLEMENT_RETURN_BLOCKERS.contains(&blocker.blocker.as_str()));
+    let mut actions = Vec::with_capacity(ADMIN_SETTLEMENT_RETURN_ACTIONS.len());
+    actions.extend(detail.allowed_actions.iter().copied());
+    actions.extend(detail.blockers.iter().map(|blocker| blocker.action));
+    let partition = actions.len() == ADMIN_SETTLEMENT_RETURN_ACTIONS.len()
+        && actions.iter().enumerate().all(|(index, action)| !actions[..index].contains(action));
     valid_summary(&detail.summary)
         && detail.summary.return_id == requested
         && partition
@@ -258,22 +268,23 @@ pub(crate) fn valid_detail(detail: &SettlementReturnDetail, requested: &str) -> 
         && detail.take.as_ref().is_none_or(valid_take)
         && detail.resend_dispatch_no.is_none_or(|value| value >= 2)
         && detail.custody.as_ref().is_none_or(valid_custody)
-        && (!detail.recheck_unavailable || detail.summary.status == "recheck_pending")
-        && (!detail.take_unavailable || detail.summary.status == "take_pending")
-        // 结果未知必有闭集内的原因，其他状态没有。
-        && detail.take_unknown_reason.is_some() == (detail.summary.status == "take_unknown")
+        && (!detail.recheck_unavailable
+            || detail.summary.status == AdminSettlementReturnStatus::RecheckPending)
+        && (!detail.take_unavailable
+            || detail.summary.status == AdminSettlementReturnStatus::TakePending)
+        && detail.take_unknown_reason.is_some()
+            == (detail.summary.status == AdminSettlementReturnStatus::TakeUnknown)
         && detail
             .take_unknown_reason
             .as_deref()
             .is_none_or(|reason| ADMIN_SETTLEMENT_RETURN_TAKE_UNKNOWN_REASONS.contains(&reason))
 }
 
-/// 命令结果必须对应本次命令身份、案件与动作，版本只会前进。
 pub(crate) fn valid_command_result(
     result: &SettlementReturnCommandResult,
     command_id: Uuid,
     return_id: &str,
-    action: &str,
+    action: AdminSettlementReturnAction,
     expected_version: i64,
 ) -> bool {
     result.command_id == command_id.to_string()
@@ -281,7 +292,32 @@ pub(crate) fn valid_command_result(
         && result.action == action
         && result.case_version > expected_version
         && result.case_version <= MAX_JSON_SAFE_INTEGER
-        && ADMIN_SETTLEMENT_RETURN_STATUSES.contains(&result.status.as_str())
+}
+
+fn status_matches(status: AdminSettlementReturnStatus, selected: &str) -> bool {
+    selected
+        == match status {
+            AdminSettlementReturnStatus::Quarantined => "quarantined",
+            AdminSettlementReturnStatus::RecheckPending => "recheck_pending",
+            AdminSettlementReturnStatus::AwaitingDecision => "awaiting_decision",
+            AdminSettlementReturnStatus::TakePending => "take_pending",
+            AdminSettlementReturnStatus::TakeUnknown => "take_unknown",
+            AdminSettlementReturnStatus::ResendPending => "resend_pending",
+            AdminSettlementReturnStatus::Held => "held",
+            AdminSettlementReturnStatus::Resent => "resent",
+            AdminSettlementReturnStatus::InboxClosed => "inbox_closed",
+            AdminSettlementReturnStatus::Reviewed => "reviewed",
+        }
+}
+
+fn match_state_matches(state: AdminSettlementReturnMatchState, selected: &str) -> bool {
+    selected
+        == match state {
+            AdminSettlementReturnMatchState::Untrusted => "untrusted",
+            AdminSettlementReturnMatchState::Unbound => "unbound",
+            AdminSettlementReturnMatchState::FulfillmentTerminal => "fulfillment_terminal",
+            AdminSettlementReturnMatchState::ManualReconcile => "manual_reconcile",
+        }
 }
 
 fn increasing(mut values: impl Iterator<Item = i64>) -> bool {
@@ -294,8 +330,7 @@ fn increasing(mut values: impl Iterator<Item = i64>) -> bool {
 }
 
 fn valid_event(event: &SettlementReturnEvent) -> bool {
-    ADMIN_SETTLEMENT_RETURN_EVENT_KINDS.contains(&event.event_kind.as_str())
-        && valid_admin_time(&event.occurred_at)
+    valid_admin_time(&event.occurred_at)
         && event.actor_id.as_deref().is_none_or(|actor| valid_safe_text(actor, 128))
         && event.command_id.as_deref().is_none_or(valid_uuid)
         && event.details.is_object()
@@ -329,6 +364,7 @@ fn valid_custody(custody: &SettlementReturnCustody) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use auction_contracts::AdminSettlementReturnAction;
     use serde_json::{Value, json};
     use uuid::Uuid;
 
@@ -465,8 +501,12 @@ mod tests {
         ] {
             let mut item = summary_json();
             item[key] = value;
-            let parsed: SettlementReturnSummary = serde_json::from_value(item).expect("可解码");
-            assert!(!valid_summary(&parsed), "{key} 应被拒绝");
+            let parsed = serde_json::from_value::<SettlementReturnSummary>(item);
+            if matches!(key, "status" | "reason_code" | "asset_location") {
+                assert!(parsed.is_err(), "{key} must deserialize through its closed set");
+            } else {
+                assert!(!valid_summary(&parsed.expect("可解码")), "{key} 应被拒绝");
+            }
         }
         let mut held = summary_json();
         held["status"] = json!("held");
@@ -512,10 +552,12 @@ mod tests {
                 json!(["reclaim_and_resend", "reclaim_and_hold", "close_inbox", "recheck"]);
         });
         assert!(!valid_detail(&duplicated, CASE), "同一动作既允许又阻断");
-        let unknown = detail_with(|value| {
-            value["blockers"][0]["blocker"] = json!("busy");
-        });
-        assert!(!valid_detail(&unknown, CASE), "未知阻断原因");
+        let mut unknown = detail_json();
+        unknown["blockers"][0]["blocker"] = json!("busy");
+        assert!(
+            serde_json::from_value::<SettlementReturnDetail>(unknown).is_err(),
+            "typed blockers reject unknown values"
+        );
         let unordered = detail_with(|value| {
             value["events"][1]["case_version"] = json!(1);
         });
@@ -582,11 +624,41 @@ mod tests {
             "status": "inbox_closed"
         }))
         .expect("结果夹具");
-        assert!(valid_command_result(&result, command_id, CASE, "close_inbox", 2));
-        assert!(!valid_command_result(&result, Uuid::from_u128(8), CASE, "close_inbox", 2));
-        assert!(!valid_command_result(&result, command_id, DELIVERY, "close_inbox", 2));
-        assert!(!valid_command_result(&result, command_id, CASE, "reclaim_and_hold", 2));
-        assert!(!valid_command_result(&result, command_id, CASE, "close_inbox", 3));
+        assert!(valid_command_result(
+            &result,
+            command_id,
+            CASE,
+            AdminSettlementReturnAction::CloseInbox,
+            2
+        ));
+        assert!(!valid_command_result(
+            &result,
+            Uuid::from_u128(8),
+            CASE,
+            AdminSettlementReturnAction::CloseInbox,
+            2
+        ));
+        assert!(!valid_command_result(
+            &result,
+            command_id,
+            DELIVERY,
+            AdminSettlementReturnAction::CloseInbox,
+            2
+        ));
+        assert!(!valid_command_result(
+            &result,
+            command_id,
+            CASE,
+            AdminSettlementReturnAction::ReclaimAndHold,
+            2
+        ));
+        assert!(!valid_command_result(
+            &result,
+            command_id,
+            CASE,
+            AdminSettlementReturnAction::CloseInbox,
+            3
+        ));
     }
 
     #[test]
@@ -602,16 +674,28 @@ mod tests {
             }))
             .unwrap()
         };
-        assert!(valid_command_result(&reply(CASE), command_id, CASE, "reclaim_and_resend", 2));
-        assert!(!valid_command_result(&reply(DELIVERY), command_id, CASE, "reclaim_and_resend", 2));
+        assert!(valid_command_result(
+            &reply(CASE),
+            command_id,
+            CASE,
+            AdminSettlementReturnAction::ReclaimAndResend,
+            2
+        ));
+        assert!(!valid_command_result(
+            &reply(DELIVERY),
+            command_id,
+            CASE,
+            AdminSettlementReturnAction::ReclaimAndResend,
+            2
+        ));
     }
 
     #[test]
     fn settlement_return_read_and_command_contract_fixtures() {
         use super::{
-            ApiResponse, SettlementReturnCommandResult, SettlementReturnDetail,
-            SettlementReturnFilters, SettlementReturnPage, valid_command_result, valid_detail,
-            valid_page,
+            AdminSettlementReturnAction, AdminSettlementReturnStatus, ApiResponse,
+            SettlementReturnCommandResult, SettlementReturnDetail, SettlementReturnFilters,
+            SettlementReturnPage, valid_command_result, valid_detail, valid_page,
         };
         use crate::api::contract_fixtures::{admin_fixture, decode};
         use uuid::Uuid;
@@ -629,7 +713,7 @@ mod tests {
         let detail: ApiResponse<SettlementReturnDetail> =
             decode(admin_fixture!("settlement-return"), "/data", "events");
         assert!(valid_detail(&detail.data, RETURN_ID));
-        assert_eq!(detail.data.allowed_actions, ["acknowledge"]);
+        assert_eq!(detail.data.allowed_actions, [AdminSettlementReturnAction::Acknowledge]);
         assert!(detail.data.take.is_none());
 
         let receipt: ApiResponse<SettlementReturnCommandResult> =
@@ -638,9 +722,9 @@ mod tests {
             &receipt.data,
             Uuid::from_u128(0x4000_8000_0000_0000_0007),
             RETURN_ID,
-            "acknowledge",
+            AdminSettlementReturnAction::Acknowledge,
             1
         ));
-        assert_eq!(receipt.data.status, "reviewed");
+        assert_eq!(receipt.data.status, AdminSettlementReturnStatus::Reviewed);
     }
 }

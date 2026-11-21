@@ -18,7 +18,7 @@ use crate::database::TrackedTransaction as Transaction;
 use crate::database::delivery::audit::{
     DeliveryAudit, SETTLEMENT_RETURN_RETAKE, append as append_delivery_audit,
 };
-use crate::database::mail::delivery::settlement_return_take_conflicts;
+use crate::database::mail::delivery::disposition::settlement_return_take_conflicts;
 
 /// 重新排队本案的 Take 投递并把动作收回 enqueued，返回写进 `take_retry_requested` 事件的安全
 /// 细节。调用方已按锁序持有 world → 资金 → 恢复与义务 → 案件 → 动作 → Take 投递的锁，并已在锁内

@@ -2,14 +2,15 @@
 
 use auction_time::{TimeDelta, Timestamp};
 
+use super::database::add;
 use super::model::{
     RETENTION_PURGE_DRY_RUN_MAX_DURATION_SECONDS, RETENTION_PURGE_MAX_BATCH_SIZE,
     RETENTION_PURGE_MIN_BATCH_SIZE, RETENTION_PURGE_POLICY_VERSION,
-    RETENTION_PURGE_RECEIPT_MAX_AGE_SECONDS, RetentionPurgeError, RetentionPurgeRequest,
-    retention_purge_approval_token,
+    RETENTION_PURGE_RECEIPT_MAX_AGE_SECONDS, RetentionPurgeApprovalTokenInput, RetentionPurgeError,
+    RetentionPurgeRequest, retention_purge_approval_token,
 };
 use super::tables::{PURGEABLE_TABLES, cutoff_rule_id};
-use super::{CLOCK_SKEW_SECONDS, ValidatedFamily, ValidatedTable, add};
+use super::{CLOCK_SKEW_SECONDS, ValidatedFamily, ValidatedTable};
 use crate::database::maintenance::retention::cutoff::retention_cutoff;
 use crate::database::maintenance::retention::inventory::{
     RetentionPolicy, retention_policy_sha256,
@@ -84,6 +85,9 @@ pub(super) fn validate_request(
         let mut sum_rows = 0_i64;
         match retention.kind.as_str() {
             "database_rows" => {
+                if approval.filesystem_root_identity_sha256.is_some() {
+                    return Err(RetentionPurgeError::CandidateCountInvalid);
+                }
                 if approval.candidate_bytes.is_some() {
                     return Err(RetentionPurgeError::CandidateCountInvalid);
                 }
@@ -145,30 +149,31 @@ pub(super) fn validate_request(
                 }
             }
             "filesystem" => {
-                if !approval.tables.is_empty() || approval.candidate_bytes.is_none() {
+                if !approval.tables.is_empty()
+                    || approval.candidate_bytes.is_none()
+                    || approval.candidate_rows < 0
+                    || u64::try_from(approval.candidate_rows).ok().is_none_or(|rows| rows > 1_024)
+                    || approval
+                        .filesystem_root_identity_sha256
+                        .as_deref()
+                        .is_none_or(|value| !is_sha256_hex(value))
+                {
                     return Err(RetentionPurgeError::FilesystemInvalid);
                 }
-                if approval.candidate_rows < 0 {
-                    return Err(RetentionPurgeError::CandidateCountInvalid);
-                }
                 sum_rows = approval.candidate_rows;
-                match &request.filesystem {
-                    Some(result)
-                        if result.deleted_files <= approval.candidate_rows.max(0) as u64 => {}
-                    _ => return Err(RetentionPurgeError::FilesystemInvalid),
-                }
             }
             _ => return Err(RetentionPurgeError::PolicyInvalid),
         }
-        let expected = retention_purge_approval_token(
-            &request.database_name,
-            request.dry_run_run_id,
-            &compiled_sha,
-            &approval.dataset_family,
-            approval.candidate_rows,
-            approval.candidate_bytes,
-            &table_binding,
-        );
+        let expected = retention_purge_approval_token(RetentionPurgeApprovalTokenInput {
+            database_name: &request.database_name,
+            dry_run_run_id: request.dry_run_run_id,
+            policy_sha256: &compiled_sha,
+            dataset_family: &approval.dataset_family,
+            filesystem_root_identity_sha256: approval.filesystem_root_identity_sha256.as_deref(),
+            candidate_rows: approval.candidate_rows,
+            candidate_bytes: approval.candidate_bytes,
+            tables: &table_binding,
+        });
         if expected != approval.approval_token {
             return Err(RetentionPurgeError::ApprovalTokenMismatch);
         }
@@ -180,12 +185,12 @@ pub(super) fn validate_request(
             tables: validated_tables,
         });
     }
-    if request.filesystem.is_some()
-        && !validated.iter().any(|family| family.retention_kind == "filesystem")
-    {
-        return Err(RetentionPurgeError::FilesystemInvalid);
-    }
     Ok(validated)
+}
+
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64
+        && value.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 pub(super) fn purgeable_table(table: &str) -> Option<&'static str> {

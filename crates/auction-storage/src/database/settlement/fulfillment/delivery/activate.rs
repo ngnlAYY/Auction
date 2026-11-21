@@ -8,11 +8,10 @@ use uuid::Uuid;
 
 use super::{DeliveryTransactionError, run_serializable_delivery_transaction};
 use crate::database::delivery::audit::{ACTIVATE, DeliveryAudit, append as append_delivery_audit};
-use crate::database::settlement::fulfillment::mapping::{
-    repository_error, validate_claim_identity,
-};
+use crate::database::repository_error;
+use crate::database::settlement::fulfillment::mapping::validate_claim_identity;
 
-pub(in crate::database::settlement::fulfillment) async fn activate_postgres(
+pub(in crate::database) async fn activate_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
     activate_command_id: CommandId,

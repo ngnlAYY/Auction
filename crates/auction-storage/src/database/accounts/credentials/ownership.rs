@@ -154,7 +154,14 @@ impl DatabaseStore {
                 }
             })
             .await
-            .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
+            .map_err(|error| {
+                crate::database::log_discarded_sql_error(
+                    &error,
+                    "credential_runtime_ownership_failed",
+                    "获取凭据运行时所有权连接失败",
+                );
+                CredentialRuntimeOwnershipError::Unavailable
+            })?;
         // 后续任一路径提前返回时都关闭 session，以释放 advisory lock。
         connection.close_on_drop();
         let lock_name = format!("auction/credential-runtime-owner/v1/{}", kind.as_str());
@@ -163,17 +170,28 @@ impl DatabaseStore {
                 .bind(lock_name)
                 .fetch_one(&mut *connection)
                 .await
-                .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
+                .map_err(|error| {
+                    crate::database::log_discarded_sql_error(
+                        &error,
+                        "credential_runtime_ownership_failed",
+                        "查询凭据运行时所有权失败",
+                    );
+                    CredentialRuntimeOwnershipError::Unavailable
+                })?;
         if !acquired {
             return Err(CredentialRuntimeOwnershipError::AlreadyOwned);
         }
         // 显式提交确认后才返回 owner；不确定错误都关闭原持锁 session。内部业务事务锁相同行
         // 直到 commit，新进程须等其完成才可外呼，配置/keyenv Cookie 同样不能绕过此 fence。
         let mail_binding = if kind == AdminCredentialKind::MailCookie {
-            let mut transaction = connection
-                .begin()
-                .await
-                .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
+            let mut transaction = connection.begin().await.map_err(|error| {
+                crate::database::log_discarded_sql_error(
+                    &error,
+                    "credential_runtime_ownership_failed",
+                    "开启凭据运行时绑定事务失败",
+                );
+                CredentialRuntimeOwnershipError::Unavailable
+            })?;
             let generation = sqlx::query_scalar::<_, i64>(
                 "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
                      INSERT INTO public.mail_runtime_generation (scope, generation, activated_at)
@@ -185,8 +203,22 @@ impl DatabaseStore {
             )
             .fetch_one(&mut *transaction)
             .await
-            .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
-            transaction.commit().await.map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
+            .map_err(|error| {
+                crate::database::log_discarded_sql_error(
+                    &error,
+                    "credential_runtime_ownership_failed",
+                    "更新凭据运行时绑定失败",
+                );
+                CredentialRuntimeOwnershipError::Unavailable
+            })?;
+            transaction.commit().await.map_err(|error| {
+                crate::database::log_discarded_sql_error(
+                    &error,
+                    "credential_runtime_ownership_failed",
+                    "提交凭据运行时绑定失败",
+                );
+                CredentialRuntimeOwnershipError::Unavailable
+            })?;
             Some(auction_application::settlement::MailRuntimeBinding { generation })
         } else {
             None

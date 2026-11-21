@@ -5,6 +5,7 @@ use auction_application::mail::mail_recipient_is_list_projection;
 use tokio::time::{Instant, timeout_at};
 
 use super::baseline::MoogleMailSentBaseline;
+use super::baseline::SentCandidates;
 use super::{MoogleMailSendRequest, MoogleMailSender};
 use crate::clients::mooglemail::parser::{canonical_mail_body_digest, subject_is_list_projection};
 use crate::clients::mooglemail::{
@@ -105,7 +106,7 @@ impl MoogleMailSender {
         &self,
         request: &MoogleMailSendRequest,
         cookie: &MoogleMailCookie,
-        candidates: &super::baseline::SentCandidates,
+        candidates: &SentCandidates,
         response_mail_id: Option<&str>,
         round: &super::super::client::MoogleMailReadRound,
         deadline: Instant,

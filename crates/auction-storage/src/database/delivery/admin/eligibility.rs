@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::delivery::scheduler::recipient::{binding_matches, key_reply_user};
+use crate::database::mail::delivery::disposition::mail_handed_over;
 use crate::database::recovery::commands::reset_after_delivery_retry;
 use crate::database::settlement::fulfillment::{
     recovery_allows_execution_now, recovery_owns_return_sql,
@@ -98,11 +99,7 @@ pub(super) async fn read_guard(
         settlement_eligible: settlement_eligible(transaction, delivery).await?,
         settlement_fulfillment_state: fulfillment_state,
         has_reconcile_reference: false,
-        mail_handed_over: crate::database::mail::delivery::mail_handed_over(
-            transaction,
-            delivery.id,
-        )
-        .await?,
+        mail_handed_over: mail_handed_over(transaction, delivery.id).await?,
         recipient_renamed: key_recipient_renamed(transaction, delivery, payload, false).await?,
         recovery_retry_eligible: reset_after_delivery_retry(transaction, delivery.id)
             .await?

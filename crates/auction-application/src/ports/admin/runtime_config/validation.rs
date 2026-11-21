@@ -2,6 +2,9 @@
 
 use std::{collections::HashSet, path::Path};
 
+use auction_domain::valid_text;
+use url::Url;
+
 use super::{
     business::{
         AdminRuntimeEquipmentFilterConfig, AdminRuntimeWorldConfig, AdminRuntimeWorldsConfig,
@@ -15,7 +18,6 @@ use super::{
 };
 use crate::ports::core::IpCidr;
 use crate::ports::mail::{EquipmentFilterBoundsError, validate_equipment_filter_bounds};
-pub(super) use auction_domain::valid_text;
 
 pub(super) fn validate_business_config(
     document: &AdminRuntimeDocument,
@@ -209,6 +211,12 @@ pub(super) fn validate_security(
     }
     if config.allowed_origins_enabled
         && config.allowed_origins.iter().any(|origin| !valid_origin(origin))
+        || config.allowed_origins_enabled
+            && config
+                .allowed_origins
+                .iter()
+                .enumerate()
+                .any(|(index, origin)| config.allowed_origins[..index].contains(origin))
     {
         return Err(AdminRuntimeConfigError::InvalidDocument(
             "security.allowed_origins 无效".to_owned(),
@@ -322,6 +330,7 @@ pub fn valid_allowlist_host(value: &str) -> bool {
                     .chars()
                     .all(|character| character.is_ascii_alphanumeric() || character == '-')
         })
+        && Url::parse(&format!("https://{value}/")).is_ok_and(|url| url.host_str() == Some(value))
 }
 
 /// 装备来源 allowlist 的路径前缀：`/` 开头结尾，拒绝点段、查询、片段与转义。
@@ -377,11 +386,27 @@ fn valid_origin(value: &str) -> bool {
 }
 
 fn valid_http_url(value: &str) -> bool {
-    (value.starts_with("http://") || value.starts_with("https://"))
-        && !value
-            .chars()
-            .any(|character| matches!(character, ' ' | '\n' | '\r' | '\0' | '?' | '#' | '@'))
-        && value.split_once("://").is_some_and(|(_, host)| !host.is_empty())
+    if value.len() > 2_048
+        || !(value.starts_with("http://") || value.starts_with("https://"))
+        || value.chars().any(|character| {
+            character.is_control()
+                || character.is_whitespace()
+                || matches!(character, '?' | '#' | '@')
+        })
+    {
+        return false;
+    }
+    let Ok(url) = Url::parse(value) else { return false };
+    let Some((_, remainder)) = value.split_once("://") else { return false };
+    let authority = remainder.split('/').next().unwrap_or("");
+    matches!(url.scheme(), "http" | "https")
+        && url.host_str().is_some_and(|host| !host.is_empty())
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.query().is_none()
+        && url.fragment().is_none()
+        && url.port().is_none_or(|port| port > 0)
+        && !authority.ends_with(':')
 }
 
 /// bot 显示名必须是非空单行文本，最多 16 个且大小写不重复。

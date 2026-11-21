@@ -3,6 +3,7 @@
 use auction_contracts::PublicLotWatchesResponse;
 #[cfg(all(target_arch = "wasm32", not(test)))]
 use auction_web_shared::storage;
+use auction_web_shared::valid_uuid;
 #[cfg(any(target_arch = "wasm32", test))]
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +36,10 @@ pub(in crate::surface) fn load(
     user_id: &str,
     auction_id: &str,
 ) -> Option<PublicLotWatchesResponse> {
+    if !valid_uuid(user_id) || !valid_uuid(auction_id) {
+        return None;
+    }
+
     cfg_select! {
         any(target_arch = "wasm32", test) => {
             let revision = PublicSessionCheckTrigger::watch_cache_revision()?;
@@ -61,6 +66,10 @@ pub(in crate::surface) fn load(
 /// 存储禁用、配额不足等错误不改变服务器保存结果。淘汰只发生在本缓存自己的前缀内，
 /// 语言、主题与每页数量偏好不会被挤掉；写入失败则不记录索引也不删除任何键。
 pub(in crate::surface) fn save(page: &PublicLotWatchesResponse, revision: Option<&str>) {
+    if !valid_uuid(&page.user_id) || !valid_uuid(&page.auction_id) {
+        return;
+    }
+
     #[cfg(any(target_arch = "wasm32", test))]
     {
         let Some(revision) = revision else { return };
@@ -74,11 +83,16 @@ pub(in crate::surface) fn save(page: &PublicLotWatchesResponse, revision: Option
         if !storage::set_item(&current, &value) {
             return;
         }
+        if PublicSessionCheckTrigger::watch_cache_revision().as_deref() != Some(revision) {
+            storage::remove_item(&current);
+            return;
+        }
         let mut recent = recent_keys();
         recent.retain(|entry| entry != &current);
-        recent.insert(0, current);
+        recent.insert(0, current.clone());
         recent.truncate(MAX_AUCTIONS);
         if !storage::set_item(INDEX_KEY, &recent.join("\n")) {
+            storage::remove_item(&current);
             return;
         }
         for stale in storage::keys()
@@ -94,6 +108,10 @@ pub(in crate::surface) fn save(page: &PublicLotWatchesResponse, revision: Option
 
 /// 已确认退出或换号后清除离开账号的快照。索引缺失时也不能再展示该账号的旧标记。
 pub(in crate::surface) fn invalidate_lot_watches(user_id: &str) {
+    if !valid_uuid(user_id) {
+        return;
+    }
+
     #[cfg(any(target_arch = "wasm32", test))]
     {
         let prefix = format!("{KEY_PREFIX}{user_id}:");
@@ -115,8 +133,21 @@ pub(in crate::surface) fn invalidate_lot_watches(user_id: &str) {
 #[cfg(any(target_arch = "wasm32", test))]
 fn recent_keys() -> Vec<String> {
     storage::get_item(INDEX_KEY).map_or_default(|index| {
-        index.split('\n').filter(|key| key.starts_with(KEY_PREFIX)).map(str::to_owned).collect()
+        let mut seen = std::collections::BTreeSet::new();
+        index
+            .split('\n')
+            .filter(|key| valid_cache_key(key) && storage::get_item(key).is_some())
+            .filter(|key| seen.insert(*key))
+            .map(str::to_owned)
+            .collect()
     })
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn valid_cache_key(key: &str) -> bool {
+    let Some(identities) = key.strip_prefix(KEY_PREFIX) else { return false };
+    let Some((user_id, auction_id)) = identities.split_once(':') else { return false };
+    !auction_id.contains(':') && valid_uuid(user_id) && valid_uuid(auction_id)
 }
 
 #[cfg(any(target_arch = "wasm32", test))]

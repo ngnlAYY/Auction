@@ -5,7 +5,7 @@
 //! 不能另取连接绕过互斥 session 继续确认游标。
 
 mod acknowledgement;
-mod failure;
+pub(in crate::database) mod failure;
 mod owned;
 mod ownership;
 mod read;
@@ -13,5 +13,3 @@ mod stream;
 mod validation;
 
 pub use ownership::{RealtimeConsumerOwnership, RealtimeConsumerOwnershipError};
-
-pub(in crate::database) use failure::resolve_failure_postgres_tx;

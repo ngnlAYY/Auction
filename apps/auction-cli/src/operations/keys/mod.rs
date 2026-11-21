@@ -13,6 +13,7 @@ use std::{collections::BTreeMap, path::Path, sync::Arc};
 use anyhow::Context;
 use auction_application::core::CliOperatorIdentity;
 use auction_config::DataKeyDomain;
+use auction_integrations::Keyring;
 use auction_storage::DatabaseStore;
 use auction_time::Timestamp;
 use serde_json::json;
@@ -188,6 +189,18 @@ async fn reencrypt(config_dir: &ConfigDir, args: KeysReencryptArgs) -> anyhow::R
         auction_storage::DatabaseConnectionPurpose::CliOperations,
         async |store| {
             let started_at = Timestamp::now();
+            if let Some(identity) = &plan.apply {
+                let task = tokio::spawn(reencrypt_apply_task(
+                    Arc::clone(store),
+                    keyrings.clone(),
+                    args.page_size,
+                    args.receipt.clone(),
+                    identity.actor.to_owned(),
+                    identity.operator.clone(),
+                    started_at,
+                ));
+                return task.await.context("等待密钥重加密收口与审计任务失败")?;
+            }
             let mut processed = Vec::with_capacity(keyrings.len());
             let mut failure = None;
             for (domain, ring) in &keyrings {
@@ -258,6 +271,57 @@ async fn reencrypt(config_dir: &ConfigDir, args: KeysReencryptArgs) -> anyhow::R
         },
     )
     .await
+}
+
+/// Apply 的重写与收口运行在拥有全部输入的任务中；调用方 future 被取消时，任务继续写回执与审计。
+async fn reencrypt_apply_task(
+    store: Arc<DatabaseStore>,
+    keyrings: Vec<(DataKeyDomain, Arc<Keyring>)>,
+    page_size: i64,
+    receipt_path: Option<std::path::PathBuf>,
+    actor: String,
+    operator: CliOperatorIdentity,
+    started_at: Timestamp,
+) -> anyhow::Result<()> {
+    let identity = ApplyIdentity { actor: &actor, operator };
+    let mut processed = Vec::with_capacity(keyrings.len());
+    let mut failure = None;
+    for (domain, ring) in &keyrings {
+        let mut outcome = DomainOutcome::default();
+        let result = reencrypt_domain(&store, ring, *domain, page_size, true, &mut outcome).await;
+        processed.push(ProcessedDomain {
+            domain: *domain,
+            to_key_id: ring.current_id().to_owned(),
+            outcome,
+            failure_stage: result.as_ref().err().map(|failure| failure.stage),
+        });
+        if let Err(error) = result {
+            failure = Some((*domain, error));
+            break;
+        }
+    }
+    let receipt_id = Uuid::new_v4();
+    let summary = failure.as_ref().map(|(domain, failure)| (*domain, failure.stage));
+    let document = receipt_document(receipt_id, true, started_at, &processed, summary);
+    let recorded =
+        record_apply(&store, receipt_path.as_deref(), &identity, receipt_id, &document, &processed)
+            .await;
+    let printed = print_json(&document);
+    let Some((domain, failure)) = failure else {
+        return recorded.and(printed);
+    };
+    let error = failure.error.context(format!(
+        "{} 域重加密中途失败（阶段 {}）；已提交的改写数见 outcome=partial 回执与审计，修复原因后重新运行会继续处理剩余信封",
+        domain.as_str(),
+        failure.stage.as_str()
+    ));
+    let mut messages = vec![format!("{error:#}")];
+    messages.extend(recorded.err().map(|record_error| format!("{record_error:#}")));
+    messages.extend(printed.err().map(|print_error| format!("{print_error:#}")));
+    if messages.len() == 1 {
+        return Err(error);
+    }
+    Err(anyhow::anyhow!(messages.join("；")))
 }
 
 /// 一个已进入改写循环的域；`failure_stage` 为 None 表示该域处理完，否则是中途失败的阶段。

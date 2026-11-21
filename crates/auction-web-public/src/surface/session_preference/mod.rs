@@ -9,8 +9,9 @@ use dioxus::prelude::*;
 
 use self::duration::DurationUnit;
 use self::state::{PreferenceOwner, PreferenceState};
+use crate::api::PublicSessionEvidenceTrigger;
 use crate::surface::account::preference_reload::{PreferenceRead, PreferenceReload};
-use crate::surface::commands::SessionAuthority;
+use crate::surface::commands::session::SessionAuthority;
 use crate::surface::session::SessionCommandScope;
 use crate::surface::{PublicCommandOwner, PublicSessionResource, use_content_loading};
 
@@ -20,6 +21,7 @@ pub(super) fn SessionPreference(user_id: String) -> Element {
     let session = use_context::<PublicSessionResource>();
     let mut state = use_signal(PreferenceState::default);
     let identity = use_context::<PublicCommandOwner>().0;
+    let evidence = use_context::<PublicSessionEvidenceTrigger>();
     let owner = PreferenceOwner {
         user_id,
         identity,
@@ -29,6 +31,7 @@ pub(super) fn SessionPreference(user_id: String) -> Element {
         commands: use_context::<SessionCommandScope>(),
         reload: PreferenceReload::use_tracking(),
         authority: SessionAuthority::use_context(),
+        evidence,
     };
     use_effect({
         let mut owner = owner.clone();

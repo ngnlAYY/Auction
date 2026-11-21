@@ -68,7 +68,7 @@ pub(super) async fn append_lifecycle_record_inner(
             schema_version: 1,
             payload,
             state_version,
-            origin_command_id: command.command_id.as_uuid(),
+            origin_command_id: Some(command.command_id.as_uuid()),
             created_at: None,
         },
     )

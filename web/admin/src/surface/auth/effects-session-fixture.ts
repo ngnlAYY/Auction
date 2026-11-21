@@ -29,28 +29,34 @@ export class Stub {
   request(signal?: AbortSignal): Promise<FetchReply> {
     this.calls += 1;
     const replyAfterAbort = this.replyAfterAbort;
+    const isAborted = (): boolean => signal?.aborted === true;
     this.replyAfterAbort = false;
-    if (signal?.aborted === true) {
+    if (isAborted()) {
       this.cancelled += 1;
       return Promise.reject(aborted());
     }
-    return new Promise((resolve, reject) => {
-      const finish = (reply: FetchReply): void => {
-        cleanup();
-        resolve(reply);
-      };
-      const abort = (): void => {
-        this.cancelled += 1;
-        if (replyAfterAbort) return;
-        const index = this.pending.indexOf(finish);
-        if (index >= 0) this.pending.splice(index, 1);
-        cleanup();
-        reject(aborted());
-      };
-      const cleanup = (): void => signal?.removeEventListener("abort", abort);
-      signal?.addEventListener("abort", abort, { once: true });
+    const { promise, resolve, reject } = Promise.withResolvers<FetchReply>();
+    const finish = (reply: FetchReply): void => {
+      cleanup();
+      resolve(reply);
+    };
+    const abort = (): void => {
+      this.cancelled += 1;
+      if (replyAfterAbort) return;
+      const index = this.pending.indexOf(finish);
+      if (index >= 0) this.pending.splice(index, 1);
+      cleanup();
+      reject(aborted());
+    };
+    const cleanup = (): void => signal?.removeEventListener("abort", abort);
+    signal?.addEventListener("abort", abort, { once: true });
+    if (isAborted() && !replyAfterAbort) {
+      abort();
+    } else {
       this.pending.push(finish);
-    });
+      if (isAborted()) abort();
+    }
+    return promise;
   }
 
   finish(reply: FetchReply, index = 0): void {
@@ -216,7 +222,9 @@ export function installFetch(stubs: Transport): () => void {
           "https://fixture.invalid",
         );
         const path = `${url.pathname}${url.search}`;
-        const method = (init?.method ?? "GET").toUpperCase();
+        const method = (
+          init?.method ?? (input instanceof Request ? input.method : "GET")
+        ).toUpperCase();
         const session = "/api/v1/admin/session";
         const sessionWithTime = `${session}?include=server_time`;
         let stub: Stub;
@@ -225,7 +233,11 @@ export function installFetch(stubs: Transport): () => void {
             stub = stubs.get;
             break;
           case `POST ${sessionWithTime}`:
-            stubs.loginAuthorizations.push(new Headers(init?.headers).get("authorization") ?? "");
+            stubs.loginAuthorizations.push(
+              new Headers(
+                init?.headers ?? (input instanceof Request ? input.headers : undefined),
+              ).get("authorization") ?? "",
+            );
             stub = stubs.post;
             break;
           case `DELETE ${session}`:
@@ -267,7 +279,9 @@ export function installFetch(stubs: Transport): () => void {
             }
             throw new Error(`意外的认证测试请求 ${method} ${path}`);
         }
-        const reply = await stub.request(init?.signal ?? undefined);
+        const reply = await stub.request(
+          init?.signal ?? (input instanceof Request ? input.signal : undefined),
+        );
         if (reply.kind === "network") {
           throw new TypeError("network");
         }

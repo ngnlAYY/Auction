@@ -139,21 +139,22 @@ pub fn retention_snapshot(
     platform::retention_snapshot(directory, retention, hold, now)
 }
 
-/// 按政策 v2 删除普通过期证据文件，最多 `max_files` 个。写入结果未知的证据一律保留，
-/// 包括超过 90 天保全窗的记录；临时文件与未识别目录项不删除。参数或目录身份异常时
-/// 在删除任何文件前失败关闭；删除中途失败仍在返回值中精确报告已完成的删除。
+/// 按政策 v2 删除普通过期证据文件，最多 `max_files` 个、累计不超过 `max_bytes` 字节。
+/// 写入结果未知的证据一律保留，包括超过 90 天保全窗的记录；临时文件与未识别目录项不删除。
+/// 参数或目录身份异常时在删除任何文件前失败关闭；删除中途失败仍精确报告已完成的删除。
 pub fn purge_ordinary_expired(
     directory: &Path,
     retention: Duration,
     hold: Duration,
     now: SystemTime,
     max_files: u64,
+    max_bytes: u64,
 ) -> Result<MailDiagnosticPurgeOutcome, MailDiagnosticError> {
     validate_retention_parameters(directory, retention, hold)?;
     if max_files > MAX_PURGE_FILES {
         return Err(MailDiagnosticError::InvalidContext);
     }
-    platform::purge_ordinary_expired(directory, retention, hold, now, max_files)
+    platform::purge_ordinary_expired(directory, retention, hold, now, max_files, max_bytes)
 }
 
 /// 结果未知证据的公开失败码；与 `MailDiagnosticOutcome::failure_code` 的闭集一致。

@@ -96,6 +96,9 @@ pub(crate) async fn create(
         || result.auction.id.as_uuid() != auction_id
         || result.auction.world_id != input.world_id
         || result.auction.sequence != input.sequence
+        || result.auction.preview_scheduled_at != preview_scheduled_at
+        || result.auction.scheduled_open_at != scheduled_open_at
+        || result.auction.scheduled_end_at != Some(scheduled_end_at)
         || result.auction.status != "draft"
         || result.auction.state_version != 1
     {

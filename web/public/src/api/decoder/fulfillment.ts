@@ -73,6 +73,9 @@ export function validFulfillmentPage(
   page: number,
   pageSize: number,
 ): boolean {
+  if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(pageSize) || pageSize < 1) {
+    return false;
+  }
   const decoded = object(value);
   if (decoded === null) {
     return false;
@@ -100,13 +103,13 @@ export function validFulfillmentPage(
   if (!lots.every(validLot)) {
     return false;
   }
-  for (let index = 0; index < lots.length; index += 1) {
-    const current = lots[index];
-    for (let previous = 0; previous < index; previous += 1) {
-      if (object(lots[previous])?.lot_id === object(current)?.lot_id) {
-        return false;
-      }
+  const lotIds = new Set<string>();
+  for (const value of lots) {
+    const lotId = object(value)?.lot_id;
+    if (typeof lotId !== "string" || lotIds.has(lotId)) {
+      return false;
     }
+    lotIds.add(lotId);
   }
   return true;
 }

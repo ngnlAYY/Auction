@@ -1805,6 +1805,7 @@ support-deliveries-title = 投递
 support-notifications-title = 通知
 support-empty = 该分区没有记录。
 support-lot = 标的
+support-lot-status = 标的状态
 support-world = 世界
 support-lot-number = 标的序号
 support-amount = 金额

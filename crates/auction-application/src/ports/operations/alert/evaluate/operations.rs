@@ -5,9 +5,10 @@ use super::super::model::{
     OperationsAlertLifecycleSnapshot, OperationsAlertProcessSnapshot,
     OperationsAlertReconciliationSnapshot, OperationsAlertSourceObservation,
 };
+use super::super::signals::thresholds::reached;
 use super::super::signals::{
     OPERATIONS_ALERT_LIFECYCLE_GRACE, OPERATIONS_ALERT_RECONCILIATION_STALE_AGE,
-    OperationsAlertKind, OperationsAlertSignal, OperationsAlertSource, reached,
+    OperationsAlertKind, OperationsAlertSignal, OperationsAlertSource,
 };
 
 pub(super) fn evaluate_process(

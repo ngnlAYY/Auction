@@ -279,6 +279,9 @@ fn prepare_replay_request(
     schema_version: i32,
     public_payload: &str,
 ) -> Result<(String, String), AdminWriteFailure> {
+    if !valid_uuid(&failure.id) || !valid_uuid(&failure.event_id) {
+        return Err(AdminWriteFailure::not_sent("invalid_request"));
+    }
     let public_payload: Value = serde_json::from_str(public_payload)
         .map_err(|error| AdminWriteFailure::not_sent(invalid_request_error(error)))?;
     if !public_payload.is_object() {

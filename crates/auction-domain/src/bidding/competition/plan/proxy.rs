@@ -138,11 +138,12 @@ pub(super) fn plan_create_proxy(
             // 新授权序号恒为 last+1，而活动授权序号 ≤ last（锁内已校验），所以同上限时
             // 总是更早的活动授权获胜；只有严格更高的上限才能让新代理胜出。
             let candidate_wins = maximum_amount > active.maximum_amount;
-            let (winner_user_id, winner_proxy_id, winner_maximum, loser) = if candidate_wins {
-                (created.user_id, created.id, created.maximum_amount, active)
-            } else {
-                (active.user_id, active.id, active.maximum_amount, created)
-            };
+            let (winner_user_id, winner_proxy_id, winner_maximum, loser, winner_state) =
+                if candidate_wins {
+                    (created.user_id, created.id, created.maximum_amount, active, created)
+                } else {
+                    (active.user_id, active.id, active.maximum_amount, created, active)
+                };
             let mut price = rules.next_minimum_bid(
                 Some(final_state.start_price),
                 Some(loser.maximum_amount),
@@ -152,6 +153,9 @@ pub(super) fn plan_create_proxy(
             if let Some(current) = final_state.current_price {
                 price = price.max(current);
             }
+            if price > winner_maximum {
+                return Err(DomainError::InvalidBidState("代理竞价超过授权上限"));
+            }
             if price <= final_state.current_price.unwrap_or(final_state.start_price) {
                 return Err(DomainError::InvalidBidState("新代理无法产生有效竞价"));
             }
@@ -160,10 +164,7 @@ pub(super) fn plan_create_proxy(
             let (loser, loser_transition) =
                 exhaust_proxy(loser, command_id, ProxyTerminalReason::RankedBelow)?;
             let transitions = vec![creation_transition, loser_transition];
-            let mut proxy_states = vec![loser];
-            if candidate_wins {
-                proxy_states.push(created);
-            }
+            let proxy_states = vec![loser, winner_state];
             (
                 transitions,
                 proxy_states,
@@ -279,6 +280,7 @@ pub(super) fn plan_slow_due(
     if bid_ids.len() != 1 {
         return Err(DomainError::InvalidBidState("慢速代理事实数量不正确"));
     }
+    let active_proxy_id = active.id;
     let final_state = clear_slow_schedule(state)?;
     finalize_plan(
         rules,
@@ -294,8 +296,8 @@ pub(super) fn plan_slow_due(
         }],
         ProxyPlanOutput {
             transitions: Vec::new(),
-            states: Vec::new(),
-            active_proxy_id: Some(active.id),
+            states: vec![active],
+            active_proxy_id: Some(active_proxy_id),
         },
     )
 }
@@ -339,6 +341,8 @@ pub(super) fn plan_final_proxy(
             mechanism: BidMechanism::Proxy,
             proxy_maximum: Some(active.maximum_amount),
         });
+    } else if final_state.slow_authorization_id.is_some() {
+        return Err(DomainError::InvalidBidState("最终阶段慢速调度与代理授权不一致"));
     } else if !bid_ids.is_empty() {
         return Err(DomainError::InvalidBidState("无慢速调度时不应产生最终阶段事实"));
     }

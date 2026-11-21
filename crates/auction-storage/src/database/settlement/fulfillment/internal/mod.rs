@@ -50,15 +50,28 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
         obligation_id: uuid::Uuid,
     ) -> ApplicationFuture<'_, Option<String>> {
         Box::pin(async move {
-            let mut tx =
-                self.pool().begin().await.map_err(|_| storage_error("旧自寄修复证明不可用"))?;
+            let mut tx = self.pool().begin().await.map_err(|error| {
+                crate::database::log_discarded_sql_error(
+                    &error,
+                    "legacy_self_proof_read_failed",
+                    "开启旧自寄修复证明事务失败",
+                );
+                storage_error("旧自寄修复证明不可用")
+            })?;
             let result = crate::database::delivery::legacy_self_proof::legacy_self_uid(
                 &mut tx,
                 obligation_id,
             )
             .await
             .map_err(|_| storage_error("旧自寄修复证明不匹配"))?;
-            tx.commit().await.map_err(|_| storage_error("旧自寄修复证明读取失败"))?;
+            tx.commit().await.map_err(|error| {
+                crate::database::log_discarded_sql_error(
+                    &error,
+                    "legacy_self_proof_read_failed",
+                    "提交旧自寄修复证明读取事务失败",
+                );
+                storage_error("旧自寄修复证明读取失败")
+            })?;
             Ok(result)
         })
     }

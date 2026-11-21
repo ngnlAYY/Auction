@@ -1,6 +1,8 @@
 //! 备份范围 sidecar：只记录摘要、规模与相对路径，绝不记录绝对来源目录或文件内容。
 
-use std::path::{Path, PathBuf};
+use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::Context;
 use auction_time::Timestamp;
@@ -45,6 +47,14 @@ impl ScopeSidecar {
         sidecar_path: &Path,
         archive_file_name: &str,
     ) -> anyhow::Result<PathBuf> {
+        let mut archive_components = Path::new(archive_file_name).components();
+        if !matches!(archive_components.next(), Some(Component::Normal(_)))
+            || archive_components.next().is_some()
+            || archive_file_name.contains(['/', '\\', '\0'])
+            || archive_file_name.chars().any(char::is_control)
+        {
+            anyhow::bail!("archive 文件名必须是单个普通路径分量");
+        }
         if self.format != FORMAT
             || self.bundle_file_name != bundle_file_name(archive_file_name)
             || !is_lower_hex(&self.bundle_sha256, 64)
@@ -64,25 +74,43 @@ impl ScopeSidecar {
         {
             anyhow::bail!("备份范围 sidecar 文件名必须与 archive 配对");
         }
-        let mut kinds = Vec::new();
-        let mut total_files = 0_u64;
+        let mut sources = BTreeMap::new();
+        let mut source_files = 0_u64;
         for source in &self.sources {
-            if kinds.contains(&source.kind) {
+            source_files =
+                source_files.checked_add(source.files).context("备份范围来源文件数溢出")?;
+            if sources.insert(source.kind, source).is_some() {
                 anyhow::bail!("备份范围 sidecar 重复记录来源类型");
             }
-            kinds.push(source.kind);
-            total_files = total_files.checked_add(source.files).context("备份范围文件数溢出")?;
         }
-        if total_files != self.files_count {
-            anyhow::bail!("备份范围 sidecar 的文件计数不一致");
+        if source_files != self.files_count {
+            anyhow::bail!("备份范围 sidecar files_count 与来源摘要不一致");
         }
+        let mut listed = BTreeMap::<_, (u64, u64)>::new();
+        let mut paths = BTreeSet::new();
         for entry in &self.files {
             validate_relative(&entry.path)?;
             if entry.path.len() > MAX_RELATIVE_BYTES
-                || !entry.path.starts_with(entry.kind.slug())
+                || !entry.path.starts_with(&format!("{}/", entry.kind.slug()))
                 || !is_lower_hex(&entry.sha256, 64)
+                || !paths.insert(&entry.path)
             {
-                anyhow::bail!("备份范围 sidecar 的文件条目无效");
+                anyhow::bail!("备份范围 sidecar 的文件条目无效或重复");
+            }
+            if !sources.contains_key(&entry.kind) {
+                anyhow::bail!("备份范围 sidecar 文件条目缺少来源摘要");
+            }
+            let totals = listed.entry(entry.kind).or_default();
+            totals.0 = totals.0.checked_add(1).context("备份范围列出文件数溢出")?;
+            totals.1 = totals.1.checked_add(entry.bytes).context("备份范围列出字节数溢出")?;
+        }
+        for source in &self.sources {
+            let (files, bytes) = listed.get(&source.kind).copied().unwrap_or_default();
+            if files > source.files
+                || bytes > source.bytes
+                || !self.files_truncated && (files != source.files || bytes != source.bytes)
+            {
+                anyhow::bail!("备份范围 sidecar 来源摘要与文件列表不一致");
             }
         }
         Ok(sidecar_path.with_file_name(self.bundle_file_name.clone()))
@@ -94,7 +122,21 @@ impl ScopeSidecar {
 }
 
 pub(crate) fn read(path: &Path) -> anyhow::Result<(ScopeSidecar, String)> {
-    let bytes = files::read_bounded(path, MAX_SIDECAR_BYTES)?;
+    read_file(path, files::open_regular(path)?)
+}
+
+pub(crate) fn read_staged(path: &Path) -> anyhow::Result<(ScopeSidecar, String)> {
+    read_file(path, files::open_private_regular(path)?)
+}
+
+fn read_file(path: &Path, file: std::fs::File) -> anyhow::Result<(ScopeSidecar, String)> {
+    let mut bytes = Vec::new();
+    file.take(MAX_SIDECAR_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("读取备份范围 sidecar 失败：{}", path.display()))?;
+    if bytes.len() as u64 > MAX_SIDECAR_BYTES {
+        anyhow::bail!("备份范围 sidecar 超过大小上限：{}", path.display());
+    }
     let sidecar: ScopeSidecar =
         serde_json::from_slice(&bytes).context("解析备份范围 sidecar 失败")?;
     Ok((sidecar, sha256_bytes(&bytes)))

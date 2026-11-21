@@ -65,9 +65,10 @@ struct SchemaContract {
     defaults: BTreeMap<String, BTreeMap<String, String>>,
     constraints: BTreeMap<String, BTreeMap<String, ConstraintShape>>,
     triggers: BTreeSet<(String, String)>,
+    trigger_functions: BTreeMap<String, BTreeMap<String, String>>,
     functions: BTreeMap<String, String>,
     domains: BTreeMap<String, String>,
-    enums: BTreeMap<String, BTreeSet<String>>,
+    enums: BTreeMap<String, Vec<String>>,
     relation_privileges: BTreeSet<(String, String, String)>,
     column_privileges: BTreeSet<(String, String, String, String)>,
     function_privileges: BTreeSet<(String, String, String)>,
@@ -142,6 +143,76 @@ const LEGACY_WORKLOAD: &[LegacyStep] = &[
     },
 ];
 
+/// 每条旧版语句的支持窗口。Breaking migration 只有在明确记录首次不再支持的版本后，
+/// 才能从后续兼容比较中移除该语句；当前迁移链仍支持全部基线运维告警语句。
+struct LegacyWorkloadSupport {
+    label: &'static str,
+    introduced_in: i64,
+    retired_in: Option<i64>,
+}
+
+const LEGACY_WORKLOAD_SUPPORT: &[LegacyWorkloadSupport] = &[
+    LegacyWorkloadSupport {
+        label: "operations-alert-signal-insert",
+        introduced_in: 75,
+        retired_in: None,
+    },
+    LegacyWorkloadSupport {
+        label: "operations-alert-signal-read",
+        introduced_in: 75,
+        retired_in: None,
+    },
+    LegacyWorkloadSupport {
+        label: "operations-alert-signal-update",
+        introduced_in: 75,
+        retired_in: None,
+    },
+    LegacyWorkloadSupport {
+        label: "operations-alert-signal-reread",
+        introduced_in: 75,
+        retired_in: None,
+    },
+    LegacyWorkloadSupport {
+        label: "operations-alert-signal-delete",
+        introduced_in: 75,
+        retired_in: None,
+    },
+    LegacyWorkloadSupport {
+        label: "operations-alert-signal-empty-read",
+        introduced_in: 75,
+        retired_in: None,
+    },
+];
+
+fn supported_legacy_workload(version: i64) -> BTreeSet<String> {
+    let declared = LEGACY_WORKLOAD.iter().map(|step| step.label).collect::<BTreeSet<_>>();
+    let modeled =
+        LEGACY_WORKLOAD_SUPPORT.iter().map(|support| support.label).collect::<BTreeSet<_>>();
+    assert_eq!(declared, modeled, "每条 LEGACY_WORKLOAD 都须声明支持窗口");
+
+    let mut supported = BTreeSet::new();
+    let mut dependency_suffix_retired = false;
+    for step in LEGACY_WORKLOAD {
+        let support = LEGACY_WORKLOAD_SUPPORT
+            .iter()
+            .find(|support| support.label == step.label)
+            .expect("工作负载支持声明");
+        let is_supported = support.introduced_in <= version
+            && support.retired_in.is_none_or(|retired_in| version < retired_in);
+        if is_supported {
+            assert!(
+                !dependency_suffix_retired,
+                "旧版工作负载按顺序依赖；退休一步后必须同时退休其后缀：{}",
+                step.label
+            );
+            supported.insert(step.label.to_owned());
+        } else {
+            dependency_suffix_retired = true;
+        }
+    }
+    supported
+}
+
 #[tokio::test]
 async fn postgres_compatible_declarations_preserve_previous_version_contract() {
     let database = support::TestDatabase::create_empty().await.expect("创建空测试库");
@@ -173,7 +244,14 @@ async fn postgres_compatible_declarations_preserve_previous_version_contract() {
     let mut baseline_contract = capture_contract(pool).await.expect("捕获基线契约");
     let mut baseline_probes =
         probe_legacy_writes(pool, &baseline_contract).await.expect("执行基线写入探针");
-    let mut baseline_workload = run_legacy_workload(pool).await.expect("执行基线旧版语句");
+    let all_workload_steps = supported_legacy_workload(COMPATIBILITY_BASELINE_VERSION);
+    let mut baseline_workload =
+        run_legacy_workload(pool, &all_workload_steps).await.expect("执行基线旧版语句");
+    assert_eq!(
+        baseline_workload.len(),
+        all_workload_steps.len(),
+        "075 必须支持支持窗口声明的完整旧版工作负载"
+    );
 
     let mut verified_compatible = Vec::new();
     let mut verified_breaking = Vec::new();
@@ -192,11 +270,13 @@ async fn postgres_compatible_declarations_preserve_previous_version_contract() {
         );
 
         let contract = capture_contract(pool).await.expect("捕获迁移后契约");
-        let probes =
-            probe_legacy_writes(pool, &baseline_contract).await.expect("执行迁移后写入探针");
-        let workload = run_legacy_workload(pool).await.expect("执行迁移后旧版语句");
 
+        let expected_workload = supported_legacy_workload(version);
         if level == "compatible" {
+            let probes = probe_legacy_writes(pool, &contract).await.expect("执行迁移后写入探针");
+            let workload = run_legacy_workload(pool, &expected_workload)
+                .await
+                .expect("执行迁移后仍受支持的旧版语句");
             let mut problems = contract_violations(&baseline_contract, &contract);
             for (table, signature) in &baseline_probes {
                 match probes.get(table) {
@@ -208,6 +288,10 @@ async fn postgres_compatible_declarations_preserve_previous_version_contract() {
                 }
             }
             for (label, digest) in &baseline_workload {
+                if !expected_workload.contains(label) {
+                    problems.push(format!("compatible 迁移 {version} 不能退休旧版语句 {label}"));
+                    continue;
+                }
                 match workload.get(label) {
                     Some(after) if after == digest => {}
                     Some(after) => {
@@ -222,14 +306,34 @@ async fn postgres_compatible_declarations_preserve_previous_version_contract() {
                 problems.join("\n")
             );
             verified_compatible.push(version);
+            baseline_probes = probes;
+            baseline_workload = workload;
         } else {
-            // breaking 允许任意变化：不比较，只重建基线。
+            let probes = probe_legacy_writes(pool, &contract)
+                .await
+                .expect("执行 breaking 迁移后的默认写入探针");
+            for (table, signature) in &baseline_probes {
+                if contract.relations.contains_key(table)
+                    && default_insert_contract_unchanged(&baseline_contract, &contract, table)
+                {
+                    assert_eq!(
+                        probes.get(table),
+                        Some(signature),
+                        "breaking 迁移 {version} 改变了结构未变表 public.{table} 的旧版默认写入结果"
+                    );
+                }
+            }
+            // 每条仍支持的旧版语句必须继续成功；只有支持窗口 manifest 明确退休的依赖后缀会移出基线。
+            let workload =
+                run_legacy_workload(pool, &expected_workload).await.unwrap_or_else(|error| {
+                    panic!("breaking 迁移 {version} 破坏仍支持的旧版语句：{error}")
+                });
             verified_breaking.push(version);
+            baseline_probes = probes;
+            baseline_workload = workload;
         }
-        // 下一级一律相对执行后的状态比较，因此 compatible 的收缩会逐级累积。
+        // 下一级一律相对执行后的结构状态比较。
         baseline_contract = contract;
-        baseline_probes = probes;
-        baseline_workload = workload;
     }
 
     let applied: i64 = sqlx::query_scalar("SELECT max(version) FROM public._sqlx_migrations")
@@ -297,7 +401,10 @@ async fn postgres_compatibility_harness_rejects_breaking_changes() {
 
     let baseline = capture_contract(pool).await.expect("捕获对照基线");
     let baseline_probes = probe_legacy_writes(pool, &baseline).await.expect("执行对照基线探针");
-    let baseline_workload = run_legacy_workload(pool).await.expect("执行对照基线旧版语句");
+    let all_workload_steps = supported_legacy_workload(COMPATIBILITY_BASELINE_VERSION);
+    let baseline_workload =
+        run_legacy_workload(pool, &all_workload_steps).await.expect("执行对照基线旧版语句");
+    assert_eq!(baseline_workload.len(), all_workload_steps.len());
     assert_eq!(
         baseline_probes.get("compatibility_probe_legacy").map(String::as_str),
         Some("ok"),
@@ -327,7 +434,9 @@ async fn postgres_compatibility_harness_rejects_breaking_changes() {
     let current = capture_contract(pool).await.expect("捕获破坏后契约");
     let problems = contract_violations(&baseline, &current);
     let current_probes = probe_legacy_writes(pool, &baseline).await.expect("执行破坏后探针");
-    let current_workload = run_legacy_workload(pool).await.expect("执行破坏后旧版语句");
+    let required_workload = baseline_workload.keys().cloned().collect::<BTreeSet<_>>();
+    let current_workload =
+        run_legacy_workload(pool, &required_workload).await.expect("执行破坏后旧版语句");
 
     for expected in
         ["新增 NOT NULL", "被删除或重命名", "新增触发器", "新增行级安全", "SELECT 权限被收回"]
@@ -502,9 +611,29 @@ async fn capture_contract(pool: &PgPool) -> Result<SchemaContract, String> {
         contract.triggers.insert((relation, trigger));
     }
 
+    for (relation, trigger, signature) in sqlx::query_as::<_, (String, String, String)>(
+        "SELECT rel.relname, trg.tgname,
+                concat_ws('|', pg_get_triggerdef(trg.oid), md5(proc.prosrc))
+         FROM pg_trigger AS trg
+         JOIN pg_class AS rel ON rel.oid = trg.tgrelid
+         JOIN pg_namespace AS ns ON ns.oid = rel.relnamespace
+         JOIN pg_proc AS proc ON proc.oid = trg.tgfoid
+         WHERE ns.nspname = 'public' AND NOT trg.tgisinternal",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("读取触发器实现契约失败：{error}"))?
+    {
+        contract.trigger_functions.entry(relation).or_default().insert(trigger, signature);
+    }
+
     for (identity, result) in sqlx::query_as::<_, (String, String)>(
         "SELECT proc.proname || '(' || pg_get_function_identity_arguments(proc.oid) || ')',
-                pg_get_function_result(proc.oid) || '|' || md5(proc.prosrc)
+                pg_get_function_result(proc.oid) || '|volatility=' || proc.provolatile::text
+                    || '|strict=' || proc.proisstrict || '|security_definer=' || proc.prosecdef
+                    || '|leakproof=' || proc.proleakproof || '|parallel=' || proc.proparallel::text
+                    || '|arguments=' || pg_get_function_arguments(proc.oid)
+                    || '|source=' || md5(proc.prosrc)
          FROM pg_proc AS proc
          JOIN pg_namespace AS ns ON ns.oid = proc.pronamespace
          WHERE ns.nspname = 'public'",
@@ -534,13 +663,14 @@ async fn capture_contract(pool: &PgPool) -> Result<SchemaContract, String> {
          FROM pg_type AS typ
          JOIN pg_enum AS enm ON enm.enumtypid = typ.oid
          JOIN pg_namespace AS ns ON ns.oid = typ.typnamespace
-         WHERE ns.nspname = 'public'",
+         WHERE ns.nspname = 'public'
+         ORDER BY typ.typname, enm.enumsortorder",
     )
     .fetch_all(pool)
     .await
     .map_err(|error| format!("读取枚举契约失败：{error}"))?
     {
-        contract.enums.entry(name).or_default().insert(label);
+        contract.enums.entry(name).or_default().push(label);
     }
 
     for (relation, grantee, privilege) in sqlx::query_as::<_, (String, String, String)>(
@@ -719,12 +849,13 @@ fn contract_violations(baseline: &SchemaContract, current: &SchemaContract) -> V
         match current.functions.get(identity) {
             None => problems.push(format!("函数 {identity} 被删除")),
             Some(after) if after != result => {
-                // 迁移/授权专用 helper 由后续迁移反复 CREATE OR REPLACE，旧程序运行时不调用；
-                // 只要求它仍然存在且返回类型不变，函数体属于迁移工具面。
-                if !MIGRATION_TOOLING_FUNCTIONS.contains(&identity.as_str()) {
-                    problems.push(format!(
-                        "函数 {identity} 的返回类型或函数体被改写：{result} → {after}"
-                    ));
+                // 迁移工具 helper 可替换函数体，但其调用/权限语义仍须兼容。
+                let tooling_function = MIGRATION_TOOLING_FUNCTIONS.contains(&identity.as_str());
+                let before_contract =
+                    result.split_once("|source=").map_or(result.as_str(), |v| v.0);
+                let after_contract = after.split_once("|source=").map_or(after.as_str(), |v| v.0);
+                if !tooling_function || before_contract != after_contract {
+                    problems.push(format!("函数 {identity} 契约被改写：{result} → {after}"));
                 }
             }
             Some(_) => {}
@@ -746,10 +877,8 @@ fn contract_violations(baseline: &SchemaContract, current: &SchemaContract) -> V
             problems.push(format!("枚举 public.{name} 被删除"));
             continue;
         };
-        for label in labels {
-            if !after.contains(label) {
-                problems.push(format!("枚举 public.{name} 取值 {label} 被移除"));
-            }
+        if labels != after {
+            problems.push(format!("枚举 public.{name} 取值或顺序改变：{labels:?} → {after:?}"));
         }
     }
 
@@ -787,6 +916,62 @@ fn contract_violations(baseline: &SchemaContract, current: &SchemaContract) -> V
     }
 
     problems
+}
+
+/// 判断单表 DEFAULT VALUES 探针依赖的结构是否在破坏性迁移后仍保持不变。
+/// Breaking 迁移只允许重置被删除或确实改变写入结构的表；其它旧版 DEFAULT VALUES 结果继续比较。
+fn default_insert_contract_unchanged(
+    baseline: &SchemaContract,
+    current: &SchemaContract,
+    relation: &str,
+) -> bool {
+    if baseline.relations.get(relation) != current.relations.get(relation)
+        || baseline.columns.get(relation) != current.columns.get(relation)
+        || baseline.defaults.get(relation) != current.defaults.get(relation)
+        || baseline.constraints.get(relation) != current.constraints.get(relation)
+        || baseline.trigger_functions.get(relation) != current.trigger_functions.get(relation)
+    {
+        return false;
+    }
+    let baseline_triggers = baseline
+        .triggers
+        .iter()
+        .filter(|entry| entry.0.as_str() == relation)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let current_triggers = current
+        .triggers
+        .iter()
+        .filter(|entry| entry.0.as_str() == relation)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let baseline_relation_privileges = baseline
+        .relation_privileges
+        .iter()
+        .filter(|entry| entry.0.as_str() == relation)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let current_relation_privileges = current
+        .relation_privileges
+        .iter()
+        .filter(|entry| entry.0.as_str() == relation)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let baseline_column_privileges = baseline
+        .column_privileges
+        .iter()
+        .filter(|entry| entry.0.as_str() == relation)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let current_column_privileges = current
+        .column_privileges
+        .iter()
+        .filter(|entry| entry.0.as_str() == relation)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    baseline_triggers == current_triggers
+        && baseline_relation_privileges == current_relation_privileges
+        && baseline_column_privileges == current_column_privileges
 }
 
 /// 对基线的每个表执行旧版“只给必需列以外全部取默认值”的写入，记录结果签名。
@@ -831,25 +1016,56 @@ async fn probe_default_insert(pool: &PgPool, relation: &str) -> Result<String, S
     Ok(signature)
 }
 
-async fn run_legacy_workload(pool: &PgPool) -> Result<BTreeMap<String, String>, String> {
+async fn run_legacy_workload(
+    pool: &PgPool,
+    required_steps: &BTreeSet<String>,
+) -> Result<BTreeMap<String, String>, String> {
     let mut transaction =
         pool.begin().await.map_err(|error| format!("开启旧版语句事务失败：{error}"))?;
     let mut digests = BTreeMap::new();
     for step in LEGACY_WORKLOAD {
-        let digest = if step.query {
-            let value: Option<String> = sqlx::query_scalar(step.sql)
+        if !required_steps.contains(step.label) {
+            break;
+        }
+        sqlx::query("SAVEPOINT legacy_workload_step")
+            .execute(&mut *transaction)
+            .await
+            .map_err(|error| format!("建立旧版语句保存点失败：{error}"))?;
+        let outcome = if step.query {
+            sqlx::query_scalar::<_, Option<String>>(step.sql)
                 .fetch_one(&mut *transaction)
                 .await
-                .map_err(|error| format!("旧版语句 {} 查询失败：{error}", step.label))?;
-            value.unwrap_or_else(|| "<null>".to_owned())
+                .map(|value| value.unwrap_or_else(|| "<null>".to_owned()))
         } else {
-            let result = sqlx::query(step.sql)
+            sqlx::query(step.sql)
                 .execute(&mut *transaction)
                 .await
-                .map_err(|error| format!("旧版语句 {} 写入失败：{error}", step.label))?;
-            format!("rows:{}", result.rows_affected())
+                .map(|result| format!("rows:{}", result.rows_affected()))
         };
-        digests.insert(step.label.to_owned(), digest);
+        match outcome {
+            Ok(digest) => {
+                sqlx::query("RELEASE SAVEPOINT legacy_workload_step")
+                    .execute(&mut *transaction)
+                    .await
+                    .map_err(|error| format!("释放旧版语句保存点失败：{error}"))?;
+                digests.insert(step.label.to_owned(), digest);
+            }
+            Err(error) => {
+                sqlx::query("ROLLBACK TO SAVEPOINT legacy_workload_step")
+                    .execute(&mut *transaction)
+                    .await
+                    .map_err(|rollback| format!("回滚旧版语句保存点失败：{rollback}"))?;
+                sqlx::query("RELEASE SAVEPOINT legacy_workload_step")
+                    .execute(&mut *transaction)
+                    .await
+                    .map_err(|release| format!("释放旧版语句保存点失败：{release}"))?;
+                transaction
+                    .rollback()
+                    .await
+                    .map_err(|rollback| format!("回滚旧版语句事务失败：{rollback}"))?;
+                return Err(format!("旧版语句 {} 查询/写入失败：{error}", step.label));
+            }
+        }
     }
     // 固定重放不落库：下一级 schema 继续使用同一测试库。
     transaction.rollback().await.map_err(|error| format!("回滚旧版语句事务失败：{error}"))?;

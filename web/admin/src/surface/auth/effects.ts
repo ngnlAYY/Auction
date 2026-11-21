@@ -70,6 +70,10 @@ export function useSession(): AdminSessionHandle {
     check: () => accept({ kind: "check_requested" }),
     writesAllowed: () => view.peek().canWrite,
     confirmed: () => phaseVerified(state.phase)?.session ?? null,
+    cookieGeneration: () => {
+      const cookie = cookieGeneration();
+      return cookie.kind === "present" ? cookie.value : null;
+    },
   });
   const host = registration.host;
   onCleanup(registration.release);

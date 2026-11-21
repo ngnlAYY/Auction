@@ -103,30 +103,30 @@ async fn user_id_for_reference(
 ) -> Result<Option<Uuid>, DeliveryAdminError> {
     sqlx::query_scalar(concat!(
         r#"WITH candidates AS (
-               SELECT obligation.recipient_user_id AS user_id
+               SELECT obligation.recipient_user_id AS user_id, 1 AS priority
                FROM public.settlement_obligations AS obligation
                WHERE obligation.id = $1 AND obligation.recipient_user_id IS NOT NULL
                UNION ALL
-               SELECT notification.user_id
+               SELECT notification.user_id, 2 AS priority
                FROM public.lot_watch_notifications AS notification
                WHERE notification.id = $1
                UNION ALL
-               SELECT pending.user_id
+               SELECT pending.user_id, 3 AS priority
                FROM public.lot_watch_pending_notifications AS pending
                WHERE pending.id = $1
                UNION ALL
-               SELECT obligation.recipient_user_id
+               SELECT obligation.recipient_user_id, 4 AS priority
                FROM public.settlement_obligation_fulfillments AS fulfillment
                JOIN public.settlement_obligations AS obligation
                  ON obligation.id = fulfillment.obligation_id
                WHERE fulfillment.delivery_id = $1
                  AND obligation.recipient_user_id IS NOT NULL
                UNION ALL
-               SELECT notification.user_id
+               SELECT notification.user_id, 5 AS priority
                FROM public.lot_watch_notifications AS notification
                WHERE notification.delivery_id = $1
                UNION ALL
-               SELECT user_account.id
+               SELECT user_account.id, 6 AS priority
                FROM public.deliveries AS delivery
                JOIN public.users AS user_account
                  ON lower(user_account.game_player_id) = lower(delivery.recipient)
@@ -135,11 +135,12 @@ async fn user_id_for_reference(
         extended_projection_delivery_sql!("delivery"),
         r#")
                UNION ALL
-               SELECT lot.leader_user_id
+               SELECT lot.leader_user_id, 7 AS priority
                FROM public.lots AS lot
                WHERE lot.id = $1
            )
-           SELECT user_id FROM candidates WHERE user_id IS NOT NULL LIMIT 1"#
+           SELECT user_id FROM candidates WHERE user_id IS NOT NULL
+           ORDER BY priority, user_id LIMIT 1"#
     ))
     .bind(reference)
     .bind(include_settlement_return_actions)
@@ -499,25 +500,41 @@ async fn attach_reference(
     }
     if !notifications.iter().any(|item| item.notification_id == reference) {
         let row = sqlx::query(
-            r#"SELECT notification.id AS notification_id,
-                      CASE WHEN notification.channel = 'mm' THEN 'mm' ELSE 'pm' END AS channel,
-                      CASE WHEN notification.channel = 'mm' THEN 'lot_watch'
-                           ELSE 'lot_watch_pm' END AS kind,
-                      notification.lot_id, lot.auction_id,
-                      COALESCE(delivery.status, pm.status) AS state,
-                      COALESCE(pm.failure_code, delivery.result_metadata ->> 'reason_code',
-                               delivery.failure_code) AS state_reason,
-                      notification.delivery_id,
-                      notification.created_at,
-                      GREATEST(notification.created_at, COALESCE(delivery.updated_at, pm.updated_at,
-                                                               notification.created_at))
-                          AS updated_at
-               FROM public.lot_watch_notifications AS notification
-               JOIN public.lots AS lot ON lot.id = notification.lot_id
-               LEFT JOIN public.deliveries AS delivery ON delivery.id = notification.delivery_id
-               LEFT JOIN public.lot_watch_pm_deliveries AS pm
-                 ON pm.notification_id = notification.id
-               WHERE notification.id = $1"#,
+            r#"WITH candidates AS (
+                   SELECT notification.id AS notification_id,
+                          CASE WHEN notification.channel = 'mm' THEN 'mm' ELSE 'pm' END AS channel,
+                          CASE WHEN notification.channel = 'mm' THEN 'lot_watch'
+                               ELSE 'lot_watch_pm' END AS kind,
+                          notification.lot_id, lot.auction_id,
+                          COALESCE(delivery.status, pm.status) AS state,
+                          COALESCE(pm.failure_code, delivery.result_metadata ->> 'reason_code',
+                                   delivery.failure_code) AS state_reason,
+                          notification.delivery_id,
+                          notification.created_at,
+                          GREATEST(notification.created_at,
+                                   COALESCE(delivery.updated_at, pm.updated_at, notification.created_at))
+                              AS updated_at,
+                          1 AS priority
+                   FROM public.lot_watch_notifications AS notification
+                   JOIN public.lots AS lot ON lot.id = notification.lot_id
+                   LEFT JOIN public.deliveries AS delivery ON delivery.id = notification.delivery_id
+                   LEFT JOIN public.lot_watch_pm_deliveries AS pm
+                     ON pm.notification_id = notification.id
+                   WHERE notification.id = $1
+                   UNION ALL
+                   SELECT pending.id, 'pending'::text,
+                          CASE WHEN pending.channel = 'mm' THEN 'lot_watch'
+                               ELSE 'lot_watch_pm' END,
+                          pending.lot_id, lot.auction_id, pending.status,
+                          pending.resolution_reason, NULL::uuid, pending.created_at,
+                          COALESCE(pending.resolved_at, pending.created_at), 2 AS priority
+                   FROM public.lot_watch_pending_notifications AS pending
+                   JOIN public.lots AS lot ON lot.id = pending.lot_id
+                   WHERE pending.id = $1
+               )
+               SELECT notification_id, channel, kind, lot_id, auction_id, state, state_reason,
+                      delivery_id, created_at, updated_at
+               FROM candidates ORDER BY priority LIMIT 1"#,
         )
         .bind(reference)
         .fetch_optional(&mut **transaction)

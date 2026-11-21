@@ -383,7 +383,7 @@ test("关闭详情与翻回本页时保留等待反击授权、禁用与说明�
     expect(actions.requests).toHaveLength(0);
     expect(actions.action()).toEqual([false, ""]);
     actions.open();
-    flush();
+    await settleProxyRead();
     expect(actions.requests.map((request) => request.userId)).toEqual([FIRST_USER]);
     actions.requests[0]?.reply(WAITING_PROXY_WIRE);
     await settleProxyRead();
@@ -402,7 +402,7 @@ test("关闭详情与翻回本页时保留等待反击授权、禁用与说明�
     expect(actions.requests).toHaveLength(1);
 
     actions.open();
-    flush();
+    await settleProxyRead();
     expect(actions.requests).toHaveLength(2);
     actions.requests[1]?.reply(null);
     await settleProxyRead();
@@ -417,7 +417,7 @@ test("换号销毁旧快照，场次之间隔离同一账号读取到的授权",
   try {
     flush();
     actions.open();
-    flush();
+    await settleProxyRead();
     actions.requests[0]?.reply(WAITING_PROXY_WIRE);
     await settleProxyRead();
     expect(actions.action()).toEqual([true, t("proxy-active-exists")]);
@@ -428,7 +428,7 @@ test("换号销毁旧快照，场次之间隔离同一账号读取到的授权",
     expect(actions.requests).toHaveLength(1);
 
     actions.open();
-    flush();
+    await settleProxyRead();
     expect(actions.requests.map((request) => request.userId)).toEqual([FIRST_USER, SECOND_USER]);
     actions.requests[1]?.reply(WAITING_PROXY_WIRE);
     await settleProxyRead();

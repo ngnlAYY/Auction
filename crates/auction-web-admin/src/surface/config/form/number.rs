@@ -104,7 +104,7 @@ mod tests {
 
     use super::NumberInput;
     use crate::surface::ADMIN_LOCALE_CATALOG;
-    use crate::surface::auctions::draft_page_tests::init_i18n;
+    use crate::surface::auctions::editor::tests::init_i18n;
     use crate::surface::config::field_announcement::{FieldLiveRegion, use_field_announcer};
     use crate::surface::config::test_form::{FormBrowser, dispatch};
     use crate::surface::config::validation::FormIssues;

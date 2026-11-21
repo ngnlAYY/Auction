@@ -4,6 +4,8 @@
 //! 另提供文档级 Escape 与按元素 ID 移动焦点的原语，供菜单收起、校验失败等场景使用。
 
 mod escape;
+#[cfg(target_arch = "wasm32")]
+mod focus;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use escape::top_modal_with;
@@ -22,6 +24,52 @@ use std::{
 use dioxus::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{JsCast, closure::Closure};
+
+#[cfg(target_arch = "wasm32")]
+use focus::{current_focusable, is_focusable, preferred_dialog_focus};
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Default)]
+struct BodyScrollLockState {
+    owners: usize,
+    original_overflow: Option<String>,
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static BODY_SCROLL_LOCK: RefCell<BodyScrollLockState> = RefCell::new(BodyScrollLockState::default());
+}
+
+#[cfg(target_arch = "wasm32")]
+fn acquire_body_scroll_lock(body: &web_sys::HtmlElement) {
+    BODY_SCROLL_LOCK.with_borrow_mut(|state| {
+        if state.owners == 0 {
+            state.original_overflow =
+                Some(body.style().get_property_value("overflow").unwrap_or_default());
+            let _ = body.style().set_property("overflow", "hidden");
+        }
+        state.owners = state.owners.saturating_add(1);
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn release_body_scroll_lock(body: &web_sys::HtmlElement) {
+    BODY_SCROLL_LOCK.with_borrow_mut(|state| {
+        if state.owners == 0 {
+            return;
+        }
+        state.owners -= 1;
+        if state.owners == 0
+            && let Some(previous) = state.original_overflow.take()
+        {
+            if previous.is_empty() {
+                let _ = body.style().remove_property("overflow");
+            } else {
+                let _ = body.style().set_property("overflow", &previous);
+            }
+        }
+    });
+}
 
 /// SPA 路由真正变化后把键盘焦点移入主内容；首次挂载与同路由数据刷新不抢占用户焦点。
 pub fn use_route_focus(_route_token: String, _target_id: &'static str) {
@@ -81,32 +129,36 @@ pub fn use_dialog_focus_trap(_lock_background_scroll: bool) {
                 return;
             };
 
-            let opener = Rc::new(RefCell::new(current_focusable(&document)));
+            let opener = Rc::new(RefCell::new(None::<web_sys::HtmlElement>));
+            let click_candidate = Rc::new(RefCell::new(None::<web_sys::HtmlElement>));
             let active_dialog = Rc::new(RefCell::new(None::<web_sys::Element>));
-            let previous_overflow = Rc::new(RefCell::new(None::<String>));
+            let scroll_lock_owned = Rc::new(Cell::new(false));
 
             let focus_document = document.clone();
-            let focus_opener = Rc::clone(&opener);
+            let focus_click_candidate = Rc::clone(&click_candidate);
             let focus_callback = Closure::<dyn FnMut(web_sys::FocusEvent)>::new(
                 move |event: web_sys::FocusEvent| {
-                    if let Some(dialog) = top_dialog(&focus_document) {
-                        let inside = event
+                    let Some(dialog) = top_dialog(&focus_document) else {
+                        let candidate_is_focused = event
                             .target()
                             .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
-                            .is_some_and(|target| dialog.contains(Some(target.as_ref())));
-                        if !inside && let Some(target) = preferred_dialog_focus(&dialog) {
-                            let _ = target.focus();
+                            .is_some_and(|target| {
+                                focus_click_candidate.borrow().as_ref().is_some_and(|candidate| {
+                                    candidate.is_same_node(Some(target.as_ref()))
+                                        || candidate.contains(Some(target.as_ref()))
+                                })
+                            });
+                        if !candidate_is_focused {
+                            drop(focus_click_candidate.borrow_mut().take());
                         }
                         return;
-                    }
-                    let Some(target) = event.target() else {
-                        return;
                     };
-                    let Ok(element) = target.dyn_into::<web_sys::HtmlElement>() else {
-                        return;
-                    };
-                    if is_focusable(&element) {
-                        focus_opener.replace(Some(element));
+                    let inside = event
+                        .target()
+                        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+                        .is_some_and(|target| dialog.contains(Some(target.as_ref())));
+                    if !inside && let Some(target) = preferred_dialog_focus(&dialog) {
+                        let _ = target.focus();
                     }
                 },
             );
@@ -116,30 +168,24 @@ pub fn use_dialog_focus_trap(_lock_background_scroll: bool) {
             );
 
             let click_document = document.clone();
-            let click_opener = Rc::clone(&opener);
+            let click_event_candidate = Rc::clone(&click_candidate);
             let click_callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::new(
                 move |event: web_sys::MouseEvent| {
                     if top_dialog(&click_document).is_some() {
                         return;
                     }
-                    let Some(target) = event.target() else {
-                        return;
-                    };
-                    let Ok(element) = target.dyn_into::<web_sys::Element>() else {
-                        return;
-                    };
-                    let Some(control) = element
-                        .closest(FOCUSABLE_SELECTOR)
-                        .ok()
-                        .flatten()
+                    let control = event
+                        .target()
+                        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+                        .and_then(|element| element.closest(FOCUSABLE_SELECTOR).ok().flatten())
                         .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
-                        .filter(is_focusable)
-                    else {
-                        return;
-                    };
-                    // 捕获阶段先于 Dioxus 打开 dialog，程序化 click 也能像旧页面的 currentTarget ref
-                    // 一样保存真实触发控件；dialog 内关闭按钮不会覆盖该 opener。
-                    click_opener.replace(Some(control));
+                        .filter(is_focusable);
+                    if let Some(control) = control {
+                        // 捕获阶段先于 Dioxus 打开 dialog；候选只在后续 modal 转换时成为 opener。
+                        click_event_candidate.replace(Some(control));
+                    } else {
+                        drop(click_event_candidate.borrow_mut().take());
+                    }
                 },
             );
             let _ = document.add_event_listener_with_callback_and_bool(
@@ -220,13 +266,16 @@ pub fn use_dialog_focus_trap(_lock_background_scroll: bool) {
                 &document,
                 &active_dialog,
                 &opener,
-                &previous_overflow,
+                &click_candidate,
+                &scroll_lock_owned,
                 _lock_background_scroll,
             );
             let observer_document = document.clone();
             let observer_dialog = Rc::clone(&active_dialog);
             let observer_opener = Rc::clone(&opener);
-            let observer_overflow = Rc::clone(&previous_overflow);
+            let observer_click_candidate = Rc::clone(&click_candidate);
+            let observer_scroll_lock = Rc::clone(&scroll_lock_owned);
+            let observer_lock_background_scroll = _lock_background_scroll;
             let observer_callback =
                 Closure::<dyn FnMut(js_sys::Array, web_sys::MutationObserver)>::new(
                     move |_records: js_sys::Array, _observer: web_sys::MutationObserver| {
@@ -234,8 +283,9 @@ pub fn use_dialog_focus_trap(_lock_background_scroll: bool) {
                             &observer_document,
                             &observer_dialog,
                             &observer_opener,
-                            &observer_overflow,
-                            _lock_background_scroll,
+                            &observer_click_candidate,
+                            &observer_scroll_lock,
+                            observer_lock_background_scroll,
                         );
                     },
                 );
@@ -264,7 +314,8 @@ pub fn use_dialog_focus_trap(_lock_background_scroll: bool) {
                 _observer_callback: observer_callback,
                 observer,
                 opener,
-                previous_overflow,
+                click_candidate,
+                scroll_lock_owned,
             }));
         });
     }
@@ -279,7 +330,8 @@ struct DialogFocusTrapGuard {
     _observer_callback: Closure<dyn FnMut(js_sys::Array, web_sys::MutationObserver)>,
     observer: Option<web_sys::MutationObserver>,
     opener: Rc<RefCell<Option<web_sys::HtmlElement>>>,
-    previous_overflow: Rc<RefCell<Option<String>>>,
+    click_candidate: Rc<RefCell<Option<web_sys::HtmlElement>>>,
+    scroll_lock_owned: Rc<Cell<bool>>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -302,17 +354,14 @@ impl DialogFocusTrapGuard {
             "keydown",
             self.keyboard_callback.as_ref().unchecked_ref(),
         );
-        if let Some(body) = self.document.body()
-            && let Some(previous) = self.previous_overflow.borrow_mut().take()
+        if self.scroll_lock_owned.replace(false)
+            && let Some(body) = self.document.body()
         {
-            if previous.is_empty() {
-                let _ = body.style().remove_property("overflow");
-            } else {
-                let _ = body.style().set_property("overflow", &previous);
-            }
+            release_body_scroll_lock(&body);
         }
         // focus 会同步派发焦点事件；先释放借用，再把控制权交给浏览器监听器。
-        let opener = self.opener.borrow().clone();
+        let opener = self.opener.borrow_mut().take();
+        drop(self.click_candidate.borrow_mut().take());
         if let Some(target) = opener.filter(|target| target.is_connected()) {
             let _ = target.focus();
         }
@@ -328,24 +377,6 @@ fn top_dialog(document: &web_sys::Document) -> Option<web_sys::Element> {
     dialogs.item(dialogs.length().checked_sub(1)?)?.dyn_into::<web_sys::Element>().ok()
 }
 
-#[cfg(target_arch = "wasm32")]
-fn current_focusable(document: &web_sys::Document) -> Option<web_sys::HtmlElement> {
-    let element = document.active_element()?.dyn_into::<web_sys::HtmlElement>().ok()?;
-    is_focusable(&element).then_some(element)
-}
-
-#[cfg(target_arch = "wasm32")]
-fn is_focusable(element: &web_sys::HtmlElement) -> bool {
-    element.matches(FOCUSABLE_SELECTOR).unwrap_or(false)
-        && !element.matches(":disabled").unwrap_or(false)
-        && element.is_connected()
-        // 手机折叠菜单、关闭的 details 与隐藏祖先不能成为焦点循环的首尾控件。
-        && element.closest("[hidden], [inert], [aria-hidden=\"true\"]").ok().flatten().is_none()
-        && element.get_client_rects().length() > 0
-        && web_sys::window().and_then(|window| window.get_computed_style(element).ok().flatten())
-            .is_none_or(|style| !matches!(style.get_property_value("visibility").ok().as_deref(), Some("hidden" | "collapse")))
-}
-
 /// 聚焦仍连接、可见且可用的控件。
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn focus_control(element: web_sys::Element) {
@@ -354,12 +385,36 @@ pub(crate) fn focus_control(element: web_sys::Element) {
     }
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+fn transition_dialog_opener<T>(
+    body_available: bool,
+    had_dialog: bool,
+    has_dialog: bool,
+    candidate: &mut Option<T>,
+    opener: &mut Option<T>,
+    candidate_is_valid: impl FnOnce(&T) -> bool,
+) -> Option<T> {
+    if !body_available {
+        return None;
+    }
+    let candidate = candidate.take();
+    if has_dialog {
+        if !had_dialog {
+            *opener = candidate.filter(candidate_is_valid);
+        }
+        None
+    } else {
+        opener.take()
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn synchronize_dialog_state(
     document: &web_sys::Document,
     active_dialog: &RefCell<Option<web_sys::Element>>,
     opener: &RefCell<Option<web_sys::HtmlElement>>,
-    previous_overflow: &RefCell<Option<String>>,
+    click_candidate: &RefCell<Option<web_sys::HtmlElement>>,
+    scroll_lock_owned: &Cell<bool>,
     lock_background_scroll: bool,
 ) {
     let next_dialog = top_dialog(document);
@@ -381,74 +436,106 @@ fn synchronize_dialog_state(
         }
         return;
     }
-    // 不能只记录“是否打开”：创建成功后会在同一次 DOM 更新中把表单弹窗替换成密钥弹窗。
-    // 此时继续保留最初 opener，但必须把焦点移入新的最顶层 dialog。
+    let body = document.body();
     let had_dialog = active_dialog.borrow().is_some();
-    active_dialog.replace(next_dialog.clone());
-
-    let Some(body) = document.body() else {
+    let opener_to_restore = {
+        let mut click_candidate_state = click_candidate.borrow_mut();
+        let mut opener_state = opener.borrow_mut();
+        transition_dialog_opener(
+            body.is_some(),
+            had_dialog,
+            next_dialog.is_some(),
+            &mut click_candidate_state,
+            &mut opener_state,
+            |candidate| candidate.is_connected(),
+        )
+    };
+    let Some(body) = body else {
         return;
     };
+    active_dialog.replace(next_dialog.clone());
     if let Some(dialog) = next_dialog {
         let active_inside = current_focusable(document)
             .as_ref()
             .is_some_and(|element| dialog.contains(Some(element.as_ref())));
         if !active_inside {
-            // opener 已由 focusin 或捕获阶段 click 记录。这里不能再用当前焦点覆盖它：程序化
-            // click 不会先聚焦按钮，DOM 切换瞬间的 activeElement 仍可能是上一个控件。
+            // 未从本次激活打开时不继承更早的 opener，避免关闭后抢回无关焦点。
             if let Some(target) = preferred_dialog_focus(&dialog) {
                 let _ = target.focus();
             }
         }
-        if !had_dialog && lock_background_scroll {
-            previous_overflow
-                .replace(Some(body.style().get_property_value("overflow").unwrap_or_default()));
-            let _ = body.style().set_property("overflow", "hidden");
+        if lock_background_scroll && !scroll_lock_owned.get() {
+            acquire_body_scroll_lock(&body);
+            scroll_lock_owned.set(true);
         }
         return;
     }
 
-    if let Some(previous) = previous_overflow.take() {
-        if previous.is_empty() {
-            let _ = body.style().remove_property("overflow");
-        } else {
-            let _ = body.style().set_property("overflow", &previous);
-        }
+    if scroll_lock_owned.replace(false) {
+        release_body_scroll_lock(&body);
     }
-    // focus 会同步触发 focusin，监听器会写回 opener；快照必须先释放 RefCell 只读借用，
-    // 避免 if let 条件的临时借用跨越 focus 调用并在关闭弹窗时触发重入 panic。
-    let opener = opener.borrow().clone();
-    if let Some(target) = opener.filter(|target| target.is_connected()) {
+    if let Some(target) = opener_to_restore.filter(|target| target.is_connected()) {
         let _ = target.focus();
+        // focusin 同步触发；清除恢复动作留下的候选，避免后续程序化弹窗复用它。
+        drop(click_candidate.borrow_mut().take());
     }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn preferred_dialog_focus(dialog: &web_sys::Element) -> Option<web_sys::HtmlElement> {
-    if let Some(target) = dialog
-        .query_selector("[autofocus]")
-        .ok()
-        .flatten()
-        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
-        .filter(is_focusable)
-    {
-        return Some(target);
-    }
-
-    let nodes = dialog.query_selector_all(FOCUSABLE_SELECTOR).ok()?;
-    for index in 0..nodes.length() {
-        let Some(node) = nodes.item(index) else {
-            continue;
-        };
-        let Ok(control) = node.dyn_into::<web_sys::HtmlElement>() else {
-            continue;
-        };
-        if is_focusable(&control) {
-            return Some(control);
-        }
-    }
-    dialog.clone().dyn_into::<web_sys::HtmlElement>().ok()
 }
 
 /// 有资格承接焦点的原生控件和显式可聚焦元素。
 pub(crate) const FOCUSABLE_SELECTOR: &str = "a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex=\"-1\"]),[contenteditable=\"true\"]";
+#[cfg(test)]
+mod tests {
+    use super::transition_dialog_opener;
+
+    #[test]
+    fn dialog_opener_waits_for_body_and_is_not_reused_after_close() {
+        let mut candidate = Some("trigger");
+        let mut opener = None;
+        assert_eq!(
+            transition_dialog_opener(false, false, true, &mut candidate, &mut opener, |_| true),
+            None
+        );
+        assert_eq!(candidate, Some("trigger"));
+        assert_eq!(opener, None);
+
+        assert_eq!(
+            transition_dialog_opener(true, false, true, &mut candidate, &mut opener, |_| true),
+            None
+        );
+        assert_eq!(candidate, None);
+        assert_eq!(opener, Some("trigger"));
+
+        candidate = Some("nested trigger");
+        assert_eq!(
+            transition_dialog_opener(true, true, true, &mut candidate, &mut opener, |_| true),
+            None
+        );
+        assert_eq!(candidate, None);
+        assert_eq!(opener, Some("trigger"));
+
+        candidate = Some("stale candidate");
+        assert_eq!(
+            transition_dialog_opener(true, true, false, &mut candidate, &mut opener, |_| true),
+            Some("trigger")
+        );
+        assert_eq!(candidate, None);
+        assert_eq!(opener, None);
+
+        assert_eq!(
+            transition_dialog_opener(true, false, true, &mut candidate, &mut opener, |_| true),
+            None
+        );
+        assert_eq!(opener, None);
+
+        let mut stale_opener = Some("old trigger");
+        candidate = Some("detached trigger");
+        assert_eq!(
+            transition_dialog_opener(true, false, true, &mut candidate, &mut stale_opener, |_| {
+                false
+            }),
+            None
+        );
+        assert_eq!(candidate, None);
+        assert_eq!(stale_opener, None);
+    }
+}

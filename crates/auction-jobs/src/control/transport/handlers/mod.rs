@@ -22,9 +22,7 @@ use super::protocol::response;
 use super::protocol::{ReadyResult, TriggerError, TriggerPollCommand};
 use super::{WORKER_CONTROL_METRICS_PATH, WorkerControlHandle};
 
-mod credential_check;
-
-pub(super) use credential_check::mail_credential_check;
+pub(super) mod credential_check;
 
 pub(super) async fn live(
     State(handle): State<WorkerControlHandle>,

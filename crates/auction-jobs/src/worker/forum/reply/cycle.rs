@@ -11,9 +11,12 @@ use auction_time::{Duration, Timestamp};
 
 use super::ForumReplyRuntime;
 use super::failure::{record_topic_failure, record_topic_failure_code};
-use super::topic::{FINAL_SCAN_MINIMUM_INTERVAL_SECONDS, process_topic, retry_scan_at};
 use crate::worker::diagnostics;
 use crate::worker::forum::hot_claim_budget;
+use crate::worker::forum::reply::topic::scan::process_topic;
+use crate::worker::forum::reply::topic::schedule::{
+    FINAL_SCAN_MINIMUM_INTERVAL_SECONDS, retry_scan_at,
+};
 use crate::worker::runtime::{PersistentWorker, WorkerError};
 
 /// 领取调用失败后至少等待的时长，与 Final 阶段最短导入间隔一致。

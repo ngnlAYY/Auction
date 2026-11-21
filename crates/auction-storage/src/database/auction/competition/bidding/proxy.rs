@@ -31,9 +31,10 @@ pub(in crate::database::auction::competition) async fn apply_proxy_changes(
         .iter()
         .map(|transition| (transition.authorization_id, transition.reason))
         .collect();
-
+    // 计划可携带未变更的活动快照以校验最终 lot 引用；只有包含转换的授权才需要持久化更新。
+    // 实际变更仍须通过下方状态版本条件更新。
     for state in &plan.proxy_states {
-        if created_ids.contains(&state.id) {
+        if created_ids.contains(&state.id) || !terminal_reasons.contains_key(&state.id) {
             continue;
         }
         let previous_version = state

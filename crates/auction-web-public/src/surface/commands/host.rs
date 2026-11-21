@@ -43,7 +43,7 @@ impl CompetitionCommands {
         if let Some(mut store) = active {
             // 认证失败的请求也可能正在调用本入口；先释放状态写借用，再取消身份任务。
             let retired = std::mem::take(&mut *store.state.write());
-            for task in retired.tasks.into_values() {
+            for task in retired.tasks.into_values().flatten() {
                 task.cancel();
             }
         }
@@ -120,7 +120,7 @@ fn IdentityCommands(user_id: String, owner: Signal<Option<String>>, revision: u6
 #[derive(Default)]
 struct CommandState {
     pending: BTreeMap<String, SentCommand>,
-    tasks: BTreeMap<Uuid, Task>,
+    tasks: BTreeMap<Uuid, Option<Task>>,
     active_dialog: Option<CommandDialogKey>,
     dialog_receipt: Option<CommandReceipt>,
     receipts: Vec<CommandReceipt>,
@@ -251,6 +251,8 @@ impl CommandStore {
     fn send(mut self, command: SentCommand, origin: Option<CommandDialogKey>, retry: bool) {
         let command_id = command.payload.command_id();
         let mut state = self.state;
+        // 先登记命令身份，再 spawn；立即完成的 future 也能通过成员检查并提交结果。
+        state.write().tasks.insert(command_id, None);
         let task = Runtime::current().in_scope(self.scope, || {
             // spawn 登记到身份 scope。界面卸载只解除回执接收，身份销毁才会取消任务。
             spawn(async move {
@@ -260,9 +262,16 @@ impl CommandStore {
                 } else {
                     Err(CommandError::before_send())
                 };
-                if !self.session.identity_confirmed()
-                    || !self.state.peek().tasks.contains_key(&command_id)
-                {
+                if !self.state.peek().tasks.contains_key(&command_id) {
+                    return;
+                }
+                if !self.session.identity_confirmed() {
+                    self.complete(
+                        command,
+                        origin,
+                        retry,
+                        Err(CommandError { code: "invalid_response".to_owned(), status: 0 }),
+                    );
                     return;
                 }
                 // 三类命令的 API 在请求结束时已经失效公开读缓存；推进外壳修订让存活的资源
@@ -274,7 +283,16 @@ impl CommandStore {
                 self.complete(command, origin, retry, result);
             })
         });
-        state.write().tasks.insert(command_id, task);
+        let mut task = Some(task);
+        {
+            let mut current = state.write();
+            if let Some(slot) = current.tasks.get_mut(&command_id) {
+                *slot = task.take();
+            }
+        }
+        if let Some(task) = task {
+            task.cancel();
+        }
     }
 
     fn complete(

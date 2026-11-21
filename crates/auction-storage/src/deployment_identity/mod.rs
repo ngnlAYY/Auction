@@ -240,4 +240,24 @@ mod postgres_target_tests {
             assert!(service.require_same_database(&other).is_err(), "{other:?}");
         }
     }
+    #[test]
+    fn query_only_endpoints_match_authority_target_identity() {
+        let authority = PostgresTarget::parse("postgresql://db.example:5432/auction")
+            .expect("authority target");
+        let query_host = PostgresTarget::parse("postgresql:///auction?host=db.example&port=5432")
+            .expect("query host target");
+        assert_eq!(authority, query_host);
+
+        let query_socket =
+            PostgresTarget::parse("postgresql:///auction?host=%2Fvar%2Frun%2Fpostgresql&port=5432")
+                .expect("query socket target");
+        assert_eq!(query_socket.host, "/var/run/postgresql");
+        assert_eq!(query_socket.port, 5432);
+        assert_eq!(query_socket.database, "auction");
+    }
+
+    #[test]
+    fn implicit_query_only_endpoint_is_rejected() {
+        assert!(PostgresTarget::parse("postgresql:///auction").is_err());
+    }
 }

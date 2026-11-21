@@ -123,14 +123,6 @@ async fn lock_action(
     Ok(())
 }
 
-mod claim;
-mod delivery;
-mod resolution;
-
-pub(super) use claim::claim_action_postgres;
-pub(super) use delivery::{
-    link_action_postgres, mark_action_enqueued_postgres, observe_action_postgres,
-};
-pub(super) use resolution::{
-    manual_action_postgres, mark_action_satisfied_postgres, release_action_postgres,
-};
+pub(in crate::database::recovery::scheduler) mod claim;
+pub(in crate::database::recovery::scheduler) mod delivery;
+pub(in crate::database::recovery::scheduler) mod resolution;

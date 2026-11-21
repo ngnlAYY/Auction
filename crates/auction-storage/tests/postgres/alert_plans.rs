@@ -389,7 +389,7 @@ async fn perf_alert_fulfillment_entry_and_paired_terminal_plans() {
         "base": summary(&base),
         "doubled": summary(&doubled),
     });
-    let path = write_report("alert-fulfillment-plans", &report);
+    let path = write_report("alert-fulfillment-plans", &report).expect("持久化告警履约计划报告");
     println!("告警履约计划报告：{}", path.display());
     pool.close().await;
 }

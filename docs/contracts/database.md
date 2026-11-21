@@ -6,7 +6,7 @@
 
 ## schema 身份与版本
 
-- `auction_schema_identity` 是单行表，记录应用名与基线版本，用来区分“Auction 的库”与其他库（备份与恢复都会核对它）。迁移只在空库或已有迁移记录的库上执行，没有迁移记录却存在用户对象的库被拒绝。
+- `auction_schema_identity` 是单行表，记录应用名与基线版本，用来区分“Auction 的库”与其他库（备份与恢复都会核对它）。迁移只在空库或已有迁移记录的库上执行；没有迁移记录却存在当前数据库用户对象的库被拒绝。对象盘点只计算目标数据库内对象，集群级 foreign data wrappers、servers 与 user mappings 不使目标库失去空库状态。
 - `_sqlx_migrations` 记录已执行的迁移。已知版本逐条核对完整序列、成功状态及 checksum，少数历史摘要仅接受[migrations/postgres/README.md#执行兼容层](../../migrations/postgres/README.md#执行兼容层)显式允许的值。readiness 默认保持完全匹配；仅显式兼容模式允许下述已登记的未来后缀。恢复预检、备份、盘点及迁移执行的严格版本边界不放宽。
 - 普通启动**从不**隐式迁移。迁移只能通过 `auction-cli db migrate`（或 `service start/restart`）以及合并部署首次初始化执行，见 [apps/auction-cli/README.md#数据库](../../apps/auction-cli/README.md#数据库)。迁移与建库、重建、恢复一样必须用迁移 owner 凭据（`--owner-secrets`）；服务运行账号没有 DDL 权限。
 - 迁移只向前，不提供回滚；已发布的迁移文件永不修改。
@@ -41,7 +41,8 @@
 - 逐数据族批准：预览输出每个族的 `approval_token`，令牌是 SHA-256 摘要，绑定数据库、演练 run id、政策摘要、族名、候选行/字节与表级候选计数。`--execute` 必须逐族提供 `--approve <family>=<token>`、逐字确认 `PURGE <database>` 与不可覆盖回执路径。
 - 边界与保护：心跳按 `expires_at <= 演练快照时间 - 30 天`；事件按 `created_at <= 快照 - 30 天` 且跳过被失败记录或重放关系引用（RESTRICT）的行；已解决失败按 `resolved_at <= 快照 - 90 天`，`resolved_at IS NULL` 永不删除；会话只删除已注销或有效截止过期满 30 天的记录，有效与永久会话（两个截止为 NULL）永不删除；文件只删除普通过期证据，写入未知证据（含超过 90 天保全窗）永不自动删除。
 - 有界执行：每批一个独立事务，默认 500 行（1–5000）；每批使用 `statement_timeout=30s`、`lock_timeout=2s`。删除谓词与只读演练一一对应，批准计数是硬上限；候选在演练后增加时只删除上限内最旧的行，其余报告为 `remaining_candidate_rows`，终态 `partial_limit_reached` 并须重新演练。执行顺序先清理已解决的失败，再清理事件，使同轮解除引用的事件也能在上限内收敛。
-- 失败与回执：批次失败时已提交批次保留；回执（`auction-retention-purge-receipt.v1`）精确记录每表批准/删除行数、`pg_column_size` 行载荷字节、批次数、剩余候选与阻断行，以及文件族实际 unlink 数与字节；顶层 `deleted_rows`/`deleted_row_bytes` 只汇总数据库行，文件计数只在 `filesystem` 与文件族结果中报告。无论成功、部分完成或失败，都追加一条只追加审计 `auction.retention.purge`（`entity_type=retention_purge`，`actor_type=system`、`actor_id=auction-cli`、`source=system`；metadata 含演练 run id、政策摘要、各族计数与终态，CLI 执行时另并入主机身份 `entrypoint=cli`、`os_uid` 与可选 `sudo_user`）；审计写入失败本身使终态为 `failed`。文件族先于数据库行删除：删除前要求演练回执距到期还剩至少 60 秒；文件已删而数据库执行在开始前返回错误时没有执行报告与审计，CLI 改写一份同格式的本地失败回执（`outcome=failed`、`execution=null`、实际文件结果与固定错误码），见[apps/auction-cli/README.md#恢复预检与保留盘点](../../apps/auction-cli/README.md#恢复预检与保留盘点)。
+- 失败与回执：批次失败时已提交批次保留；回执（`auction-retention-purge-receipt.v1`）精确记录每表批准/删除行数、`pg_column_size` 行载荷字节、批次数、剩余候选与阻断行，以及文件族实际 unlink 数与字节；顶层 `deleted_rows`/`deleted_row_bytes` 只汇总数据库行，文件计数只在 `filesystem` 与文件族结果中报告。无论成功、部分完成或失败，都追加一条只追加审计 `auction.retention.purge`（`entity_type=retention_purge`，`actor_type=system`、`actor_id=auction-cli`、`source=system`；metadata 含演练 run id、政策摘要、各族计数与终态，CLI 执行时另并入主机身份 `entrypoint=cli`、`os_uid` 与可选 `sudo_user`）；审计写入失败本身使终态为 `failed`。文件族先于数据库行删除，删除前要求演练回执距到期还剩至少 60 秒。artifact 读取/绑定预检失败时，CLI 写本地失败回执（`outcome=failed`、`execution=null`、实际文件结果与固定错误码）；artifact 消费失败时数据库行族全部跳过，存储层返回 `filesystem_artifact_audit_failed` 失败回执并尝试追加审计；审计追加失败标记为 `audit_append_failed`。已消费摘要拒绝重放。
+- 文件族结果必须引用 CLI 在实际 unlink 后 create-new 的 `auction-retention-filesystem-purge-artifact.v1` 私有 JSON 证据，SHA-256 覆盖精确 `serde_json::to_vec` 字节；数据库端只接收 artifact path 与摘要，再核对 execution/dry-run UUID、数据库、族、批准 token 摘要、政策版本/摘要、批准上限、根身份摘要、时间、终态与逐项计数。`outcome` 闭集为 `complete`、`partial_limit_reached`、`failed`；`filesystem_root_identity_sha256` 必须匹配批准 dry-run 中绑定的配置目录身份。计数/终态不一致、未知字段、过期证据或已消费 artifact 摘要均失败关闭。
 - 本命令不新增迁移；删除只使用迁移已授予运行账号的 `DELETE` 权限。文件族要求目录为 0700、文件为 0600 且单链接，持锁扫描后按修改时间从旧到新删除。
 
 ### 配置与 schema
@@ -62,7 +63,7 @@
 | --- | --- |
 | `auctions` | 场次：世界、期号、状态、冻结的经济/结算/恢复策略快照、计划/有效截止、`state_version`、早鸟窗口内场次的最早收件时刻 `intake_opens_at`（赛季开始，也是旧赛季装备不能重列的边界；迁移前的场次保持 NULL，不回填）。身份字段（世界、期号等）由触发器禁止修改 |
 | `lots` | lot：装备、编号、状态（pending/live/sold/unsold/withdrawn）、起拍价、当前价、领先者、有效截止、慢速代理到期、`state_version` |
-| `equipment` | 装备公开属性（世界内按外部装备 ID 唯一）；`attributes.stats` 保持名称到 value/Base 的对象，HTML 新快照按[crates/auction-integrations/README.md#关键行为](../../crates/auction-integrations/README.md#关键行为)保留完整属性键，历史键不改写 |
+| `equipment` | 装备公开属性（世界内按外部装备 ID 唯一）；`attributes.stats` 保持名称到 value/Base 的对象，HTML 新快照按[crates/auction-integrations/README.md#关键行为](../../crates/auction-integrations/README.md#关键行为)保留完整属性键，历史键不改写；迁移 `000128` 以复合外键约束 lot 分类快照，已有 lot 引用时禁止变更装备分类 |
 | `equipment_secrets` | 加密保存的装备 key（`equipment_data_key` 信封） |
 | `auction_commands` | 竞价与生命周期等命令的幂等账本（命令 ID、种类、聚合、请求摘要、结果） |
 | `bids` | 被接受的出价事实：金额、机制（ordinary/proxy）、接受后的截止与版本；**只追加**，同一命令内事实序号连续 |
@@ -104,22 +105,22 @@
 
 | 表 | 内容 |
 | --- | --- |
-| `auction_settlements`、`lot_settlements` | 场次与 lot 的结算结果（成交价、买方实付、卖方所得、税费、补偿） |
+| `auction_settlements`、`lot_settlements` | 场次与 lot 的结算结果（成交价、买方实付、卖方所得、税费、补偿）；迁移 `000126` 的补偿池上限比较使用 NUMERIC 中间值，避免 bigint 加法溢出 |
 | `compensation_pool`、`compensation_ledger` | 两个世界共用的补偿池（单行，main Credits）与只追加流水 |
 | `settlement_pools` | 迁移 000071 合并前各世界补偿池的期末余额与版本（触发器冻结，只作证据） |
-| `compensation_pool_reversals` | 成交撤销后的补偿池冲正（每个恢复记录最多一条，与 `resolution` 落定同事务写入） |
+| `compensation_pool_reversals` | 成交撤销后的补偿池冲正（每个恢复记录最多一条，与 `resolution` 落定同事务写入）；迁移 `000131` 以复合外键约束 reversal 的 `world_id`、`auction_id`、`lot_id` 与 recovery 及 auction 一致，升级时既有不一致记录会停止迁移并留待人工核对 |
 | `settlement_obligations` | 结算义务（种类闭集、世界、收款人、金额、前置义务、业务状态） |
 | `settlement_obligation_fulfillments` | 义务履约执行与证据；`dispatch_no`（迁移 `000115`）是当前派发编号，首寄为 1，结算退件领回后经 Admin 授权的补寄逐次加 1，编号决定投递/prepare/activate 身份与补寄正文的派发引用 |
 | `settlement_internal_commands` | Bot 内部履约的命令与完整证明 |
-| `settlement_funding_scope`、`settlement_funding_accounts`、`settlement_funding_sources`、`settlement_funding_entries`、`settlement_funding_allocations`、`settlement_funding_lots`、`settlement_funding_receipts`、`settlement_funding_returns`、`settlement_funding_commands` | Bot 资金范围、账户、来源、分录、用途占用、lot 绑定、收款绑定、返还与命令账本；账户策略（strict_cash/record_only）由触发器禁止改写。`settlement_funding_returns` 自迁移 `000115` 起只追加：每行以原投递为主键，并唯一绑定退件案件、Take 投递与 `returned_delivery` 来源（新行由 NOT VALID 的 CHECK 强制）；返还只凭精确领回证明写一次，原分配由 `spent` 恢复为 `available`、金额仍为原额，分录种类为 `return`，来源额度按 `issue` 与 `return` 合计消耗 |
+| `settlement_funding_scope`、`settlement_funding_accounts`、`settlement_funding_sources`、`settlement_funding_entries`、`settlement_funding_allocations`、`settlement_funding_lots`、`settlement_funding_receipts`、`settlement_funding_returns`、`settlement_funding_commands` | Bot 资金范围、账户、来源、分录、用途占用、lot 绑定、收款绑定、返还与命令账本；账户策略（strict_cash/record_only）由触发器禁止改写。`settlement_funding_returns` 自迁移 `000115` 起只追加：每行以原投递为主键，并唯一绑定退件案件、Take 投递与 `returned_delivery` 来源（新行由 NOT VALID 的 CHECK 强制）；返还只凭精确领回证明写一次，原分配由 `spent` 恢复为 `available`、金额仍为原额，分录种类为 `return`，来源额度按 `issue` 与 `return` 合计消耗。迁移 `000117` 增加 `(uid,id)` 复合唯一键及分录复合外键，确保 `debit_id`、`credit_id`、`source_id` 所指资金对象与分录 `uid` 一致；同一来源可合法拆成多条 `issue` 分录，不按 `source_id` 限定唯一。迁移 `000120` 限制同一来源累计 issue/return 不得超过额度并使资金分录只追加；迁移 `000131` 以来源行的累计 `issued_amount` 在插入时原子更新及校验该上限，并禁止来源已有发行/返还后修改 `amount`；迁移 `000122` 运行账号对分录只授 INSERT |
 | `settlement_funding_delivery_bindings` | 出站投递曾占用的资金分配历史（迁移 `000115`，只追加）：reserve 时登记，迁移时补登既有指针；分配指针在退件返还后换代到补寄投递，旧派发仍按历史绑定定位原账户并受资金保护，迟到回调只能重放原“已寄出”结论 |
 | `settlement_legacy_self_reconciliations`、`settlement_legacy_bot_seller_claims` | 历史 Bot 自交易结算的核对证明（只追加） |
 | `settlement_equipment_losses` | 装备损失的人工责任声明与原 owner 快照；command/lot/recovery/payment/delivery/seller/refund 各自唯一，只追加，永久退役原投递 |
-| `settlement_recoveries`、`settlement_recovery_actions`、`settlement_recovery_commands`、`settlement_recovery_health`、`settlement_recovery_return_consumptions` | 付款超时恢复的状态、动作、人工确认、健康与 COD 退回计数 |
+| `settlement_recoveries`、`settlement_recovery_actions`、`settlement_recovery_commands`、`settlement_recovery_health`、`settlement_recovery_return_consumptions` | 付款超时恢复的状态、动作、人工确认、健康与 COD 退回计数；迁移 `000129` 要求新建 `buyer_blacklist` action 携带理由，历史 NULL 理由保持原样 |
 | `settlement_return_evidence` | 恢复流程不处理的结算退件的消费事实（迁移 `000111`，只追加）：以入站邮件 ID 为主键，记录处置闭集 `untrusted`（来源无法证明）、`unbound`（无法唯一绑定原派发）、`fulfillment_terminal`（履约已终结，只留证）与 `manual_reconcile`（同事务把未终结履约转人工对账，失败码 `settlement_mail_returned`），以及原因码、原义务、原投递与消费前的履约状态；消费本身不领取、不退回、不重发，不写 `settlement_funding_returns`，不改变资金 |
 | `settlement_return_cases` | 结算退件案件投影（迁移 `000114`）：每条退件证据一个案件（含 untrusted/unbound/fulfillment_terminal），主键即退件邮件 ID；记录绑定的原派发（投递与派发编号，同一原派发至多被一个案件绑定）、状态闭集（`quarantined`、`recheck_pending`、`awaiting_decision`、`take_pending`、`take_unknown`、`resend_pending`、`held`、`resent`、`inbox_closed`、`reviewed`）、当前判定原因、领回后计划（`resend`/`hold`）、建案时冻结的补寄上限（领域常量 3，不含首寄）、本案授权的补寄编号与 `case_version`；经重新核验改绑的案件以 `verified_version` 引用改绑所依据的核验事实，此后资产、Take 预期与巡检身份都以该核验事实为当前有效证据，入站证据原文不改写。案件终结只表示本次退件处理完成，不消灭原权利人的权益。Admin 导航待办 `settlement_returns` 与两类退件告警都只按 `closed_at IS NULL` 计数（含隔离、待核验与 Take 结果未知），不要求存在义务 |
 | `settlement_return_commands`、`settlement_return_events` | 退件 Admin 命令账本与案件事件（迁移 `000114`，只追加）：命令按 `command_id` 幂等（同摘要返回原结果、不同摘要冲突），记录动作、摘要、actor、期望与结果版本；事件以 `(案件, 版本)` 为主键，每次案件版本推进恰好一条，Admin 事件引用命令，Worker 事件为空。`take_observed` 只追加邮箱维护在原 Take 会话里的观察（案件状态不变，详情与告警据此给出 `take_unknown_reason`）；`take_retry_requested` 由 Admin 再次领回命令触发，重新排队同一 Take 而不消耗自动重排预算 |
-| `settlement_return_actions` | 退件持久 Take 投影（迁移 `000114`）：每案至多一项，冻结来源世界/MID 与精确预期 Credits/COD/附件；`pending` 由 Worker 锁内复核同邮件互斥后经 delivery owner 以受限来源 `settlement_return_action` 准备并激活投递（`enqueued`），终态后凭精确领取证明转 `satisfied`，失败或未知转 `manual_reconcile`（不自动重试）；唯一例外是持久结果证明确定未外写（`write_started` 与 `outcome_unknown` 都是明确的 JSON 布尔 `false`，缺键、null 或错误类型都不算；没有 `sweep_retries` 与远端引用）的失败，案件 owner 在收口时以新 fence 重新排队同一投递、动作保持 `enqueued`（每案最多两次，记在案件事件）。激活前即发现同邮件冲突时不写入投递，动作保持没有投递身份的 `pending`，原因记在案件事件；另一 owner 的意图确定从未执行后案件交接回 `take_pending` 再激活，之后投递台拒绝重新激活那条意图。结果未知之后只由邮箱维护凭原 Take 会话的观察推进：integrations 核对过收件人（执行 Take 的凭据所属账号的预期玩家名，缺失即不成立）、原身份、原退件正文前缀与领取回执的完成证明（`action_recovered_inbox_v1`/`take_receipt_proven`，预期资产逐项一致；只凭附件已为空不接受）与投递收口同事务转 `satisfied` 并按领回证明记账，原资产完整仍在则投递重新排队、动作回到 `enqueued`、案件回到 `take_pending`；自动重排用满后，当前 fence 上最近一次观察为 `assets_claimable` 时 Admin 可再次领回同一投递，动作与案件按同一路径重新排队，不消耗也不重置自动重排预算 |
+| `settlement_return_actions` | 退件持久 Take 投影（迁移 `000114`）：每案至多一项，冻结来源世界/MID 与精确预期 Credits/COD/附件；`pending` 由 Worker 锁内复核同邮件互斥后经 delivery owner 以受限来源 `settlement_return_action` 准备并激活投递（`enqueued`），终态后凭精确领取证明转 `satisfied`，失败或未知转 `manual_reconcile`（不自动重试）；唯一例外是持久结果证明确定未外写（`write_started` 与 `outcome_unknown` 都是明确的 JSON 布尔 `false`，缺键、null 或错误类型都不算；没有 `sweep_retries` 与远端引用）的失败，案件 owner 在收口时以新 fence 重新排队同一投递、动作保持 `enqueued`（每案最多两次，记在案件事件）。激活前即发现同邮件冲突时不写入投递，动作保持没有投递身份的 `pending`，原因记在案件事件；另一 owner 的意图确定从未执行后案件交接回 `take_pending` 再激活，之后投递台拒绝重新激活那条意图。结果未知之后只由邮箱维护凭原 Take 会话的观察推进：integrations 核对过收件人（执行 Take 的凭据所属账号的预期玩家名，缺失即不成立）、原身份、原退件正文前缀与领取回执的完成证明（`action_recovered_inbox_v1`/`take_receipt_proven`，预期资产逐项一致；只凭附件已为空不接受）与投递收口同事务转 `satisfied` 并按领回证明记账；迁移 `000125` 要求该 `manual_reconcile → satisfied` 转移绑定同一案件、原派发、Take 投递与当前 fencing attempt，只有原邮件领取证明及唯一精确 Take 事实均匹配时才允许。原资产完整仍在则投递重新排队、动作回到 `enqueued`、案件回到 `take_pending`；自动重排用满后，当前 fence 上最近一次观察为 `assets_claimable` 时 Admin 可再次领回同一投递，动作与案件按同一路径重新排队，不消耗也不重置自动重排预算。迁移 `000117` 以延迟约束触发器保证已绑定动作的 `delivery_id` 不可换代或删除，并校验其投递的来源、`settlement_return:<return_mail_id>` 身份、prepare/activate 命令、世界、Take 操作及外部邮件 ID 与动作一致 |
 | `settlement_return_verifications` | 未绑定退件只读重新核验读到的完整证据（迁移 `000114`，只追加）：以写入它的案件推进版本为键，记录与入站证据同一严格模型的证据对象、判定（分类与原因码）、唯一绑定的原派发与观察时刻；读不到原退件时不写。改绑时案件引用它，其余结论只留作核验历史 |
 | `settlement_return_takes` | 精确领回证明的消费事实（迁移 `000114`，只追加）：案件、Take 投递、原派发投递与（世界, MID）各唯一，记录领回的资产与证明摘要；资金返还、代管责任与对账位置都以它为准，只消费一次 |
 | `settlement_fulfillment_dispatches` | 结算义务派发历史（迁移 `000115`，只追加）：`(义务, 派发编号)` 主键、投递唯一；首寄 `authorized_by` 为空，补寄必须引用授权它的退件案件（每案至多一次）。履约准备事务登记本次派发；迁移补登既有的首寄 |
@@ -128,7 +129,7 @@
 | `delivery_sent_confirmations` | Admin 与正式 CLI 的人工 Sent 观察命令、请求摘要、接受项、原 owner 快照与结果；只追加，按当前 delivery/fence 和 world/MID 唯一 |
 | `delivery_send_cadence`、`delivery_admin_commands` | 同类邮件发送节奏；Admin 投递操作账本 |
 | `delivery_external_quarantines` | 恢复后外部核对隔离事实（迁移 `000096`，只追加）：`scan_id`、投递与隔离时 fence、world/MID、Sent 详情完整收件人与标题、`sent_at`/`observed_at`；同一投递/fence 与同一 world/MID 各只允许一条。写入与把 pending/claimed 投递改为 `manual_reconcile` 在同一事务内，不重发、不领取、不改写资金或结算。恢复库没有该投递当前 fence 的冻结发送尝试时（备份点仍是 pending/claimed，旧 Worker 在快照之后才进入 `sending`），身份只能用 `payload` 的世界/收件人/金额/装备重建，`result_metadata.external_recovery_quarantine.match_evidence=restored_payload` 与失败码 `external_recovery_payload_match` 标明这是弱证据。无法唯一归属 Sent（多候选 MID，或多条投递共用同一 MID）时不写本表，只把投递阻塞为 `manual_reconcile`（失败码 `external_recovery_unresolved_send`、审计 `delivery.external_recovery_block`） |
-| `delivery_dispositions` | 投递异常终态的统一处置事实（迁移 `000088`）：种类闭集 `auto_sent_proof`、`operator_sent_confirmation`、`admin_failed`、`equipment_loss`、`legacy_self`、`preflight_retired`、`operator_acknowledged`；每种恰好一个来源引用（自动 Sent 绑定、人工 Sent 证明命令、Admin 账本命令、装备损失命令、历史自寄修复命令、操作者确认审计），预检退役以投递行自身为证；只追加，不改变投递状态、资金、履约或资产 |
+| `delivery_dispositions` | 投递异常终态的统一处置事实（迁移 `000088`）：种类闭集包括 `auto_sent_proof`、`operator_sent_confirmation`、`admin_failed`、`equipment_loss`、`cod_returned`、`recovery_equipment_recovered`、`legacy_self`、`preflight_retired`、`operator_acknowledged`；每种恰好一个来源引用，预检退役以投递行自身为证；只追加，不改变投递状态、资金、履约或资产。迁移 `000130` 验证 `cod_returned` 引用的 recovery 与投递同属该恢复付款义务、Send 操作及当前 fence，并保护其身份不被后续改写 |
 
 Worker 在 `deliveries.result_metadata.mailbox_sweep` 与 `sent_reference_sighting` 中保存 Sent 详情实见的 `remaining_equipment_ids`，与 `remaining_equipment_count` 一并写入。清单由按字典序排列且互异的规范正十进制字符串组成，明确没有装备时为 `[]`。遇到无法规范化的编号时保留目击，清单记为 `null`。同一 MID 的新观测显示已领取时，在原 fence 的更新内把此前实见的非空清单保存为 `pre_collection_equipment_ids`，后续同 MID 的已领取观察继续保留它。不同 MID 之间不转移编号，历史记录不补填猜测值。原有的目击重排门依旧生效。
 
@@ -144,7 +145,7 @@ Admin 判失败后的 `sent_reference_sighting` 补采复用人工 Sent 准入�
 
 同一 Serializable 事务写入只追加损失事实及审计，CAS 三个期望版本；相同 command ID 同参先重放，异参或其他 ID 重处置拒绝，序列化冲突/死锁最多尝试三次。锁序为 command advisory → runtime generation → worlds → funding scope/account → auctions → recoveries → lots → equipment → users → obligations → recovery actions → deliveries → fulfillments。原 delivery 终结为 failed/equipment_destroyed 并递增 fencing，Admin 所有新动作均拒绝该退休投递。payment 以 `operator_equipment_loss_v1:<command_id>` 及请求摘要满足；这只是人工处置证明。refund 终结为 failed/operator_external_buyer_compensation 并保留同一人工证明，表示其执行责任转由操作者承担，不表示买方已获补偿。
 
-`settlement_funding_lots.source_kind=operator_equipment_loss`；资金来源 `record_operator_equipment_loss` 只记录操作者承担的冻结 buyer_amount，原 compensation_amount 继续来自 `record_compensation`，按冻结 B+C=S+T 分配 seller/tax，不创建 collected_payment 或实收 receipt。recovery 完成为 completed/resolution=NULL，不触发成交撤销、补偿池冲正、重列或黑名单。卖家只从 blocked 释放为 ready，由原正常 SellerPayout/Worker 流程真实付款；原 lot/auction settlement、补偿账本与冻结策略保持不可变。资金预览仅在损失事实、退休投递、人工证明及资金 lot 完整匹配时识别 refund 的终结和原投递的退休。
+`settlement_funding_lots.source_kind=operator_equipment_loss`；装备损失资金来源 `record_operator_equipment_loss` 只记录操作者承担的冻结 buyer_amount，且须匹配同 UID、付款义务、lot、完整 B/C/S/T 与损失事实摘要；冻结 compensation_amount 由 `record_compensation` 按冻结 B+C=S+T 分配到 seller/tax，不创建 collected_payment 或实收 receipt。相同记录型资金 owner 也允许 `record_internal_purchase` 按冻结 buyer_amount 入账；实收后的 `record_compensation` 必须绑定同 UID、付款义务、lot、冻结 compensation_amount、`collected` 资金 lot 与其 persisted receipt/collected_payment 来源。三类记录型 issue 都只能进入同 UID、同 lot、seller_payout 义务对应的 seller allocation；当前写入还要求该 lot 仍为 seller disposition、allocation 可用，历史迁移校验保留后续改为 retained/refund 的合法发行。Recovery 完成为 completed/resolution=NULL，不触发成交撤销、补偿池冲正、重列或黑名单。卖家只从 blocked 释放为 ready，由原正常 SellerPayout/Worker 流程真实付款；原 lot/auction settlement、补偿账本与冻结策略保持不可变。资金预览仅在损失事实、退休投递、人工证明及资金 lot 完整匹配时识别 refund 的终结和原投递的退休。
 
 人工 Sent 收口只经 `DeliverySentConfirmationPort`，支持 main/settlement 的单件 `winner_equipment_cod`、`unsold_return`、`withdrawn_return` 及已寄出货款的 `seller_payout`。准入二选一且均须当前无租约/claim：结果未知的 `manual_reconcile/write_unknown/write_started=true`；或 Admin 对账判失败的 `failed` 投递（`result_metadata.resolution=admin_reconciled_failed`，命令账本中最新一条 `reconcile` 命令结果为 `failed`、fence 与失败码仍等于当前行，履约以同一失败码 `failed`），预览以 `corrects_admin_failure` 标明。两者都须具备同 command/hash/sending_at 的不可变当前发送尝试；退休装备损失、已有 MID、其他相同内容未绑定投递或付款提醒以外的恢复动作均拒绝，恢复只允许处于 `awaiting_payment`/`payment_overdue` 且无处置。原凭据必须仍为 active 同版本，sender UID 绑定唯一 ready 资金账户，有预期 player_name 时逐字匹配。正文原摘要、世界、完整收件人、主题与冻结资产均核对，历史正文不按当前模板重渲染。
 
@@ -181,10 +182,10 @@ Admin 判失败后的 `sent_reference_sighting` 补采复用人工 Sent 准入�
 
 | 表 | 内容 |
 | --- | --- |
-| `realtime_streams`、`realtime_events` | 事件流与事件（流内序号连续）；非竞价事件（拍卖创建、排期、Admin lot 修改、生命周期、录入、重挂、结算）在业务事务内取号并同事务写入，写入入口只有一个（Admin 重放自行推进流并写引用原事件的副本，不经此入口）；竞价事件与出价同事务写入，`stream_sequence` 在提交后分配，未分配行为 NULL 且不进入回放；迁移 `000011` 的 `auction:discovery` 历史发现流只保留、不再写入、没有读者，见[docs/contracts/realtime.md](realtime.md) |
+| `realtime_streams`、`realtime_events` | 事件流与事件（流内序号连续）；非竞价事件（拍卖创建、排期、Admin lot 修改、生命周期、录入、重挂、结算）在业务事务内取号并同事务写入，写入入口只有一个（Admin 重放自行推进流并写引用原事件的副本，不经此入口）；竞价事件与出价同事务写入，`stream_sequence` 在提交后分配，未分配行为 NULL 且不进入回放；迁移 `000118` 的历史 recovery 重挂来源经命令账本或 Worker 审计及目标载荷预检后保留原值，`origin_command_id` 的 `auction_commands` 外键为 `NOT VALID`，只约束后续非空来源以保持事件只追加；迁移 `000011` 的 `auction:discovery` 历史发现流只保留、不再写入、没有读者，见[docs/contracts/realtime.md](realtime.md)
 | `realtime_consumer_offsets`、`realtime_failures` | 各 consumer 游标与转发失败记录 |
-| `operations_alert_runtime_state`、`operations_alert_signals`、`operations_alert_batches`、`operations_alert_batch_items` | 运维告警的运行状态、信号、批次与批次项 |
-| `operations_alert_webhook_deliveries` | 独立 webhook 通道的持久投递账本；创建时冻结 JSON、每行唯一 `command_id`，lease/fencing 防并发重复发送，结果未知只进入 `manual_reconcile`。新 webhook 领取同时要求 `operations_alert_signals.silenced_until` 已到期，静默只抑制新的重复通知；已存在的 pending 重试按自身状态处理。它不消费 `operations_alert_batches` 或 MoogleMail delivery 状态；`next_webhook_at` 与 `next_notify_at` 分离。迁移 `000103` 增加 `operations_alert_signals.webhook_generation` 与投递 `signal_generation`：generation 只在 signal 从 inactive 变为 active 时递增，open 投递按 `(fingerprint, signal_generation)` 唯一；上一周期的 `manual_reconcile` 保留未知结果，不阻断新事件 |
+| `operations_alert_runtime_state`、`operations_alert_signals`、`operations_alert_batches`、`operations_alert_batch_items` | 运维告警的运行状态、信号、批次与批次项；迁移 `000127` 将引用终态 delivery 的旧 pending/claimed 批次按 delivery 收口；只有批次与原始 `operations_alert` delivery 的命令、摘要及身份一致，且 delivery 仍处于未激活、零尝试的 `prepared` 状态时才保留可领取状态，其他非终态关联失败关闭 |
+| `operations_alert_webhook_deliveries` | 独立 webhook 通道的持久投递账本；创建时冻结 JSON、每行唯一 `command_id`，lease/fencing 防并发重复发送，结果未知只进入 `manual_reconcile`。新 webhook 领取同时要求 `operations_alert_signals.silenced_until` 已到期，静默只抑制新的重复通知；已存在的 pending 重试按自身状态处理。它不消费 `operations_alert_batches` 或 MoogleMail delivery 状态；`next_webhook_at` 与 `next_notify_at` 分离。迁移 `000103` 增加 `operations_alert_signals.webhook_generation` 与投递 `signal_generation`：generation 只在 signal 从 inactive 变为 active 时递增，open 投递按 `(fingerprint, signal_generation)` 唯一；上一周期的 `manual_reconcile` 保留未知结果，不阻断新事件。迁移 `000122` 保留 INSERT/UPDATE 写入面并撤销运行账号 DELETE 权限。
 | `operations_alert_acknowledgements` | 迁移 `000089` 新增的告警台确认/静默只追加事实：`action`（`acknowledge`/`silence`）、唯一 `command_id` 与请求摘要、操作者、原因、静默秒数与到期时间。BEFORE UPDATE/DELETE 触发器与权限层拒绝改写；不改变 signal 状态、计数、阈值或业务数据 |
 | `operations_alert_signals` 的确认/静默投影 | 迁移 `000089` 新增 `acknowledged_at`、`acknowledged_by`、`silenced_until`、`resolution_notified_at`。前三者是当前活动周期的快速投影，观察事务在 signal 从已恢复重新变为活动时清空；`resolution_notified_at` 只标记已恢复的每日摘要类信号已进入下一封摘要，两者都由追加事实表保存历史 |
 | `operations_alert_signals` 的 kind / scope / source / identity 闭集 | 迁移 `000005`/`000015`/`000020` 建立，`000085` 扩展为 26 个 kind、9 个 source，`000091` 再扩展为 29 个 kind、11 个 source，`000095` 再扩展为 32 个 kind、12 个 source（新增 `reconciliation` 来源与 `custody_drift`/`solvency_shortfall`/`reconciliation_stale`），`000099` 再新增 `recovery_payment_mail_unsent`（33 个 kind，来源/范围仍为 `recovery`/`auction`），`000101` 再新增 `mail_sent_page_limit_approaching`、`forum_topic_page_limit_approaching` 与 `season_obligations_pending`（36 个 kind；来源/范围为 `mail`/`mail`、`forum`/`forum`、`lifecycle`/`isekai`），`000104` 再新增 `restore_drill_overdue`（37 个 kind；来源/范围均为 `backup`，只由 `alert report --restore-drill-dir` 写入，判定见[apps/auction-cli/README.md#主机侧运维告警报告](../../apps/auction-cli/README.md#主机侧运维告警报告)），`000110` 再新增 `fulfillment_collection_overdue`（38 个 kind；来源/范围为 `fulfillment`/`auction`，已寄出等待领取的寄出时长超过 `fulfillment_collection_overdue_age_seconds` 时由 Worker 扫描写入，只告警不触发任何动作；同时把 `reconciliation` 补进 scope 闭集，供该来源的 `source_unavailable` 使用）：Worker 扫描的 `process`、`delivery`、`fulfillment`、`recovery`、`mail`、`credential`、`lifecycle`、`forum`、`notification`，以及主机侧 `auction-cli alert report` 报告的 `backup`（`disk_capacity_low`/`backup_failed`/`restore_drill_overdue`，scope `backup`）与 `wal`（`wal_upload_stalled`，scope `wal`）。`scope`/`source` 仍为既有闭集；`000091` 的 `account_busy` 使用 `recovery`/世界，`000095` 的三个对账种类使用 `reconciliation`/世界或 `custody`/`solvency`。迁移均登记为 `breaking` |
@@ -197,7 +198,17 @@ Worker 心跳的 `details.worker_cold_config` 为 `{"version":1,"sha256":"<64 �
 
 ### 当前态投影
 
-`public_sessions`、`admin_sessions`、`mail_poll_pending_reads`、`mailbox_sweep_cursors`、`mail_scan_checkpoints`、`auction_intake_targets`、`mail_runtime_generation` 只表示当前运行状态，由各自 owner 的生命周期维护，不作为历史事实。`auction_forum_reply_cursors` 已无读写方：逐主题游标存放在 `auction_forum_bid_commands.post_number`，该表只余迁移 `000005` 的种子行，迁移 `000097` 已删除该表及其余无人读写对象。
+`public_sessions`、`admin_sessions`、`mail_poll_pending_reads`、`mailbox_sweep_cursors`、`mail_scan_checkpoints`、`auction_intake_targets`、`mail_runtime_generation` 只表示当前运行状态，由各自 owner 的生命周期维护，不作为历史事实。邮箱轮转游标按 (created_at, delivery_id) 排序并带 sweep/attempt token；迁移 `000124` 拒绝迟到批次回退。`auction_forum_reply_cursors` 已无读写方：逐主题游标存放在 `auction_forum_bid_commands.post_number`，该表只余迁移 `000005` 的种子行，迁移 `000097` 已删除该表及其余无人读写对象。
+
+### 新增数据库不变量（schema 118–125）
+
+- `000118` 要求代理授权当前投影与连续追加转换一致，realtime 竞价来源与真实命令绑定，并在提交时校验终态拍卖与 lot 的关系；现存 recovery 重挂来源经 recovery 行、命令账本或 Worker 审计和事件载荷预检证明，原 realtime 事件不改写，`origin_command_id` 外键保持 `NOT VALID` 以约束未来写入。
+- `000119` 对入站邮件展示快照的 JSON 数字、整数范围与载荷大小做数据库层检查。
+- `000120` 在冻结发行额度与 `returned_delivery` 唯一完整返还之外，约束 record-only 的 `record_internal_purchase`、`record_operator_equipment_loss` 与 `record_compensation`：buyer/compensation 金额须匹配同 UID、付款义务、lot 与冻结 B/C/S/T；设备损失来源须匹配损失事实，收款后的补偿来源须匹配 persisted receipt 及其 collected_payment 来源；所有发行只能进入相同 UID/lot/seller_payout 对应的 seller allocation。历史预检允许后续 disposition 移为 retained/refund，但当前 issue 只接受 seller disposition 与可用 seller allocation。另校验 legacy seller claim 与付款/前置义务及 lot 对应、补偿池冲正金额与结算事实相等。
+- `000121` 检查早鸟日期确为 Gregorian 日历日期、冻结恢复策略数字保持 JSON number 类型，并要求 runtime switch `expire` 指向同名、当前且已到期的 `set` 事实。
+- `000122` 在迁移与恢复后统一运行账号权限：拒绝继承 DDL/写权限、公开写授权、运行账号对象所有权与旧授权函数的额外执行权，并为所有可创建 public 对象的角色设置默认 ACL。
+- `000123` 把恢复后 quarantine 与 delivery 当前 fence/状态推进同事务绑定，按各退件截止区间逐一归属可能外达的 Send；退件 action 的状态推进保持版本单调且身份字段不变，并只修复唯一可证明的历史案件。
+- `000124` 为 `mailbox_sweep_cursors` 持久化 sweep 与 attempt 身份；迟到批次不能回退游标，只有当前轮已无待处理后缀时才能回绕。`000014`/`000032` 的 intake 目标仍以每世界唯一 intake auction、唯一 target 和事务级世界锁维护。
 
 ## 共有约束
 
@@ -216,12 +227,13 @@ Worker 心跳的 `details.worker_cold_config` 为 `{"version":1,"sha256":"<64 �
 迁移 owner 与运行账号分离。owner 是应用数据库 owner，只供 `auction-cli` 的
 `db create`、`db migrate`、`db rebuild`、`backup restore` 与 `service start/restart` 使用，
 凭据固定在 owner-only 的独立敏感 TOML（`--owner-secrets`）。Public、Admin 与 Worker 共用一个
-运行账号 `auction_runtime`，角色本身在集群中预先创建，权限全部由迁移 `000081` 授予：
+运行账号 `auction_runtime`，角色本身在集群中预先创建，权限由迁移 `000081` 建立、`000122` 校验并由 `000131` 收紧资金来源写入面：
 
 | 对象面 | 运行账号权限 |
 | --- | --- |
 | `public` schema | 只有 `USAGE`；`CREATE` 被撤销，因此不能建表、索引、视图、触发器或函数 |
 | 普通可变表 | `SELECT`、`INSERT`、`UPDATE`、`DELETE`；任何表都没有 `TRUNCATE` |
+| `settlement_funding_sources` | 运行账号有 `SELECT`，且仅可插入 `id`、`uid`、`kind`、`source_key`、`amount`、`proof_digest`；不可指定或改写 `issued_amount`，计数器只由分录触发器更新。权限重放同样保留此列级限制 |
 | 只追加事实表（触发器拒绝 `UPDATE`/`DELETE`）：`auction_settlements`、`audit_records`、`bid_proxy_authorization_transitions`、`bids`、`compensation_ledger`、`compensation_pool_reversals`、`delivery_dispositions`、`delivery_external_quarantines`、`delivery_send_attempts`、`delivery_sent_bindings`、`delivery_sent_confirmations`、`delivery_take_attempts`、`lot_settlements`、`mail_template_events`、`runtime_switch_events`、`settlement_equipment_losses`、`settlement_legacy_bot_seller_claims`、`settlement_legacy_self_reconciliations`、`settlement_recovery_return_consumptions`、`settlement_return_evidence`、`settlement_return_commands`、`settlement_return_events`、`settlement_return_takes`、`settlement_return_verifications`、`settlement_fulfillment_dispatches`、`settlement_funding_delivery_bindings`、`settlement_funding_returns`、`user_blacklist_history` | 只有 `SELECT`、`INSERT` |
 | 冻结证据与登记：`settlement_pools`、`schema_migration_compatibility`、`_sqlx_migrations` | 只有 `SELECT` |
 | 序列 | 只有 `USAGE`、`SELECT`；不授予 `UPDATE`，运行账号不能 `setval` |

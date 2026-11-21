@@ -6,7 +6,7 @@
 use std::{
     ffi::{OsStr, OsString},
     fs::{self, File, OpenOptions},
-    io,
+    io::{self, Seek, SeekFrom},
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     process::Stdio,
@@ -16,13 +16,15 @@ use anyhow::Context;
 use serde::Serialize;
 use tokio::process::Command;
 
+use super::model::classify;
+use super::model::manifest::{ArchiveManifest, Duplicate};
 use super::model::{
-    ArchiveManifest, CIPHER_SUFFIX, Duplicate, MANIFEST_FORMAT, SourceIdentity, cipher_path,
-    classify, manifest_path, require_staging_dir, source_identity, valid_recipient,
-    valid_segment_name,
+    CIPHER_SUFFIX, MANIFEST_FORMAT, SourceIdentity, cipher_path, manifest_path,
+    require_staging_dir, source_identity, valid_recipient, valid_segment_name,
 };
-use super::staging::{STAGED_MODE, STDERR_LIMIT, temp_path, write_staged_manifest};
+use super::staging::{STAGED_MODE, STDERR_LIMIT, TempPathGuard, temp_path, write_staged_manifest};
 use crate::app::progress;
+use crate::support::digest::sha256_reader;
 use crate::support::{files, process};
 
 /// 与 `archive_command` 的参数一一对应；`source` 是 `%p`，`name` 是 `%f`。
@@ -64,6 +66,8 @@ pub(super) async fn run(request: &Request) -> anyhow::Result<Outcome> {
     if source_name != request.name {
         anyhow::bail!("WAL 段名必须等于源文件名：{} != {}", request.name, source_name);
     }
+    let lock_path = request.staging_dir.join(format!(".wal-archive-{}.lock", request.name));
+    let _lock = files::lock_file(&lock_path, "同一 WAL 段正在归档")?;
     let source = source_identity(&request.source)?;
     if let Some(outcome) = resolve_duplicate(&request.staging_dir, &request.name, &source)? {
         return Ok(outcome);
@@ -86,7 +90,8 @@ pub(super) async fn run(request: &Request) -> anyhow::Result<Outcome> {
             OsString::from(request.recipient.as_str()),
         ],
     };
-    archive_with(&compress, &encrypt, &request.staging_dir, &request.name, &source).await
+    archive_with(&compress, &encrypt, &request.source, &request.staging_dir, &request.name, &source)
+        .await
 }
 
 /// 按既有证据决定是否直接成功；未确认的密文在这里清理，返回 `None` 表示需要归档。
@@ -141,6 +146,7 @@ struct Tool {
 async fn archive_with(
     compress: &Tool,
     encrypt: &Tool,
+    source_path: &Path,
     directory: &Path,
     segment: &str,
     source: &SourceIdentity,
@@ -148,13 +154,19 @@ async fn archive_with(
     let temp = temp_path(directory, segment, CIPHER_SUFFIX);
     process::remove_stale(&temp, "WAL 临时文件")?;
     let file = OpenOptions::new()
+        .read(true)
         .write(true)
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
         .open(&temp)
         .with_context(|| format!("创建 WAL 密文临时文件失败：{}", temp.display()))?;
-    let result = publish(compress, encrypt, directory, segment, file, source).await;
+    let mut temporary = TempPathGuard::new(temp.clone());
+    let result = publish(
+        PipelineInput { compress, encrypt, source_path, directory, segment, file, source },
+        &mut temporary,
+    )
+    .await;
     if result.is_err() {
         // 只回收本次未发布的临时文件；已发布的密文由下次运行按 manifest 判定。
         process::discard_stale(&temp, "wal_archive");
@@ -162,14 +174,22 @@ async fn archive_with(
     result
 }
 
-async fn publish(
-    compress: &Tool,
-    encrypt: &Tool,
-    directory: &Path,
-    segment: &str,
+struct PipelineInput<'a> {
+    compress: &'a Tool,
+    encrypt: &'a Tool,
+    source_path: &'a Path,
+    directory: &'a Path,
+    segment: &'a str,
     file: File,
-    source: &SourceIdentity,
+    source: &'a SourceIdentity,
+}
+
+async fn publish(
+    input: PipelineInput<'_>,
+    temporary: &mut TempPathGuard,
 ) -> anyhow::Result<Outcome> {
+    let PipelineInput { compress, encrypt, source_path, directory, segment, mut file, source } =
+        input;
     let temp = temp_path(directory, segment, CIPHER_SUFFIX);
     let cipher = cipher_path(directory, segment);
     let mut compress_child = Command::new(&compress.program)
@@ -234,9 +254,20 @@ async fn publish(
     // 用文件描述符 fchmod，避免路径被替换成符号链接后修改其他文件权限。
     file.set_permissions(fs::Permissions::from_mode(STAGED_MODE))
         .context("设置 WAL 密文权限失败")?;
+    let cipher_bytes_before_hash = file.metadata().context("读取 WAL 密文长度失败")?.len();
+    file.seek(SeekFrom::Start(0)).context("定位 WAL 密文摘要失败")?;
+    let (cipher_sha256, hashed_bytes) =
+        sha256_reader(&mut file).context("计算 WAL 密文摘要失败")?;
+    if hashed_bytes != cipher_bytes_before_hash {
+        anyhow::bail!("WAL 密文在摘要期间发生变化");
+    }
     file.sync_all().context("同步 WAL 密文失败")?;
+    if &source_identity(source_path)? != source {
+        anyhow::bail!("归档期间 WAL 源内容发生变化：{}", source_path.display());
+    }
     fs::rename(temp, &cipher)
         .with_context(|| format!("发布 WAL 密文失败：{}", cipher.display()))?;
+    temporary.disarm();
     files::sync_directory(directory, "WAL 暂存目录")?;
     let cipher_bytes = fs::symlink_metadata(&cipher)
         .with_context(|| format!("读取 WAL 密文失败：{}", cipher.display()))?
@@ -246,7 +277,9 @@ async fn publish(
         segment_name: segment.to_owned(),
         source_bytes: source.bytes,
         source_mtime_ns: source.mtime_ns,
+        source_sha256: Some(source.sha256.clone()),
         cipher_bytes,
+        cipher_sha256: Some(cipher_sha256),
         archived_unix_seconds: process::unix_seconds()?,
     };
     let bytes = serde_json::to_vec_pretty(&record).context("序列化 WAL 归档 manifest 失败")?;
@@ -349,6 +382,7 @@ mod tests {
         let first = archive_with(
             &source_copy_tool(&source),
             &copy_tool(),
+            &source,
             &fixture.staging(),
             SEGMENT,
             &identity,
@@ -380,10 +414,16 @@ mod tests {
         let source = fixture.source(SEGMENT, b"wal-segment-bytes");
         let identity = source_identity(&source).expect("读取源身份");
 
-        let error =
-            archive_with(&failing_tool(), &copy_tool(), &fixture.staging(), SEGMENT, &identity)
-                .await
-                .expect_err("压缩失败必须传播");
+        let error = archive_with(
+            &failing_tool(),
+            &copy_tool(),
+            &source,
+            &fixture.staging(),
+            SEGMENT,
+            &identity,
+        )
+        .await
+        .expect_err("压缩失败必须传播");
         assert!(error.to_string().contains("zstd"));
         assert!(!cipher_path(&fixture.staging(), SEGMENT).exists());
         assert!(!manifest_path(&fixture.staging(), SEGMENT).exists());
@@ -401,7 +441,14 @@ mod tests {
         };
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            archive_with(&compress, &failing_tool(), &fixture.staging(), SEGMENT, &identity),
+            archive_with(
+                &compress,
+                &failing_tool(),
+                &source,
+                &fixture.staging(),
+                SEGMENT,
+                &identity,
+            ),
         )
         .await;
         assert!(result.is_ok(), "加密提前退出时不能等待被写满管道阻塞的压缩进程");
@@ -427,6 +474,7 @@ mod tests {
             archive_with(
                 &source_copy_tool(&source),
                 &encrypt,
+                &source,
                 &fixture.staging(),
                 SEGMENT,
                 &identity,
@@ -457,6 +505,7 @@ mod tests {
         let outcome = archive_with(
             &source_copy_tool(&source),
             &copy_tool(),
+            &source,
             &fixture.staging(),
             SEGMENT,
             &identity,
@@ -476,6 +525,7 @@ mod tests {
         archive_with(
             &source_copy_tool(&source),
             &copy_tool(),
+            &source,
             &fixture.staging(),
             SEGMENT,
             &identity,

@@ -1,7 +1,7 @@
-//! 私有目录与私有文件的创建、打开与校验；权限、属主和链接数都在打开前后核对。
+//! 私有目录与私有文件的创建、打开与校验；权限、属主和链接数均按元数据核对。
 
 use std::{
-    fs::{self, DirBuilder, File, Metadata, OpenOptions},
+    fs::{self, DirBuilder, Metadata},
     io,
     os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
@@ -10,7 +10,7 @@ use std::{
 use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::mail::MailDiagnosticError;
 
-use super::path::{normalized_target, same_file};
+use super::path::normalized_target;
 use crate::safe_diagnostics;
 
 pub(super) fn private_directory(
@@ -41,8 +41,12 @@ pub(super) fn private_directory(
         "inspect_directory",
         || MailDiagnosticError::Io,
     ))?;
+    // Archive contents are trusted only when the service account owns their private directory.
+    // SAFETY: geteuid takes no pointers and does not access Rust-managed memory.
+    let owner = unsafe { libc::geteuid() };
     if !metadata.is_dir()
         || metadata.file_type().is_symlink()
+        || metadata.uid() != owner
         || metadata.permissions().mode() & 0o7777 != 0o700
     {
         return Err(MailDiagnosticError::Io);
@@ -69,27 +73,4 @@ pub(super) fn private_file(
         return Err(MailDiagnosticError::Io);
     }
     Ok(metadata)
-}
-
-pub(super) fn open_private(
-    path: &Path,
-    owner: u32,
-    write: bool,
-) -> Result<File, MailDiagnosticError> {
-    let before = private_file(path, owner, false)?;
-    let file = OpenOptions::new().read(true).write(write).open(path).map_err(
-        safe_diagnostics::error_map("mooglemail_diagnostics", "open_file", || {
-            MailDiagnosticError::Io
-        }),
-    )?;
-    let opened = file.metadata().map_err(safe_diagnostics::error_map(
-        "mooglemail_diagnostics",
-        "inspect_open_file",
-        || MailDiagnosticError::Io,
-    ))?;
-    let after = private_file(path, owner, false)?;
-    if !same_file(&before, &opened) || !same_file(&opened, &after) {
-        return Err(MailDiagnosticError::Io);
-    }
-    Ok(file)
 }

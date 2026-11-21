@@ -34,7 +34,7 @@ export function parseBlocks(markdown: string): MarkdownBlock[] {
       continue;
     }
 
-    const fence = fenceStart(trimmed);
+    const fence = fenceStart(line);
     if (fence !== null) {
       const value: string[] = [];
       index += 1;
@@ -179,7 +179,7 @@ function startsBlock(lines: readonly string[], index: number): boolean {
   const trimmed = rustTrim(line);
   const nextLine = lines[index + 1];
   return (
-    fenceStart(trimmed) !== null ||
+    fenceStart(line) !== null ||
     parseHeading(trimmed) !== null ||
     isRule(trimmed) ||
     trimmed.startsWith(">") ||
@@ -190,19 +190,29 @@ function startsBlock(lines: readonly string[], index: number): boolean {
 }
 
 function fenceStart(value: string): FenceStart | null {
-  const marker = value.charAt(0);
+  let start = 0;
+  while (value.charAt(start) === " ") {
+    start += 1;
+  }
+  if (start > 3) {
+    return null;
+  }
+  const marker = value.charAt(start);
   if (marker !== "`" && marker !== "~") {
     return null;
   }
   let length = 0;
-  while (value.charAt(length) === marker) {
+  while (value.charAt(start + length) === marker) {
     length += 1;
   }
   if (length < 3) {
     return null;
   }
-  const language = rustTrim(value.slice(length));
-  return { fence: value.slice(0, length), language: language.length === 0 ? null : language };
+  const language = rustTrim(value.slice(start + length));
+  return {
+    fence: value.slice(start, start + length),
+    language: language.length === 0 ? null : language,
+  };
 }
 
 function isClosingFence(candidate: string, fence: string): boolean {

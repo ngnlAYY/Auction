@@ -19,3 +19,10 @@ test("平铺子集加载器接受的行形态与 i18n 门禁样本一致", () =>
     expect(buildBundle("en", sample.text, "en", null).ok, sample.name).toBe(sample.valid);
   }
 });
+
+test.each(['key = text {"a\\{b"}\n', 'key = text {"a\\}b"}\n'])(
+  "平铺子集加载器拒绝 Fluent 不支持的花括号转义 %s",
+  (text) => {
+    expect(buildBundle("en", text, "en", null).ok).toBe(false);
+  },
+);

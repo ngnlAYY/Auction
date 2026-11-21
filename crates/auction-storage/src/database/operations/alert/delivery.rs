@@ -60,31 +60,32 @@ pub(super) async fn terminalize_prepared_delivery(
     .execute(&mut **transaction)
     .await
     .map_err(|error| storage_error_from(error, "收口 operations alert prepared delivery 失败"))?;
-    if updated.rows_affected() == 1 {
-        let request_id = delivery_id.to_string();
-        append_delivery_audit(
-            transaction,
-            DeliveryAudit {
-                occurred_at: now,
-                actor_type: "system",
-                actor_id: "delivery-service",
-                action: FAIL,
-                delivery_id,
-                request_id: Some(&request_id),
-                source: "system",
-                metadata: serde_json::json!({
-                    "status": "failed",
-                    "failure_code": failure_code,
-                    "reason_code": "operations_alert_batch_terminal",
-                    "outcome_unknown": false,
-                }),
-            },
-        )
-        .await
-        .map_err(|error| {
-            storage_error_from(error, "追加 operations alert prepared delivery 收口审计失败")
-        })?;
+    if updated.rows_affected() != 1 {
+        return Err(storage_error("operations alert prepared delivery 状态冲突"));
     }
+    let request_id = delivery_id.to_string();
+    append_delivery_audit(
+        transaction,
+        DeliveryAudit {
+            occurred_at: now,
+            actor_type: "system",
+            actor_id: "delivery-service",
+            action: FAIL,
+            delivery_id,
+            request_id: Some(&request_id),
+            source: "system",
+            metadata: serde_json::json!({
+                "status": "failed",
+                "failure_code": failure_code,
+                "reason_code": "operations_alert_batch_terminal",
+                "outcome_unknown": false,
+            }),
+        },
+    )
+    .await
+    .map_err(|error| {
+        storage_error_from(error, "追加 operations alert prepared delivery 收口审计失败")
+    })?;
     Ok(())
 }
 
@@ -280,6 +281,7 @@ pub(super) async fn mark_claim_failed_postgres(
             },
         )
         .await?;
+        restore_resolution_notifications(&mut transaction, claim.batch_id).await?;
     }
     transaction
         .commit()
@@ -346,6 +348,24 @@ fn parse_delivery_status(value: &str) -> Option<OperationsAlertDeliveryStatus> {
     }
 }
 
+pub(super) async fn restore_resolution_notifications(
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
+    batch_id: uuid::Uuid,
+) -> Result<(), ApplicationError> {
+    sqlx::query(
+        "UPDATE public.operations_alert_signals AS signal
+         SET resolution_notified_at = NULL
+         FROM public.operations_alert_batch_items AS item
+         WHERE item.batch_id = $1 AND item.fingerprint = signal.fingerprint
+           AND NOT signal.active AND signal.resolution_notified_at IS NOT NULL",
+    )
+    .bind(batch_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|error| storage_error_from(error, "恢复 operations alert 已恢复项通知标记失败"))?;
+    Ok(())
+}
+
 pub(super) async fn mark_terminal_postgres(
     pool: &TrackedPool<sqlx::Postgres>,
     batch: &OperationsAlertEnqueuedBatch,
@@ -360,6 +380,20 @@ pub(super) async fn mark_terminal_postgres(
         OperationsAlertDeliveryStatus::Failed => "delivery_failed",
         OperationsAlertDeliveryStatus::ManualReconcile => "delivery_manual_reconcile",
     };
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| storage_error_from(error, "开启 operations alert 终态事务失败"))?;
+    lock_batch(&mut transaction, batch.batch_id).await?;
+    let delivery_status: Option<String> =
+        sqlx::query_scalar("SELECT status FROM public.deliveries WHERE id = $1 FOR UPDATE")
+            .bind(batch.delivery_id)
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(|error| storage_error_from(error, "锁定 operations alert delivery 失败"))?;
+    if delivery_status.as_deref() != Some(status.as_str()) {
+        return Err(ApplicationError::OperationsAlert(OperationsAlertError::IdentityConflict));
+    }
     let updated = sqlx::query(
         "UPDATE public.operations_alert_batches
          SET status = $3, completed_at = $4, updated_at = $4,
@@ -375,11 +409,17 @@ pub(super) async fn mark_terminal_postgres(
     .bind(status.as_str())
     .bind(completed_at)
     .bind(stored_error)
-    .execute(pool)
+    .execute(&mut *transaction)
     .await
     .map_err(|error| storage_error_from(error, "写入 operations alert 终态失败"))?;
     if updated.rows_affected() != 1 {
         return Err(ApplicationError::OperationsAlert(OperationsAlertError::IdentityConflict));
     }
-    Ok(())
+    if status == OperationsAlertDeliveryStatus::Failed {
+        restore_resolution_notifications(&mut transaction, batch.batch_id).await?;
+    }
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交 operations alert 终态事务失败"))
 }

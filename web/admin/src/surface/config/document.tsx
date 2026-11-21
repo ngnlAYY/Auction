@@ -339,19 +339,6 @@ export function RuntimeConfigDocument(): JSX.Element {
     <PendingCommandsContext value={pending}>
       <FormIssuesContext value={issues}>
         <h2 class="admin-config-page__runtime-title">{t("admin-runtime-document-title")}</h2>
-        <PendingCommandPanel owner={pending} />
-        <div role="status">
-          <Show when={notice()?.kind === "saved"}>
-            <p class="admin-panel__note action-feedback action-feedback--success">
-              {noticeText({ kind: "saved" })}
-            </p>
-          </Show>
-          <Show when={restartRequired() || readRequiresRestart()}>
-            <p class="admin-panel__note admin-runtime-config__restart">
-              {t("admin-runtime-restart-required")}
-            </p>
-          </Show>
-        </div>
         <div role="status">
           <Show when={workerRestartState()}>
             {(state) => (
@@ -365,6 +352,19 @@ export function RuntimeConfigDocument(): JSX.Element {
                 {workerRestartMessage(state())}
               </p>
             )}
+          </Show>
+        </div>
+        <PendingCommandPanel owner={pending} />
+        <div role="status">
+          <Show when={notice()?.kind === "saved"}>
+            <p class="admin-panel__note action-feedback action-feedback--success">
+              {noticeText({ kind: "saved" })}
+            </p>
+          </Show>
+          <Show when={restartRequired() || readRequiresRestart()}>
+            <p class="admin-panel__note admin-runtime-config__restart">
+              {t("admin-runtime-restart-required")}
+            </p>
           </Show>
         </div>
         <Show when={visibleFingerprint()}>

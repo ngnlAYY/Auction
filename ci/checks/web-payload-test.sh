@@ -569,4 +569,30 @@ fi
 [[ $(<"$fixture/diagnostic") == *'solid_public_initial_js_baseline_bytes'* &&
 	$(<"$fixture/diagnostic") == *'Solid 键'* ]] || fail 'Solid 预算缺键诊断不明确'
 
+sed 's/^warn_growth_basis_points=.*/warn_growth_basis_points=-1/' \
+	"$fixture/solid-budget" >"$fixture/solid-budget-invalid"
+if (
+	export AUCTION_WEB_STACK=solid
+	source "$repository_root/ci/release/build-identity.sh"
+	verify_web_size_budget public "$solid_root" "$fixture/solid-budget-invalid"
+) >"$fixture/out" 2>"$fixture/diagnostic"; then
+	fail 'Solid 预算负告警阈值应失败'
+fi
+[[ $(<"$fixture/diagnostic") == *'schema 或告警阈值无效'* ]] ||
+	fail 'Solid 预算负告警阈值诊断不明确'
+
+over_budget=$((payload_bytes - 1))
+sed -e "s/^solid_public_payload_baseline_bytes=.*/solid_public_payload_baseline_bytes=$over_budget/" \
+	-e "s/^solid_public_payload_max_bytes=.*/solid_public_payload_max_bytes=$over_budget/" \
+	"$fixture/solid-budget" >"$fixture/solid-budget-over"
+if (
+	export AUCTION_WEB_STACK=solid
+	source "$repository_root/ci/release/build-identity.sh"
+	verify_web_size_budget public "$solid_root" "$fixture/solid-budget-over"
+) >"$fixture/out" 2>"$fixture/diagnostic"; then
+	fail 'Solid payload 超出硬上限时应失败'
+fi
+[[ $(<"$fixture/diagnostic") == *'payload 体积超出预算'* ]] ||
+	fail 'Solid payload 超预算诊断不明确'
+
 printf '%s\n' 'Web payload 回归检查通过'

@@ -5,7 +5,7 @@ use auction_time::Timestamp;
 use sqlx::Connection;
 use uuid::Uuid;
 
-use super::super::validation::storage_error;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 pub(crate) async fn record_failure_postgres(

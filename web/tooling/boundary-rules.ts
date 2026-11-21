@@ -144,6 +144,11 @@ function registeredAliasTarget(specifier: string, repositoryRoot: string): strin
     const prefix = alias.pattern.slice(0, -1);
     if (specifier.startsWith(prefix)) {
       const suffix = specifier.slice(prefix.length);
+      if (
+        suffix.split("/").some((segment) => segment === "" || segment === "." || segment === "..")
+      ) {
+        return undefined;
+      }
       return resolve(resolve(repositoryRoot, "web"), alias.target.replace("*", suffix));
     }
   }
@@ -283,8 +288,25 @@ export function classifySpecifier(input: SpecifierInput): SpecifierDecision {
     return targetDecision(sourcePackage, target, input.specifier, false, repositoryRoot);
   }
 
+  if (pathPart.startsWith("@")) {
+    const segments = pathPart.split("/");
+    const scope = segments[0] ?? "";
+    const packageSegment = segments[1] ?? "";
+    if (
+      scope.length < 2 ||
+      !scope.startsWith("@") ||
+      packageSegment === "" ||
+      packageSegment === "." ||
+      packageSegment === ".."
+    ) {
+      return { kind: "violation", reason: `第三方包名无效：${pathPart}` };
+    }
+  }
   const dependency = dependencyName(pathPart);
   if (input.dependencies.includes(dependency)) {
+    if (queryIndex >= 0) {
+      return { kind: "violation", reason: `第三方裸包导入不能附带 query：${input.specifier}` };
+    }
     const segments = pathPart.split("/").slice(dependency.split("/").length);
     if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
       return {

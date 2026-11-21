@@ -132,7 +132,7 @@ export function Fulfillment(): JSX.Element {
         roundReadWorldScope(readPublicQueryForState(queryStateSignal)) !==
           dependencies.request[1].scope
       ) {
-        return progress.peek() ?? null;
+        return null;
       }
       const [auctionId, , world, lotId, page, size] = dependencies.request;
       const result = await fetchFulfillmentPage(

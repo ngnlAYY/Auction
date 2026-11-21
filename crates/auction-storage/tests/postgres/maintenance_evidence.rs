@@ -76,3 +76,48 @@ async fn postgres_maintenance_evidence_reports_missing_migration_history_on_empt
 
     store.postgres_pool().close().await;
 }
+
+#[tokio::test]
+async fn postgres_recovery_preflight_counts_database_local_foreign_objects() {
+    let database = support::TestDatabase::create_empty().await.expect("新建空库");
+    let store = database.maintenance_store().await.expect("以维护账号连接");
+    let name = database_name(&store).await;
+    store.postgres_pool().close().await;
+    let store = database.maintenance_store().await.expect("重新连接空库");
+
+    let empty = store.collect_recovery_preflight(&name).await.expect("空库恢复预检");
+    assert_eq!(empty.user_object_count, 0);
+    assert!(empty.restore_preflight_passed);
+
+    sqlx::query("CREATE FOREIGN DATA WRAPPER recovery_preflight_fdw")
+        .execute(store.postgres_pool())
+        .await
+        .expect("创建 foreign-data wrapper");
+    let wrapper = store.collect_recovery_preflight(&name).await.expect("FDW 恢复预检");
+    assert_eq!(wrapper.user_object_count, 1, "FDW wrapper 的 catalog identity 必须计数");
+    assert!(!wrapper.restore_preflight_passed, "仅有 FDW wrapper 的目标也必须拒绝");
+
+    sqlx::query(
+        "CREATE SERVER recovery_preflight_server
+         FOREIGN DATA WRAPPER recovery_preflight_fdw",
+    )
+    .execute(store.postgres_pool())
+    .await
+    .expect("创建 foreign server");
+    let server = store.collect_recovery_preflight(&name).await.expect("server 恢复预检");
+    assert_eq!(server.user_object_count, 2, "foreign server 的 catalog identity 必须计数");
+    assert!(!server.restore_preflight_passed, "含 foreign server 的目标必须拒绝");
+
+    sqlx::query(
+        "CREATE USER MAPPING FOR CURRENT_USER
+         SERVER recovery_preflight_server",
+    )
+    .execute(store.postgres_pool())
+    .await
+    .expect("创建 user mapping");
+    let mapping = store.collect_recovery_preflight(&name).await.expect("mapping 恢复预检");
+    assert_eq!(mapping.user_object_count, 3, "user mapping 的 catalog identity 必须计数");
+    assert!(!mapping.restore_preflight_passed, "含 user mapping 的目标必须拒绝");
+
+    store.postgres_pool().close().await;
+}

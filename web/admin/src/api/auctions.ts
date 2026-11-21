@@ -81,11 +81,13 @@ export async function fetchAdminAuctions(
   if (!bounds.ok) {
     return bounds;
   }
-  let url = `/api/v1/admin/auctions?page=${page}&page_size=${pageSize}`;
+  const query = new URLSearchParams();
+  query.append("page", String(page));
+  query.append("page_size", String(pageSize));
   if (worldId !== "" && worldId !== "all") {
-    url += "&world_id=";
-    url += worldId;
+    query.append("world_id", worldId);
   }
+  const url = `/api/v1/admin/auctions?${query.toString()}`;
   const response = await sendGet(host, url, signal);
   if (!response.ok) {
     return err(response.error);
@@ -218,12 +220,25 @@ export async function updateAdminAuctionSchedule(
   prepare: AdminAuctionCommandPreparation,
   signal: AbortSignal,
 ): Promise<Result<AdminAuction, AdminWriteFailure>> {
-  if (!validUuid(auctionId) || expectedStateVersion <= 0) {
+  if (
+    !validUuid(auctionId) ||
+    !Number.isSafeInteger(expectedStateVersion) ||
+    expectedStateVersion <= 0
+  ) {
     return err(writeNotSent("invalid_request"));
   }
   const expectedPreview = parseAdminTime(previewScheduledAt);
   const expectedOpen = parseAdminTime(scheduledOpenAt);
   const expectedEnd = parseAdminTime(scheduledEndAt);
+  if (
+    expectedPreview === null ||
+    expectedOpen === null ||
+    expectedEnd === null ||
+    expectedOpen < expectedPreview ||
+    expectedEnd < expectedOpen
+  ) {
+    return err(writeNotSent("invalid_request"));
+  }
   const prepared = prepare(commandId);
   if (!prepared.ok) {
     return err(prepared.error);
@@ -372,11 +387,46 @@ export function decodeAuction(value: AdminAuction): Result<AdminAuction, string>
     !validOptionalTime(value.settled_at) ||
     !validOptionalTime(value.scheduled_ends_at) ||
     (value.lot_count !== null && !validCount(value.lot_count)) ||
-    (value.status === "cancelled" ? !cancellationFieldsPresent : !cancellationFieldsAbsent)
+    (value.status === "cancelled" ? !cancellationFieldsPresent : !cancellationFieldsAbsent) ||
+    !validAuctionLifecycle(value)
   ) {
     return err("auction");
   }
   return ok(value);
+}
+
+function validAuctionLifecycle(value: AdminAuction): boolean {
+  const previewOpened = parseAdminTime(value.preview_opened_at);
+  const opened = parseAdminTime(value.opened_at);
+  const finalPhase = parseAdminTime(value.final_phase_at);
+  const settled = parseAdminTime(value.settled_at);
+  const created = parseAdminTime(value.created_at);
+  if (
+    created === null ||
+    (previewOpened !== null && previewOpened < created) ||
+    (opened !== null && previewOpened !== null && opened < previewOpened) ||
+    (finalPhase !== null && opened !== null && finalPhase < opened) ||
+    (settled !== null && finalPhase !== null && settled < finalPhase)
+  ) {
+    return false;
+  }
+  switch (value.status) {
+    case "draft":
+      return previewOpened === null && opened === null && finalPhase === null && settled === null;
+    case "preview":
+      return previewOpened !== null && opened === null && finalPhase === null && settled === null;
+    case "live":
+      return opened !== null && finalPhase === null && settled === null;
+    case "final":
+    case "settling":
+      return opened !== null && finalPhase !== null && settled === null;
+    case "settled":
+      return opened !== null && finalPhase !== null && settled !== null;
+    case "cancelled":
+      return true;
+    default:
+      return false;
+  }
 }
 
 function auctionIntoCommand(value: AdminAuction): AdminAuctionCommandResponse {

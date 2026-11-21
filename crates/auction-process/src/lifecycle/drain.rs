@@ -2,6 +2,7 @@
 
 use std::{
     future::Future,
+    panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     pin::Pin,
     sync::{
         Arc, Mutex,
@@ -77,6 +78,15 @@ impl DrainCoordinator {
     }
 }
 
+struct ReleaseActive<'a>(&'a Shared);
+
+impl Drop for ReleaseActive<'_> {
+    fn drop(&mut self) {
+        self.0.active.fetch_sub(1, Ordering::AcqRel);
+        self.0.idle.notify_waiters();
+    }
+}
+
 struct Activity {
     shared: Arc<Shared>,
     phase: AtomicU8,
@@ -89,13 +99,10 @@ impl Activity {
         let admission =
             self.shared.admission.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let was_critical = self.phase.swap(FINISHED, Ordering::AcqRel) == CRITICAL;
-        if was_critical {
-            self.shared.active.fetch_sub(1, Ordering::AcqRel);
-        }
         drop(admission);
         if was_critical {
+            let _release = ReleaseActive(&self.shared);
             self.observer.released(persisted);
-            self.shared.idle.notify_waiters();
         }
     }
     fn is_cancelled(&self) -> bool {
@@ -127,8 +134,13 @@ impl DrainActivity {
         }
         self.0.phase.store(CRITICAL, Ordering::Release);
         self.0.shared.active.fetch_add(1, Ordering::AcqRel);
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| self.0.observer.entered())) {
+            self.0.phase.store(PREPARING, Ordering::Release);
+            let _release = ReleaseActive(&self.0.shared);
+            drop(admission);
+            resume_unwind(payload);
+        }
         drop(admission);
-        self.0.observer.entered();
         true
     }
     /// 调用方已经确认原结果提交；只释放进程内计数。

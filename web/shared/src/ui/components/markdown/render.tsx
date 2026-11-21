@@ -1,7 +1,7 @@
 // Markdown 结构到安全 DOM 的渲染。
 
 import type { JSX } from "@solidjs/web";
-import { createEffect, For, Match, onSettled, Switch } from "solid-js";
+import { createEffect, For, Match, onCleanup, onSettled, Switch } from "solid-js";
 
 import { createCell } from "../../../reactive/cell";
 import { createValueMemo } from "../../../reactive/memo";
@@ -275,7 +275,7 @@ function MarkdownLink(props: { readonly node: LinkInline }): JSX.Element {
     <a
       href={props.node.target}
       target={internal() ? undefined : "_blank"}
-      rel={internal() ? undefined : "noreferrer"}
+      rel={internal() ? undefined : "noopener noreferrer"}
     >
       <MarkdownInline nodes={props.node.label} />
     </a>
@@ -325,27 +325,28 @@ function MarkdownTable(props: { readonly block: TableBlock }): JSX.Element {
     return headers.filter(Boolean).join(", ") || t("markdown-table-scroll-region");
   });
 
+  const measure = () => {
+    const element = wrapper;
+    if (element === undefined) return;
+    // 桌面 display: contents 和只裁剪内容的容器都不应进入 Tab 顺序。
+    const overflowX = window.getComputedStyle(element).overflowX;
+    scrollable.set(
+      element.clientWidth > 0 &&
+        element.scrollWidth > element.clientWidth &&
+        (overflowX === "auto" || overflowX === "scroll"),
+    );
+  };
+  window.addEventListener("resize", measure);
+  onCleanup(() => window.removeEventListener("resize", measure));
+
   onSettled(() => {
     const element = wrapper;
     if (element === undefined) return;
-    const measure = () => {
-      // 桌面 display: contents 和只裁剪内容的容器都不应进入 Tab 顺序。
-      const overflowX = window.getComputedStyle(element).overflowX;
-      scrollable.set(
-        element.clientWidth > 0 &&
-          element.scrollWidth > element.clientWidth &&
-          (overflowX === "auto" || overflowX === "scroll"),
-      );
-    };
     measure();
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
     observer?.observe(element);
     if (element.firstElementChild !== null) observer?.observe(element.firstElementChild);
-    window.addEventListener("resize", measure);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", measure);
-    };
+    return () => observer?.disconnect();
   });
 
   createEffect(regionName, (name) => {

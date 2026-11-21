@@ -4,7 +4,7 @@
 //! 没有独立状态机。读写都经调用方以描述符固定的部署状态目录（持锁时取得，查询时只读打开），
 //! 状态目录与祖先的信任口径见 `service::DeploymentState`。
 
-use std::path::Path;
+use std::{os::fd::AsRawFd, path::Path};
 
 use anyhow::Context;
 use auction_time::Timestamp;
@@ -55,8 +55,12 @@ impl ReceiptContext {
     }
 
     /// deploy 在停机备份发布后才能确定恢复点标识；回执仍只写一次。
-    pub(crate) fn set_backup_id(&mut self, backup_id: Option<&str>) {
+    pub(crate) fn set_backup_id(&mut self, backup_id: Option<&str>) -> anyhow::Result<()> {
+        if let Some(backup_id) = backup_id {
+            validate_backup_id(backup_id)?;
+        }
         self.backup_id = backup_id.map(str::to_owned);
+        Ok(())
     }
 }
 
@@ -168,13 +172,23 @@ pub(crate) fn artifact_from_process(role: &str, pid: u32) -> Artifact {
         return artifact;
     }
     let executable = format!("/proc/{pid}/exe");
-    artifact.path = std::fs::read_link(&executable)
-        .ok()
-        .and_then(|path| path.to_str().map(|path| path.trim_end_matches(" (deleted)").to_owned()));
-    if let Ok((sha256, bytes)) = digest::sha256_path(Path::new(&executable)) {
-        artifact.sha256 = Some(sha256);
-        artifact.bytes = Some(bytes);
-    }
+    let Ok(mut file) = std::fs::File::open(&executable) else {
+        return artifact;
+    };
+    let descriptor = format!("/proc/self/fd/{}", file.as_raw_fd());
+    let Ok(path) = std::fs::read_link(&descriptor) else {
+        return artifact;
+    };
+    let Some(path) = path.to_str().map(|path| path.trim_end_matches(" (deleted)").to_owned())
+    else {
+        return artifact;
+    };
+    let Ok((sha256, bytes)) = digest::sha256_reader(&mut file) else {
+        return artifact;
+    };
+    artifact.path = Some(path);
+    artifact.sha256 = Some(sha256);
+    artifact.bytes = Some(bytes);
     artifact
 }
 

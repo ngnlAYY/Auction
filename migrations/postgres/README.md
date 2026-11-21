@@ -49,7 +49,7 @@ VALUES (76, 'breaking');
 
 ## 索引
 
-当前 head 为 `000116`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。下表按版本递增，只列主题，不是逐条字段说明。
+当前 head 为 `000131`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。
 
 | 版本 | 主题 |
 | --- | --- |
@@ -169,3 +169,18 @@ VALUES (76, 'breaking');
 | 000114 | 结算退件案件：新增可变投影 `settlement_return_cases`（每条退件证据一个案件，含 untrusted/unbound/fulfillment_terminal；冻结补寄上限 3、案件版本乐观并发；同一原派发只绑定一个案件）与持久 Take 投影 `settlement_return_actions`，只追加的 `settlement_return_commands`（command_id 幂等账本）、`settlement_return_events`（每个案件版本一条，含 Take 结果未知后的原会话观察 `take_observed` 与凭 `assets_claimable` 观察再次领回的 `take_retry_requested`）、`settlement_return_takes`（精确领回证明只消费一次，原派发、Take 投递与邮件各唯一）与 `settlement_return_verifications`（只读重新核验读到的完整证据，改绑的案件以 `verified_version` 引用，入站证据原文不改写）；`deliveries.origin_kind` 新增受限来源 `settlement_return_action`（只做 Take）；为已有证据补建案件与开案事件；运行账号对投影授读写、对事实只授 `INSERT`；旧程序不认识新来源与新互斥，登记 breaking |
 | 000115 | 结算退件补寄与资金返还：履约新增当前派发编号 `dispatch_no`（既有行为 1），只追加的派发历史 `settlement_fulfillment_dispatches`（`(义务, 派发编号)` 主键，补寄引用授权它的退件案件）与资金投递历史绑定 `settlement_funding_delivery_bindings`（分配指针换代后旧派发仍受资金保护）；`settlement_funding_returns` 增加入站/Take/来源唯一绑定（NOT VALID 只约束新行）并改为只追加、运行账号只授 `INSERT`；补登既有派发与绑定；旧程序按单指针定位资金，登记 breaking |
 | 000116 | `operations_alert_signals` 的 kind/scope/identity 闭集新增 `settlement_return_pending`（已绑定待处理的退件案件）与 `settlement_return_quarantined`（隔离或待重新核验的退件案件），沿用 `fulfillment` 来源与 `auction` scope；另新增 `settlement_return_take_unknown`（Take 结果未知的退件案件），scope 为结果未知的原因闭集（`assets_claimable`、`assets_unclaimable`、`assets_changed`、`mail_missing`、`receipt_unproven`、`session_changed`、`take_unverifiable`、`disposition_conflict`、`awaiting_observation`），每个原因一个信号；按未结案案件计数，不改变案件、义务、投递或资金；旧程序无法解析新 kind，登记 breaking |
+| 000117 | 资金分录新增 `(uid,id)` 复合唯一键与分录复合外键，阻止 debit/credit/source 跨 UID 归属；延迟约束触发器把结算退件 action 绑定到来源、身份、prepare/activate 命令、世界、Take 操作及外部 MID 均匹配的唯一 delivery，已绑定后不可换代或删除；新增唯一性、外键和触发器限制旧程序可能的写入，登记 breaking |
+| 000118 | 代理转换历史连续性与当前投影、realtime 来源完整性和终态拍卖/lot 跨行一致性；历史 recovery 重挂来源按命令账本或 Worker 审计证明并保留，`origin_command_id` 的 `auction_commands` 外键仅强制后续写入；依赖 000079 的命名 CHECK 基线缺失时失败关闭，登记 breaking |
+| 000119 | 入站邮件展示快照 CHECK 安全校验 JSON 数值类型、整型范围与载荷大小，不以窄化 cast 引发范围异常；登记 breaking |
+| 000120 | 资金 issue/return 总额不得超源；record-only 来源必须绑定同 UID、付款义务、lot、冻结拆分及 seller payout allocation；历史预检核对 equipment loss、collected receipt 与冲正。资金分录只追加，UPDATE/DELETE/TRUNCATE 均由触发器拒绝，issue 来源额度不能经行改写绕过；登记 breaking |
+| 000121 | 早鸟排期日期使用 Gregorian 日历校验，冻结恢复策略要求 JSON 数值类型，runtime switch expire 只能引用同名、当前且已到期的 set 事实；登记 breaking |
+| 000122 | 运行账号权限重建覆盖所有数据库对象 ownership、继承角色、PUBLIC 写权限、各对象创建者默认 ACL 与旧 SECURITY DEFINER 函数授权；保留 webhook INSERT/UPDATE、撤销 DELETE，并将 funding entries 限为 INSERT；登记 breaking |
+| 000123 | 外部 Sent quarantine 与 delivery 当前 fence 及状态转换同事务绑定；000112 关账 Send/退件逐一按时间区间归属；修复可唯一证明的 000114 earliest backfill，并约束退件 action 生命周期；登记 breaking |
+| 000124 | 邮箱 sweep cursor 新增 sweep/attempt 身份，只有带新 attempt 且无剩余后缀候选的本轮扫描可回绕；登记 breaking |
+| 000125 | 结算退件 Take 的原会话完整领取证明可将 action 从 `manual_reconcile` 直接收口为 `satisfied`；数据库同时核对唯一 Take 事实、案件/义务/邮件身份、成功投递及当前 fencing attempt，登记 breaking |
+| 000126 | 场次结算池余额 CHECK 改用 NUMERIC 中间值，避免 bigint 加法在约束求值时溢出；登记 breaking |
+| 000127 | 将引用终态 delivery 的 pending/claimed 告警批次按 delivery 权威结果收口；只放行身份一致且未触碰的 prepared delivery，其他非终态关联失败关闭；登记 breaking |
+| 000128 | 以复合唯一键和外键绑定 lot 分类快照与 equipment 分类，阻止已有 lot 的分类漂移；登记 breaking |
+| 000129 | 新建 buyer_blacklist recovery action 必须有理由，保留历史 NULL 理由；登记 breaking |
+| 000130 | `cod_returned` disposition 绑定同一 recovery 的付款 Send 投递与 fence，身份引用写入后不可改写；登记 breaking |
+| 000131 | 资金来源累计 issue/return 由来源行原子计数并受冻结额度约束，已使用来源金额不可修改；运行账号仅可列级 INSERT 来源，不可写累计计数器，权限重放保持该限制；复合外键绑定补偿冲正的 recovery、auction 与 world，历史不一致时失败关闭；登记 breaking |

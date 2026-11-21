@@ -1,5 +1,6 @@
 // 实时订阅测试共用的 HTTP、WebSocket 和外壳替身。
 
+import { createPromiseResolvers } from "@auction/web-shared/platform/promise";
 import { createPageVisibility } from "@auction/web-shared/platform/visibility";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { children, createEffect, createRoot, flush } from "solid-js";
@@ -63,17 +64,14 @@ export async function withSocket(
   ) => Promise<void>,
   initialState = SocketStub.OPEN,
 ): Promise<void> {
-  let resolveCreated: ((socket: SocketStub) => void) | null = null;
-  const created = new Promise<SocketStub>((resolve) => {
-    resolveCreated = resolve;
-  });
+  const { promise: created, resolve: resolveCreated } = createPromiseResolvers<SocketStub>();
   const sockets: SocketStub[] = [];
   class TrackedSocket extends SocketStub {
     constructor() {
       super();
       this.readyState = initialState;
       sockets.push(this);
-      resolveCreated?.(this);
+      resolveCreated(this);
     }
   }
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window") ?? null;

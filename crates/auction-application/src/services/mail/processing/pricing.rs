@@ -107,7 +107,11 @@ pub(super) fn resolve_start_price_plan(
         {
             continue;
         }
-        let Some(amount) = tokens.get(index + 2) else {
+        let Some(amount) = tokens.get(index + 2).filter(|amount| {
+            !amount.is_line_start
+                && !amount.value.contains("/equip/")
+                && !is_explicit_start_token(&tokens, index + 2)
+        }) else {
             return Err(pricing_failure(
                 EquipmentRejectionReason::StartPriceInvalid,
                 "invalid_amount",
@@ -172,16 +176,19 @@ pub(super) fn resolve_start_price_plan(
                     attachment_count,
                 ));
             }
-            let amount = tokens.get(index + 1).ok_or_else(|| {
-                pricing_failure(
-                    EquipmentRejectionReason::StartPriceInvalid,
-                    "invalid_amount",
-                    body,
-                    token_count,
-                    Some(token.index + 1),
-                    attachment_count,
-                )
-            })?;
+            let amount = tokens
+                .get(index + 1)
+                .filter(|amount| !token.is_line_end && !amount.is_line_start)
+                .ok_or_else(|| {
+                    pricing_failure(
+                        EquipmentRejectionReason::StartPriceInvalid,
+                        "invalid_amount",
+                        body,
+                        token_count,
+                        Some(token.index + 1),
+                        attachment_count,
+                    )
+                })?;
             if !amount.is_line_end {
                 return Err(pricing_failure(
                     EquipmentRejectionReason::StartPriceInvalid,
@@ -322,7 +329,13 @@ fn is_explicit_start_token(tokens: &[PricingToken<'_>], index: usize) -> bool {
     let marker = value
         .trim_start_matches(['"', '\'', '`', '[', '('])
         .trim_end_matches(['"', '\'', '`', ']', ')']);
-    let Some(suffix) = marker.get(5..).filter(|_| marker[..5].eq_ignore_ascii_case("start")) else {
+    let Some(prefix) = marker.get(..5) else {
+        return false;
+    };
+    if !prefix.eq_ignore_ascii_case("start") {
+        return false;
+    }
+    let Some(suffix) = marker.get(5..) else {
         return false;
     };
     let compact_amount = suffix

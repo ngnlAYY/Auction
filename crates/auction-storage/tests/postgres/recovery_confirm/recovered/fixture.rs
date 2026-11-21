@@ -221,7 +221,10 @@ pub(crate) async fn insert_relist_target(pool: &PgPool, sequence: i64) {
              scheduled_end_at, effective_end_at, preview_opened_at, opened_at, policy_snapshot)
          SELECT $1, 'isekai', $2, 'Recovery relist target', 'draft', $3, $3, $3, $3, $3, $3,
                 policy_snapshot
-         FROM public.auctions WHERE world_id = 'isekai' AND status = 'settled' LIMIT 1",
+         FROM public.auctions
+         WHERE world_id = 'isekai' AND status = 'settled'
+         ORDER BY sequence DESC, id
+         LIMIT 1",
     )
     .bind(auction)
     .bind(sequence + 1_000_000)

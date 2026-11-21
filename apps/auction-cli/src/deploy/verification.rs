@@ -114,8 +114,9 @@ pub(crate) fn running_roles(states: &[UnitState; 3]) -> Vec<(&'static str, u32)>
 }
 
 pub(super) fn require_artifact_cli(artifact: &artifact::Artifact) -> anyhow::Result<()> {
-    let current = std::env::current_exe().context("读取当前 auction-cli 路径失败")?;
-    let (sha256, _) = sha256_path(&current).context("计算当前 auction-cli 摘要失败")?;
+    // 从 procfs 读取当前进程的实际映像，避免制品路径在检查前后被替换。
+    let current = Path::new("/proc/self/exe");
+    let (sha256, _) = sha256_path(current).context("计算当前 auction-cli 摘要失败")?;
     if sha256 != artifact.cli_sha256() {
         anyhow::bail!(
             "deploy 必须由制品内的 auction-cli 执行（{}）；当前程序摘要与制品不一致",

@@ -91,7 +91,7 @@ pub(super) fn map_foreign_key(
 pub(super) async fn read_migration_inventory(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
 ) -> Result<PostgresMigrationInventory, RetentionInventoryError> {
-    let rows = crate::database::migrations::read_postgres_history(&mut **transaction)
+    let rows = crate::database::migrations::evidence::read_postgres_history(&mut **transaction)
         .await
         .map_err(|source| query_error("migration_identity", source))?;
     let migration_count =
@@ -119,7 +119,10 @@ pub(super) async fn read_migration_inventory(
         all_success,
         expected_version,
         // current 只证明完整迁移身份；盘点结果不构成任何删除授权。
-        current: crate::database::migrations::postgres_history_matches(&rows, expected_version),
+        current: crate::database::migrations::history::postgres_history_matches(
+            &rows,
+            expected_version,
+        ),
     })
 }
 

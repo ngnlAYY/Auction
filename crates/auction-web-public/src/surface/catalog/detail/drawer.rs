@@ -17,7 +17,7 @@ use crate::surface::catalog::actions::active_own_proxy;
 use crate::surface::catalog::command_scope::{
     CatalogAction, CommandDialogContext, CommandDialogInput,
 };
-use crate::surface::commands::CompetitionCommands;
+use crate::surface::commands::host::CompetitionCommands;
 use crate::surface::watches::LotWatchButton;
 use crate::surface::{
     catalog_category_key, catalog_category_label, countdown_class, equipment_group_label,

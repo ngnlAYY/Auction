@@ -75,6 +75,9 @@ export async function fetchAdminSettlement(
   auctionId: string,
   signal: AbortSignal,
 ): Promise<Result<AdminSettlementReport, string>> {
+  if (!validUuid(auctionId)) {
+    return err(invalidResponseError("settlement_auction_id"));
+  }
   const url = `/api/v1/admin/auctions/${auctionId}/settlement-report`;
   const response = await sendGet(host, url, signal);
   if (!response.ok) {
@@ -201,6 +204,7 @@ function decodeSettlementLot(lot: StrictSettlementLot): Result<AdminSettlementLo
     lot.hold_ppm > 1_000_000 ||
     lot.adjustment_ppm < -1_000_000 ||
     lot.adjustment_ppm > 1_000_000 ||
+    !Number.isInteger(lot.leader_held_nanos) ||
     lot.leader_held_nanos < 0 ||
     !validOptionalText(lot.adjustment.policy)
   ) {

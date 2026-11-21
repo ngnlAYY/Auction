@@ -46,7 +46,7 @@ pub(super) fn generated_key_visibility() -> KeyVisibility {
 /// 管理端外壳。与公开端外壳完全独立，并沿用旧版的左侧纵向导航布局。
 #[component]
 pub(super) fn AdminShell() -> Element {
-    use_hook(super::router::restore_initial_admin_location);
+    super::router::restore_initial_admin_location();
     let router = dioxus::prelude::router();
     use_query_router(move || router.full_route_string());
     // 与 Public 外壳一致：弹窗打开期间锁定背景滚动。

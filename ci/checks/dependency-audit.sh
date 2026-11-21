@@ -5,7 +5,12 @@
 
 set -euo pipefail
 
-lockfile=${1:?用法：ci/checks/dependency-audit.sh <Cargo.lock>}
+if (($# != 1)); then
+	printf '用法：%s <Cargo.lock>\n' "$0" >&2
+	exit 2
+fi
+
+lockfile=$1
 exceptions="$(dirname "$0")/dependency-audit.ignore"
 
 arguments=(--file "$lockfile" --deny warnings)

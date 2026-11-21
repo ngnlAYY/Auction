@@ -13,6 +13,14 @@ const LOGIN_KEY_TEXT_LENGTH: usize = 43;
 const ADMIN_MANUAL_LOGIN_KEY_MIN_BYTES: usize = 32;
 const ADMIN_MANUAL_LOGIN_KEY_MAX_BYTES: usize = 256;
 
+fn zeroize_bytes(bytes: &mut [u8]) {
+    for byte in bytes {
+        // SAFETY: 每个 byte 都是可变借用的已初始化字节，且写入发生在释放缓冲区之前。
+        unsafe { std::ptr::write_volatile(byte, 0) };
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}
+
 /// 仅在可信边界内短暂存在的用户登录 key。
 /// MoogleMail 签发和换绑只接受 canonical Base64URL；Admin 手工创建还要兼容旧版允许的
 /// 32–256 字节 UTF-8 非控制字符。两个构造器保持各自闭集，避免放宽邮件命令解析。
@@ -26,13 +34,19 @@ impl MailLoginKey {
         if encoded.len() != LOGIN_KEY_TEXT_LENGTH || !encoded.is_ascii() {
             return Err(MailProcessingError::InvalidLoginKey);
         }
-        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(encoded)
-            .map_err(|_| MailProcessingError::InvalidLoginKey)?;
-        let canonical = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&decoded);
-        let valid = decoded.len() == LOGIN_KEY_BYTES && canonical == encoded;
-        let mut decoded = decoded;
-        decoded.fill(0);
+        let mut decoded = Vec::with_capacity(LOGIN_KEY_BYTES);
+        if base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode_vec(encoded.as_bytes(), &mut decoded)
+            .is_err()
+        {
+            zeroize_bytes(&mut decoded);
+            return Err(MailProcessingError::InvalidLoginKey);
+        }
+        let mut canonical =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&decoded).into_bytes();
+        let valid = decoded.len() == LOGIN_KEY_BYTES && canonical.as_slice() == encoded.as_bytes();
+        zeroize_bytes(&mut canonical);
+        zeroize_bytes(&mut decoded);
         if !valid {
             return Err(MailProcessingError::InvalidLoginKey);
         }
@@ -68,7 +82,7 @@ impl MailLoginKey {
 
     /// 尽力清除 key 的内存副本。
     pub fn clear(&mut self) {
-        self.encoded.fill(0);
+        zeroize_bytes(&mut self.encoded);
         self.encoded.clear();
     }
 }

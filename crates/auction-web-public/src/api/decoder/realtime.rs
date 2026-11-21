@@ -166,13 +166,9 @@ fn valid_realtime_event(value: &Value, auction_id: &str) -> bool {
                 &[],
             ) && valid_uuid(string(payload.get("auction_id")).unwrap_or_default())
                 && positive(payload.get("state_version"))
-                && nonnegative(payload.get("policy_version"))
                 && nonnegative(payload.get("sold_count"))
                 && nonnegative(payload.get("unsold_count"))
-                && int(payload.get("sold_count"))
-                    .zip(int(payload.get("unsold_count")))
-                    .and_then(|(sold, unsold)| sold.checked_add(unsold))
-                    .is_some_and(|total| total > 0)
+                && positive_count_sum(payload.get("sold_count"), payload.get("unsold_count"))
                 && positive(payload.get("obligation_count"))
         }
         (Some("lot.bid_accepted"), Some(2)) => {
@@ -202,6 +198,13 @@ fn valid_realtime_event(value: &Value, auction_id: &str) -> bool {
     }
 }
 
+fn positive_count_sum(sold_count: Option<&Value>, unsold_count: Option<&Value>) -> bool {
+    int(sold_count)
+        .zip(int(unsold_count))
+        .and_then(|(sold, unsold)| sold.checked_add(unsold))
+        .is_some_and(|total| total > 0)
+}
+
 /// 旧版 auction-specific WebSocket 还会把带 world 的事件与当前页面目标核对；HTTP catch-up
 /// 只冻结 auction ID，因此该校验只由单事件帧入口调用。
 fn valid_realtime_event_world(value: &Value, expected_world: &str) -> bool {
@@ -222,6 +225,45 @@ mod tests {
 
     use super::super::decode_success_text;
     use super::valid_auction_realtime_page;
+
+    #[test]
+    fn settled_v2_requires_nonzero_counts_and_v1_keeps_zero_count_compatibility() {
+        let auction_id = "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b";
+        let event = |schema_version, sold_count, unsold_count, obligation_count| {
+            serde_json::json!({
+                "event_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+                "stream_sequence": 1,
+                "kind": "auction.settled",
+                "schema_version": schema_version,
+                "payload": {
+                    "auction_id": auction_id,
+                    "state_version": 1,
+                    "policy_version": 1,
+                    "sold_count": sold_count,
+                    "unsold_count": unsold_count,
+                    "obligation_count": obligation_count
+                },
+                "created_at": "2026-11-20T12:00:00Z"
+            })
+        };
+        let v1 = serde_json::json!({
+            "event_id": "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+            "stream_sequence": 1,
+            "kind": "auction.settled",
+            "schema_version": 1,
+            "payload": {
+                "auction_id": auction_id,
+                "sold_count": 0,
+                "unsold_count": 0,
+                "state_version": 1
+            },
+            "created_at": "2026-11-20T12:00:00Z"
+        });
+        assert!(super::valid_realtime_event(&v1, auction_id));
+        assert!(!super::valid_realtime_event(&event(2, 0, 0, 1), auction_id));
+        assert!(!super::valid_realtime_event(&event(2, 1, 0, 0), auction_id));
+        assert!(super::valid_realtime_event(&event(2, 1, 0, 1), auction_id));
+    }
 
     #[test]
     fn realtime_pages_decode_backend_contract_fixtures() {

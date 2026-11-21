@@ -70,6 +70,9 @@ pub(super) fn decode_player_support(
         }
     }
     for delivery in &bundle.deliveries {
+        if delivery.failure_code.as_deref().is_some_and(|code| !valid_reason_code(code, 96)) {
+            return Err(());
+        }
         decode_delivery(delivery.clone())?;
     }
     for notification in &bundle.notifications {
@@ -79,7 +82,10 @@ pub(super) fn decode_player_support(
             || notification.lot_id.as_deref().is_some_and(|id| !valid_uuid(id))
             || notification.auction_id.as_deref().is_some_and(|id| !valid_uuid(id))
             || notification.delivery_id.as_deref().is_some_and(|id| !valid_uuid(id))
-            || notification.state_reason.as_deref().is_some_and(|value| !valid_safe_text(value, 96))
+            || notification
+                .state_reason
+                .as_deref()
+                .is_some_and(|value| !valid_reason_code(value, 96))
             || parse_delivery_time(&notification.created_at).is_none()
             || parse_delivery_time(&notification.updated_at).is_none()
         {
@@ -96,6 +102,14 @@ pub(super) fn decode_player_support(
         }
     }
     Ok(bundle)
+}
+
+fn valid_reason_code(value: &str, maximum: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= maximum
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
 
 pub(super) fn valid_world(world: &str) -> bool {

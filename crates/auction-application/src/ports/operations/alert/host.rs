@@ -8,10 +8,10 @@
 //! manifest。这里不解析 journal、不推断缺失证据，也不把“从未运行”当作失败。
 
 use super::model::OperationsAlertSourceObservation;
+use super::signals::thresholds::reached;
 use super::signals::{
     OPERATIONS_ALERT_RESTORE_DRILL_MAX_AGE, OPERATIONS_ALERT_WAL_UPLOAD_STALL_AGE,
     OperationsAlertError, OperationsAlertKind, OperationsAlertSignal, OperationsAlertSource,
-    reached,
 };
 
 /// 备份目录文件系统的水位事实；两个下限与定时备份的磁盘门禁使用同一配置。

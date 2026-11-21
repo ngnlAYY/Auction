@@ -25,14 +25,16 @@ const BACKOFF: [Duration; 4] = [
 struct BusyState {
     /// 当前忙碌期已升级到的退避档位（1 基）。
     level: usize,
-    /// 当前退避窗口结束时刻；过期后不立即清零档位，重复命中才继续升级。
-    until: Option<Instant>,
-    /// 当前窗口是否已经放行过只读探测。
-    probe_used: bool,
+    /// 当前退避窗口及其探测额度；忙碌未被成功读取确认结束前保留额度状态。
+    window: Option<BusyWindow>,
     /// 同一忙碌期是否已经保存过首份战斗页证据。
     evidence_saved: bool,
 }
 
+struct BusyWindow {
+    until: Instant,
+    probe_used: bool,
+}
 /// 单个账号（一个 `MoogleMailClient`）内的按世界熔断状态。
 #[derive(Default)]
 pub(crate) struct MoogleMailAccountBusy {
@@ -49,8 +51,8 @@ impl MoogleMailAccountBusy {
     /// 只观察不占用额度；额度只能在取得在途锁、即将发出网络时由 `permits_read` 占用，
     /// 否则排队中被取消的请求会白白耗掉整个窗口唯一的探测。
     pub(crate) fn may_queue_read(&self, world: MoogleMailWorld, now: Instant) -> bool {
-        self.states().get(&world).is_none_or(|state| match state.until {
-            Some(until) if now < until => !state.probe_used,
+        self.states().get(&world).is_none_or(|state| match &state.window {
+            Some(window) if now < window.until => !window.probe_used,
             _ => true,
         })
     }
@@ -59,12 +61,12 @@ impl MoogleMailAccountBusy {
     pub(crate) fn permits_read(&self, world: MoogleMailWorld, now: Instant) -> bool {
         let mut states = self.states();
         let state = states.entry(world).or_default();
-        match state.until {
-            Some(until) if now < until => {
-                if state.probe_used {
+        match &mut state.window {
+            Some(window) if now < window.until => {
+                if window.probe_used {
                     false
                 } else {
-                    state.probe_used = true;
+                    window.probe_used = true;
                     true
                 }
             }
@@ -74,7 +76,10 @@ impl MoogleMailAccountBusy {
 
     /// 写入类请求在窗口内一律不发网络；拒绝发生在 sending 围栏之前，不能算作写入未知。
     pub(crate) fn permits_write(&self, world: MoogleMailWorld, now: Instant) -> bool {
-        self.states().get(&world).and_then(|state| state.until).is_none_or(|until| now >= until)
+        self.states()
+            .get(&world)
+            .and_then(|state| state.window.as_ref().map(|window| window.until))
+            .is_none_or(|until| now >= until)
     }
 
     /// 不能充当探测的只读请求（装备页）与写入同口径：窗口内一律不发网络，也不占用窗口唯一的
@@ -84,12 +89,20 @@ impl MoogleMailAccountBusy {
     }
 
     /// 观察到战斗页：升级退避档位并延长窗口。
-    /// 不重置探测额度：若本次失败来自窗口内探测，立即重新放行会让探测退化成常规请求。
+    /// 不重置探测额度：若本次失败来自探测，即使窗口自然到期后再次命中，也不能立即再次探测。
     pub(crate) fn record_busy(&self, world: MoogleMailWorld, now: Instant) {
         let mut states = self.states();
         let state = states.entry(world).or_default();
+        let probe_used = match &state.window {
+            Some(window) if now >= window.until => {
+                state.evidence_saved = false;
+                window.probe_used
+            }
+            Some(window) => window.probe_used,
+            None => false,
+        };
         state.level = (state.level + 1).min(BACKOFF.len());
-        state.until = Some(now + BACKOFF[state.level - 1]);
+        state.window = Some(BusyWindow { until: now + BACKOFF[state.level - 1], probe_used });
     }
 
     /// 只读请求成功证明账号已退出战斗：结束当前忙碌期并重置退避档位。

@@ -12,6 +12,7 @@ use crate::database::maintenance::retention::inventory::{
 /// 代码内闭集的清理规则；政策只能引用这些规则并给出期限，不能新增谓词。
 pub(crate) struct RetentionRuleSpec {
     pub(crate) rule_id: &'static str,
+    pub(crate) dataset_family: &'static str,
     pub(crate) table: Option<&'static str>,
     pub(crate) basis: &'static str,
     pub(crate) duration_days: i64,
@@ -21,54 +22,63 @@ pub(crate) struct RetentionRuleSpec {
 pub(crate) const RETENTION_RULES: &[RetentionRuleSpec] = &[
     RetentionRuleSpec {
         rule_id: "service_heartbeat_expired_grace",
+        dataset_family: "service_heartbeat",
         table: Some("service_heartbeats"),
         basis: "expires_at",
         duration_days: 30,
     },
     RetentionRuleSpec {
         rule_id: "realtime_event_age",
+        dataset_family: "realtime_events",
         table: Some("realtime_events"),
         basis: "created_at",
         duration_days: 30,
     },
     RetentionRuleSpec {
         rule_id: "realtime_resolved_failure_age",
+        dataset_family: "realtime_failures",
         table: Some("realtime_failures"),
         basis: "resolved_at",
         duration_days: 90,
     },
     RetentionRuleSpec {
         rule_id: "public_session_revoked",
+        dataset_family: "session_records",
         table: Some("public_sessions"),
         basis: "revoked_at",
         duration_days: 0,
     },
     RetentionRuleSpec {
         rule_id: "public_session_expired_grace",
+        dataset_family: "session_records",
         table: Some("public_sessions"),
         basis: "session_deadline",
         duration_days: 30,
     },
     RetentionRuleSpec {
         rule_id: "admin_session_revoked",
+        dataset_family: "session_records",
         table: Some("admin_sessions"),
         basis: "revoked_at",
         duration_days: 0,
     },
     RetentionRuleSpec {
         rule_id: "admin_session_expired_grace",
+        dataset_family: "session_records",
         table: Some("admin_sessions"),
         basis: "session_deadline",
         duration_days: 30,
     },
     RetentionRuleSpec {
         rule_id: "mail_diagnostic_ordinary_age",
+        dataset_family: "mail_diagnostic_files",
         table: None,
         basis: "modified_at",
         duration_days: 7,
     },
     RetentionRuleSpec {
         rule_id: "mail_diagnostic_write_unknown_hold",
+        dataset_family: "mail_diagnostic_files",
         table: None,
         basis: "disposition_plus_grace",
         duration_days: 90,
@@ -107,8 +117,10 @@ pub(crate) fn parse_retention_policy(
 
     let mut seen_tables = BTreeMap::new();
     let mut seen_rules = BTreeMap::new();
+    let mut seen_families = BTreeMap::new();
     for family in &policy.families {
         if family.dataset_family.is_empty()
+            || seen_families.insert(family.dataset_family.clone(), ()).is_some()
             || family.feature_owner.is_empty()
             || family.policy_state.is_empty()
             || family.candidate_class.is_empty()
@@ -193,7 +205,8 @@ fn validate_family_retention(
         let Some(spec) = retention_rule_spec(&rule.rule_id) else {
             return Err(RetentionInventoryError::PolicyInvalid);
         };
-        if rule.basis != spec.basis
+        if family.dataset_family != spec.dataset_family
+            || rule.basis != spec.basis
             || rule.duration_days != spec.duration_days
             || rule.table.as_deref() != spec.table
             || seen_rules.insert(rule.rule_id.clone(), family.dataset_family.clone()).is_some()
@@ -272,27 +285,27 @@ pub(crate) fn build_policy_family_inventory(
                 } else {
                     statistics_complete = false;
                 }
-                let Some(rows) = table.estimated_rows else {
+                if let Some(rows) = table.estimated_rows {
+                    estimated_rows = estimated_rows
+                        .checked_add(rows.max(0))
+                        .ok_or(RetentionInventoryError::CountOverflow)?;
+                } else {
                     statistics_complete = false;
-                    continue;
-                };
-                estimated_rows = estimated_rows
-                    .checked_add(rows.max(0))
-                    .ok_or(RetentionInventoryError::CountOverflow)?;
-                let Some(dead_rows) = table.estimated_dead_rows else {
+                }
+                if let Some(dead_rows) = table.estimated_dead_rows {
+                    estimated_dead_rows = estimated_dead_rows
+                        .checked_add(dead_rows.max(0))
+                        .ok_or(RetentionInventoryError::CountOverflow)?;
+                } else {
                     statistics_complete = false;
-                    continue;
-                };
-                estimated_dead_rows = estimated_dead_rows
-                    .checked_add(dead_rows.max(0))
-                    .ok_or(RetentionInventoryError::CountOverflow)?;
-                let Some(bytes) = table.total_bytes else {
+                }
+                if let Some(bytes) = table.total_bytes {
+                    total_bytes = total_bytes
+                        .checked_add(bytes.max(0))
+                        .ok_or(RetentionInventoryError::CountOverflow)?;
+                } else {
                     statistics_complete = false;
-                    continue;
-                };
-                total_bytes = total_bytes
-                    .checked_add(bytes.max(0))
-                    .ok_or(RetentionInventoryError::CountOverflow)?;
+                }
             }
             Ok(PostgresRetentionFamilyInventory {
                 dataset_family: family.dataset_family.clone(),

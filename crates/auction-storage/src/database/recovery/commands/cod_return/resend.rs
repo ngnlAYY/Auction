@@ -176,7 +176,7 @@ pub(super) async fn resend_cod(
                completed_at = NULL,
                updated_at = $2
            WHERE obligation_id = $1
-             AND execution_state NOT IN ('satisfied', 'failed')
+             AND execution_state IN ('enqueued', 'manual_reconcile', 'satisfied')
            RETURNING obligation_id"#,
     )
     .bind(payment_obligation_id)

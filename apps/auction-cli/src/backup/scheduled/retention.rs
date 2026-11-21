@@ -5,11 +5,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::Context;
 use uuid::Uuid;
 
+use super::offsite::STAGING_DIRECTORY;
 use super::{
     completion,
     journal::Journal,
     model::{FORMAT, Outcome, RunReceipt},
-    offsite::STAGING_DIRECTORY,
 };
 use crate::support::files::{FileIdentity, PrivateDirectory};
 

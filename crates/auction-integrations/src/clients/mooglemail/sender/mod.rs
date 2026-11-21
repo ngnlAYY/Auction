@@ -112,6 +112,7 @@ pub struct MoogleMailSender {
     read_scans: Arc<Mutex<HashMap<MoogleMailWorld, CachedReadScan>>>,
     /// 可选持久检查点；只缩短重启后的前缀扫描，读取失败仍回退完整扫描。
     scan_checkpoints: Option<Arc<dyn MailScanCheckpointStore>>,
+    scan_checkpoint_writes: Arc<tokio::sync::Mutex<()>>,
     scan_observer: Arc<dyn MailScanObserver>,
 }
 
@@ -148,6 +149,7 @@ impl MoogleMailSender {
             sent_scans: Arc::new(Mutex::new(HashMap::new())),
             read_scans: Arc::new(Mutex::new(HashMap::new())),
             scan_checkpoints: None,
+            scan_checkpoint_writes: Arc::new(tokio::sync::Mutex::new(())),
             scan_observer: auction_application::mail::noop_mail_scan_observer(),
         }
     }

@@ -134,24 +134,27 @@ async fn real_client_follows_st_pagination_and_rejects_deleted_tail_post() {
             format!("<div class=\"postcolor\" id=\"post-{}\">System log</div>", 6987908 + index)
         })
         .collect::<String>();
+    // 真实 IPB 的页码导航位于帖子正文之外；放在 `.postcolor` 中会被解析器正确视为用户内容并忽略。
     let navigation = "<a href=\"index.php?showtopic=302133&amp;st=20\">2</a>";
-    server.set_topic_page(
-        0,
-        normalized.replace(&original, &format!("{original}{extra}{navigation}")),
-    );
+    let first_page = normalized.replace("</body>", &format!("{extra}{navigation}</body>"));
+    server.set_topic_page(0, first_page);
     let tail = normalized
         .replace(&original, "<div class=\"postcolor\" id=\"post-6987928\">System log</div>")
         .replace("6987908", "6987928");
     server.set_topic_page(20, tail.clone());
-    let result =
-        client(&server).fetch_topic(SettlementWorld::Main, "302133", &cookie()).await.unwrap();
-    assert_eq!(result.catalog_post_id, "6987908");
+    let result = client(&server)
+        .fetch_topic_incremental(SettlementWorld::Main, "302133", &cookie(), None, 2)
+        .await
+        .unwrap();
+    assert_eq!(result.preview.catalog_post_id, "6987908");
+    assert_eq!(result.fixed_post_numbers, [2]);
+    assert_eq!(result.post_numbers.first(), Some(&3));
+    assert_eq!(result.post_numbers.last(), Some(&21));
     assert!(server.requests().iter().any(|path| path.contains("st=20")));
-    // 删掉尾页唯一的真实结构帖子后，不把缺失页静默当作完整主题。
     server.set_topic_page(20, tail.replace("class=\"postcolor\"", "class=\"deleted\""));
     assert_eq!(
         client(&server)
-            .fetch_topic(SettlementWorld::Main, "302133", &cookie())
+            .fetch_topic_incremental(SettlementWorld::Main, "302133", &cookie(), None, 2)
             .await
             .unwrap_err()
             .category(),

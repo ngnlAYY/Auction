@@ -152,7 +152,10 @@ impl DiagnosticError for ApplicationError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        ApplicationError, CompetitionTransactionError, DeliveryDispositionCommandError,
+        DiagnosticError, RepositoryError, SafeErrorKind,
+    };
 
     #[test]
     fn remote_dependency_keeps_the_remote_classification() {

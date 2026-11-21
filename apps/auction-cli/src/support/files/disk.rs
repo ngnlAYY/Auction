@@ -5,11 +5,15 @@ use std::{fs::File, mem::MaybeUninit, os::fd::AsRawFd, path::Path};
 
 use anyhow::Context;
 
-/// 文件系统的总字节与非特权可用字节。
+/// Linux Btrfs superblock magic in `statfs.f_type`.
+pub(crate) const BTRFS_FILESYSTEM_TYPE: i64 = 0x9123_683e;
+
+/// 文件系统的总字节、非特权可用字节与 Linux 文件系统类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DiskUsage {
     pub total_bytes: u64,
     pub available_bytes: u64,
+    pub filesystem_type: i64,
 }
 
 /// 读取已打开描述符所在文件系统的容量。
@@ -21,6 +25,13 @@ pub(crate) fn usage(file: &File) -> anyhow::Result<DiskUsage> {
     }
     // SAFETY：上面的 fstatvfs 已成功填充整个结构体。
     let statistics = unsafe { statistics.assume_init() };
+    let mut filesystem = MaybeUninit::<libc::statfs>::uninit();
+    // SAFETY：fstatfs 只写入正确尺寸的缓冲区；仅在返回成功后读取已初始化的值。
+    if unsafe { libc::fstatfs(file.as_raw_fd(), filesystem.as_mut_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error()).context("读取文件系统类型失败");
+    }
+    // SAFETY：上面的 fstatfs 已成功填充整个结构体。
+    let filesystem = unsafe { filesystem.assume_init() };
     Ok(DiskUsage {
         total_bytes: statistics
             .f_blocks
@@ -30,6 +41,7 @@ pub(crate) fn usage(file: &File) -> anyhow::Result<DiskUsage> {
             .f_bavail
             .checked_mul(statistics.f_frsize)
             .context("文件系统可用大小溢出")?,
+        filesystem_type: filesystem.f_type,
     })
 }
 

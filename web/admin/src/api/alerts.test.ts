@@ -387,13 +387,14 @@ test("webhook_and_alert_command_contract_fixtures", async () => {
   expect(zeroLimit.result).toEqual(err("invalid_request"));
   expect(zeroLimit.requests).toEqual([]);
 
-  // 合法请求上限为 1；两条独立的合法记录使相同的响应条数检查可经公开入口复现。
+  // 合法请求上限为 1；通过扩展夹具数组构造两条独立记录，路径助手只改已有数组槽位。
   const oversized = adminFixtureBody(webhookName);
   const entry = jsonObjectAt(oversized, "/data/entries/0");
-  setAt(oversized, "/data/entries/1", {
-    ...entry,
-    id: "00000000-0000-4000-8000-000000000021",
-  });
+  const oversizedEntries = jsonObjectAt(oversized, "/data").entries;
+  if (!Array.isArray(oversizedEntries)) {
+    throw new Error("webhook 夹具 entries 必须是数组");
+  }
+  oversizedEntries.push({ ...entry, id: "00000000-0000-4000-8000-000000000021" });
   const oversizedBody = JSON.stringify(oversized);
   expect(decode(apiResponseSchema(AdminAlertWebhookListResponseSchema), oversized).ok).toBe(true);
   const withinLimit = await readWebhooks(oversizedBody, 2);

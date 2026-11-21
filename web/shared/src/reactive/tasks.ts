@@ -68,7 +68,14 @@ export function createTaskScope(): TaskScope {
         signal: controller.signal,
       };
       // 任务体的异常等同程序错误：不在这里吞掉，交给全局未处理拒绝钩子显示错误横幅。
-      void task(context).finally(finish);
+      let promise: Promise<void>;
+      try {
+        promise = task(context);
+      } catch (error) {
+        finish();
+        throw error;
+      }
+      void promise.finally(finish);
       return handle;
     },
   };

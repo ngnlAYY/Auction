@@ -8,10 +8,8 @@ mod claim;
 mod cycle;
 mod failure;
 mod layout;
-mod links;
+pub(in crate::worker::forum) mod links;
 mod runtime;
 
 pub(crate) use cycle::run_cycle;
 pub use runtime::{ForumSyncPorts, ForumSyncRuntime};
-
-pub(super) use links::{resolve_public_url, valid_public_base_url};

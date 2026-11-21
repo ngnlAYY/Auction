@@ -8,9 +8,9 @@
 #[allow(unreachable_code, reason = "Routable 派生的段解析错误映射在 Infallible 即 ! 后不可达")]
 mod route;
 
-pub(super) use route::Route;
+pub(in crate::surface) use route::Route;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 use std::{cell::RefCell, rc::Rc};
 
 use auction_web_shared::t;
@@ -22,9 +22,30 @@ use super::{
 };
 
 /// 冷启动的查询和片段只保存在当前页面内存。
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Clone)]
 struct InitialAdminLocation(Rc<RefCell<Option<AdminLocationSuffix>>>);
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl InitialAdminLocation {
+    fn restore(
+        &self,
+        pathname: &str,
+        search: &str,
+        hash: &str,
+        replace: impl FnOnce(&str) -> bool,
+    ) {
+        let url = self
+            .0
+            .borrow()
+            .as_ref()
+            .and_then(|suffix| initial_admin_url(suffix, pathname, search, hash));
+        // 已有导航或完整地址优先，不能在之后再次复活冷启动后缀。
+        if url.as_deref().is_none_or(replace) {
+            self.0.replace(None);
+        }
+    }
+}
 
 #[cfg(any(target_arch = "wasm32", test))]
 struct AdminLocationSuffix {
@@ -86,12 +107,14 @@ fn initial_admin_url(
     Some(format!("{pathname}{}{}", initial.search, initial.hash))
 }
 
-/// 认证请求前恢复一次冷启动 URL，保留 Router 已写入的历史状态。
+/// 外壳渲染时尝试恢复冷启动 URL，保留 Router 已写入的历史状态。
 pub(super) fn restore_initial_admin_location() {
     #[cfg(target_arch = "wasm32")]
     {
         let Some(initial) = try_consume_context::<InitialAdminLocation>() else { return };
-        let Some(initial) = initial.0.borrow_mut().take() else { return };
+        if initial.0.borrow().is_none() {
+            return;
+        }
         let Some(window) = web_sys::window() else { return };
         let location = window.location();
         let (Ok(pathname), Ok(search), Ok(hash)) =
@@ -99,11 +122,11 @@ pub(super) fn restore_initial_admin_location() {
         else {
             return;
         };
-        let Some(url) = initial_admin_url(&initial, &pathname, &search, &hash) else { return };
-        if let Ok(history) = window.history() {
-            let state = history.state().unwrap_or(wasm_bindgen::JsValue::NULL);
-            let _ = history.replace_state_with_url(&state, "", Some(&url));
-        }
+        initial.restore(&pathname, &search, &hash, |url| {
+            let Ok(history) = window.history() else { return false };
+            let Ok(state) = history.state() else { return false };
+            history.replace_state_with_url(&state, "", Some(url)).is_ok()
+        });
     }
 }
 
@@ -310,7 +333,9 @@ fn NotFound(segments: Vec<String>) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use super::{capture_initial_admin_location, initial_admin_url};
+    use std::{cell::RefCell, rc::Rc};
+
+    use super::{InitialAdminLocation, capture_initial_admin_location, initial_admin_url};
 
     #[test]
     fn admin_bookmark_keeps_query_and_fragment_independently() {
@@ -336,5 +361,36 @@ mod tests {
         assert!(initial_admin_url(&bookmark, "/audit", "?page=3", "").is_none());
         assert!(initial_admin_url(&bookmark, "/audit", "", "#other").is_none());
         assert!(initial_admin_url(&bookmark, "/audit", "?page=2", "#audit").is_none());
+    }
+
+    #[test]
+    fn admin_bookmark_is_retained_until_history_replacement_succeeds() {
+        let suffix = capture_initial_admin_location("/audit", "?page=2", "#audit").unwrap();
+        let initial = InitialAdminLocation(Rc::new(RefCell::new(Some(suffix))));
+        let mut attempts = 0;
+
+        initial.restore("/audit", "", "", |url| {
+            assert_eq!(url, "/audit?page=2#audit");
+            attempts += 1;
+            false
+        });
+        initial.restore("/audit", "", "", |url| {
+            assert_eq!(url, "/audit?page=2#audit");
+            attempts += 1;
+            true
+        });
+        assert_eq!(attempts, 2);
+        initial.restore("/audit", "", "", |_| panic!("恢复后不能再写回启动地址"));
+    }
+
+    #[test]
+    fn newer_navigation_discards_a_bookmark_after_replacement_failure() {
+        let suffix = capture_initial_admin_location("/audit", "?page=2", "#audit").unwrap();
+        let initial = InitialAdminLocation(Rc::new(RefCell::new(Some(suffix))));
+
+        initial.restore("/audit", "", "", |_| false);
+        assert!(initial.0.borrow().is_some());
+        initial.restore("/users", "", "", |_| panic!("不能覆盖新导航"));
+        initial.restore("/audit", "", "", |_| panic!("返回旧路由时不能恢复过期书签"));
     }
 }

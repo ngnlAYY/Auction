@@ -26,7 +26,7 @@ mod table;
 use create::AdminUserCreateForm;
 use table::{AdminUserFilters, AdminUserTable};
 
-pub(super) use create::{AdminUserGeneratedKey, AdminUserGeneratedKeyDialog};
+pub(in crate::surface) use create::{AdminUserGeneratedKey, AdminUserGeneratedKeyDialog};
 
 #[derive(Clone, Copy)]
 struct SourceKeyDelivery(Signal<Option<u64>>);

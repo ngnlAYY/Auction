@@ -118,11 +118,7 @@ pub(super) async fn list(
         }
     }
     validate_entries(&entries)?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| storage_error_from(error, "提交公开价格历史读取事务失败"))?;
-    Ok(PublicPriceHistoryPage {
+    let page = PublicPriceHistoryPage {
         entries,
         total: Some(stats.count),
         stats: Some(stats),
@@ -130,7 +126,13 @@ pub(super) async fn list(
         offset: request.offset,
         next_cursor: None,
         has_more: false,
-    })
+    };
+    page.validate(&request).map_err(storage_error)?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| storage_error_from(error, "提交公开价格历史读取事务失败"))?;
+    Ok(page)
 }
 
 fn map_stats(row: &sqlx::postgres::PgRow) -> Result<PublicPriceHistoryStats, ApplicationError> {

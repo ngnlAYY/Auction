@@ -1,7 +1,7 @@
 //! 暂存文件命名、路径与目录校验。
 
 use std::fs;
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -126,14 +126,27 @@ pub(crate) fn require_staging_dir(directory: &Path) -> anyhow::Result<()> {
 
 /// 源文件必须是普通文件；只接受 PostgreSQL 传入的 WAL 文件本身。
 pub(crate) fn source_identity(path: &Path) -> anyhow::Result<SourceIdentity> {
-    let metadata = fs::symlink_metadata(path)
-        .with_context(|| format!("读取 WAL 文件失败：{}", path.display()))?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .with_context(|| format!("打开 WAL 文件失败：{}", path.display()))?;
+    let metadata = file.metadata().context("读取 WAL 文件元数据失败")?;
+    if !metadata.is_file() {
         anyhow::bail!("WAL 源必须是普通文件：{}", path.display());
     }
     let modified = metadata.modified().context("读取 WAL 文件时间失败")?;
     let elapsed =
         modified.duration_since(SystemTime::UNIX_EPOCH).context("WAL 文件时间早于 UNIX 纪元")?;
     let mtime_ns = u64::try_from(elapsed.as_nanos()).context("WAL 文件时间超出可记录范围")?;
-    Ok(SourceIdentity { bytes: metadata.len(), mtime_ns })
+    let (sha256, bytes) = crate::support::digest::sha256_reader(&mut file)
+        .with_context(|| format!("读取 WAL 文件内容失败：{}", path.display()))?;
+    let after = file.metadata().context("复核 WAL 文件元数据失败")?;
+    if bytes != metadata.len()
+        || after.len() != metadata.len()
+        || after.modified().context("复核 WAL 文件时间失败")? != modified
+    {
+        anyhow::bail!("计算 WAL 源摘要期间文件发生变化：{}", path.display());
+    }
+    Ok(SourceIdentity { bytes, mtime_ns, sha256 })
 }

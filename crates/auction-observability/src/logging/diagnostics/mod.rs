@@ -102,22 +102,26 @@ impl DiagnosticSink for DiagnosticLogWindows {
                     return;
                 }
             };
-            // 过期窗口可丢弃，容量不能被已经停止的故障永久占满。
-            windows.retain(|_, window| window.deadline().is_some());
-            let key = (diagnostic.kind, diagnostic.phase, diagnostic.safe_kind.label());
-            if windows.len() >= MAX_KEYS && !windows.contains_key(&key) {
+            if !self.active.load(Ordering::Acquire) {
                 true
             } else {
-                let window = windows.entry(key).or_insert_with(|| {
-                    RateLimitedLog::diagnostic(
-                        diagnostic.kind,
-                        diagnostic.phase,
-                        diagnostic.safe_kind.label(),
-                    )
-                });
-                let allowed = window.should_log(tracing_level(diagnostic.level));
-                self.changed.notify_one();
-                allowed
+                // 过期窗口可丢弃，容量不能被已经停止的故障永久占满。
+                windows.retain(|_, window| window.deadline().is_some());
+                let key = (diagnostic.kind, diagnostic.phase, diagnostic.safe_kind.label());
+                if windows.len() >= MAX_KEYS && !windows.contains_key(&key) {
+                    true
+                } else {
+                    let window = windows.entry(key).or_insert_with(|| {
+                        RateLimitedLog::diagnostic(
+                            diagnostic.kind,
+                            diagnostic.phase,
+                            diagnostic.safe_kind.label(),
+                        )
+                    });
+                    let allowed = window.should_log(tracing_level(diagnostic.level));
+                    self.changed.notify_one();
+                    allowed
+                }
             }
         } else {
             true

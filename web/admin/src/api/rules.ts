@@ -23,6 +23,7 @@ import {
   adminApiFailureClient,
   decodeAdminReceipt,
   responseFailure,
+  writeNotSent,
   writeOutcomeUnknown,
 } from "./failure";
 import type { AdminSessionHost } from "./session";
@@ -211,6 +212,9 @@ export async function publishAdminRules(
   prepare: AdminRulesPublishPreparation,
   signal: AbortSignal,
 ): Promise<Result<AdminRules, AdminWriteFailure>> {
+  if (kind !== "rules" && kind !== "about") {
+    return err(writeNotSent("invalid_request"));
+  }
   const prepared = prepare(commandId);
   if (!prepared.ok) {
     return err(prepared.error);

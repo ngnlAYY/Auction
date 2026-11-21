@@ -8,5 +8,5 @@ mod page;
 mod preview;
 mod workspace;
 
-pub(super) use model::use_rules_draft;
-pub(super) use page::page;
+pub(in crate::surface) use model::use_rules_draft;
+pub(crate) use page::page;

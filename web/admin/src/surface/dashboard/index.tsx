@@ -48,7 +48,10 @@ export function page(): JSX.Element {
   const dashboard = createTaskResource(
     () => refresh(),
     async (generation, context) =>
-      [generation, await fetchDashboard(host, context.signal)] as const,
+      [
+        generation,
+        await fetchDashboard(host, context.signal).catch(() => err("network_error")),
+      ] as const,
   );
   // 自动轮询开关与间隔入 URL（`poll` 键），默认 30 秒；页面隐藏时轮询挂起。
   // 轮询只重取当前快照，不额外写地址栏。

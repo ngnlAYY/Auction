@@ -18,6 +18,8 @@ mod runtime_switches;
 mod validation;
 mod worlds;
 #[cfg(all(test, not(target_arch = "wasm32")))]
-pub(super) use field_announcement::test_form;
-pub(super) use field_announcement::{FieldAnnouncer, FieldLiveRegion, use_field_announcer};
-pub(super) use page::{page, use_config_draft};
+pub(in crate::surface) use field_announcement::test_form;
+pub(in crate::surface) use field_announcement::{
+    FieldAnnouncer, FieldLiveRegion, use_field_announcer,
+};
+pub(crate) use page::{page, use_config_draft};

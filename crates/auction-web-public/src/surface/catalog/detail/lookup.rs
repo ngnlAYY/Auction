@@ -168,10 +168,17 @@ pub(crate) fn LotDetailLookupHost(lookup: LotDetailLookup) -> Element {
         }
         _ => None,
     };
+    let seed_generation =
+        target.as_ref().and_then(|(_, seed)| seed.as_ref()).map(|seed| seed.generation);
 
     rsx! {
-        for (target, seed) in target {
-            LotDetailLookupSession { key: "{target.auction_id}:{target.lot_id}:{target.entry:?}", target, lookup, seed }
+        if let Some((target, seed)) = target {
+            LotDetailLookupSession {
+                key: "{target.auction_id}:{target.lot_id}:{target.entry:?}:{seed_generation:?}",
+                target,
+                lookup,
+                seed,
+            }
         }
         if let Some((target, error)) = failure {
             if error.not_found() {

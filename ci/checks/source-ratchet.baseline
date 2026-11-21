@@ -7,10 +7,10 @@ application:Err(_) 6
 application:map_err(|_|) 12
 http:Err(_) 38
 http:map_err(|_|) 31
-storage:Err(_) 4
-storage:map_err(|_|) 276
+storage:Err(_) 3
+storage:map_err(|_|) 275
 integrations:Err(_) 1
 integrations:map_err(|_|) 26
 apps:Err(_) 7
-apps:map_err(|_|) 23
+apps:map_err(|_|) 22
 service-apps:english_message 0

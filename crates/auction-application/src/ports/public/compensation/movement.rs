@@ -170,7 +170,12 @@ impl PublicCompensationMovementPage {
             );
             "公开补偿账本页大小溢出"
         })?;
-        if self.total != self.round.movement_count || self.total < 2 || entry_count > self.limit {
+        if self.total != self.round.movement_count
+            || self.total < 2
+            || entry_count > self.limit
+            || self.offset > self.total
+            || entry_count != self.limit.min(self.total - self.offset)
+        {
             return Err("公开补偿账本页无效");
         }
 
@@ -192,21 +197,26 @@ impl PublicCompensationMovementPage {
             if entry.validate().is_err()
                 || entry.auction_id != self.round.auction_id
                 || i64::from(entry.sequence) != expected_sequence
+                || (entry.kind == PublicCompensationMovementKind::Opening && expected_sequence != 1)
+                || (entry.kind == PublicCompensationMovementKind::Closing
+                    && expected_sequence != self.total)
             {
                 return Err("公开补偿账本页包含无效条目");
             }
         }
 
-        if self.offset == 0 && !self.entries.is_empty() {
-            let mut balance = 0_i64;
+        if let Some(first) = self.entries.first() {
+            let mut balance =
+                first.balance_after.checked_sub(first.amount).ok_or("公开补偿账本余额溢出")?;
             for entry in &self.entries {
                 balance = balance.checked_add(entry.amount).ok_or("公开补偿账本余额溢出")?;
                 if balance != entry.balance_after {
                     return Err("公开补偿账本余额链无效");
                 }
             }
-            if self.entries[0].kind != PublicCompensationMovementKind::Opening
-                || self.entries[0].balance_after != self.round.opening_balance
+            if self.offset == 0
+                && (first.kind != PublicCompensationMovementKind::Opening
+                    || first.balance_after != self.round.opening_balance)
             {
                 return Err("公开补偿账本 opening 与摘要不一致");
             }

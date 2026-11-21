@@ -94,13 +94,18 @@ function serdeExponentFitsF64(
     index += 1;
   }
   let exponent = 0;
+  let exponentOverflowed = false;
   for (; index < text.length; index += 1) {
     const digit = text.charCodeAt(index) - 0x30;
-    if (exponent > Math.trunc((I32_MAX - digit) / 10)) {
-      // serde 在指数越过 i32 时忽略剩余位数：只有非零尾数配正指数才溢出。
-      return significand === 0n || !positive;
+    if (exponent > Math.trunc((Number.MAX_SAFE_INTEGER - digit) / 10)) {
+      exponentOverflowed = true;
+    } else if (!exponentOverflowed) {
+      exponent = exponent * 10 + digit;
     }
-    exponent = exponent * 10 + digit;
+  }
+  if (exponentOverflowed) {
+    // 超过安全整数的指数不可能被有限 JSON 数字的分数位抵消。
+    return significand === 0n || !positive;
   }
   const finalExponent = positive
     ? Math.min(I32_MAX, startingExponent + exponent)
@@ -173,8 +178,8 @@ interface WallTimestamp {
 }
 
 /** 对齐旧浏览器 `Date.parse` 的时间接受边界。 */
-export function parseAdminTime(value: string): number | null {
-  if (value.length === 0) {
+export function parseAdminTime(value: string | null): number | null {
+  if (value === null || value.length === 0) {
     return null;
   }
   const timestamp = Date.parse(value);

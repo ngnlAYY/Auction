@@ -269,10 +269,13 @@ async fn read_expectations(
 ) -> Result<Vec<ExternalRecoveryDeliveryExpectation>, ApplicationError> {
     let sql = expectation_sql("ORDER BY delivery.created_at, delivery.id LIMIT $1");
     let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
-        .bind(i64::try_from(MAX_EXTERNAL_RECOVERY_DELIVERIES).unwrap_or(i64::MAX))
+        .bind(i64::try_from(MAX_EXTERNAL_RECOVERY_DELIVERIES + 1).unwrap_or(i64::MAX))
         .fetch_all(pool)
         .await
         .map_err(|error| storage_error_from(error, "读取待核对投递发送身份失败"))?;
+    if rows.len() > MAX_EXTERNAL_RECOVERY_DELIVERIES {
+        return Err(storage_error("待核对投递超过单次恢复上限；存在未读取候选"));
+    }
     rows.iter().map(expectation_from_row).collect()
 }
 
@@ -302,8 +305,18 @@ fn expectation_sql(tail: &str) -> String {
                   delivery.recipient,
                   COALESCE(delivery.payload_world, 'main') AS world_id,
                   attempt.expectation AS frozen_expectation,
-                  COALESCE((delivery.payload ->> 'credits')::bigint, 0) AS payload_credits,
-                  COALESCE((delivery.payload ->> 'cod')::bigint, 0) AS payload_cod,
+                  CASE
+                      WHEN (delivery.payload ->> 'credits') ~ '^-?[0-9]{{1,19}}$'
+                      THEN CASE
+                          WHEN (delivery.payload ->> 'credits')::numeric BETWEEN -9223372036854775808 AND 9223372036854775807
+                          THEN (delivery.payload ->> 'credits')::bigint ELSE 0 END
+                      ELSE 0 END AS payload_credits,
+                  CASE
+                      WHEN (delivery.payload ->> 'cod') ~ '^-?[0-9]{{1,19}}$'
+                      THEN CASE
+                          WHEN (delivery.payload ->> 'cod')::numeric BETWEEN -9223372036854775808 AND 9223372036854775807
+                          THEN (delivery.payload ->> 'cod')::bigint ELSE 0 END
+                      ELSE 0 END AS payload_cod,
                   CASE
                       WHEN delivery.origin_kind = 'settlement' THEN (
                           SELECT CASE

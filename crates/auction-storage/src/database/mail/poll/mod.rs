@@ -127,6 +127,7 @@ impl MailPollStore for DatabaseStore {
             if !valid_text(&mailbox_key, 256)
                 || !valid_text(&worker_id, 256)
                 || now.timestamp_nanos_opt().is_none()
+                || lease_until.timestamp_nanos_opt().is_none()
                 || lease_until <= now
                 || limit == 0
                 || limit > MAX_MAIL_POLL_BATCH_SIZE
@@ -162,6 +163,7 @@ impl MailPollStore for DatabaseStore {
         Box::pin(async move {
             if !claim.validate()
                 || now.timestamp_nanos_opt().is_none()
+                || lease_until.timestamp_nanos_opt().is_none()
                 || lease_until <= now
                 || lease_until <= claim.lease_until
             {

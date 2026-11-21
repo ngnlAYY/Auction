@@ -94,7 +94,7 @@ impl MoogleMailGateway {
         let deadline = requested_deadline.map_or(configured_deadline, |deadline| {
             tokio::time::Instant::from_std(deadline).min(configured_deadline)
         });
-        let mut session = tokio::time::timeout_at(
+        let session = tokio::time::timeout_at(
             deadline,
             self.credentials.begin_read(world, MoogleMailOperation::Inbox),
         )

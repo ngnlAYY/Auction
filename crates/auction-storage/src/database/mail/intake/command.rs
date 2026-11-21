@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::database::auction::competition::{PostgresCompetitionTransaction, map_sql_error};
 use crate::database::auction::intake_target;
+use crate::database::mail::delivery::disposition::has_return_intent;
 use crate::database::mail::intake::failed;
 
 pub(super) async fn add_mail_auction_intake_inner(
@@ -48,13 +49,9 @@ pub(super) async fn add_mail_auction_intake_inner(
         return Err(CompetitionTransactionError::Conflict);
     }
     // 退回与录入共享 world 锁；已安排退回的邮件不能在重试中重新成为可拍卖资产。
-    if crate::database::mail::delivery::has_return_intent(
-        transaction,
-        &write.world_id,
-        &write.external_mail_id,
-    )
-    .await
-    .map_err(map_sql_error)?
+    if has_return_intent(transaction, &write.world_id, &write.external_mail_id)
+        .await
+        .map_err(map_sql_error)?
     {
         return Err(CompetitionTransactionError::Conflict);
     }

@@ -166,7 +166,7 @@ export function currentLotsUrl(
     query.append("include_unleveled", "false");
   }
   query.append("fields", "summary");
-  return `/api/v1/auctions/${auctionId}/lots?${query.toString()}`;
+  return `/api/v1/auctions/${encodeURIComponent(auctionId)}/lots?${query.toString()}`;
 }
 
 /** 读取单个 lot 的详情外壳；与目录共用同一投影类型标识，因为两者都是 lot 外壳响应，

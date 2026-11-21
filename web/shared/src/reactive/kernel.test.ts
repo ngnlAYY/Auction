@@ -5,11 +5,15 @@ import { createEffect, createRoot, flush } from "solid-js";
 import { createCell } from "./cell";
 import { structuralEquals } from "./equality";
 import { createValueMemo } from "./memo";
-import { createTaskResource } from "./resource";
+import { createTaskResource, type TaskResource } from "./resource";
 import { createTaskScope } from "./tasks";
 
 const sleep = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+const settleResource = async () => {
+  flush();
+  await Promise.resolve();
+};
 
 test("cell：写入后同步可读，等值写入仍通知订阅者", () => {
   createRoot((dispose) => {
@@ -111,11 +115,11 @@ test("createTaskResource：依赖变化取消旧任务并保留旧值，支持�
   expect(resource.peek()).toBe("page-1");
 
   page.set(2);
-  flush();
+  await settleResource();
   expect(resource.state()).toBe("pending");
   expect(resource.peek()).toBe("page-1");
   page.set(3);
-  flush();
+  await settleResource();
   await sleep(50);
   expect(resource.peek()).toBe("page-3");
   expect(log).toContain("done:2:false");
@@ -136,101 +140,105 @@ test("createTaskResource：依赖变化取消旧任务并保留旧值，支持�
   expect(resource.peek()).toBeUndefined();
 });
 
-test("createTaskResource：首次提交前的重启只用初始依赖启动一次", () => {
-  createRoot((dispose) => {
-    try {
-      const seen: number[] = [];
-      const page = createCell(1);
-      const resource = createTaskResource(page, async (current) => {
-        seen.push(current);
-        return current;
-      });
-      resource.restart();
-      flush();
-      expect(seen).toEqual([1]);
-    } finally {
-      dispose();
-    }
+test("createTaskResource：首次提交前的重启只用初始依赖启动一次", async () => {
+  let dispose = () => {};
+  const seen: number[] = [];
+  const resource = createRoot((disposeRoot) => {
+    dispose = disposeRoot;
+    const page = createCell(1);
+    return createTaskResource(page, async (current) => {
+      seen.push(current);
+      return current;
+    });
   });
+  resource.restart();
+  await settleResource();
+  expect(seen).toEqual([1]);
+  dispose();
 });
 
-test("createTaskResource：同轮更新依赖与多次重启只启动最新任务", () => {
-  createRoot((dispose) => {
-    try {
-      const seen: number[] = [];
-      const page = createCell(1);
-      const resource = createTaskResource(page, async (current) => {
+test("createTaskResource：同轮更新依赖与多次重启只启动最新任务", async () => {
+  let dispose = () => {};
+  const seen: number[] = [];
+  const { page, resource } = createRoot((disposeRoot) => {
+    dispose = disposeRoot;
+    const pageCell = createCell(1);
+    return {
+      page: pageCell,
+      resource: createTaskResource(pageCell, async (current) => {
         seen.push(current);
         return current;
-      });
-      flush();
-      page.set(2);
-      resource.restart();
-      resource.restart();
-      flush();
-      expect(seen).toEqual([1, 2]);
-      resource.restart();
-      flush();
-      expect(seen).toEqual([1, 2, 2]);
-    } finally {
-      dispose();
-    }
+      }),
+    };
   });
+  await settleResource();
+  page.set(2);
+  resource.restart();
+  resource.restart();
+  await settleResource();
+  expect(seen).toEqual([1, 2]);
+  resource.restart();
+  await settleResource();
+  expect(seen).toEqual([1, 2, 2]);
+  dispose();
 });
 
 test.each([true, false])(
   "createTaskResource：跨 effect 更新后只启动最新任务，手动重启 %s",
-  (restart) => {
-    createRoot((dispose) => {
-      try {
-        const seen: number[] = [];
-        const page = createCell(1);
-        createEffect(page, (current) => {
-          if (current === 2) {
-            page.set(3);
-            if (restart) {
-              resource.restart();
-            }
+  async (restart) => {
+    let dispose = () => {};
+    const seen: number[] = [];
+    const { page } = createRoot((disposeRoot) => {
+      dispose = disposeRoot;
+      const pageCell = createCell(1);
+      let taskResource: TaskResource<number> | null = null;
+      createEffect(pageCell, (current) => {
+        if (current === 2) {
+          pageCell.set(3);
+          if (restart) {
+            taskResource?.restart();
           }
-        });
-        const pageQuery = createValueMemo(() => page());
-        const resource = createTaskResource(pageQuery, async (current) => {
-          seen.push(current);
-          return current;
-        });
-        flush();
-        page.set(2);
-        flush();
-        expect(seen).toEqual([1, 3]);
-      } finally {
-        dispose();
-      }
-    });
-  },
-);
-
-test("createTaskResource：取消待提交的重启后仍响应新的依赖变化", () => {
-  createRoot((dispose) => {
-    try {
-      const seen: number[] = [];
-      const page = createCell(1);
-      const resource = createTaskResource(page, async (current) => {
+        }
+      });
+      const pageQuery = createValueMemo(() => pageCell());
+      taskResource = createTaskResource(pageQuery, async (current) => {
         seen.push(current);
         return current;
       });
-      flush();
-      resource.restart();
-      resource.cancel();
-      flush();
-      expect(resource.state()).toBe("stopped");
-      expect(seen).toEqual([1]);
-      page.set(2);
-      flush();
-      expect(seen).toEqual([1, 2]);
-    } finally {
-      dispose();
-    }
+      return { page: pageCell };
+    });
+    await settleResource();
+    page.set(2);
+    await settleResource();
+    expect(seen).toEqual([1, 3]);
+    dispose();
+  },
+);
+
+test("createTaskResource：取消待提交的重启后仍响应新的依赖变化", async () => {
+  let dispose = () => {};
+  const seen: number[] = [];
+  const { page, resource } = createRoot((disposeRoot) => {
+    dispose = disposeRoot;
+    const pageCell = createCell(1);
+    return {
+      page: pageCell,
+      resource: createTaskResource(pageCell, async (current) => {
+        seen.push(current);
+        return current;
+      }),
+    };
   });
+  await settleResource();
+  resource.restart();
+  resource.cancel();
+  await settleResource();
+  expect(resource.state()).toBe("stopped");
+  expect(seen).toEqual([1]);
+  page.set(2);
+  await settleResource();
+  expect(seen).toEqual([1, 2]);
+  dispose();
 });
 
 test("createTaskScope：宿主销毁后任务不再存活，新任务不执行", async () => {

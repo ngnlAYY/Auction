@@ -66,7 +66,7 @@ where
                         || result.auction_id != auction_id
                         || result.watch.lot_id != command.lot_id
                         || result.watch.version <= 0
-                        || result.watch.channel != "mm"
+                        || result.watch.channel != command.channel
                         || result.watch.watched != command.watched
                     {
                         return Err(LotWatchError::Unavailable);

@@ -14,8 +14,9 @@ use sqlx::Postgres;
 use uuid::Uuid;
 
 use super::candidates::record_sweep_attempt;
+use crate::database::delivery::sent_confirmation::snapshot::admission_rows;
 use crate::database::delivery::sent_confirmation::{
-    SENT_OBSERVATION_KINDS, admission_rows, decode_sent_observation,
+    SENT_OBSERVATION_KINDS, decode_sent_observation,
 };
 use crate::database::operations::audit_health::AuditWriteResult as _;
 use crate::database::storage_error_from;
@@ -95,8 +96,29 @@ pub(super) async fn begin_detail(
     fencing_version: i64,
     entry: Option<&MoogleMailboxSentEntry>,
 ) -> Result<bool, ApplicationError> {
+    begin_detail_from(pool, delivery_id, fencing_version, entry, None, None, None).await
+}
+
+pub(super) async fn begin_detail_from(
+    pool: &TrackedPool<Postgres>,
+    delivery_id: Uuid,
+    fencing_version: i64,
+    entry: Option<&MoogleMailboxSentEntry>,
+    start: Option<auction_application::mail::MoogleMailboxSweepPosition>,
+    sweep_id: Option<Uuid>,
+    oldest_visible: Option<Timestamp>,
+) -> Result<bool, ApplicationError> {
     let Some(entry) = entry else {
-        record_sweep_attempt(pool, "main", delivery_id, Some(fencing_version)).await?;
+        record_sweep_attempt(
+            pool,
+            "main",
+            delivery_id,
+            start,
+            sweep_id,
+            Some(fencing_version),
+            oldest_visible,
+        )
+        .await?;
         return Ok(false);
     };
     let mut tx = pool.begin().await.map_err(detail_storage_error)?;
@@ -118,8 +140,16 @@ pub(super) async fn begin_detail(
         tx.rollback().await.map_err(detail_storage_error)?;
         return Ok(false);
     };
-    let advanced =
-        record_sweep_attempt(&mut *tx, "main", delivery_id, Some(fencing_version)).await?;
+    let advanced = record_sweep_attempt(
+        &mut *tx,
+        "main",
+        delivery_id,
+        start,
+        sweep_id,
+        Some(fencing_version),
+        oldest_visible,
+    )
+    .await?;
     let reserved = if advanced && !attempted {
         match has_observation(&metadata, &entry.external_mail_id) {
             Ok(false) => {

@@ -65,7 +65,7 @@ macro_rules! return_take_blocked_sql {
                        AND intent.payload->>'external_mail_id' = ", $mail, "
                        AND intent.payload_operation IN ('take', 'return')
                        AND NOT ",
-            $crate::database::mail::delivery::unexecuted_intent_sql!("intent"),
+            $crate::database::mail::delivery::disposition::unexecuted_intent_sql!("intent"),
             ")"
         )
     };

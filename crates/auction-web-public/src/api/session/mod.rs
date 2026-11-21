@@ -1,9 +1,9 @@
 //! Public 会话 HTTP DTO 与同源请求。
 //! 原始登录 key 只存在于浏览器表单和一次 HTTPS 请求中，组件只持有安全身份投影。
 
-mod cookie;
-mod identity;
-mod transport;
+pub(super) mod cookie;
+pub(super) mod identity;
+pub(super) mod transport;
 
 use auction_contracts::PublicLoginResponse;
 pub(crate) use auction_contracts::PublicSessionCurrentResponse as PublicSession;
@@ -12,25 +12,23 @@ use serde_json::Value;
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) use self::identity::PUBLIC_SESSION_CHANGE_STORAGE_KEY;
+pub(crate) use self::identity::SessionIdentityObservation;
 pub(crate) use self::identity::{
     PublicSessionCheckTrigger, PublicSessionEvidenceTrigger, SessionIdentity,
     SessionIdentityEvidence, SessionRefreshReason,
 };
 pub(super) use self::identity::{
-    SessionIdentityObservation, broadcast_session_change, notify_public_session_change,
-    observe_public_session_failure, publish_cookie_identity, request_public_session_check,
+    broadcast_session_change, observe_public_session_failure_observed, request_public_session_check,
 };
 use self::identity::{
     mark_public_login, mark_public_logout, observe_expected_user_rejection, publish_read_identity,
 };
 #[cfg(not(test))]
 pub(super) use self::transport::SessionRequest;
+pub(super) use self::transport::decode_identity_response;
 pub(super) use self::transport::send_session_request;
 #[cfg(test)]
 pub(crate) use self::transport::{SessionHttpFixture, SessionRequest};
-pub(super) use self::transport::{
-    decode_account_identity_response, decode_identity_response, decode_observed_account_read,
-};
 
 /// 所有可能写入 Public Cookie 的请求必须先持有同一原生跨标签页锁。
 pub(super) use self::cookie::lock as lock_cookie_mutation;
@@ -126,6 +124,7 @@ async fn fetch_session(
 async fn synchronize_cookie(
     current: PublicSession,
 ) -> Result<PublicSession, PublicSessionApiError> {
+    let observation = SessionIdentityObservation::user_owner();
     let synchronized = request_current_session(SessionRequest::Sync(&current.user_id))
         .await
         .inspect_err(|error| {
@@ -133,6 +132,7 @@ async fn synchronize_cookie(
                 error.status,
                 error.code.as_deref(),
                 Some(&current.user_id),
+                Some(&observation),
             ) {
                 cookie::invalidate();
             }
@@ -142,7 +142,7 @@ async fn synchronize_cookie(
         return Err(PublicSessionApiError::local("invalid_response"));
     };
     cookie::record(&synchronized);
-    publish_cookie_identity(SessionIdentity::Snapshot(Some(synchronized.clone())));
+    observation.publish_cookie_write(SessionIdentity::Snapshot(Some(synchronized.clone())));
     Ok(synchronized)
 }
 
@@ -190,6 +190,7 @@ async fn request_current_session(
 
 pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSessionApiError> {
     let cookie_lock = lock_cookie_mutation().await.map_err(PublicSessionApiError::local)?;
+    let observation = SessionIdentityObservation::start();
     cookie::invalidate();
     let response = send_session_request(SessionRequest::Login(&key)).await;
     drop(key);
@@ -238,7 +239,7 @@ pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSes
     if let Ok(identity) = &result {
         cookie::record(identity);
         mark_public_login();
-        publish_cookie_identity(SessionIdentity::Snapshot(Some(identity.clone())));
+        observation.publish_cookie_write(SessionIdentity::Snapshot(Some(identity.clone())));
     }
     drop(cookie_lock);
     if recheck {
@@ -251,6 +252,7 @@ pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSes
 pub(crate) async fn logout_public(user_id: String) -> Result<(), String> {
     let cookie_lock = lock_cookie_mutation().await.map_err(str::to_owned)?;
     cookie::invalidate();
+    let observation = SessionIdentityObservation::user_owner();
     let response = match send_session_request(SessionRequest::Logout(&user_id)).await {
         Ok(response) => response,
         Err(failure) => {
@@ -269,7 +271,7 @@ pub(crate) async fn logout_public(user_id: String) -> Result<(), String> {
         .map_err(|error| error.validate_conflict(&["session_changed"]));
     let reason = if result.is_ok() {
         mark_public_logout(true);
-        publish_cookie_identity(SessionIdentity::Snapshot(None));
+        observation.publish_cookie_write(SessionIdentity::Snapshot(None));
         Some(SessionRefreshReason::CookieChanged)
     } else if (200..300).contains(&status)
         || status >= 500
@@ -291,10 +293,11 @@ pub(crate) async fn logout_public(user_id: String) -> Result<(), String> {
     } else {
         drop(cookie_lock);
         if let Err(error) = &result {
-            observe_public_session_failure(
+            observe_public_session_failure_observed(
                 status,
                 error.code.as_deref().unwrap_or("invalid_response"),
                 Some(&user_id),
+                &observation,
             );
         }
     }

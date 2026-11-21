@@ -161,8 +161,7 @@ mod tests {
                     id: command.auction_id,
                     sequence: command.sequence,
                     world_id: command.world_id,
-                    preview_scheduled_at: command.preview_scheduled_at,
-                    scheduled_open_at: command.scheduled_open_at,
+                    scheduled_end_at: Some(command.scheduled_end_at),
                     ..draft_auction()
                 };
                 Ok(AdminAuctionSummary {
@@ -173,7 +172,6 @@ mod tests {
             })
         }
     }
-
     impl AdminAuctionSchedulePort for Auctions {
         fn update_schedule(
             &self,

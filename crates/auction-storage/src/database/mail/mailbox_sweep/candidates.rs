@@ -13,6 +13,7 @@ use sqlx::{FromRow, Postgres, Row};
 use uuid::Uuid;
 
 use crate::database::TrackedPool;
+use crate::database::storage_error;
 use crate::database::storage_error_from;
 
 /// 未证明发送的单行投影。
@@ -99,6 +100,7 @@ pub(super) async fn unproven_sends(
                     SELECT CASE
                         WHEN count(e.id)=jsonb_array_length(
                             COALESCE(d.payload->'equipment_secret_refs','[]'::jsonb))
+                         AND count(DISTINCT e.external_equipment_id) = count(e.id)
                         THEN COALESCE(jsonb_agg(e.external_equipment_id ORDER BY e.external_equipment_id)
                             FILTER (WHERE e.id IS NOT NULL),'[]'::jsonb)
                         ELSE 'null'::jsonb END
@@ -327,27 +329,108 @@ pub(super) async fn record_sweep_attempt<'e>(
     executor: impl sqlx::Executor<'e, Database = Postgres>,
     world_id: &str,
     delivery_id: Uuid,
+    start: Option<MoogleMailboxSweepPosition>,
+    sweep_id: Option<Uuid>,
     failed_fence: Option<i64>,
+    oldest_visible: Option<Timestamp>,
 ) -> Result<bool, auction_application::core::ApplicationError> {
-    // 只推进当前一条；取消或提交应答丢失最多消费本条机会，后缀位置不受影响。
-    // 排序键来自原 delivery，不接受调用方伪造时间，也不锁住远端读取期间的业务行。
+    // Sweep 身份识别同一轮的串行推进；乐观匹配轮首游标拒绝另一轮的迟到批次。
+    // 只有 Sent 覆盖范围内不存在任何后缀候选时，较小排序键才代表本轮合法回绕。
+    // `oldest_visible = None` 表示直接详情请求不设 Sent 可见下界；巡检轮转传入本轮冻结下界。
+    if sweep_id.is_some_and(|id| id.is_nil())
+        || start.is_some_and(|position| {
+            position.delivery_id.is_nil() || position.created_at.timestamp_nanos_opt().is_none()
+        })
+    {
+        return Err(storage_error("MoogleMail 维护轮转快照无效"));
+    }
+    let attempt_id = sweep_id.map(|_| Uuid::new_v4());
     let result = sqlx::query(
-        "INSERT INTO public.mailbox_sweep_cursors (world_id, last_created_at, last_delivery_id)
-         SELECT $1, created_at, id FROM public.deliveries
-         WHERE id = $2 AND COALESCE(payload_world, 'main') = $1
-           AND external_reference IS NULL
-           AND (($3::bigint IS NULL AND status = 'manual_reconcile'
-                 AND payload_operation IN ('send', 'take'))
-                OR ($3::bigint IS NOT NULL AND status = 'failed' AND fencing_version = $3
-                    AND origin_kind = 'settlement' AND payload_operation = 'send'))
-           AND sending_at IS NOT NULL AND completed_at IS NOT NULL
-         ON CONFLICT (world_id) DO UPDATE
-         SET last_created_at = EXCLUDED.last_created_at,
-             last_delivery_id = EXCLUDED.last_delivery_id",
+        r#"INSERT INTO public.mailbox_sweep_cursors
+               (world_id, last_created_at, last_delivery_id, last_sweep_id, last_attempt_id)
+           SELECT $1, delivery.created_at, delivery.id, $6, $7
+           FROM public.deliveries AS delivery
+           WHERE delivery.id = $2
+             AND COALESCE(delivery.payload_world, 'main') = $1
+             AND delivery.external_reference IS NULL
+             AND delivery.sending_at IS NOT NULL
+             AND delivery.completed_at IS NOT NULL
+             AND ($6::uuid IS NULL
+                  OR ($4::timestamptz IS NULL AND $5::uuid IS NULL)
+                  OR EXISTS (
+                      SELECT 1 FROM public.mailbox_sweep_cursors AS saved
+                      WHERE saved.world_id = $1
+                        AND (saved.last_sweep_id = $6
+                             OR (saved.last_created_at, saved.last_delivery_id) = ($4, $5::uuid))
+                  ))
+             AND (
+                 ($3::bigint IS NULL AND delivery.status = 'manual_reconcile'
+                     AND delivery.payload_operation IN ('send', 'take'))
+                OR ($3::bigint IS NOT NULL AND delivery.status = 'failed'
+                    AND delivery.fencing_version = $3
+                    AND delivery.origin_kind = 'settlement'
+                    AND delivery.payload_operation = 'send'
+                    AND ($8::timestamptz IS NULL OR delivery.completed_at >= $8)
+                    AND EXISTS (
+                        SELECT 1 FROM public.settlement_obligation_fulfillments AS fulfillment
+                        WHERE fulfillment.delivery_id = delivery.id
+                    ))
+             )
+           ON CONFLICT (world_id) DO UPDATE
+           SET last_created_at = EXCLUDED.last_created_at,
+               last_delivery_id = EXCLUDED.last_delivery_id,
+               last_sweep_id = COALESCE($6, mailbox_sweep_cursors.last_sweep_id),
+               last_attempt_id = COALESCE($7, mailbox_sweep_cursors.last_attempt_id)
+           WHERE (
+                   ($6::uuid IS NULL AND
+                       (EXCLUDED.last_created_at, EXCLUDED.last_delivery_id)
+                           > (mailbox_sweep_cursors.last_created_at,
+                              mailbox_sweep_cursors.last_delivery_id))
+                   OR ($6::uuid IS NOT NULL AND (
+                       mailbox_sweep_cursors.last_sweep_id = $6
+                       OR ($4::timestamptz IS NOT NULL
+                           AND (mailbox_sweep_cursors.last_created_at,
+                                mailbox_sweep_cursors.last_delivery_id) = ($4, $5::uuid))
+                   ))
+               )
+             AND (
+                   (EXCLUDED.last_created_at, EXCLUDED.last_delivery_id)
+                       >= (mailbox_sweep_cursors.last_created_at,
+                           mailbox_sweep_cursors.last_delivery_id)
+                   OR ($6::uuid IS NOT NULL AND NOT EXISTS (
+                       SELECT 1 FROM public.deliveries AS pending
+                       WHERE COALESCE(pending.payload_world, 'main') = $1
+                         AND pending.external_reference IS NULL
+                         AND pending.sending_at IS NOT NULL
+                         AND pending.completed_at IS NOT NULL
+                         AND (pending.created_at, pending.id) >
+                             (mailbox_sweep_cursors.last_created_at,
+                              mailbox_sweep_cursors.last_delivery_id)
+                         AND (
+                             (pending.status = 'manual_reconcile'
+                                 AND pending.payload_operation IN ('send', 'take'))
+                             OR ($8::timestamptz IS NOT NULL
+                                 AND pending.status = 'failed'
+                                 AND pending.origin_kind = 'settlement'
+                                 AND pending.payload_operation = 'send'
+                                 AND pending.completed_at >= $8
+                                 AND EXISTS (
+                                     SELECT 1
+                                     FROM public.settlement_obligation_fulfillments AS fulfillment
+                                     WHERE fulfillment.delivery_id = pending.id
+                                 ))
+                         )
+                   ))
+               )"#,
     )
     .bind(world_id)
     .bind(delivery_id)
     .bind(failed_fence)
+    .bind(start.map(|position| position.created_at))
+    .bind(start.map(|position| position.delivery_id))
+    .bind(sweep_id)
+    .bind(attempt_id)
+    .bind(oldest_visible)
     .execute(executor)
     .await
     .map_err(|error| storage_error_from(error, "MoogleMail 维护轮转提交未确认"))?;

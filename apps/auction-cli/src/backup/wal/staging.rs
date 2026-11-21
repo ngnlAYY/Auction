@@ -23,6 +23,33 @@ pub(super) fn temp_path(directory: &Path, stem: &str, suffix: &str) -> PathBuf {
     directory.join(format!("{stem}{suffix}.tmp"))
 }
 
+/// 本次调用拥有的临时名在取消或失败时尽力回收；成功发布后显式解除守卫。
+pub(super) struct TempPathGuard {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl TempPathGuard {
+    pub(super) fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    pub(super) fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TempPathGuard {
+    fn drop(&mut self) {
+        if self.armed
+            && fs::remove_file(&self.path).is_ok()
+            && let Some(parent) = self.path.parent()
+        {
+            let _ = files::sync_directory(parent, "暂存目录");
+        }
+    }
+}
+
 /// manifest 是发布证据：以 create_new/0600 创建、写满后用描述符设为 [`STAGED_MODE`]，fsync
 /// 文件与目录后才返回成功；目标已存在即失败，不覆盖既有证据。
 pub(super) fn write_staged_manifest(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {

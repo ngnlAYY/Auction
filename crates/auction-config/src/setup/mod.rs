@@ -5,9 +5,12 @@ use std::{
     ffi::CString,
     fs::{self, OpenOptions},
     io::{ErrorKind, Write},
-    os::unix::{
-        ffi::OsStrExt,
-        fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
+    os::{
+        fd::AsRawFd,
+        unix::{
+            ffi::OsStrExt,
+            fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
+        },
     },
     path::{Path, PathBuf},
 };
@@ -140,11 +143,12 @@ impl FirstRunConfig {
         runtime: Option<&Path>,
     ) -> Result<(), FirstRunError> {
         self.validate()?;
-        ensure_destination_absent(destination)?;
         let parent = destination.parent().ok_or(FirstRunError::InvalidInput)?;
-        let metadata = fs::symlink_metadata(parent).map_err(|_| FirstRunError::Io)?;
-        // 临时目录含数据库口令与 Admin 凭据；父目录若可被他人改写，0700 也无法防止
-        // 同级临时名称被替换，后续写入或发布就可能落到另一个目录。
+        let mut parent_options = OpenOptions::new();
+        parent_options.read(true).custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW);
+        let parent_directory = parent_options.open(parent).map_err(|_| FirstRunError::Io)?;
+        let metadata = parent_directory.metadata().map_err(|_| FirstRunError::Io)?;
+        // 临时目录含数据库口令与 Admin 凭据；锚定已校验的目录 inode，避免后续路径解析被重定向。
         // SAFETY：geteuid 只读取当前进程的有效 UID。
         let owner_uid = unsafe { libc::geteuid() };
         if !metadata.is_dir()
@@ -153,7 +157,13 @@ impl FirstRunConfig {
         {
             return Err(FirstRunError::InvalidInput);
         }
-        let temporary = parent.join(format!(".auction-first-run-{}", Uuid::new_v4().simple()));
+        let stable_parent =
+            PathBuf::from(format!("/proc/self/fd/{}", parent_directory.as_raw_fd()));
+        let destination_name = destination.file_name().ok_or(FirstRunError::InvalidInput)?;
+        let stable_destination = stable_parent.join(destination_name);
+        ensure_destination_absent(&stable_destination)?;
+        let temporary =
+            stable_parent.join(format!(".auction-first-run-{}", Uuid::new_v4().simple()));
         // 创建瞬间就限制访问，不依赖后续 chmod 缩小目录权限。
         fs::DirBuilder::new().mode(0o700).create(&temporary).map_err(|_| FirstRunError::Io)?;
         let result = (|| {
@@ -173,17 +183,15 @@ impl FirstRunConfig {
                         .map_err(|_| FirstRunError::InvalidConfig)?;
                 }
             }
-            ensure_destination_absent(destination)?;
-            // 文件 fsync 不持久化目录项；先同步 runtime 子目录，再同步其父目录。
+            ensure_destination_absent(&stable_destination)?;
+            // 文件 fsync 不持久化目录项；先同步 runtime 子目录，再同步锚定的父目录。
             for directory in [temporary.join("runtime"), temporary.clone()] {
                 fs::File::open(directory)
                     .and_then(|directory| directory.sync_all())
                     .map_err(|_| FirstRunError::Io)?;
             }
-            publish_directory(&temporary, destination)?;
-            fs::File::open(parent)
-                .and_then(|directory| directory.sync_all())
-                .map_err(|_| FirstRunError::OutcomeUnknown)
+            publish_directory(&temporary, &stable_destination)?;
+            parent_directory.sync_all().map_err(|_| FirstRunError::OutcomeUnknown)
         })();
         if result.is_err() {
             // 仅清理本次临时名称；发布后父目录同步失败也不能删除已出现的目标目录。

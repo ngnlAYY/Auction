@@ -296,6 +296,27 @@ impl MoogleMailSender {
         let Some(key) = self.scan_checkpoint_key(cookie, world, stream) else {
             return;
         };
+        let writes = Arc::clone(&self.scan_checkpoint_writes);
+        let _write = writes.lock().await;
+        let latest = match stream {
+            MailScanStream::Sent => self.sent_scans.lock().ok().and_then(|cache| {
+                cache
+                    .get(&world)
+                    .filter(|entry| {
+                        entry.credential == cookie.observation_key()
+                            && self.client.check_sent_scope(cookie, &entry.scope).is_ok()
+                    })
+                    .map(|entry| entry.checkpoint.clone())
+            }),
+            MailScanStream::ReadMail => self.read_scans.lock().ok().and_then(|cache| {
+                cache
+                    .get(&world)
+                    .filter(|entry| entry.credential == cookie.observation_key())
+                    .map(|entry| entry.checkpoint.clone())
+            }),
+            _ => None,
+        };
+        let checkpoint = latest.as_ref().unwrap_or(checkpoint);
         if store.save(&key, checkpoint).await.is_err() {
             tracing::debug!(
                 world = world.as_str(),

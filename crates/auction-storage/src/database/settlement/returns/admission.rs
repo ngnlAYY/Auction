@@ -92,9 +92,17 @@ pub(super) async fn admission_facts(
     // 再次领回的机器证明只对结果未知的案件有意义；其他状态不读事件历史。
     let take_retry_proven = case.status == SettlementReturnCaseStatus::TakeUnknown
         && take_retry_proven(tx, case.return_mail_id).await?;
-    let resends_used = fulfillment
-        .as_ref()
-        .map_or(0, |fulfillment| u32::try_from(fulfillment.dispatch_no - 1).unwrap_or(0));
+    let resends_used = match fulfillment.as_ref() {
+        Some(fulfillment) => {
+            let completed_resends = fulfillment
+                .dispatch_no
+                .checked_sub(1)
+                .ok_or_else(|| repository_error("结算退件派发次数无效"))?;
+            u32::try_from(completed_resends)
+                .map_err(|_| repository_error("结算退件派发次数无效"))?
+        }
+        None => 0,
+    };
     let resend_limit = u8::try_from(case.resend_limit)
         .ok()
         .ok_or_else(|| repository_error("结算退件补寄上限无效"))?;

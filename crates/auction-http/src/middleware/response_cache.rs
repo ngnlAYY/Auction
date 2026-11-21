@@ -35,7 +35,15 @@ pub(crate) async fn public_catalog(request: Request, next: Next) -> Response {
     if !response.status().is_success() || has_cache_directive(response.headers(), "no-store") {
         return response;
     }
-    if !response.headers().contains_key(header::CACHE_CONTROL) {
+    let cache_control = response.headers().get(header::CACHE_CONTROL);
+    let approved_shared_policy = cache_control.is_some_and(|value| {
+        value == SETTLED_CACHE_CONTROL || value == LOW_FREQUENCY_CACHE_CONTROL
+    });
+    if cache_control.is_none()
+        || cache_control.is_some_and(|value| {
+            has_cache_directive_value(value, "public") && !approved_shared_policy
+        })
+    {
         response
             .headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static(PUBLIC_CATALOG_CACHE_CONTROL));
@@ -123,11 +131,32 @@ pub(crate) fn etag_matches(header: &HeaderValue, etag: &HeaderValue) -> bool {
     let (Ok(candidates), Ok(etag)) = (header.to_str(), etag.to_str()) else {
         return false;
     };
-    candidates.split(',').any(|candidate| {
-        let candidate = candidate.trim();
-        candidate == "*"
-            || candidate == etag
-            || candidate.strip_prefix("W/").is_some_and(|weak| weak == etag)
+    let mut quoted = false;
+    let mut start = 0;
+    for (index, character) in candidates.char_indices() {
+        if character == '"' {
+            quoted = !quoted;
+        }
+        if character == ',' && !quoted {
+            let candidate = candidates[start..index].trim();
+            if candidate == "*"
+                || candidate == etag
+                || candidate.strip_prefix("W/").is_some_and(|weak| weak == etag)
+            {
+                return true;
+            }
+            start = index + character.len_utf8();
+        }
+    }
+    let candidate = candidates[start..].trim();
+    candidate == "*"
+        || candidate == etag
+        || candidate.strip_prefix("W/").is_some_and(|weak| weak == etag)
+}
+
+fn has_cache_directive_value(value: &HeaderValue, expected: &str) -> bool {
+    value.to_str().ok().is_some_and(|value| {
+        value.split(',').any(|directive| directive.trim().eq_ignore_ascii_case(expected))
     })
 }
 

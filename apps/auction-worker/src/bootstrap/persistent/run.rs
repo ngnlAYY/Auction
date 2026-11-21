@@ -36,10 +36,10 @@ use uuid::Uuid;
 use super::heartbeat;
 use super::profile::{configure_schedule_runtime, database_profile};
 use super::recovery::{asset_reconciliation_runtime, recovery_health_runtime, recovery_worlds};
+use crate::bootstrap::control::WorkerRemoteReads;
 use crate::bootstrap::control::{
-    WorkerRemoteReads, WorkerRuntimeTaskExit, abort_worker_task, bind_worker_control_server,
-    join_worker_control_task, join_worker_task, spawn_external_heartbeat, spawn_heartbeat,
-    worker_heartbeat_health,
+    WorkerRuntimeTaskExit, abort_worker_task, bind_worker_control_server, join_worker_control_task,
+    join_worker_task, spawn_external_heartbeat, spawn_heartbeat, worker_heartbeat_health,
 };
 use crate::bootstrap::forum::configure_forum;
 use crate::bootstrap::fulfillment::{

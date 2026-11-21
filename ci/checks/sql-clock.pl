@@ -9,7 +9,7 @@ use open qw(:std :encoding(UTF-8));
 my $token = qr{
     //[^\n]*
     | (?<comment> /\* (?: [^*/]++ | /(?!\*) | \*(?!/) | (?&comment) )* \*/ )
-    | (?<literal> (?:br|cr|r)(?<hashes>\#*)".*?"\k<hashes>
+    | (?<literal> (?:br|cr|r)(?<hashes>\#*)"(?:(?!"\k<hashes>(?!\#))[\s\S])*"\k<hashes>
                 | (?:b|c)?"(?:\\.|[^"\\])*" )
     | b?'(?:\\(?:u\{[0-9a-fA-F_]+\}|x[0-9a-fA-F]{2}|.)|[^'\\\n])'
 }xs;

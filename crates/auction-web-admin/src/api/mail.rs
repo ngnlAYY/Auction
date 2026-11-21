@@ -49,6 +49,8 @@ struct StrictMailPolling {
     diagnostics: Option<auction_contracts::AdminMailPollingDiagnosticsResponse>,
 }
 
+const MAX_ADMIN_MAIL_RESPONSE_BYTES: usize = 1 << 20;
+
 fn encode_query(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
@@ -75,8 +77,10 @@ pub(crate) async fn fetch_mail_state(mailbox_key: String) -> Result<AdminMailPol
     if !response.ok() {
         return Err(response_error(response).await);
     }
-    let payload: ApiResponse<StrictMailState> =
-        response.json().await.map_err(invalid_response_error)?;
+    let payload: ApiResponse<StrictMailState> = response
+        .json_bounded(MAX_ADMIN_MAIL_RESPONSE_BYTES)
+        .await
+        .map_err(invalid_response_error)?;
     let polling = decode_mail_state(payload.data).map_err(invalid_response_error)?;
     if polling.mailbox_key != mailbox_key || polling.diagnostics.is_none() {
         return Err("invalid_response".to_owned());
@@ -98,20 +102,28 @@ pub(crate) async fn fetch_mail_intakes(
     if !response.ok() {
         return Err(response_error(response).await);
     }
-    let payload: ApiResponse<AdminMailIntakePage> =
-        response.json().await.map_err(invalid_response_error)?;
+    let payload: ApiResponse<AdminMailIntakePage> = response
+        .json_bounded(MAX_ADMIN_MAIL_RESPONSE_BYTES)
+        .await
+        .map_err(invalid_response_error)?;
     decode_mail_intake_page(payload.data, &query, page, page_size).map_err(invalid_response_error)
 }
 
 pub(crate) async fn fetch_mail_intake_detail(
     intake_id: String,
 ) -> Result<AdminMailIntakeDetail, String> {
+    if !valid_uuid(&intake_id) {
+        return Err("invalid_request".to_owned());
+    }
+
     let response = send_get(&format!("/api/v1/admin/mail/intake/{intake_id}")).await?;
     if !response.ok() {
         return Err(response_error(response).await);
     }
-    let payload: ApiResponse<AdminMailIntakeDetail> =
-        response.json().await.map_err(invalid_response_error)?;
+    let payload: ApiResponse<AdminMailIntakeDetail> = response
+        .json_bounded(MAX_ADMIN_MAIL_RESPONSE_BYTES)
+        .await
+        .map_err(invalid_response_error)?;
     let detail = decode_mail_intake_detail(payload.data).map_err(invalid_response_error)?;
     if detail.id != intake_id {
         return Err("invalid_response".to_owned());
@@ -142,8 +154,10 @@ pub(crate) async fn set_mail_paused(
     let response = WriteRequest::general("/api/v1/admin/mail/polling", Method::PUT)
         .send_json(&command)
         .await?;
-    let payload: ApiResponse<StrictMailState> =
-        response.json().await.map_err(AdminWriteFailure::invalid_response)?;
+    let payload: ApiResponse<StrictMailState> = response
+        .json_bounded(MAX_ADMIN_MAIL_RESPONSE_BYTES)
+        .await
+        .map_err(AdminWriteFailure::invalid_response)?;
     validate_mail_polling_receipt(payload, &command)
 }
 
@@ -166,7 +180,12 @@ pub(crate) async fn trigger_mail_poll(command_id: Uuid) -> Result<i64, AdminWrit
     let response = WriteRequest::general("/api/v1/admin/mail/polls:trigger", Method::POST)
         .send_json(&command)
         .await?;
-    poll_trigger_write_result(response.status(), response.json(), command_id).await
+    poll_trigger_write_result(
+        response.status(),
+        response.json_bounded(MAX_ADMIN_MAIL_RESPONSE_BYTES),
+        command_id,
+    )
+    .await
 }
 
 async fn poll_trigger_write_result(
@@ -480,7 +499,7 @@ fn decode_mail_metadata(value: &AdminMailIntakeMetadataResponse) -> Result<(), &
         || !valid_optional_metadata_text(&value.owner_result_code)
         || !valid_optional_metadata_text(&value.reason_code)
         || !valid_metadata_list(&value.warning_codes)
-        || !valid_metadata_list(&value.delivery_ids)
+        || !valid_delivery_ids(&value.delivery_ids)
     {
         return Err("mail_metadata");
     }
@@ -493,6 +512,14 @@ fn valid_optional_metadata_text(value: &str) -> bool {
 
 fn valid_metadata_list(values: &[String]) -> bool {
     values.len() <= 1000 && values.iter().all(|value| valid_safe_text(value, 512))
+}
+
+fn valid_delivery_ids(values: &[String]) -> bool {
+    if values.len() > 1000 {
+        return false;
+    }
+    let mut seen = std::collections::HashSet::with_capacity(values.len());
+    values.iter().all(|value| valid_uuid(value) && seen.insert(value.as_str()))
 }
 
 #[cfg(test)]

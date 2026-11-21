@@ -34,7 +34,7 @@ pub(super) fn MailPollingCommands(
 #[cfg(test)]
 #[derive(Clone)]
 pub(super) struct PollingReply(
-    pub(super) std::rc::Rc<crate::surface::auctions::draft_page_tests::RecordRead<AdminMailPolling>>,
+    pub(super) std::rc::Rc<crate::surface::auctions::editor::tests::RecordRead<AdminMailPolling>>,
 );
 
 #[component]
@@ -178,7 +178,7 @@ mod tests {
 
     use super::{MailPollingCard, MailPollingCommands, MailTriggerButton, PollingReply};
     use crate::api::{AdminApiFailure, AdminMailPolling};
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         RecordRead, button, click_button, has_live_text, init_i18n, mount_writer, settle_writer,
     };
     use crate::surface::pending::{PendingCommandHost, PendingCommandNotices};

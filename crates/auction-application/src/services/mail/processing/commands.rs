@@ -154,9 +154,9 @@ pub(super) fn auction_request_hash(
         level: Option<i32>,
         attributes: &'a Value,
         source_fingerprint: [u8; 32],
+        collected_at: Timestamp,
         start_price: i64,
     }
-    // 保留原数组顺序和 Item 字段编码，借用逐项投影，不为摘要再分配整封附件列表。
     struct Items<'a>(&'a [crate::ports::mail::MailAuctionItem]);
 
     impl Serialize for Items<'_> {
@@ -171,6 +171,7 @@ pub(super) fn auction_request_hash(
                 level: item.level,
                 attributes: &item.attributes,
                 source_fingerprint: item.source_fingerprint,
+                collected_at: item.collected_at,
                 start_price: item.start_price,
             }))
         }
@@ -190,14 +191,19 @@ pub(super) fn auction_request_hash(
     )?)
 }
 
+pub(super) struct DeliveryRequestHashInput<'a> {
+    pub command_id: CommandId,
+    pub message: &'a MailMessage,
+    pub operation: MailDeliveryOperation,
+    pub template: Option<MailNotificationTemplate>,
+    pub result_code: Option<&'a str>,
+    pub user_key_user_id: Option<Uuid>,
+    pub attachment_ids: &'a [String],
+    pub notification_body: Option<&'a str>,
+}
+
 pub(super) fn delivery_request_hash(
-    command_id: CommandId,
-    message: &MailMessage,
-    operation: MailDeliveryOperation,
-    template: Option<MailNotificationTemplate>,
-    result_code: Option<&str>,
-    user_key_user_id: Option<Uuid>,
-    attachment_ids: &[String],
+    input: DeliveryRequestHashInput<'_>,
 ) -> Result<crate::ports::core::RequestHash, ApplicationError> {
     #[derive(Serialize)]
     struct Request<'a> {
@@ -209,23 +215,24 @@ pub(super) fn delivery_request_hash(
         result_code: Option<&'a str>,
         user_key_user_id: Option<Uuid>,
         attachment_ids: &'a [String],
+        notification_body: Option<&'a str>,
     }
     Ok(crate::ports::core::RequestHash::from_request(
         "mail_delivery",
-        command_id.into(),
+        input.command_id.into(),
         &Request {
-            operation: operation.as_str(),
-            world_id: &message.world_id,
-            external_mail_id: &message.external_mail_id,
-            recipient: &message.sender,
-            template: template.map(MailNotificationTemplate::as_str),
-            result_code,
-            user_key_user_id,
-            attachment_ids,
+            operation: input.operation.as_str(),
+            world_id: &input.message.world_id,
+            external_mail_id: &input.message.external_mail_id,
+            recipient: &input.message.sender,
+            template: input.template.map(MailNotificationTemplate::as_str),
+            result_code: input.result_code,
+            user_key_user_id: input.user_key_user_id,
+            attachment_ids: input.attachment_ids,
+            notification_body: input.notification_body,
         },
     )?)
 }
-
 pub(super) fn user_request_hash(
     message: &MailMessage,
     command_id: CommandId,

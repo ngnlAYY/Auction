@@ -1,6 +1,7 @@
 //! Admin 凭据明文值与密文信封。
 
 use std::fmt;
+use std::sync::atomic::{Ordering, compiler_fence};
 
 use auction_domain::valid_text;
 
@@ -77,15 +78,15 @@ pub struct AdminCredentialSecret(Vec<u8>);
 impl AdminCredentialSecret {
     /// 从 HTTP 已解析的 UTF-8 字符串建立明文值对象。
     pub fn new(value: String) -> Result<Self, AdminCredentialError> {
-        if value.is_empty()
-            || value.len() > MAX_ADMIN_CREDENTIAL_SECRET_BYTES
-            || value
-                .chars()
-                .any(|character| character == '\0' || character == '\r' || character == '\n')
+        let mut bytes = value.into_bytes();
+        if bytes.is_empty()
+            || bytes.len() > MAX_ADMIN_CREDENTIAL_SECRET_BYTES
+            || bytes.iter().any(|byte| matches!(*byte, 0 | b'\r' | b'\n'))
         {
+            wipe_bytes(&mut bytes);
             return Err(AdminCredentialError::InvalidRequest);
         }
-        Ok(Self(value.into_bytes()))
+        Ok(Self(bytes))
     }
 
     /// 返回明文只读字节，调用方不得复制到持久化或日志结构。
@@ -100,8 +101,16 @@ impl fmt::Debug for AdminCredentialSecret {
     }
 }
 
+fn wipe_bytes(bytes: &mut [u8]) {
+    for byte in bytes {
+        // SAFETY: `byte` 是已初始化且独占的敏感字节；volatile 写避免清零被优化掉。
+        unsafe { std::ptr::write_volatile(byte, 0) };
+    }
+    compiler_fence(Ordering::SeqCst);
+}
+
 impl Drop for AdminCredentialSecret {
     fn drop(&mut self) {
-        self.0.fill(0);
+        wipe_bytes(&mut self.0);
     }
 }

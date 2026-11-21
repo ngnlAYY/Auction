@@ -67,7 +67,7 @@ export function useFieldAnnouncer(): FieldAnnouncer {
 
   const clearField = (fieldId: string): void => {
     const pending = field.peek();
-    if (pending === null || pending === fieldId) {
+    if (pending === fieldId) {
       clear();
     }
   };

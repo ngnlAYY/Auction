@@ -186,6 +186,8 @@ pub(super) async fn authorize_pending_or_prepared(
                     );
                 })
                 .is_err()
+            || claim.lease_until <= clock.now()
+            || !snapshot.valid_at(clock.now())
         {
             record_error(
                 DiagnosticLevel::Warn,

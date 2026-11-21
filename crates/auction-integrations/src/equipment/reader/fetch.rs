@@ -31,10 +31,8 @@ impl EquipmentSourceAdapter {
                 }
             };
         };
-        let mut session = credentials
-            .begin_read(world, MoogleMailOperation::Equipment)
-            .await
-            .map_err(|diagnostic_cause| {
+        let session = credentials.begin_read(world, MoogleMailOperation::Equipment).await.map_err(
+            |diagnostic_cause| {
                 safe_diagnostics::warn(
                     "equipment_fetch",
                     "acquire_session",
@@ -45,7 +43,8 @@ impl EquipmentSourceAdapter {
                     },
                 );
                 AdminIntakeError::SourceUnavailable
-            })?;
+            },
+        )?;
         match self.fetch_document_attempt(world, target, Some(session.cookie())).await {
             Ok(body) => {
                 let mut body = SensitiveResponseBody(body);

@@ -77,19 +77,21 @@ export function AlertReasonInput(props: {
   const announceError = (): void => {
     clearAnnouncement(announcementTask, live);
     const task = tasks.spawn(async (context) => {
-      // 让读屏先播报失焦后到达的控件，显式提交的兜底也先清空再写入。
-      if (!(await sleep(500, context.signal))) {
-        return;
+      try {
+        // 让读屏先播报失焦后到达的控件，显式提交的兜底也先清空再写入。
+        if (!(await sleep(500, context.signal)) || !context.alive()) {
+          return;
+        }
+        const error = draftError();
+        if (reasonErrorVisible(error.peek())) {
+          live.set(true);
+          error.set("announced");
+        }
+      } finally {
+        if (announcementTask.peek() === task) {
+          announcementTask.set(null);
+        }
       }
-      if (!context.alive()) {
-        return;
-      }
-      const error = draftError();
-      if (reasonErrorVisible(error.peek())) {
-        live.set(true);
-        error.set("announced");
-      }
-      announcementTask.set(null);
     });
     announcementTask.set(task);
   };

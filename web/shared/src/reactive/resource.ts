@@ -2,7 +2,7 @@
 // 不使用 Solid 的异步派生与 Loading 边界：页面需要显式区分“加载中、已就绪、已停止”，
 // 并在重跑期间继续显示上一次结果。
 
-import { createEffect, createMemo, onSettled, untrack } from "solid-js";
+import { createEffect, createMemo, untrack } from "solid-js";
 import type { Cell } from "./cell";
 import { createCell } from "./cell";
 import type { TaskContext, TaskHandle } from "./tasks";
@@ -53,8 +53,14 @@ export function createTaskResource<D, T>(
       if (revision !== restartRevision.peek()) {
         return;
       }
-      // 其他 apply 可以使快照过时。等本轮依赖提交后再启动，旧快照不能进入任务体。
-      onSettled(() => {
+      if (!restartRequested && snapshot === startedSnapshot) {
+        return;
+      }
+      running?.cancel();
+      running = null;
+      state.set("pending");
+      // 微任务在本轮同步 apply 后启动；依赖、重启或销毁若已变化，闭包守卫会丢弃旧快照。
+      void Promise.resolve().then(() => {
         if (
           !scope.alive() ||
           revision !== restartRevision.peek() ||
@@ -94,6 +100,7 @@ export function createTaskResource<D, T>(
   };
   resource.cancel = () => {
     restartRequested = false;
+    startedSnapshot = untrack(dependencySnapshot);
     running?.cancel();
     state.set("stopped");
   };

@@ -9,10 +9,11 @@ use super::report::BaseReport;
 use super::transfer::{destination_identity, prune, write_wal_upload_receipt};
 use super::{BASE_PREFIX, BASE_UPLOAD_FORMAT, WAL_PREFIX};
 use crate::backup::object_key;
-use crate::backup::wal::model::{
-    BASE_MANIFEST_FORMAT, BaseManifest, BaseStaged, WAL_UPLOAD_FORMAT, WalUploadReceipt,
+use crate::backup::wal::model::manifest::{BaseManifest, BaseStaged, WalUploadReceipt};
+use crate::backup::wal::model::paths::{
     base_cipher_path, base_manifest_path, base_receipt_path, retention_plan, wal_upload_path,
 };
+use crate::backup::wal::model::{BASE_MANIFEST_FORMAT, WAL_UPLOAD_FORMAT};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -72,6 +73,7 @@ fn wal_upload_receipt_is_readable_by_archive_account() {
         segment_name: "000000010000000000000001".to_owned(),
         source_bytes: 1,
         source_mtime_ns: 2,
+        source_sha256: Some("b".repeat(64)),
         cipher_bytes: 3,
         cipher_sha256: "a".repeat(64),
         remote_key: "wal/000000010000000000000001.zst.age".to_owned(),

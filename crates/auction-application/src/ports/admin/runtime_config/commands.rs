@@ -1,6 +1,6 @@
 //! runtime 更新命令、命令账本状态与审计记录。
 
-use auction_domain::CommandId;
+use auction_domain::{CommandId, valid_text};
 use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -29,11 +29,8 @@ impl AdminRuntimeUpdateCommand {
     pub fn validate(&self) -> Result<(), AdminRuntimeConfigError> {
         if self.command_id.is_nil()
             || !super::validation::valid_fingerprint(&self.expected_fingerprint)
-            || !super::validation::valid_text(&self.actor_id, 256)
-            || self
-                .request_id
-                .as_deref()
-                .is_some_and(|value| !super::validation::valid_text(value, 256))
+            || !valid_text(&self.actor_id, 256)
+            || self.request_id.as_deref().is_some_and(|value| !valid_text(value, 256))
             || self.document.validate().is_err()
         {
             return Err(AdminRuntimeConfigError::InvalidCommand(
@@ -98,11 +95,8 @@ impl AdminRuntimeStoredCommand {
             || !super::validation::valid_fingerprint(&self.expected_fingerprint)
             || self.expected_fingerprint != self.old_fingerprint
             || !super::validation::valid_fingerprint(&self.new_fingerprint)
-            || !super::validation::valid_text(&self.actor_id, 256)
-            || self
-                .request_id
-                .as_deref()
-                .is_some_and(|value| !super::validation::valid_text(value, 256))
+            || !valid_text(&self.actor_id, 256)
+            || self.request_id.as_deref().is_some_and(|value| !valid_text(value, 256))
             || self.occurred_at.timestamp_micros() == 0
             || self.created_at.timestamp_micros() == 0
             || self.updated_at < self.created_at
@@ -136,8 +130,11 @@ impl AdminRuntimeStoredCommand {
                 let Some(result) = &self.result_document else {
                     return Err(AdminRuntimeConfigError::StoredResultCorrupt);
                 };
-                if self.applied_at.is_none()
-                    || self.unknown_category.is_some()
+                if self.applied_at.is_none_or(|applied_at| {
+                    applied_at.timestamp_micros() == 0
+                        || applied_at < self.created_at
+                        || applied_at > self.updated_at
+                }) || self.unknown_category.is_some()
                     || result.validate().is_err()
                     || result.fingerprint() != self.new_fingerprint
                     || result != &self.candidate_document

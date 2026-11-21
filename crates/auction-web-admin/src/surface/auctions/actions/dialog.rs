@@ -341,7 +341,8 @@ fn run_lifecycle_action(
         move |_| {
             set_if_alive(feedback, None);
             // 未决区回执只关闭同一个版本的确认，不能影响另一个场次的草稿。
-            close_matching_draft(pending, |draft| {
+            let submitted_target = submitted_target.clone();
+            close_matching_draft(pending, move |draft| {
                 draft.target == submitted_target && draft.action == action
             });
             set_if_alive(notice, Some(AdminAuctionNotice::Lifecycle(action)));

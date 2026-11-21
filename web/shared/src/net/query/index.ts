@@ -21,12 +21,17 @@ export function parseQuerySearch(search: string): URLSearchParams {
   return new URLSearchParams(search);
 }
 
+function queryWindow(): Window | null {
+  return typeof window === "undefined" || window.document === undefined ? null : window;
+}
+
 /** 读取当前地址栏的全部 query 键值对；浏览器不可用时为空。 */
 export function readQueryPairs(): readonly QueryPair[] {
-  if (typeof window === "undefined") {
+  const browser = queryWindow();
+  if (browser === null) {
     return [];
   }
-  return [...parseQuerySearch(window.location.search)];
+  return [...parseQuerySearch(browser.location.search)];
 }
 
 /** 查询状态的历史写入与地址恢复选项。 */
@@ -46,33 +51,41 @@ export function writeQueryPairs(
   mode: QueryWriteMode,
   options?: LocationWriteOptions,
 ): boolean {
-  if (typeof window === "undefined") {
+  const browser = queryWindow();
+  if (browser === null) {
     return false;
   }
-  const location = window.location;
-  const parameters = new URLSearchParams();
-  for (const [key, value] of readQueryPairs()) {
-    if (!keys.includes(key)) {
-      parameters.append(key, value);
-    }
-  }
-  for (const [key, value] of pairs) {
-    parameters.append(key, value);
-  }
-  const encoded = parameters.toString();
-  let pathname = "/";
-  let hash = "";
+  const location = browser.location;
+  let rawSearch: string;
+  let pathname: string;
+  let hash: string;
   try {
+    rawSearch = location.search;
     pathname = location.pathname;
-  } catch {
-    pathname = "/";
-  }
-  try {
     hash = location.hash;
   } catch {
-    hash = "";
+    return false;
   }
-  const url = encoded.length === 0 ? `${pathname}${hash}` : `${pathname}?${encoded}${hash}`;
+  const raw = rawSearch.startsWith("?") ? rawSearch.slice(1) : rawSearch;
+  const retained =
+    raw === ""
+      ? []
+      : raw.split("&").filter((segment) => {
+          const separator = segment.indexOf("=");
+          const encodedKey = separator === -1 ? segment : segment.slice(0, separator);
+          const key = new URLSearchParams(`key=${encodedKey}`).get("key");
+          return key === null || !keys.includes(key);
+        });
+  const replacement = new URLSearchParams();
+  for (const [key, value] of pairs) {
+    replacement.append(key, value);
+  }
+  const encoded = replacement.toString();
+  if (encoded.length !== 0) {
+    retained.push(encoded);
+  }
+  const query = retained.length === 0 ? "" : `?${retained.join("&")}`;
+  const url = `${pathname}${query}${hash}`;
   queryWriteDepth += 1;
   try {
     return writeLocationPreservingScroll(url, mode, options);
@@ -104,20 +117,22 @@ function usePopstateListener(onPopstate: () => void): void {
   // 原生事件不会进入 Solid 的作用域；解析器可能读取 Context，必须在创建时记住宿主。
   const owner = getOwner();
   onSettled(() => {
-    if (typeof window === "undefined") {
+    const browser = queryWindow();
+    if (browser === null) {
       return;
     }
     const listener = () => runWithOwner(owner, onPopstate);
-    window.addEventListener("popstate", listener);
-    return () => window.removeEventListener("popstate", listener);
+    browser.addEventListener("popstate", listener);
+    return () => browser.removeEventListener("popstate", listener);
   });
 }
 
 function currentQueryAddress(): { readonly pathname: string; readonly search: string } | null {
-  if (typeof window === "undefined") {
+  const browser = queryWindow();
+  if (browser === null) {
     return null;
   }
-  const { pathname, search } = window.location;
+  const { pathname, search } = browser.location;
   return { pathname, search };
 }
 
@@ -140,7 +155,7 @@ function useQueryNavigation(restore: (pairs: readonly QueryPair[]) => void): voi
     }
     restore([...parseQuerySearch(next.search)]);
   };
-  if (typeof window !== "undefined") {
+  if (queryWindow() !== null) {
     // 初始化分页也会写回地址，订阅须在首次 effect 前就能记录成功写入。
     onCleanup(watchLocationWritten(() => runWithOwner(owner, restoreFromLocation)));
   }

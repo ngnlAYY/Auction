@@ -7,7 +7,10 @@
 use anyhow::Context;
 
 use super::trust::PinnedInstallDir;
-use super::{InstallArtifactFailure, RecordDirectory, RollbackRecord, Source, install_one};
+use super::{
+    InstallArtifactFailure, InstallRecoveryOutcome, RecordDirectory, RollbackRecord, Source,
+    install_one,
+};
 
 /// 换回所需的回滚记录与固定的安装目录。
 pub(super) struct Swap<'a> {
@@ -17,8 +20,8 @@ pub(super) struct Swap<'a> {
 }
 
 impl Swap<'_> {
-    /// 逆序换回 `replaced` 中的程序，再复核记录覆盖的全部程序（摘要，以及换回过的程序的属主与
-    /// 权限）；原始安装错误保留在错误链末尾。只有这些程序都与回滚记录一致时才报告已恢复。
+    /// 逆序换回 `replaced` 中的程序，再复核记录覆盖的全部程序摘要、属主与权限；原始安装错误
+    /// 保留在错误链末尾。没有替换时仅报告未改动且已验证，不把它与实际换回混为一谈。
     pub(super) fn back(&self, error: anyhow::Error, replaced: &[&str]) -> InstallArtifactFailure {
         let mut failures = Vec::new();
         for name in replaced.iter().rev() {
@@ -27,17 +30,20 @@ impl Swap<'_> {
             }
         }
         let mut mismatched = Vec::new();
+        let mut untrusted = Vec::new();
         let mut digests = Vec::with_capacity(self.retained.binaries.len());
         for binary in &self.retained.binaries {
             let current = self.directory.inspect(&binary.name).ok();
             let matches = current.as_ref().is_some_and(|current| {
                 current.sha256 == binary.sha256 && current.bytes == binary.bytes
             });
-            // 换回过的程序还必须恢复为可信属主与 0755；未替换的程序保持原样。
-            let sealed = !replaced.contains(&binary.name.as_str())
-                || current.as_ref().is_some_and(|current| current.sealed);
-            if !matches || !sealed {
+            // 启动指引要求所有角色都具备可信属主与 0755，而不只检查本次换回的程序。
+            let sealed = current.as_ref().is_some_and(|current| current.sealed);
+            if !matches {
                 mismatched.push(binary.name.as_str());
+            }
+            if !sealed {
+                untrusted.push(binary.name.as_str());
             }
             digests.push(format!(
                 "{}={}",
@@ -45,7 +51,7 @@ impl Swap<'_> {
                 current.map_or_else(|| "不可读".to_owned(), |current| current.sha256)
             ));
         }
-        if failures.is_empty() && mismatched.is_empty() {
+        if failures.is_empty() && mismatched.is_empty() && untrusted.is_empty() {
             let swapped = if replaced.is_empty() {
                 "本次没有程序被替换".to_owned()
             } else {
@@ -53,10 +59,14 @@ impl Swap<'_> {
             };
             return InstallArtifactFailure {
                 error: error.context(format!(
-                    "{swapped}，安装目录中回滚记录覆盖的 {} 个程序摘要一致",
+                    "{swapped}，安装目录中回滚记录覆盖的 {} 个程序摘要与信任属性一致",
                     self.retained.binaries.len()
                 )),
-                restored: true,
+                outcome: if replaced.is_empty() {
+                    InstallRecoveryOutcome::UntouchedVerified
+                } else {
+                    InstallRecoveryOutcome::Restored
+                },
             };
         }
         let mut details = Vec::new();
@@ -66,13 +76,26 @@ impl Swap<'_> {
         if !mismatched.is_empty() {
             details.push(format!("与回滚记录不一致：{}", mismatched.join("、")));
         }
+        if !untrusted.is_empty() {
+            details.push(format!("程序信任属性不一致：{}", untrusted.join("、")));
+        }
+        let outcome = if replaced.is_empty() {
+            InstallRecoveryOutcome::UntouchedUnverified
+        } else {
+            InstallRecoveryOutcome::Mixed
+        };
+        let status = if replaced.is_empty() {
+            "本次没有程序被替换，安装目录未通过完整核验"
+        } else {
+            "自动换回未完成"
+        };
         InstallArtifactFailure {
             error: error.context(format!(
-                "自动换回未完成（{}）；安装目录各程序当前摘要：{}",
+                "{status}（{}）；安装目录各程序当前摘要：{}",
                 details.join("；"),
                 digests.join("、")
             )),
-            restored: false,
+            outcome,
         }
     }
 

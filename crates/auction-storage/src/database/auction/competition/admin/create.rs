@@ -238,7 +238,7 @@ async fn append_admin_auction_created_record_inner(
                 result.auction.state_version,
             ),
             state_version: result.auction.state_version,
-            origin_command_id: command.command_id.as_uuid(),
+            origin_command_id: Some(command.command_id.as_uuid()),
             created_at: None,
         },
     )

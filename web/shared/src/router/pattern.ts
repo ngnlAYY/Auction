@@ -148,14 +148,16 @@ export function encodePathSegment(value: string): string {
 }
 
 function compilePattern(definition: RouteDefinition): CompiledRoute {
-  const withoutHash = definition.pattern.split("#", 1)[0] ?? "";
-  const withoutQuery = withoutHash.split("?", 1)[0] ?? "";
+  if (definition.pattern.includes("#") || definition.pattern.includes("?")) {
+    throw new Error(
+      `路由定义 "${definition.name}" 的 pattern "${definition.pattern}" 只能包含路径，不能包含查询或片段`,
+    );
+  }
+  const path = definition.pattern;
   const segments: PatternSegment[] = [];
-  const patternSegments = withoutQuery.startsWith("/")
-    ? withoutQuery.slice(1).split("/")
-    : withoutQuery.split("/");
+  const patternSegments = path.startsWith("/") ? path.slice(1).split("/") : path.split("/");
   // 根路径由空段数表达；其他 path 的末尾空段保留在格式化结果里，但匹配时会跳过。
-  if (withoutQuery !== "/") {
+  if (path !== "/") {
     for (const segment of patternSegments) {
       if (segment.startsWith(":")) {
         segments.push({ kind: "dynamic", name: segment.slice(1) });
@@ -163,6 +165,18 @@ function compilePattern(definition: RouteDefinition): CompiledRoute {
         segments.push({ kind: "static", value: segment });
       }
     }
+  }
+  const parameterNames = new Set<string>();
+  for (const segment of segments) {
+    if (segment.kind !== "dynamic") {
+      continue;
+    }
+    if (segment.name.length === 0 || parameterNames.has(segment.name)) {
+      throw new Error(
+        `路由定义 "${definition.name}" 的 pattern "${definition.pattern}" 含空或重复参数名`,
+      );
+    }
+    parameterNames.add(segment.name);
   }
   for (const [index, segment] of segments.entries()) {
     if (
@@ -249,12 +263,12 @@ function parseHref(href: string): ParsedHref | null {
   const pathname = queryIndex === -1 ? routeAndQuery : routeAndQuery.slice(0, queryIndex);
   const search = queryIndex === -1 ? "" : routeAndQuery.slice(queryIndex);
   const hash = hashIndex === -1 ? "" : href.slice(hashIndex);
-  const path = pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
   if (!href.startsWith("/")) {
     return null;
   }
+  const path = pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
   const segments = path === "" ? [] : path.slice(1).split("/").map(percentDecode);
-  return { segments, search: search === "?" ? "" : search, hash };
+  return { segments, search, hash };
 }
 
 function matchCompiledRoute(
@@ -262,7 +276,7 @@ function matchCompiledRoute(
   segments: readonly string[],
   queryValues: ReadonlyMap<string, string>,
 ): MatchedRoute | null {
-  const params: Record<string, string> = {};
+  const params: Record<string, string> = Object.create(null) as Record<string, string>;
   let pathIndex = 0;
   for (const [index, patternSegment] of route.segments.entries()) {
     // Dioxus 只跳过定义末尾的空静态段，因此 `/x/` 接受 `/x` 和 `/x/`，中间空段仍消费一个输入段。
@@ -285,7 +299,7 @@ function matchCompiledRoute(
   if (pathIndex !== segments.length) {
     return null;
   }
-  const query: Record<string, string> = {};
+  const query: Record<string, string> = Object.create(null) as Record<string, string>;
   for (const name of route.definition.query ?? []) {
     const value = queryValues.get(name);
     if (value !== undefined) {

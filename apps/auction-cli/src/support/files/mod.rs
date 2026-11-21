@@ -18,7 +18,7 @@ mod evidence;
 mod trust;
 
 pub(crate) use directory::{FileIdentity, MAX_READ_BYTES, PrivateDirectory};
-pub(crate) use disk::{DiskUsage, disk_usage};
+pub(crate) use disk::{BTRFS_FILESYSTEM_TYPE, DiskUsage, disk_usage};
 pub(crate) use evidence::{
     require_private_directory, require_private_target, sync_parent, write_private,
 };
@@ -125,6 +125,20 @@ pub(crate) fn open_regular(path: &Path) -> anyhow::Result<File> {
         .with_context(|| format!("打开文件失败：{}", path.display()))?;
     if !file.metadata().context("读取文件元数据失败")?.is_file() {
         anyhow::bail!("必须是普通文件：{}", path.display());
+    }
+    Ok(file)
+}
+
+/// 打开归当前账号所有、单链接且权限严格为 0600 的普通文件，并基于同一描述符核验。
+pub(crate) fn open_private_regular(path: &Path) -> anyhow::Result<File> {
+    let file = open_regular(path)?;
+    let metadata = file.metadata().context("读取私有文件元数据失败")?;
+    if !metadata.is_file()
+        || metadata.nlink() != 1
+        || metadata.uid() != effective_uid()
+        || metadata.mode() & 0o7777 != 0o600
+    {
+        anyhow::bail!("私有文件必须归当前账号所有、单链接且权限为 0600：{}", path.display());
     }
     Ok(file)
 }

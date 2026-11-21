@@ -284,7 +284,19 @@ where
     else {
         return WorkerResult::Success;
     };
-    let Ok(lease_duration) = TimeDelta::from_std(worker.auction.lease_duration) else {
+    let lease_duration = match worker
+        .auction
+        .item_timeout
+        .checked_add(SETTLEMENT_FAILURE_RECORD_TIMEOUT)
+        .and_then(|duration| duration.checked_add(std::time::Duration::from_secs(1)))
+    {
+        Some(minimum_lease) => worker.auction.lease_duration.max(minimum_lease),
+        None => {
+            tracing::error!("auction settlement lease safety margin overflowed");
+            return WorkerResult::Error;
+        }
+    };
+    let Ok(lease_duration) = TimeDelta::from_std(lease_duration) else {
         tracing::error!("auction settlement lease duration is invalid");
         return WorkerResult::Error;
     };

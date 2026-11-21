@@ -142,11 +142,13 @@ pub(crate) fn mapped_response(
     response: Response,
 ) -> Response {
     if response.status().is_server_error() {
-        let level = match response.status() {
+        let status = response.status();
+        let level = match status {
             StatusCode::INTERNAL_SERVER_ERROR => DiagnosticLevel::Error,
             StatusCode::NOT_IMPLEMENTED => DiagnosticLevel::Info,
             _ => DiagnosticLevel::Warn,
         };
+        let _ = ROUTE.try_with(|state| state.response_logged.set(Some(status)));
         record(level, kind, phase, safe_kind, DiagnosticContext::default());
     }
     response

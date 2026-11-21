@@ -4,7 +4,11 @@
 //! 缺证据的记录保持原样。截止之前的两次发送、同分钟内多次发送与时钟偏差下落在截止之前的重发都
 //! 不能唯一归属；多轮 COD 重寄每轮一次发送对应一封已消费退件时照常修复。
 
+use auction_application::core::RequestHash;
+use auction_application::realtime::{RealtimeAdminPort, RealtimeReplayCommand};
+use auction_application::recovery::RecoveryResolutionStore;
 use auction_storage::postgres_migrate_to;
+use auction_time::{TimeDelta, Timestamp};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -55,6 +59,32 @@ async fn sale(pool: &PgPool, world: &'static str, sequence: i64) -> Sale {
         },
     )
     .await
+}
+
+#[tokio::test]
+async fn postgres_migration_131_rejects_compensation_reversal_world_mismatch() {
+    let database = support::TestDatabase::create_empty().await.expect("新建空库");
+    let store = database.maintenance_store().await.expect("连接测试库 owner");
+    let pool = store.postgres_pool();
+    postgres_migrate_to(pool, 130).await.expect("迁移到 000130");
+    let recovery = sale(pool, "main", 7_700_001).await;
+    postgres_migrate_to(pool, 131).await.expect("迁移 000131");
+
+    let result = sqlx::query(
+        "INSERT INTO public.compensation_pool_reversals
+            (id, recovery_id, world_id, auction_id, lot_id, rule_version, resolution,
+             tax_amount, compensation_amount, tax_reversed, opening_balance, closing_balance,
+             opening_pool_version, closing_pool_version)
+         VALUES ($1, $2, 'isekai', $3, $4, 1, 'reclaimed', 1, 1, 1, 0, 0, 1, 2)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(recovery.recovery_id)
+    .bind(recovery.auction_id)
+    .bind(recovery.lot_id)
+    .execute(pool)
+    .await;
+    assert!(result.is_err(), "复合外键必须拒绝与 recovery/auction 不同世界的冲正");
+    store.postgres_pool().close().await;
 }
 
 #[tokio::test]
@@ -437,4 +467,212 @@ async fn inconsistent_cases(pool: &PgPool) -> Vec<(&'static str, Sale, &'static 
         kept.push((label, sale, payment_state));
     }
     kept
+}
+
+/// 迁移 118 必须保留由 Worker 审计证明的 scheduled relist 来源；该 ID 不在 recovery 命令账本中。
+#[tokio::test]
+async fn postgres_migration_118_preserves_proven_scheduled_relist_event_origin() {
+    let database = support::TestDatabase::create_empty().await.expect("新建空库");
+    let maintenance = database.maintenance_store().await.expect("以维护账号连接");
+    postgres_migrate_to(maintenance.postgres_pool(), 117).await.expect("迁移到 000117");
+
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let scheduled = sale(pool, "isekai", 7_600_090).await;
+    // Isekai recoveries can be scheduled for relist only after the carrier has been cancelled;
+    // `reclaimed` is a main-world confirmation and cannot validate against this fixture's action.
+    void_without_closure(pool, &scheduled, "cancelled", false).await;
+    super::recovered::fixture::insert_relist_target(pool, 7_600_090).await;
+    let advance = store
+        .advance_due_relist(Timestamp::now() + TimeDelta::seconds(1), TimeDelta::minutes(5))
+        .await
+        .expect("执行 scheduled relist")
+        .expect("必须完成一次 scheduled relist");
+    assert!(advance.completed, "目标存在时 Worker 必须完成重挂");
+
+    let (target_auction_id, target_lot_id, stage): (Uuid, Uuid, String) = sqlx::query_as(
+        "SELECT relisted_auction_id, relisted_lot_id, stage
+         FROM public.settlement_recoveries WHERE id = $1",
+    )
+    .bind(scheduled.recovery_id)
+    .fetch_one(pool)
+    .await
+    .expect("读取重挂 recovery 结果");
+    assert_eq!(stage, "completed");
+    let (scheduled_command_id, audited_auction_id, audited_lot_id): (Uuid, Uuid, Uuid) =
+        sqlx::query_as(
+            "SELECT (metadata->>'origin_command_id')::uuid,
+                    (metadata->>'relisted_auction_id')::uuid,
+                    (metadata->>'relisted_lot_id')::uuid
+             FROM public.audit_records
+             WHERE action = 'auction.recovery.relisted'
+               AND entity_type = 'settlement_recovery'
+               AND entity_id = $1 AND source = 'worker'",
+        )
+        .bind(scheduled.recovery_id.to_string())
+        .fetch_one(pool)
+        .await
+        .expect("读取 Worker 审计里的 scheduled command ID");
+    assert_eq!(audited_auction_id, target_auction_id);
+    assert_eq!(audited_lot_id, target_lot_id);
+    let command_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM public.settlement_recovery_commands
+         WHERE command_id = $1",
+    )
+    .bind(scheduled_command_id)
+    .fetch_one(pool)
+    .await
+    .expect("确认 scheduled ID 不在 recovery 命令账本");
+    assert_eq!(command_rows, 0, "scheduled relist 仅由 Worker 审计记录身份");
+
+    let (stream_key, payload, state_version, created_at): (
+        String,
+        serde_json::Value,
+        i64,
+        Timestamp,
+    ) = sqlx::query_as(
+        "SELECT stream_key, public_payload, state_version, created_at
+         FROM public.realtime_events
+         WHERE kind = 'preview_catalog_changed' AND origin_command_id IS NULL
+           AND public_payload->>'auction_id' = $1
+         ORDER BY event_id DESC LIMIT 1",
+    )
+    .bind(target_auction_id.to_string())
+    .fetch_one(pool)
+    .await
+    .expect("读取当前代码写入的 recovery 预览事件");
+    assert_eq!(payload["world"], "isekai");
+    assert_eq!(payload["auction_id"], target_auction_id.to_string());
+    let mut transaction = pool.begin().await.expect("开启历史事件夹具事务");
+    let stream_sequence: i64 = sqlx::query_scalar(
+        "UPDATE public.realtime_streams
+         SET next_sequence = next_sequence + 1, updated_at = $2
+         WHERE stream_key = $1 RETURNING next_sequence - 1",
+    )
+    .bind(&stream_key)
+    .bind(Timestamp::now())
+    .fetch_one(&mut *transaction)
+    .await
+    .expect("为旧 recovery 事件分配序号");
+    let legacy_event_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO public.realtime_events
+            (event_id, stream_key, stream_sequence, kind, schema_version, public_payload,
+             state_version, origin_command_id, created_at)
+         VALUES ($1, $2, $3, 'preview_catalog_changed', 1, $4, $5, $6, $7)",
+    )
+    .bind(legacy_event_id)
+    .bind(&stream_key)
+    .bind(stream_sequence)
+    .bind(&payload)
+    .bind(state_version)
+    .bind(scheduled_command_id)
+    .bind(created_at)
+    .execute(&mut *transaction)
+    .await
+    .expect("写入旧 scheduled relist event 来源");
+    transaction.commit().await.expect("提交历史事件夹具");
+
+    store.postgres_pool().close().await;
+    postgres_migrate_to(maintenance.postgres_pool(), 118)
+        .await
+        .expect("迁移 118 必须保留由 Worker 审计证明的历史 relist 事件");
+    let retained_origin: Uuid = sqlx::query_scalar(
+        "SELECT origin_command_id FROM public.realtime_events WHERE event_id = $1",
+    )
+    .bind(legacy_event_id)
+    .fetch_one(maintenance.postgres_pool())
+    .await
+    .expect("读取保留的历史来源");
+    assert_eq!(retained_origin, scheduled_command_id, "迁移不能改写 append-only event");
+    let validated: bool = sqlx::query_scalar(
+        "SELECT convalidated FROM pg_catalog.pg_constraint
+         WHERE conrelid = 'public.realtime_events'::regclass
+           AND conname = 'realtime_events_origin_command_fkey_000118'",
+    )
+    .fetch_one(maintenance.postgres_pool())
+    .await
+    .expect("读取来源外键状态");
+    assert!(!validated, "恢复来源先由迁移预检证明，外键只约束后续新写入");
+    let replay_store = database.store().await.expect("以运行账号连接 replay");
+    let replay_pool = replay_store.postgres_pool();
+    let failure_id = Uuid::new_v4();
+    let consumer_key = "migration-118-replay";
+    let failed_at = Timestamp::now();
+    let predecessor_sequence = stream_sequence.checked_sub(1).expect("历史事件序号必须大于零");
+    let mut replay_fixture = replay_pool.begin().await.expect("开启 realtime replay 夹具事务");
+    sqlx::query(
+        "INSERT INTO public.realtime_failures
+            (id, consumer_key, event_id, failure_code, safe_detail, failed_at)
+         VALUES ($1, $2, $3, 'legacy_recovery_origin', 'replay fixture', $4)",
+    )
+    .bind(failure_id)
+    .bind(consumer_key)
+    .bind(legacy_event_id)
+    .bind(failed_at)
+    .execute(&mut *replay_fixture)
+    .await
+    .expect("写入原事件的 consumer failure");
+    sqlx::query(
+        "INSERT INTO public.realtime_consumer_offsets
+            (consumer_key, stream_key, last_sequence, updated_at)
+         VALUES ($1, $2, $3, $4)",
+    )
+    .bind(consumer_key)
+    .bind(&stream_key)
+    .bind(predecessor_sequence)
+    .bind(failed_at)
+    .execute(&mut *replay_fixture)
+    .await
+    .expect("写入原事件之前的 consumer offset");
+    replay_fixture.commit().await.expect("提交 replay 夹具");
+
+    #[derive(serde::Serialize)]
+    struct ReplayHashInput<'a> {
+        failure_id: Uuid,
+        schema_version: i32,
+        public_payload: &'a serde_json::Value,
+        actor_id: &'a str,
+    }
+    let actor_id = "migration-118-replay-admin".to_owned();
+    let schema_version = 1;
+    let request_hash = RequestHash::from_request(
+        "replay_realtime_failure",
+        failure_id,
+        &ReplayHashInput {
+            failure_id,
+            schema_version,
+            public_payload: &payload,
+            actor_id: &actor_id,
+        },
+    )
+    .expect("计算 replay 请求摘要");
+    let replay = RealtimeAdminPort::replay(
+        &replay_store,
+        RealtimeReplayCommand {
+            command_id: Uuid::new_v4(),
+            failure_id,
+            schema_version,
+            public_payload: payload.clone(),
+            actor_id,
+            request_id: None,
+            request_hash,
+            created_at: Timestamp::now(),
+        },
+    )
+    .await
+    .expect("重放旧 recovery event");
+    assert_eq!(replay.replay_of_event_id, legacy_event_id);
+    let (replay_origin, replay_of): (Option<Uuid>, Option<Uuid>) = sqlx::query_as(
+        "SELECT origin_command_id, replay_of_event_id
+         FROM public.realtime_events WHERE event_id = $1",
+    )
+    .bind(replay.event_id)
+    .fetch_one(replay_pool)
+    .await
+    .expect("读取 replay 副本来源");
+    assert_eq!(replay_origin, None, "只有已证明的 recovery 来源在副本上清空");
+    assert_eq!(replay_of, Some(legacy_event_id), "保留原事件 replay 引用");
+    replay_store.postgres_pool().close().await;
+    maintenance.postgres_pool().close().await;
 }

@@ -52,12 +52,14 @@ pub enum RecoveryAdvanceError {
     #[error("recovery 完成事实时间越界")]
     CompletionTimeOutOfRange,
 
-    #[error("recovery 提醒次数已超过冻结上限")]
-    ReminderLimitExceeded,
+    #[error("recovery 提醒次数或冻结上限无效")]
+    InvalidReminderCount,
 
     #[error("recovery 提醒次数溢出")]
     ReminderCountOverflow,
 
+    #[error("recovery 提醒次数已达到冻结上限")]
+    ReminderLimitExceeded,
     #[error("recovery due case 状态不支持推进")]
     UnsupportedStage,
 }
@@ -66,6 +68,12 @@ pub enum RecoveryAdvanceError {
 pub fn next_recovery_advance(
     facts: &RecoveryAdvanceFacts,
 ) -> Result<RecoveryAdvance, RecoveryAdvanceError> {
+    if facts.stage == RecoveryStage::Completed {
+        return Err(RecoveryAdvanceError::UnsupportedStage);
+    }
+    if facts.world == SettlementWorld::Main && facts.stage == RecoveryStage::DeliveringEquipment {
+        return Err(RecoveryAdvanceError::UnsupportedStage);
+    }
     let completed = |at: Option<Timestamp>| {
         let completed_at = at.ok_or(RecoveryAdvanceError::MissingCompletionTime)?;
         if completed_at < facts.created_at || completed_at > facts.observed_at {
@@ -77,7 +85,10 @@ pub fn next_recovery_advance(
     if facts.world == SettlementWorld::Main && facts.payment_satisfied {
         return completed(facts.payment_completed_at);
     }
-    if facts.world == SettlementWorld::Isekai && facts.equipment_satisfied {
+    if facts.world == SettlementWorld::Isekai
+        && facts.payment_satisfied
+        && facts.equipment_satisfied
+    {
         return completed(facts.equipment_completed_at);
     }
     // 异世界付款已收但装备未交付：进入交付阶段，等待装备履约完成后结束。
@@ -86,6 +97,9 @@ pub fn next_recovery_advance(
     }
     if facts.stage != RecoveryStage::AwaitingPayment {
         return Err(RecoveryAdvanceError::UnsupportedStage);
+    }
+    if facts.reminder_count < 0 || facts.reminder_limit < 0 {
+        return Err(RecoveryAdvanceError::InvalidReminderCount);
     }
     if !facts.payment_sent_proven {
         return Ok(RecoveryAdvance::DeferPaymentReminder);

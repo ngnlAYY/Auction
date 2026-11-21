@@ -274,11 +274,9 @@ async fn apply(
         let action = InternalSettlementAction::for_kind(command.claim.kind)
             .ok_or(FundingError::Unsupported)?;
         conflicts::exclude_asset_conflicts(tx, &command.claim).await?;
-        if external_refund && account.is_none() && !protected {
-            // 无资金账户的旧外部退款继续原路径，不创建资金授权事实。
-            return Ok(false);
-        }
-        if action.requires_funding() {
+        let legacy_external_refund = external_refund && account.is_none() && !protected;
+        // 旧外部退款没有资金账户时不建授权事实，但仍需在下方完成幂等命令账本。
+        if action.requires_funding() && !legacy_external_refund {
             let account =
                 account.as_ref().filter(|a| a.ready()).ok_or(FundingError::Unavailable)?;
             if !settlement_funding::check_funding_evidence(tx, account, evidence).await? {

@@ -26,6 +26,7 @@ impl EhentaiClient {
         if !self.valid_for() || !valid_cookie(cookie) || !valid_rendered_thread(&rendered) {
             return Err(EhentaiError::configuration(operation));
         }
+        let _topic_create = self.topic_create_lock.lock().await;
         let (board_id, board_url, existing) = self
             .find_topic_by_titles_with_operation(
                 world,
@@ -39,10 +40,32 @@ impl EhentaiClient {
             return Ok(auction_application::forum::ForumTopicPublication::Existing(published));
         }
 
+        let title = rendered.title.clone();
+        let reconciliation_titles = rendered.reconciliation_titles.clone();
         let form = self.load_topic_form(board_id, &board_url, forum_world(world), cookie).await?;
-        self.submit_topic(form, board_id, rendered, forum_world(world), cookie)
-            .await
-            .map(auction_application::forum::ForumTopicPublication::Created)
+        match self.submit_topic(form, board_id, rendered, forum_world(world), cookie).await {
+            Ok(published) => {
+                Ok(auction_application::forum::ForumTopicPublication::Created(published))
+            }
+            Err(error) if error.write_started() => {
+                if let Ok((_, _, Some(published))) = self
+                    .find_topic_by_titles_with_operation(
+                        world,
+                        cookie,
+                        &title,
+                        &reconciliation_titles,
+                        EhentaiOperation::ReconcileTopic,
+                    )
+                    .await
+                {
+                    return Ok(auction_application::forum::ForumTopicPublication::Existing(
+                        published,
+                    ));
+                }
+                Err(error)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// 一次版面读取核对全部精确标题及唯一主题身份；永远不加载发帖表单或发送 POST。

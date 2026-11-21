@@ -446,8 +446,11 @@ function validAlert(alert: AdminAlert): boolean {
     alert.scope !== "" &&
     alert.runbook_anchor !== "" &&
     alert.incident_generation !== null &&
+    Number.isSafeInteger(alert.incident_generation) &&
     alert.incident_generation >= 0 &&
+    Number.isSafeInteger(alert.count) &&
     alert.count >= 0 &&
+    Number.isSafeInteger(alert.age_seconds) &&
     alert.age_seconds >= 0 &&
     alert.active === (alert.resolved_at === null) &&
     alert.first_seen_at !== "" &&

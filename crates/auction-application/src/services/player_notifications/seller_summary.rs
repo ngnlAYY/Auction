@@ -62,8 +62,8 @@ impl SellerSummary {
     }
 
     /// 成交价合计；流拍不计入。
-    pub fn sold_total(&self) -> i64 {
-        self.lots.iter().filter_map(|lot| lot.sold_price).sum()
+    pub fn sold_total(&self) -> Option<i64> {
+        self.lots.iter().filter_map(|lot| lot.sold_price).try_fold(0_i64, i64::checked_add)
     }
 }
 
@@ -117,6 +117,7 @@ pub fn group_seller_summaries(
 
 /// 由已合并事实生成冻结正文；超出正文预算返回 `None`，不截断结果。
 pub fn seller_summary_body(summary: &SellerSummary) -> Option<String> {
+    let sold_total = summary.sold_total()?;
     let mut body = String::with_capacity(160 + summary.lots.len() * 96);
     body.push_str("Your auction session has been settled.\n\n");
     body.push_str(&format!("Session: {} #{}\n\n", summary.world, summary.sequence));
@@ -162,7 +163,7 @@ pub fn seller_summary_body(summary: &SellerSummary) -> Option<String> {
         "\nTotals: {} sold, {} unsold, {} Credits.\n",
         summary.sold_count(),
         summary.unsold_count(),
-        format_credits(summary.sold_total())
+        format_credits(sold_total)
     ));
     body.push_str("\nPayout and unsold returns are sent separately.");
     (body.len() <= MAX_SELLER_SUMMARY_BODY_BYTES).then_some(body)
@@ -258,7 +259,7 @@ mod tests {
         assert_eq!(alice.lots.iter().map(|lot| lot.lot_number).collect::<Vec<_>>(), vec![1, 2]);
         assert_eq!(alice.sold_count(), 1);
         assert_eq!(alice.unsold_count(), 1);
-        assert_eq!(alice.sold_total(), 50_000);
+        assert_eq!(alice.sold_total(), Some(50_000));
     }
 
     #[test]

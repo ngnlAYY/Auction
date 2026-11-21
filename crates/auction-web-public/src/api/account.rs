@@ -6,10 +6,13 @@ pub(crate) use auction_contracts::{
     PublicMyBidsResponse as MyBidsPage, PublicOwnedBidResponse as OwnedBid,
     PublicOwnedProxyResponse as OwnedProxy,
 };
+use auction_web_shared::TransportError;
 use auction_web_shared::timer::TimeoutFuture;
 use gloo_net::http::{Request, Response};
 
-use super::{TransportError, decoder, send_request};
+use super::decoder;
+use super::send_request;
+use super::session::identity::SessionIdentityObservation;
 
 const PUBLIC_QUERY_RETRY_DELAY_MILLIS: u32 = 1_000;
 
@@ -54,6 +57,7 @@ async fn fetch_my_proxy_once(
 
 /// 响应不携带用户 UUID，必须由同一请求的 Cookie 与预期宿主身份校验绑定归属。
 async fn account_response(url: &str, user_id: &str) -> Result<Response, String> {
+    let observation = SessionIdentityObservation::user_owner();
     let response = send_request(|abort_signal| {
         Request::get(url)
             .abort_signal(abort_signal)
@@ -66,7 +70,12 @@ async fn account_response(url: &str, user_id: &str) -> Result<Response, String> 
     if !response.ok() {
         let status = response.status();
         let code = decoder::decode_error_code(response).await;
-        super::session::observe_public_session_failure(status, &code, Some(user_id));
+        super::session::identity::observe_public_session_failure_observed(
+            status,
+            &code,
+            Some(user_id),
+            &observation,
+        );
         return Err(code);
     }
     Ok(response)

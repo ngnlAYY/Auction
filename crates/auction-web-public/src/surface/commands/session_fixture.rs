@@ -39,7 +39,7 @@ thread_local! {
     static PREFERENCE_COMMANDS: RefCell<Vec<PublicSetSessionPreferenceRequest>> = const { RefCell::new(Vec::new()) };
     static LOCK_DEPTH: Cell<usize> = const { Cell::new(0) };
     static SERIALIZE_LOCK: Cell<bool> = const { Cell::new(false) };
-    static LOCK_WAITER: RefCell<Option<Waker>> = const { RefCell::new(None) };
+    static LOCK_WAITERS: RefCell<Vec<Waker>> = const { RefCell::new(Vec::new()) };
     static REVISIONS: RefCell<BTreeMap<String, String>> = const { RefCell::new(BTreeMap::new()) };
     static REVISION_WRITES: RefCell<Vec<(&'static str, bool)>> = const { RefCell::new(Vec::new()) };
     pub(in crate::surface) static FAIL_SESSION_CHECK: Cell<bool> = const { Cell::new(false) };
@@ -53,7 +53,11 @@ pub(in crate::surface) fn use_session_fixture(user: &'static str) -> Signal<Sess
         wait_for_lock: || {
             Box::pin(poll_fn(|context| {
                 if SERIALIZE_LOCK.get() && LOCK_DEPTH.get() != 0 {
-                    LOCK_WAITER.replace(Some(context.waker().clone()));
+                    LOCK_WAITERS.with_borrow_mut(|waiters| {
+                        if !waiters.iter().any(|waker| waker.will_wake(context.waker())) {
+                            waiters.push(context.waker().clone());
+                        }
+                    });
                     Poll::Pending
                 } else {
                     Poll::Ready(())
@@ -61,12 +65,17 @@ pub(in crate::surface) fn use_session_fixture(user: &'static str) -> Signal<Sess
             }))
         },
         track_lock: |acquired| {
-            LOCK_DEPTH.update(|depth| if acquired { depth + 1 } else { depth - 1 });
-            if !acquired
-                && LOCK_DEPTH.get() == 0
-                && let Some(waker) = LOCK_WAITER.take()
-            {
-                waker.wake();
+            LOCK_DEPTH.update(|depth| {
+                if acquired {
+                    depth.checked_add(1).expect("fixture lock depth overflow")
+                } else {
+                    depth.checked_sub(1).expect("fixture lock released without a holder")
+                }
+            });
+            if !acquired && LOCK_DEPTH.get() == 0 {
+                for waker in LOCK_WAITERS.take() {
+                    waker.wake();
+                }
             }
         },
         get_revision: |key| REVISIONS.with_borrow(|values| values.get(key).cloned()),
@@ -90,13 +99,15 @@ pub(in crate::surface) fn use_session_fixture(user: &'static str) -> Signal<Sess
 }
 
 pub(in crate::surface) fn reset() {
+    assert_eq!(LOCK_DEPTH.get(), 0, "reset requires all cookie lock holders released");
+
     SCRIPT.set(VecDeque::new());
     REQUESTS.set(Vec::new());
     PREFERENCE_COMMANDS.set(Vec::new());
     REVISIONS.set(BTreeMap::new());
     REVISION_WRITES.set(Vec::new());
     SERIALIZE_LOCK.set(false);
-    LOCK_WAITER.set(None);
+    LOCK_WAITERS.set(Vec::new());
     FAIL_SESSION_CHECK.set(false);
 }
 
@@ -249,12 +260,17 @@ pub(in crate::surface) struct ExpiryClock {
 
 struct ExpiryClockState {
     now: Cell<Timestamp>,
-    waker: RefCell<Option<Waker>>,
+    wakers: RefCell<Vec<Waker>>,
 }
 
 impl ExpiryClock {
     pub(in crate::surface) fn new(now: Timestamp) -> Self {
-        Self { state: Rc::new(ExpiryClockState { now: Cell::new(now), waker: RefCell::new(None) }) }
+        Self {
+            state: Rc::new(ExpiryClockState {
+                now: Cell::new(now),
+                wakers: RefCell::new(Vec::new()),
+            }),
+        }
     }
 
     pub(in crate::surface) fn now(&self) -> Timestamp {
@@ -267,7 +283,12 @@ impl ExpiryClock {
             if self.now() != started {
                 Poll::Ready(())
             } else {
-                self.state.waker.replace(Some(context.waker().clone()));
+                {
+                    let mut wakers = self.state.wakers.borrow_mut();
+                    if !wakers.iter().any(|waker| waker.will_wake(context.waker())) {
+                        wakers.push(context.waker().clone());
+                    }
+                }
                 Poll::Pending
             }
         })
@@ -275,12 +296,12 @@ impl ExpiryClock {
     }
 
     pub(in crate::surface) fn waiting(&self) -> bool {
-        self.state.waker.borrow().is_some()
+        !self.state.wakers.borrow().is_empty()
     }
 
     pub(in crate::surface) fn advance_to(&self, now: Timestamp) {
         self.state.now.set(now);
-        if let Some(waker) = self.state.waker.take() {
+        for waker in self.state.wakers.take() {
             waker.wake();
         }
     }
@@ -289,7 +310,7 @@ impl ExpiryClock {
 #[derive(Default)]
 pub(in crate::surface) struct ResponseGate {
     released: Cell<bool>,
-    waker: RefCell<Option<Waker>>,
+    wakers: RefCell<Vec<Waker>>,
 }
 
 impl ResponseGate {
@@ -316,7 +337,12 @@ impl ResponseGate {
             if self.released.get() {
                 Poll::Ready(())
             } else {
-                self.waker.replace(Some(context.waker().clone()));
+                {
+                    let mut wakers = self.wakers.borrow_mut();
+                    if !wakers.iter().any(|waker| waker.will_wake(context.waker())) {
+                        wakers.push(context.waker().clone());
+                    }
+                }
                 Poll::Pending
             }
         })
@@ -325,12 +351,12 @@ impl ResponseGate {
 
     pub(in crate::surface) fn release(&self) {
         self.released.set(true);
-        if let Some(waker) = self.waker.take() {
+        for waker in self.wakers.take() {
             waker.wake();
         }
     }
 
     pub(in crate::surface) fn waiting(&self) -> bool {
-        self.waker.borrow().is_some()
+        !self.wakers.borrow().is_empty()
     }
 }

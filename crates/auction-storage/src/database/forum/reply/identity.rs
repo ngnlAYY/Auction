@@ -2,15 +2,15 @@
 
 use auction_application::core::ApplicationError;
 use auction_application::forum::ForumBidderIdentity;
+use auction_domain::valid_text;
 use auction_domain::{SettlementWorld, UserId};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::super::super::DatabaseStore;
-use super::validation::{
-    MAX_FORUM_ACCOUNT_ID_BYTES, MAX_PLAYER_NAME_BYTES, valid_decimal_id, valid_text,
-};
+use super::validation::{MAX_FORUM_ACCOUNT_ID_BYTES, MAX_PLAYER_NAME_BYTES};
+use crate::database::DatabaseStore;
+use crate::database::forum::sync::validation::valid_decimal_id;
 use crate::database::operations::audit_health::AuditWriteResult as _;
 use crate::database::storage_error_from;
 
@@ -150,7 +150,7 @@ pub(super) async fn resolve_bidder_postgres(
 
                 // 同一数字账号可在两个世界留下映射，但所有映射必须归属同一个用户。
                 let linked_rows = sqlx::query(
-                    "SELECT user_id
+                    "SELECT user_id, status AS identity_status, registration_state
          FROM public.forum_bidder_identities
          WHERE provider = 'ehentai' AND external_account_id = $1
          FOR UPDATE",
@@ -164,12 +164,20 @@ pub(super) async fn resolve_bidder_postgres(
                     let user_id: Uuid = row
                         .try_get("user_id")
                         .map_err(|error| storage_error_from(error, "读取论坛账号归属用户失败"))?;
+                    let identity_status: String = row
+                        .try_get("identity_status")
+                        .map_err(|error| storage_error_from(error, "读取论坛身份状态失败"))?;
+                    let registration_state: String = row
+                        .try_get("registration_state")
+                        .map_err(|error| storage_error_from(error, "读取论坛身份注册状态失败"))?;
                     if user_id.is_nil()
+                        || identity_status != "active"
+                        || !matches!(registration_state.as_str(), "forum_only" | "mm_bound")
                         || linked_user_id
                             .is_some_and(|existing_user_id| existing_user_id != user_id)
                     {
                         return Err(ApplicationError::ForumIdentityRejected(
-                            "论坛账号跨世界归属不一致",
+                            "论坛账号跨世界身份已阻止或稳定归属不一致",
                         ));
                     }
                     linked_user_id = Some(user_id);

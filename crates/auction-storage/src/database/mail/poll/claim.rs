@@ -134,6 +134,15 @@ pub(crate) async fn commit(
     let Some(state) = state else {
         return rollback_error(transaction, "MoogleMail 提交邮箱状态不存在").await;
     };
+    // SELECT FOR UPDATE 可能在等待行锁时跨过截止；锁定后用数据库实时钟先拒绝过期租约。
+    let lease_active: bool = sqlx::query_scalar(
+        "SELECT COALESCE(claim_expires_at > clock_timestamp(), false)
+         FROM public.mail_poll_state WHERE mailbox_key = $1",
+    )
+    .bind(&claim.mailbox_key)
+    .fetch_one(&mut *transaction)
+    .await
+    .map_err(|error| storage_error_from(error, "核对 MoogleMail 租约时限失败"))?;
     let stored_token: Option<Uuid> = state
         .try_get("claim_token")
         .map_err(|error| storage_error_from(error, "读取 MoogleMail claim token 失败"))?;
@@ -150,6 +159,7 @@ pub(crate) async fn commit(
         || stored_owner.as_deref() != Some(claim.worker_id.as_str())
         || current_version != claim.state_version
         || expires_at.is_none()
+        || !lease_active
     {
         return rollback_error(transaction, "MoogleMail 提交租约已失效").await;
     }

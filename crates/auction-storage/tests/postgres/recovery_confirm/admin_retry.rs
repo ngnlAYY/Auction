@@ -48,8 +48,7 @@ fn admin_command(
     }
 }
 
-/// 把投递改到动作要求的起始状态（Release 为 claimed，重试为 failed，对账重试为
-/// manual_reconcile）并推进 fence；返回新的 fence。只用于构造夹具。
+/// 把投递改到动作要求的起始状态，但保留当前 fence；返回该 fence。只用于构造夹具。
 async fn stage_delivery(pool: &PgPool, delivery_id: Uuid, action: DeliveryAdminAction) -> i64 {
     let (status, leased) = match action {
         DeliveryAdminAction::Release => ("claimed", true),
@@ -70,7 +69,6 @@ async fn stage_delivery(pool: &PgPool, delivery_id: Uuid, action: DeliveryAdminA
                                     WHEN 'manual_reconcile' THEN 'outcome_unknown' END,
              external_reference = NULL,
              attempt_count = GREATEST(attempt_count, 1),
-             fencing_version = fencing_version + 1,
              updated_at = clock_timestamp()
          WHERE id = $1
          RETURNING fencing_version",
@@ -209,13 +207,14 @@ async fn postgres_admin_retry_projection_matches_recovery_owner_at_same_fence() 
     let delivery_id = Uuid::new_v4();
     let prepare = Uuid::new_v4();
     let activate = Uuid::new_v4();
+    // stage_delivery 保留当前 fence，失败快照必须已有发送世代。
     sqlx::query(
         "INSERT INTO public.deliveries
             (id, command_id, request_digest, origin_kind, origin_id, recipient, payload, status,
-             activation_command_id, activation_request_digest, activated_at)
+             activation_command_id, activation_request_digest, activated_at, fencing_version)
          VALUES ($1, $2, decode(repeat('4b',32),'hex'), 'settlement_recovery_action', $3, 'Recovery buyer',
                  '{\"schema_version\":1,\"operation\":\"send\",\"world\":\"main\",\"template\":\"recovery_payment_reminder\"}'::jsonb,
-                 'pending', $4, decode(repeat('4c',32),'hex'), clock_timestamp())",
+                 'pending', $4, decode(repeat('4c',32),'hex'), transaction_timestamp(), 1)",
     )
     .bind(delivery_id).bind(prepare).bind(format!("recovery:{}", parent.recovery_id)).bind(activate)
     .execute(pool).await.expect("写入恢复提醒投递");
@@ -439,21 +438,17 @@ async fn postgres_admin_retry_rejects_voided_settlement() {
 }
 
 /// 等到本库中处于锁等待的会话数达到 `expected`；超时说明调用没有在恢复行锁上排队。
-async fn wait_for_lock_waiters(pool: &PgPool, expected: i64) {
+async fn wait_for_lock_waiters(pool: &PgPool, expected: i64, blocker_pid: i32) {
     for _ in 0..400 {
-        let waiting: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM pg_stat_activity
-             WHERE datname = current_database() AND wait_event_type = 'Lock'",
-        )
-        .fetch_one(pool)
-        .await
-        .expect("读取锁等待");
+        let waiting = crate::support::lock_waiters::count_blocked_by(pool, blocker_pid)
+            .await
+            .expect("读取锁等待");
         if waiting >= expected {
             return;
         }
         tokio::time::sleep(StdDuration::from_millis(25)).await;
     }
-    panic!("没有等到 {expected} 个锁等待会话");
+    panic!("没有等到 {expected} 个被目标事务阻塞的会话");
 }
 
 /// 两种提交顺序：第三条连接先锁住恢复行，让重试与确认依次排队，再放行。恢复流程已消费退件并
@@ -489,23 +484,27 @@ async fn postgres_admin_retry_races_recovery_confirmation() {
             .execute(&mut *blocker)
             .await
             .expect("锁住恢复行");
+        let blocker_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *blocker)
+            .await
+            .expect("读取阻塞事务会话");
         let (retry_task, confirm_task) = if retry_first {
             let retry_store = store.clone();
             let retry_task = tokio::spawn(async move { retry_store.execute(retry).await });
-            wait_for_lock_waiters(pool, 1).await;
+            wait_for_lock_waiters(pool, 1, blocker_pid).await;
             let confirm_store = store.clone();
             let confirm_task =
                 tokio::spawn(async move { confirm_store.confirm_recovery(confirm).await });
-            wait_for_lock_waiters(pool, 2).await;
+            wait_for_lock_waiters(pool, 2, blocker_pid).await;
             (retry_task, confirm_task)
         } else {
             let confirm_store = store.clone();
             let confirm_task =
                 tokio::spawn(async move { confirm_store.confirm_recovery(confirm).await });
-            wait_for_lock_waiters(pool, 1).await;
+            wait_for_lock_waiters(pool, 1, blocker_pid).await;
             let retry_store = store.clone();
             let retry_task = tokio::spawn(async move { retry_store.execute(retry).await });
-            wait_for_lock_waiters(pool, 2).await;
+            wait_for_lock_waiters(pool, 2, blocker_pid).await;
             (retry_task, confirm_task)
         };
         blocker.commit().await.expect("放行排队的两个事务");
@@ -619,12 +618,16 @@ async fn postgres_confirmation_and_reconcile_failed_lock_the_delivery_first() {
         .execute(&mut *blocker)
         .await
         .expect("锁住原付款投递");
+    let blocker_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *blocker)
+        .await
+        .expect("读取阻塞事务会话");
     let failed_store = store.clone();
     let failed_task = tokio::spawn(async move { failed_store.execute(failed).await });
-    wait_for_lock_waiters(pool, 1).await;
+    wait_for_lock_waiters(pool, 1, blocker_pid).await;
     let confirm_store = store.clone();
     let confirm_task = tokio::spawn(async move { confirm_store.confirm_recovery(confirm).await });
-    wait_for_lock_waiters(pool, 2).await;
+    wait_for_lock_waiters(pool, 2, blocker_pid).await;
 
     // 两个事务都排在原付款投递上；确认此时不得已经持有付款履约行。
     let mut probe = pool.begin().await.expect("开启探测事务");

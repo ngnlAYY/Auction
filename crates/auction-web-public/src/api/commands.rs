@@ -19,10 +19,19 @@ use uuid::Uuid;
 use super::clock::send_response_observed;
 #[cfg(test)]
 use super::clock::{HttpFixture, HttpHeadFixtureFuture, HttpResponseFixture};
-use super::session::{
-    SessionRefreshReason, notify_public_session_change, observe_public_session_failure,
+use super::session::identity::{
+    SessionIdentityObservation, SessionRefreshReason, observe_public_session_failure_observed,
+    request_public_session_check,
 };
 use super::{PublicSessionApiError, TransportError, decoder};
+
+fn valid_path_uuid(value: &str) -> bool {
+    Uuid::parse_str(value).is_ok_and(|id| !id.is_nil() && id.to_string() == value)
+}
+
+fn invalid_path_request() -> CommandError {
+    CommandError { code: "invalid_request".to_owned(), status: 400 }
+}
 
 const NOT_SENT: &str = "command_not_sent";
 
@@ -100,6 +109,9 @@ pub(crate) async fn place_bid(
     amount: i64,
     command_id: Uuid,
 ) -> Result<BidResult, CommandError> {
+    if !valid_path_uuid(&lot_id) {
+        return Err(invalid_path_request());
+    }
     let url = format!("/api/v1/lots/{lot_id}/bids");
     let command = PlaceBidRequest { command_id: command_id.to_string(), amount };
     send_command(
@@ -118,6 +130,9 @@ pub(crate) async fn create_proxy_authorization(
     mode: String,
     command_id: Uuid,
 ) -> Result<ProxyCommandAuthorization, CommandError> {
+    if !valid_path_uuid(&lot_id) {
+        return Err(invalid_path_request());
+    }
     let url = format!("/api/v1/lots/{lot_id}/proxy-authorizations");
     let command = CreateProxyAuthorizationRequest {
         command_id: command_id.to_string(),
@@ -140,6 +155,9 @@ pub(crate) async fn lower_proxy_authorization(
     maximum_amount: i64,
     command_id: Uuid,
 ) -> Result<ProxyCommandAuthorization, CommandError> {
+    if !valid_path_uuid(&lot_id) || !valid_path_uuid(&authorization_id) {
+        return Err(invalid_path_request());
+    }
     let url = format!("/api/v1/lots/{lot_id}/proxy-authorizations/{authorization_id}/lower");
     let command =
         LowerProxyAuthorizationRequest { command_id: command_id.to_string(), maximum_amount };
@@ -185,7 +203,8 @@ fn observe_command_head(response_status: &mut Option<u16>, status: u16) {
     *response_status = Some(status);
     // 401 发起复核并暂停新写入和重试。正文收口前仍保留原命令的归属。
     if status == 401 {
-        notify_public_session_change(SessionRefreshReason::AuthenticationFailed);
+        super::session::broadcast_session_change();
+        request_public_session_check(SessionRefreshReason::AuthenticationFailed);
     }
 }
 
@@ -251,13 +270,15 @@ async fn send_command<T>(
     send: impl AsyncFnOnce(&mut CommandInvalidation) -> Result<CommandResponse, TransportError>,
     decode: impl FnOnce(Option<&str>) -> Result<T, String>,
 ) -> Result<T, CommandError> {
+    let observation = SessionIdentityObservation::user_owner();
+    let expected_user_id = expected_user.to_string();
     let (response, response_status) = {
         let mut invalidation = CommandInvalidation::default();
         let response = send(&mut invalidation).await.map_err(|error| {
             if invalidation.request_built {
                 let error = CommandError::transport(error, invalidation.response_status);
                 if error.status == 401 && invalidation.response_status != Some(401) {
-                    notify_public_session_change(SessionRefreshReason::AuthenticationFailed);
+                    request_public_session_check(SessionRefreshReason::AuthenticationFailed);
                 }
                 error
             } else {
@@ -271,7 +292,12 @@ async fn send_command<T>(
     if !(200..300).contains(&status) {
         let error = read_command_error(status, body);
         if status != 401 || response_status != Some(401) {
-            observe_public_session_failure(status, &error.code, Some(&expected_user.to_string()));
+            observe_public_session_failure_observed(
+                status,
+                &error.code,
+                Some(&expected_user_id),
+                &observation,
+            );
         }
         return Err(error);
     }
@@ -279,21 +305,22 @@ async fn send_command<T>(
 }
 
 fn read_command_error(status: u16, body: Option<&str>) -> CommandError {
-    super::session::decode_identity_response::<()>(status, body, serde_json::Value::is_null)
-        .err()
-        .map(PublicSessionApiError::into_read_code)
-        .filter(|code| {
-            !code.is_empty()
-                && code.len() <= 64
-                && code == code.trim()
-                && code.chars().all(|character| {
-                    character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
-                })
-        })
-        .map_or_else(
-            || CommandError::invalid_response(status),
-            |code| CommandError { code, status },
-        )
+    super::session::transport::decode_identity_response::<()>(
+        status,
+        body,
+        serde_json::Value::is_null,
+    )
+    .err()
+    .map(PublicSessionApiError::into_read_code)
+    .filter(|code| {
+        !code.is_empty()
+            && code.len() <= 64
+            && code == code.trim()
+            && code.chars().all(|character| {
+                character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
+            })
+    })
+    .map_or_else(|| CommandError::invalid_response(status), |code| CommandError { code, status })
 }
 
 #[cfg(test)]

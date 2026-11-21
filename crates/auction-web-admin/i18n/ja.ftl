@@ -1804,6 +1804,7 @@ support-deliveries-title = 送信
 support-notifications-title = 通知
 support-empty = この区分に記録はありません。
 support-lot = 出品
+support-lot-status = 出品状態
 support-world = ワールド
 support-lot-number = 出品番号
 support-amount = 金額

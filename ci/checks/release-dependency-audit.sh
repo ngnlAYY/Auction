@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 # 与 auction-release 的 tag 守卫同一口径；其他 tag（如临时标记）不代表已发布版本。
-# versionsort.suffix=- 让预发布（v1.2.0-rc1）排在同版本正式发布之前，取最高版本。
+# 与发布工作流采用相同的 tag 语法；有效的预发布版本也作为实际发布候选参与排序。
 release_pattern='^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$'
 mapfile -t release_tags < <(
 	git -c versionsort.suffix=- tag --list 'v[0-9]*' --sort=-v:refname |

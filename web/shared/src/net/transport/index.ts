@@ -154,13 +154,12 @@ async function sendRequestObservedWithTimeout(
   timeoutMillis: number,
   signal?: AbortSignal,
 ): Promise<Result<TransportResponse, TransportError>> {
+  if (signal?.aborted === true) {
+    return err({ kind: "network", status: null });
+  }
   const controller = new AbortController();
   const abortFromCaller = () => controller.abort();
-  if (signal?.aborted === true) {
-    controller.abort();
-  } else {
-    signal?.addEventListener("abort", abortFromCaller, { once: true });
-  }
+  signal?.addEventListener("abort", abortFromCaller, { once: true });
   const cleanupCaller = () => {
     signal?.removeEventListener("abort", abortFromCaller);
   };

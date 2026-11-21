@@ -60,3 +60,8 @@ impl BackupStoreError {
         }
     }
 }
+impl From<object_store::path::Error> for BackupStoreError {
+    fn from(_: object_store::path::Error) -> Self {
+        Self::Configuration
+    }
+}

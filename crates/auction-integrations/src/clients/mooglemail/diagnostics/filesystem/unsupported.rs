@@ -26,6 +26,7 @@ pub(super) fn purge_ordinary_expired(
     _: Duration,
     _: SystemTime,
     _: u64,
+    _: u64,
 ) -> Result<MailDiagnosticPurgeOutcome, MailDiagnosticError> {
     Err(MailDiagnosticError::UnsupportedPlatform)
 }

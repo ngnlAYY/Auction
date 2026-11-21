@@ -18,6 +18,7 @@
 //! 多个用例共用的种子与插行夹具在 `fixtures`、`retention` 子模块。
 
 pub mod fixtures;
+pub mod lock_waiters;
 pub mod retention;
 
 use std::{
@@ -97,7 +98,9 @@ impl TestDatabase {
 
 impl Drop for TestDatabase {
     fn drop(&mut self) {
-        drop_database(&self.cluster.admin_url, &self.name);
+        if let Err(error) = drop_database(&self.cluster.admin_url, &self.name) {
+            report_cleanup_failure(&format!("测试数据库清理失败：{error}"));
+        }
     }
 }
 
@@ -109,6 +112,7 @@ struct Cluster {
     /// 继承 `auction_runtime` 的一次性登录角色名与随机密码，只供 `TestDatabase::store` 使用。
     service_role: String,
     service_password: String,
+    drop_runtime_role_on_bootstrap_failure: bool,
     server: Option<TempServer>,
 }
 
@@ -118,8 +122,21 @@ impl Drop for Cluster {
             // 一次性集群连同数据目录与角色一起删除，不需要再逐个清理。
             return;
         }
-        drop_database(&self.admin_url, &self.template);
-        drop_role(&self.admin_url, &self.service_role);
+        let mut errors = Vec::new();
+        if let Err(error) = drop_database(&self.admin_url, &self.template) {
+            errors.push(format!("清理模板数据库失败：{error}"));
+        }
+        if let Err(error) = drop_role(&self.admin_url, &self.service_role) {
+            errors.push(format!("清理运行账号失败：{error}"));
+        }
+        if self.drop_runtime_role_on_bootstrap_failure
+            && let Err(error) = drop_role(&self.admin_url, "auction_runtime")
+        {
+            errors.push(format!("清理临时运行角色失败：{error}"));
+        }
+        if !errors.is_empty() {
+            report_cleanup_failure(&format!("测试集群清理未完成：{}", errors.join("；")));
+        }
     }
 }
 
@@ -128,6 +145,7 @@ struct TempServer {
     bin_dir: Option<PathBuf>,
     root: PathBuf,
     data_dir: PathBuf,
+    initialized: bool,
 }
 
 impl TempServer {
@@ -136,10 +154,9 @@ impl TempServer {
         let root = env::temp_dir().join(unique_name("auction_pg18_"));
         let data_dir = root.join("data");
         let socket_dir = root.join("socket");
+        let mut server = Self { bin_dir, root, data_dir, initialized: false };
         std::fs::create_dir_all(&socket_dir)
             .map_err(|error| format!("创建临时集群目录失败：{error}"))?;
-
-        let server = Self { bin_dir, root, data_dir };
         server.run_tool(
             "initdb",
             &[
@@ -155,26 +172,40 @@ impl TempServer {
             ],
             "initdb",
         )?;
+        server.initialized = true;
 
-        let port = free_port()?;
         let log_path = server.root.join("postgres.log");
-        let options = format!("-p {port} -k {} -h 127.0.0.1 -F", path_str(&socket_dir)?);
-        server.run_tool(
-            "pg_ctl",
-            &[
-                "-D",
-                path_str(&server.data_dir)?,
-                "-l",
-                path_str(&log_path)?,
-                "-o",
-                &options,
-                "-w",
-                "-t",
-                "60",
-                "start",
-            ],
-            "pg_ctl start",
-        )?;
+        let socket_dir = server.root.join("socket");
+        let mut started_port = None;
+        let mut last_error = None;
+        for _ in 0..3 {
+            let port = free_port()?;
+            let options = format!("-p {port} -k {} -h 127.0.0.1 -F", path_str(&socket_dir)?);
+            match server.run_tool(
+                "pg_ctl",
+                &[
+                    "-D",
+                    path_str(&server.data_dir)?,
+                    "-l",
+                    path_str(&log_path)?,
+                    "-o",
+                    &options,
+                    "-w",
+                    "-t",
+                    "60",
+                    "start",
+                ],
+                "pg_ctl start",
+            ) {
+                Ok(()) => {
+                    started_port = Some(port);
+                    break;
+                }
+                Err(error) => last_error = Some(error),
+            }
+        }
+        let port = started_port
+            .ok_or_else(|| last_error.unwrap_or_else(|| "pg_ctl start 未执行".to_owned()))?;
 
         let admin_url = format!("postgresql://postgres@127.0.0.1:{port}/postgres");
         Ok((admin_url, server))
@@ -203,12 +234,39 @@ impl TempServer {
 
 impl Drop for TempServer {
     fn drop(&mut self) {
-        // 停止失败不覆盖测试结果；数据目录仍会被删除，残留进程由 pid 文件诊断。
-        let _ = self
-            .tool("pg_ctl")
-            .args(["-D", self.data_dir.to_string_lossy().as_ref(), "-m", "immediate", "-w", "stop"])
-            .output();
-        let _ = std::fs::remove_dir_all(&self.root);
+        let stopped = if !self.initialized {
+            true
+        } else {
+            let stop = self
+                .tool("pg_ctl")
+                .args([
+                    "-D",
+                    self.data_dir.to_string_lossy().as_ref(),
+                    "-m",
+                    "immediate",
+                    "-w",
+                    "stop",
+                ])
+                .output();
+            match stop {
+                Ok(output) if output.status.success() => true,
+                _ => self
+                    .tool("pg_ctl")
+                    .args(["-D", self.data_dir.to_string_lossy().as_ref(), "status"])
+                    .output()
+                    .is_ok_and(|output| output.status.code() == Some(3)),
+            }
+        };
+        if !stopped {
+            report_cleanup_failure(&format!(
+                "无法确认临时 PostgreSQL 已停止，保留数据目录：{}",
+                self.data_dir.display()
+            ));
+            return;
+        }
+        if let Err(error) = std::fs::remove_dir_all(&self.root) {
+            report_cleanup_failure(&format!("删除临时 PostgreSQL 数据目录失败：{error}"));
+        }
     }
 }
 
@@ -231,24 +289,66 @@ async fn bootstrap() -> Result<Cluster, String> {
         }
     };
     ensure_server_major_18(&admin_url).await?;
-
-    run_sql(
-        &admin_url,
-        "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='auction_runtime') THEN          CREATE ROLE auction_runtime LOGIN; END IF; END $$;",
+    let mut connection = PgConnection::connect(&admin_url)
+        .await
+        .map_err(|error| format!("连接 PostgreSQL 测试服务器失败：{error}"))?;
+    if server.is_none() {
+        // 外部夹具从同一维护库取得会话锁。出错时后声明的 Cluster 先清理，再由连接释放锁。
+        tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            sqlx::query(
+                "SELECT pg_advisory_lock(hashtextextended('auction-storage:test-db:bootstrap', 0))",
+            )
+            .execute(&mut connection),
+        )
+        .await
+        .map_err(|_| "等待 PostgreSQL 测试集群初始化锁超时".to_owned())?
+        .map_err(|error| format!("取得 PostgreSQL 测试集群初始化锁失败：{error}"))?;
+    }
+    let runtime_role_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'auction_runtime')",
     )
-    .await?;
-    let cluster = Cluster {
+    .fetch_one(&mut connection)
+    .await
+    .map_err(|error| format!("检查运行角色失败：{error}"))?;
+    let mut cluster = Cluster {
         admin_url,
         template: unique_name("auction_test_tmpl_"),
         service_role: unique_name("auction_test_svc_"),
         service_password: uuid::Uuid::new_v4().simple().to_string(),
+        drop_runtime_role_on_bootstrap_failure: false,
         server,
     };
+    if !runtime_role_exists {
+        sqlx::query("CREATE ROLE auction_runtime LOGIN")
+            .execute(&mut connection)
+            .await
+            .map_err(|error| format!("创建 PostgreSQL 测试运行角色失败：{error}"))?;
+        cluster.drop_runtime_role_on_bootstrap_failure = true;
+    }
+    run_sql(
+        &cluster.admin_url,
+        "DO $$ BEGIN
+             IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=current_user AND rolsuper)
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM pg_auth_members AS membership
+                    JOIN pg_roles AS granted_role ON granted_role.oid=membership.roleid
+                    JOIN pg_roles AS member_role ON member_role.oid=membership.member
+                    WHERE granted_role.rolname='auction_runtime'
+                      AND member_role.rolname=current_user
+                      AND membership.admin_option
+                ) THEN
+                 RAISE EXCEPTION 'maintenance role requires ADMIN OPTION on auction_runtime';
+             END IF;
+         END $$;",
+    )
+    .await?;
     let statement = format!("CREATE DATABASE {}", quote_ident(&cluster.template));
     run_sql(&cluster.admin_url, &statement).await?;
     prepare_template(&cluster).await?;
     // 只授予 auction_runtime 成员资格（默认 INHERIT），不带任何角色属性；外部服务器上要求维护角色
-    // 对 auction_runtime 有 ADMIN OPTION（由它创建时 PG18 自动具备）。
+    // 创建一次性登录角色需要维护身份对 auction_runtime 的 ADMIN OPTION；上面已显式检查。
     let statement = format!(
         "CREATE ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS \
          PASSWORD '{}' IN ROLE auction_runtime",
@@ -256,6 +356,8 @@ async fn bootstrap() -> Result<Cluster, String> {
         cluster.service_password
     );
     run_sql(&cluster.admin_url, &statement).await?;
+    cluster.drop_runtime_role_on_bootstrap_failure = false;
+    drop(connection);
     Ok(cluster)
 }
 
@@ -265,7 +367,10 @@ async fn prepare_template(cluster: &Cluster) -> Result<(), String> {
     let store = DatabaseStore::connect(&url, DatabaseConnectionProfile::legacy())
         .await
         .map_err(|error| format!("连接模板库失败：{error}"))?;
-    let migrated = store.migrate().await.map_err(|error| format!("模板库执行迁移失败：{error}"));
+    let migrated = store
+        .migrate()
+        .await
+        .map_err(|error| format!("模板库执行迁移失败：{error}；详细原因：{error:?}"));
     let applied = match migrated {
         Ok(()) => sqlx::query_scalar::<_, i64>(
             "SELECT coalesce(max(version), 0) FROM public._sqlx_migrations",
@@ -319,48 +424,75 @@ async fn run_sql(admin_url: &str, statement: &str) -> Result<(), String> {
     closed
 }
 
-/// 在独立线程与独立 current-thread 运行时里删除数据库，避免在测试运行时上下文中阻塞或递归建 runtime。
-fn drop_database(admin_url: &str, name: &str) {
+/// 在独立线程与独立 current-thread 运行时里清理测试数据库，等待上限 10 秒。
+fn drop_database(admin_url: &str, name: &str) -> Result<(), String> {
     let admin_url = admin_url.to_owned();
     let name = name.to_owned();
     run_blocking_cleanup("auction-pg-drop", async move {
-        let Ok(mut connection) = PgConnection::connect(&admin_url).await else {
-            return;
-        };
+        let mut connection = PgConnection::connect(&admin_url)
+            .await
+            .map_err(|error| format!("连接清理数据库失败：{error}"))?;
         // FORCE 终止克隆库上尚未释放的测试连接，保证清理不因连接池析构时序而失败。
         let statement = format!("DROP DATABASE IF EXISTS {} WITH (FORCE)", quote_ident(&name));
-        let _ = sqlx::raw_sql(AssertSqlSafe(statement)).execute(&mut connection).await;
-        let _ = connection.close().await;
-    });
+        sqlx::raw_sql(AssertSqlSafe(statement))
+            .execute(&mut connection)
+            .await
+            .map_err(|error| format!("删除测试数据库失败：{error}"))?;
+        connection.close().await.map_err(|error| format!("关闭数据库清理连接失败：{error}"))?;
+        Ok(())
+    })
 }
 
-/// 删除一次性运行账号角色；角色不拥有对象，删除失败不覆盖测试结果。
-fn drop_role(admin_url: &str, role: &str) {
+/// 删除一次性运行账号角色；角色不拥有对象，失败由析构调用方非致命报告。
+fn drop_role(admin_url: &str, role: &str) -> Result<(), String> {
     let admin_url = admin_url.to_owned();
     let role = role.to_owned();
     run_blocking_cleanup("auction-pg-drop-role", async move {
-        let Ok(mut connection) = PgConnection::connect(&admin_url).await else {
-            return;
-        };
+        let mut connection = PgConnection::connect(&admin_url)
+            .await
+            .map_err(|error| format!("连接角色清理数据库失败：{error}"))?;
         let statement = format!("DROP ROLE IF EXISTS {}", quote_ident(&role));
-        let _ = sqlx::raw_sql(AssertSqlSafe(statement)).execute(&mut connection).await;
-        let _ = connection.close().await;
-    });
+        sqlx::raw_sql(AssertSqlSafe(statement))
+            .execute(&mut connection)
+            .await
+            .map_err(|error| format!("删除测试角色失败：{error}"))?;
+        connection.close().await.map_err(|error| format!("关闭角色清理连接失败：{error}"))?;
+        Ok(())
+    })
 }
 
-fn run_blocking_cleanup<F>(label: &str, future: F)
+/// 在独立线程与独立 current-thread 运行时里清理测试数据库，等待上限 10 秒。
+fn run_blocking_cleanup<F>(label: &str, future: F) -> Result<(), String>
 where
-    F: Future<Output = ()> + Send + 'static,
+    F: Future<Output = Result<(), String>> + Send + 'static,
 {
-    let spawned = std::thread::Builder::new().name(label.to_owned()).spawn(move || {
-        let Ok(runtime) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
-            return;
-        };
-        runtime.block_on(future);
-    });
-    if let Ok(handle) = spawned {
-        let _ = handle.join();
+    let label = label.to_owned();
+    let thread_label = label.clone();
+    let worker_label = label.clone();
+    let handle = std::thread::Builder::new()
+        .name(thread_label)
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| format!("{worker_label} cleanup runtime failed: {error}"))?;
+            runtime.block_on(async move {
+                tokio::time::timeout(std::time::Duration::from_secs(10), future)
+                    .await
+                    .map_err(|_| format!("{worker_label} cleanup timed out after 10 seconds"))?
+            })
+        })
+        .map_err(|error| format!("{label} cleanup thread spawn failed: {error}"))?;
+    match handle.join() {
+        Ok(result) => result,
+        Err(_) => Err(format!("{label} cleanup thread panicked")),
     }
+}
+
+/// 析构阶段只报告清理失败；stderr 不可写也不能触发第二次 panic。
+fn report_cleanup_failure(message: &str) {
+    let mut stderr = std::io::stderr().lock();
+    let _ = std::io::Write::write_fmt(&mut stderr, format_args!("{message}\n"));
 }
 
 fn resolve_pg_bin() -> Result<Option<PathBuf>, String> {

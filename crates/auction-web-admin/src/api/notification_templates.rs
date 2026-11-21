@@ -39,10 +39,17 @@ pub(crate) async fn fetch_mail_templates() -> Result<Vec<AdminMailTemplateDto>, 
 
 /// 响应里的一项是否自洽：键是 snake_case，版本与“是否自定义”对得上，必需占位符都在允许集合里。
 fn valid_template_entry(template: &AdminMailTemplateDto) -> bool {
+    let maximum_body_bytes = if matches!(template.key.as_str(), "lot_watch" | "lot_watch_pm") {
+        MAX_WATCH_BODY_BYTES
+    } else {
+        MAX_TEMPLATE_BODY_BYTES
+    };
     valid_template_key(&template.key)
         && template.revision >= 0
         && !template.body.is_empty()
         && !template.default_body.is_empty()
+        && template.body.len() <= maximum_body_bytes
+        && template.default_body.len() <= maximum_body_bytes
         && (template.revision > 0 || !template.customized)
         && (template.customized || (template.usable && template.body == template.default_body))
         && (template.revision > 0) == template.updated_by.is_some()
@@ -137,6 +144,7 @@ pub(crate) async fn submit_mail_template(
         || Some(accepted.revision) != attempt.expected_revision.checked_add(1)
         || accepted.customized != attempt.body.is_some()
         || attempt.body.as_ref().is_some_and(|body| body != &accepted.body)
+        || attempt.body.is_none() && accepted.body != accepted.default_body
     {
         return Err(AdminWriteFailure::invalid_response("mail template update"));
     }

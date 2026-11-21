@@ -34,11 +34,12 @@ function lot(id: string, ended: boolean, detail: boolean) {
       name: id === LOT_ID ? "Legendary Cotton Robe" : "Magnificent Cotton Robe",
       category: "Cloth",
       equipment_group: "rare",
+      game_equipment_url: "https://hentaiverse.org/equip/123456/0123456789",
       level: 450,
       primary_attribute_initials: "IW",
       avg_roll: 70,
-      game_equipment_url: "https://hentaiverse.org/equip/123456/0123456789",
       ...(detail ? { info_summary: "Robe Lv450", stats: {} } : {}),
+      attributes: { quality: "Legendary" },
     },
   };
 }

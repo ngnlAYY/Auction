@@ -1,7 +1,8 @@
 // 补偿池批次、逐件结算明细及补偿轮次的字段闭集校验。
 
-import { validUuid } from "@auction/web-shared/ui/validation";
+import { jsonKeysOnly } from "@auction/web-shared/net/wire";
 
+import { validUuid } from "@auction/web-shared/ui/validation";
 import {
   accountNonempty,
   gameUrl,
@@ -19,8 +20,16 @@ import { validNumberedPage } from "./auction";
 export function validCompensationPool(value: unknown): boolean {
   const pool = object(value);
   if (pool === null) return false;
+  if (
+    !jsonKeysOnly(
+      pool,
+      ["balance", "updated_at", "rounds", "page", "page_size", "total"],
+      ["cursor", "next_cursor", "has_more"],
+    )
+  ) {
+    return false;
+  }
   const rounds = pool.rounds;
-  // 两个世界共用一个补偿池，单行始终存在，因此余额与更新时间都必须给出。
   if (!validNumberedPage(pool) || !nonnegative(pool.balance)) return false;
   if (!time(pool.updated_at) || !Array.isArray(rounds)) return false;
   return rounds.every(validCompensationRound);
@@ -30,15 +39,40 @@ export function validCompensationPool(value: unknown): boolean {
 export function validCompensationLots(value: unknown): boolean {
   const page = object(value);
   if (page === null) return false;
+  if (!jsonKeysOnly(page, ["round", "lots", "total", "page", "page_size"], [])) return false;
   const lots = page.lots;
-  if (!validNumberedPage(page) || !validCompensationRound(page.round) || !Array.isArray(lots))
+  if (!validNumberedPage(page) || !validCompensationRound(page.round) || !Array.isArray(lots)) {
     return false;
+  }
   return lots.every(validCompensationLot);
 }
 
 function validCompensationRound(value: unknown): boolean {
   const round = object(value);
   if (round === null) return false;
+  if (
+    !jsonKeysOnly(
+      round,
+      [
+        "auction_id",
+        "world_id",
+        "auction_sequence",
+        "policy_mode",
+        "opening_balance",
+        "tax_income",
+        "discount_demand",
+        "compensation_out",
+        "closing_balance",
+        "movement_count",
+        "reversal_count",
+        "reversal_amount",
+        "settled_at",
+      ],
+      [],
+    )
+  ) {
+    return false;
+  }
   const policyMode = string(round.policy_mode);
   return (
     validUuid(string(round.auction_id) ?? "") &&
@@ -63,11 +97,36 @@ function validCompensationLot(value: unknown): boolean {
   const lot = object(value);
   if (lot === null) return false;
   if (
+    !jsonKeysOnly(
+      lot,
+      [
+        "lot_id",
+        "lot_number",
+        "equipment_name",
+        "equipment_category",
+        "game_equipment_url",
+        "end_price",
+        "hold_ppm",
+        "adjustment_ppm",
+        "tax_amount",
+        "discount_amount",
+        "compensation_amount",
+        "buyer_amount",
+        "seller_amount",
+        "buyer_name",
+        "seller_name",
+        "voided",
+      ],
+      ["leader_held_nanos", "reversal"],
+    )
+  ) {
+    return false;
+  }
+  if (
     !validUuid(string(lot.lot_id) ?? "") ||
     !positive(lot.lot_number) ||
     !accountNonempty(lot.equipment_name) ||
     !accountNonempty(lot.equipment_category) ||
-    // 明细返回完整 ID/key 链接，复用目录校验，但不接受目录兼容的空串。
     !nonempty(lot.game_equipment_url) ||
     !gameUrl(lot.game_equipment_url) ||
     !positive(lot.end_price)
@@ -98,6 +157,7 @@ function validCompensationLot(value: unknown): boolean {
   const reversal = object(lot.reversal);
   return (
     reversal !== null &&
+    jsonKeysOnly(reversal, ["amount", "tax_shortfall", "balance_after", "reversed_at"], []) &&
     int(reversal.amount) !== null &&
     nonnegative(reversal.tax_shortfall) &&
     nonnegative(reversal.balance_after) &&

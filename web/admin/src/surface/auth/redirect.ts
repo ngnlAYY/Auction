@@ -17,9 +17,9 @@ export function AdminLoginRedirect(): JSX.Element {
   const encodedReturn = formUrlencodedByteSerialize(returnTarget);
   const target = `/login?return=${encodedReturn}`;
   createEffect(
-    () => null,
-    () => {
-      router.replace(target);
+    () => target,
+    (next) => {
+      router.replace(next);
     },
   );
   return null;
@@ -30,11 +30,11 @@ export function AdminReturnRedirect(): JSX.Element {
   const router = useRouter();
   const target = adminReturnPath();
   createEffect(
-    () => null,
-    () => {
+    () => target,
+    (next) => {
       // 共享路由的 replace 保留当前历史条目键并同步匹配；它没有“原样地址 + 页首落点”
       // 的公开入口，尾斜杠、裸问号与片段定位的差异见迁移报告。
-      router.replace(target);
+      router.replace(next);
     },
   );
   return null;

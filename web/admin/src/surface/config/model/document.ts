@@ -325,13 +325,11 @@ function cloneDocument(document: AdminJsonValue): AdminJsonValue | null {
 }
 
 function isJsonValue(value: unknown): value is AdminJsonValue {
-  if (
-    value === null ||
-    typeof value === "boolean" ||
-    typeof value === "string" ||
-    typeof value === "number"
-  ) {
+  if (value === null || typeof value === "boolean" || typeof value === "string") {
     return true;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value);
   }
   if (Array.isArray(value)) {
     return value.every(isJsonValue);
@@ -340,5 +338,9 @@ function isJsonValue(value: unknown): value is AdminJsonValue {
 }
 
 function isJsonObject(value: unknown): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }

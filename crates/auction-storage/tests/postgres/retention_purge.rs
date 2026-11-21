@@ -12,14 +12,22 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::assert_matches;
+#[cfg(unix)]
+use std::fs;
+#[cfg(unix)]
+use std::{os::unix::fs::PermissionsExt, path::PathBuf};
 
 use auction_application::core::CliOperatorIdentity;
+#[cfg(unix)]
+use auction_storage::RetentionPurgeFilesystemArtifactRef;
 use auction_storage::{
     DatabaseStore, RETENTION_DRY_RUN_FORMAT, RetentionDryRunReport, RetentionPurgeApproval,
-    RetentionPurgeError, RetentionPurgeFilesystemResult, RetentionPurgeOutcome,
+    RetentionPurgeApprovalTokenInput, RetentionPurgeError, RetentionPurgeOutcome,
     RetentionPurgeRequest, RetentionPurgeTableApproval, retention_purge_approval_token,
 };
 use auction_time::{TimeDelta, Timestamp};
+#[cfg(unix)]
+use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -30,6 +38,28 @@ use crate::support::retention::{
 
 const RUNTIME_FAMILIES: [&str; 4] =
     ["service_heartbeat", "realtime_events", "realtime_failures", "session_records"];
+
+#[cfg(unix)]
+struct ArtifactDirectory(PathBuf);
+
+#[cfg(unix)]
+impl ArtifactDirectory {
+    fn new() -> Self {
+        let path =
+            std::env::temp_dir().join(format!("auction-retention-artifact-{}", Uuid::new_v4()));
+        fs::create_dir(&path).expect("建立 artifact 私有目录");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
+            .expect("设置 artifact 目录权限");
+        Self(path)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ArtifactDirectory {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
 
 async fn database_name(store: &DatabaseStore) -> String {
     sqlx::query_scalar("SELECT current_database()")
@@ -66,17 +96,19 @@ fn approval(
         .collect::<Vec<_>>();
     let binding =
         tables.iter().map(|table| (table.table.clone(), table.candidate_rows)).collect::<Vec<_>>();
-    let approval_token = retention_purge_approval_token(
-        database,
-        report.run_id,
-        &report.policy_sha256,
-        family_name,
-        family.candidate_rows,
-        None,
-        &binding,
-    );
+    let approval_token = retention_purge_approval_token(RetentionPurgeApprovalTokenInput {
+        database_name: database,
+        dry_run_run_id: report.run_id,
+        policy_sha256: &report.policy_sha256,
+        dataset_family: family_name,
+        filesystem_root_identity_sha256: None,
+        candidate_rows: family.candidate_rows,
+        candidate_bytes: None,
+        tables: &binding,
+    });
     RetentionPurgeApproval {
         dataset_family: family_name.to_owned(),
+        filesystem_root_identity_sha256: None,
         approval_token,
         candidate_rows: family.candidate_rows,
         candidate_bytes: None,
@@ -97,7 +129,7 @@ fn request(
         policy_sha256: report.policy_sha256.clone(),
         batch_size: 2,
         approvals,
-        filesystem: None,
+        filesystem_artifact: None,
         operator_identity: None,
     }
 }
@@ -516,6 +548,7 @@ async fn postgres_retention_purge_rejects_invalid_approvals_before_mutation() {
     // retain_forever 族：审计族永不清理。
     let audit_family = RetentionPurgeApproval {
         dataset_family: "audit".to_owned(),
+        filesystem_root_identity_sha256: None,
         approval_token: "0".repeat(64),
         candidate_rows: 0,
         candidate_bytes: None,
@@ -620,6 +653,7 @@ async fn postgres_retention_purge_unblocks_referenced_events_in_the_same_run() {
     assert!(!rerun.mutation_executed);
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn postgres_retention_purge_accepts_mixed_database_and_filesystem_approvals() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
@@ -628,18 +662,23 @@ async fn postgres_retention_purge_accepts_mixed_database_and_filesystem_approval
     let database_name = database_name(&store).await;
     let report = collect_report(postgres, &database_name).await;
 
-    // 文件族由 CLI 在预校验后执行；这里只验证存储层接受混合批准并如实计入回执。
-    let filesystem_token = retention_purge_approval_token(
-        &database_name,
-        report.run_id,
-        &report.policy_sha256,
-        "mail_diagnostic_files",
-        1,
-        Some(75),
-        &[],
-    );
+    // 文件族由 CLI 在预检后清理；存储层只接受绑定批准的私有 artifact。
+    let root_identity = "c".repeat(64);
+    let filesystem_token = retention_purge_approval_token(RetentionPurgeApprovalTokenInput {
+        database_name: &database_name,
+        dry_run_run_id: report.run_id,
+        policy_sha256: &report.policy_sha256,
+        dataset_family: "mail_diagnostic_files",
+        filesystem_root_identity_sha256: Some(&root_identity),
+        candidate_rows: 1,
+        candidate_bytes: Some(75),
+        tables: &[],
+    });
+    let token_sha256 =
+        auction_application::core::lower_hex(&Sha256::digest(filesystem_token.as_bytes()));
     let filesystem_approval = RetentionPurgeApproval {
         dataset_family: "mail_diagnostic_files".to_owned(),
+        filesystem_root_identity_sha256: Some(root_identity.clone()),
         approval_token: filesystem_token,
         candidate_rows: 1,
         candidate_bytes: Some(75),
@@ -650,29 +689,61 @@ async fn postgres_retention_purge_accepts_mixed_database_and_filesystem_approval
         &database_name,
         vec![approval(&report, &database_name, "service_heartbeat"), filesystem_approval],
     );
-    purge_request.filesystem = Some(RetentionPurgeFilesystemResult {
-        directory_present: true,
-        examined_files: 4,
-        deleted_files: 1,
-        deleted_bytes: 75,
-        retained_files: 2,
-        write_unknown_held_files: 1,
-        write_unknown_over_hold_window_files: 1,
-        unexpected_entries: 0,
-        limit_reached: false,
-        needs_follow_up: true,
-        failure_code: None,
+    let execution_id = Uuid::new_v4();
+    let completed_at = Timestamp::now();
+    let artifact = serde_json::json!({
+        "format": "auction-retention-filesystem-purge-artifact.v1",
+        "run_id": execution_id,
+        "dry_run_run_id": report.run_id,
+        "database_name": database_name,
+        "dataset_family": "mail_diagnostic_files",
+        "approval_token_sha256": token_sha256,
+        "policy_version": report.policy_version,
+        "policy_sha256": report.policy_sha256,
+        "filesystem_root_identity_sha256": root_identity,
+        "approved_max_files": 1,
+        "completed_at": completed_at,
+        "outcome": "complete",
+        "directory_present": true,
+        "examined_files": 4,
+        "deleted_files": 1,
+        "deleted_bytes": 75,
+        "retained_files": 2,
+        "write_unknown_held_files": 1,
+        "write_unknown_over_hold_window_files": 1,
+        "unexpected_entries": 0,
+        "limit_reached": false,
+        "needs_follow_up": true,
+        "failure_code": null,
     });
+    let artifact_bytes = serde_json::to_vec(&artifact).expect("序列化文件清理 artifact");
+    let artifact_dir = ArtifactDirectory::new();
+    let run_dir = artifact_dir.0.join(format!(".filesystem-purge-{execution_id}"));
+    fs::create_dir(&run_dir).expect("建立单次 purge artifact 目录");
+    fs::set_permissions(&run_dir, fs::Permissions::from_mode(0o700))
+        .expect("设置单次 purge 目录权限");
+    let artifact_path = run_dir.join("artifact.json");
+    fs::write(&artifact_path, &artifact_bytes).expect("写入文件清理 artifact");
+    fs::set_permissions(&artifact_path, fs::Permissions::from_mode(0o600))
+        .expect("设置 artifact 文件权限");
+    let artifact_sha256: [u8; 32] = Sha256::digest(&artifact_bytes).into();
+    purge_request.filesystem_artifact =
+        Some(RetentionPurgeFilesystemArtifactRef { path: artifact_path, sha256: artifact_sha256 });
+    let replay_request = purge_request.clone();
     let purge = postgres.execute_retention_purge(purge_request).await.expect("混合批准执行");
     assert_eq!(purge.outcome, RetentionPurgeOutcome::Complete);
     assert_eq!(purge.deleted_rows, 0);
     assert!(purge.mutation_executed, "文件族已实际删除 1 个文件");
-    assert_eq!(purge.filesystem.as_ref().expect("文件结果").deleted_files, 1);
+    let filesystem = purge.filesystem.as_ref().expect("文件结果");
+    assert_eq!(filesystem.deleted_files, 1);
+    assert_eq!(filesystem.artifact_sha256, auction_application::core::lower_hex(&artifact_sha256));
     assert_eq!(purge.deleted_row_bytes, 0);
     let audit = purge_audits(&store).await;
     assert_eq!(audit.len(), 1);
     assert_eq!(audit[0].1["mutation_executed"], true);
     assert_eq!(audit[0].1["filesystem"]["deleted_files"], 1);
+    let replay = postgres.execute_retention_purge(replay_request).await;
+    assert_matches!(replay, Err(RetentionPurgeError::FilesystemArtifactReplay));
 }
 
 fn heartbeat_family(report: &RetentionDryRunReport) -> &auction_storage::RetentionFamilyDryRun {

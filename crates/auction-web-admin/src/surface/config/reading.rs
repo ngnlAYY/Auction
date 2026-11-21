@@ -151,5 +151,5 @@ fn apply_config_read(
 #[derive(Clone)]
 /// 宿主回归可等待并控制后台 GET 完成，成功读仍走生产投影解码。
 pub(super) struct ConfigReadGate(
-    pub(super) std::rc::Rc<crate::surface::auctions::draft_page_tests::RecordRead<()>>,
+    pub(super) std::rc::Rc<crate::surface::auctions::editor::tests::RecordRead<()>>,
 );

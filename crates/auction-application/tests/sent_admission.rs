@@ -352,6 +352,7 @@ fn equipment_case() -> (SentAdmissionSnapshot, ManualSentEvidence) {
     let payload = payload_of(&mut snapshot);
     payload.template = "settlement_equipment_handoff".to_owned();
     payload.credits = 0;
+    payload.variables.amount = None;
     payload.variables.item_name = Some(EQUIPMENT_NAME.to_owned());
     payload.equipment_secret_refs =
         vec![SentSecretRef { kind: "auction_equipment_key".to_owned(), id: equipment_id }];

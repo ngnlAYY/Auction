@@ -53,12 +53,24 @@ if ! command -v blaze >/dev/null 2>&1; then
   exit 127
 fi
 
-# XDG_RUNTIME_DIR 只在本进程树生效，隔离 daemon，继续复用用户已安装的工具链。
+# XDG_RUNTIME_DIR 必须是当前用户独占的真实目录，避免复用宽权限或符号链接目标。
 # CARGO_TARGET_DIR 是已核对版本支持的隔离方式；该版本拒绝 --target-dir。
 umask 077
-mkdir -p "$repository_root/target/blaze/runtime"
+runtime_parent="$repository_root/target/blaze"
+runtime_directory="$runtime_parent/runtime"
+for directory in "$repository_root/target" "$runtime_parent" "$runtime_directory"; do
+	if [[ -L "$directory" ]]; then
+		printf 'Blaze 运行目录路径不得是符号链接：%s\n' "$directory" >&2
+		exit 1
+	fi
+done
+mkdir -p -- "$runtime_directory"
+[[ -d "$runtime_directory" ]] || { printf 'Blaze 运行路径不是目录：%s\n' "$runtime_directory" >&2; exit 1; }
+runtime_owner=$(stat -c '%u' -- "$runtime_directory")
+[[ "$runtime_owner" == "$EUID" ]] || { printf 'Blaze 运行目录不属于当前用户：%s\n' "$runtime_directory" >&2; exit 1; }
+chmod 700 -- "$runtime_directory"
 unset BLAZE_HOME RA_JIT_HOME BLAZE_REMOTE RA_JIT_REMOTE
-export XDG_RUNTIME_DIR="$repository_root/target/blaze/runtime"
+export XDG_RUNTIME_DIR="$runtime_directory"
 export CARGO_TARGET_DIR="$repository_root/target/blaze/build"
 export BLAZE_CACHE="$repository_root/target/blaze/cache"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"

@@ -64,15 +64,26 @@ impl LotWatchPmOperations for DatabaseStore {
     .run(TransactionPolicy::serializable(), |transaction| {
                 let command = command.clone();
                 Box::pin(async move {
-                    // 对账只锁队列，不再倒取 lot；此命令没有发送资格。
-                    let row = sqlx::query("SELECT q.notification_id,n.lot_id,q.status,q.fencing_version,q.sender_forum_account_id,q.failure_code,q.sending_at,q.completed_at,q.reconcile_requested_at FROM public.lot_watch_pm_deliveries q JOIN public.lot_watch_notifications n ON n.id=q.notification_id WHERE q.notification_id=$1 FOR UPDATE OF q")
-                        .bind(command.notification_id).fetch_optional(&mut **transaction.transaction_mut()?).await.map_err(sql_error)?.ok_or(LotWatchError::NotFound)?;
                     if let Some(stored) = transaction.find_command_inner(command.command_id).await? {
-                        if !stored.matches_request(KIND,command.notification_id,hash) { return Err(LotWatchError::Conflict); }
-                        let result: LotWatchPmSnapshot = serde_json::from_slice(&stored.result_payload).map_err(|_| LotWatchError::Unavailable)?;
-                        if stored.result_code != "ok" || result.notification_id != command.notification_id || Some(result.fencing_version) != command.expected_fencing_version.checked_add(1) || result.status != "manual_reconcile" || result.reconcile_requested_at.is_none() { return Err(LotWatchError::Unavailable); }
+                        if !stored.matches_request(KIND, command.notification_id, hash) {
+                            return Err(LotWatchError::Conflict);
+                        }
+                        let result: LotWatchPmSnapshot = serde_json::from_slice(&stored.result_payload)
+                            .map_err(|_| LotWatchError::Unavailable)?;
+                        if stored.result_code != "ok"
+                            || result.notification_id != command.notification_id
+                            || Some(result.fencing_version)
+                                != command.expected_fencing_version.checked_add(1)
+                            || result.status != "manual_reconcile"
+                            || result.reconcile_requested_at.is_none()
+                        {
+                            return Err(LotWatchError::Unavailable);
+                        }
                         return Ok(result);
                     }
+                    // 新命令需要当前聚合行；已提交命令的重放则由上方的稳定账本结果满足。
+                    let row = sqlx::query("SELECT q.notification_id,n.lot_id,q.status,q.fencing_version,q.sender_forum_account_id,q.failure_code,q.sending_at,q.completed_at,q.reconcile_requested_at FROM public.lot_watch_pm_deliveries q JOIN public.lot_watch_notifications n ON n.id=q.notification_id WHERE q.notification_id=$1 FOR UPDATE OF q")
+                        .bind(command.notification_id).fetch_optional(&mut **transaction.transaction_mut()?).await.map_err(sql_error)?.ok_or(LotWatchError::NotFound)?;
                     let current = snapshot(&row)?;
                     if current.fencing_version != command.expected_fencing_version || current.status != "manual_reconcile" { return Err(LotWatchError::Conflict); }
                     let next = current.fencing_version.checked_add(1).ok_or(LotWatchError::Unavailable)?;

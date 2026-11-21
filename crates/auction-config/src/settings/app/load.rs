@@ -17,7 +17,7 @@ use crate::reader::{read_toml_bytes, read_toml_file};
 use crate::settings::backup::BackupConfig;
 use crate::settings::errors::ConfigError;
 use crate::settings::shutdown::ShutdownFileConfig;
-use crate::settings::validation::{
+use crate::settings::validation::paths::{
     resolve_config_path, resolve_secrets_path, resolve_worker_paths,
 };
 use crate::settings::{

@@ -85,8 +85,12 @@ function fakeBrowser(locksAvailable: boolean) {
     if (name !== LOCK_NAME) {
       throw new Error("会话请求使用了其他锁");
     }
+    const signal = options.signal;
+    if (signal?.aborted) {
+      return Promise.reject(signal.reason ?? new DOMException("锁请求已取消", "AbortError"));
+    }
     const granted = queue.then(async () => {
-      options.signal?.throwIfAborted();
+      signal?.throwIfAborted();
       held = ++nextLock;
       try {
         await callback({ name });
@@ -97,7 +101,19 @@ function fakeBrowser(locksAvailable: boolean) {
     queue = granted.catch(() => {
       // 取消排队项不能让后续锁请求一并失败。
     });
-    return granted;
+    if (signal === undefined) {
+      return granted;
+    }
+    let onAbort = (): void => {};
+    const { promise: aborted, reject } = Promise.withResolvers<never>();
+    onAbort = () => reject(signal.reason ?? new DOMException("锁请求已取消", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) {
+      onAbort();
+    }
+    return Promise.race([granted, aborted]).finally(() =>
+      signal.removeEventListener("abort", onAbort),
+    );
   };
   const restoreWindow = replaceGlobal(
     "window",
@@ -117,7 +133,13 @@ function fakeBrowser(locksAvailable: boolean) {
       },
     }),
   );
-  const restoreNavigator = replaceGlobal("navigator", locksAvailable ? { locks: { request } } : {});
+  let restoreNavigator: () => void;
+  try {
+    restoreNavigator = replaceGlobal("navigator", locksAvailable ? { locks: { request } } : {});
+  } catch (failure) {
+    restoreWindow();
+    throw failure;
+  }
   return {
     storage,
     writes,
@@ -144,73 +166,94 @@ export function fixture(
   options: { waitForLock?: Promise<void>; locksAvailable?: boolean } = {},
 ) {
   const browser = fakeBrowser(options.locksAvailable ?? true);
-  const priorLock = options.waitForLock === undefined ? null : browser.hold(options.waitForLock);
-  invalidate();
-  resetStoreForTest();
-  const signal = new AbortController().signal;
-  const requests: {
-    path: string;
-    method: string;
-    lock: number | null;
-    expectedUser: string | null;
-  }[] = [];
-  const server = {
-    identity: initial,
-    read: (): Response | Promise<Response> => success(server.identity),
-    synchronize: (): Response | Promise<Response> => success(server.identity),
-    mutate: (_path: string, method: string, _init?: RequestInit): Response | Promise<Response> => {
-      throw new Error(`意外写请求 ${method}`);
-    },
-  };
-  const restoreFetch = replaceGlobal(
-    "fetch",
-    Object.assign(
-      async (url: URL | RequestInfo, init?: RequestInit): Promise<Response> => {
-        const path = String(url);
-        const method = init?.method ?? "GET";
-        const expectedUser = new Headers(init?.headers).get(PUBLIC_EXPECTED_USER_ID_HEADER);
-        requests.push({ path, method, expectedUser, lock: browser.currentLock() });
-        if (path.startsWith("/api/v1/auctions/current?")) {
-          return success({ auction: null });
-        }
-        if (path === SESSION_PATH && method === "GET") {
-          return server.read();
-        }
-        if (path === SESSION_PATH && method === "PUT") {
-          if (expectedUser !== (server.identity?.user_id ?? null)) {
-            throw new Error("Cookie 同步未使用锁内身份");
-          }
-          return server.synchronize();
-        }
-        return server.mutate(path, method, init);
+  let restoreFetch: (() => void) | null = null;
+  let disposeShell: (() => void) | null = null;
+  try {
+    const priorLock = options.waitForLock === undefined ? null : browser.hold(options.waitForLock);
+    invalidate();
+    resetStoreForTest();
+    const signal = new AbortController().signal;
+    const requests: {
+      path: string;
+      method: string;
+      lock: number | null;
+      expectedUser: string | null;
+    }[] = [];
+    const server = {
+      identity: initial,
+      read: (): Response | Promise<Response> => success(server.identity),
+      synchronize: (): Response | Promise<Response> => success(server.identity),
+      mutate: (
+        _path: string,
+        method: string,
+        _init?: RequestInit,
+      ): Response | Promise<Response> => {
+        throw new Error(`意外写请求 ${method}`);
       },
-      { preconnect: () => {} },
-    ),
-  );
-  const refreshGeneration = createCell(0);
-  const shell = createRoot((dispose) => {
-    const shellSession = createPublicShellSession(refreshGeneration);
-    const owners: (string | null)[] = [];
-    createEffect(shellSession.commandOwner, (userId) => {
-      owners.push(userId);
+    };
+    restoreFetch = replaceGlobal(
+      "fetch",
+      Object.assign(
+        async (url: URL | RequestInfo, init?: RequestInit): Promise<Response> => {
+          const request = url instanceof Request ? url : null;
+          const requestUrl = request === null ? null : new URL(request.url);
+          const path =
+            requestUrl === null ? String(url) : `${requestUrl.pathname}${requestUrl.search}`;
+          const method = init?.method ?? request?.method ?? "GET";
+          const expectedUser = new Headers(init?.headers ?? request?.headers).get(
+            PUBLIC_EXPECTED_USER_ID_HEADER,
+          );
+          requests.push({ path, method, expectedUser, lock: browser.currentLock() });
+          if (path.startsWith("/api/v1/auctions/current?")) {
+            return success({ auction: null });
+          }
+          if (path === SESSION_PATH && method === "GET") {
+            return server.read();
+          }
+          if (path === SESSION_PATH && method === "PUT") {
+            if (expectedUser !== (server.identity?.user_id ?? null)) {
+              throw new Error("Cookie 同步未使用锁内身份");
+            }
+            return server.synchronize();
+          }
+          return server.mutate(path, method, init);
+        },
+        { preconnect: () => {} },
+      ),
+    );
+    const refreshGeneration = createCell(0);
+    const shell = createRoot((dispose) => {
+      const shellSession = createPublicShellSession(refreshGeneration);
+      const owners: (string | null)[] = [];
+      createEffect(shellSession.commandOwner, (userId) => {
+        owners.push(userId);
+      });
+      flush();
+      return { ...shellSession, owners, dispose };
     });
-    flush();
-    return { ...shellSession, owners, dispose };
-  });
-  return {
-    ...shell,
-    browser,
-    server,
-    requests,
-    refreshGeneration,
-    signal,
-    priorLock,
-    dispose() {
-      shell.dispose();
-      restoreFetch();
-      browser.dispose();
-      invalidate();
-      resetStoreForTest();
-    },
-  };
+    disposeShell = shell.dispose;
+    return {
+      ...shell,
+      browser,
+      server,
+      requests,
+      refreshGeneration,
+      signal,
+      priorLock,
+      dispose() {
+        shell.dispose();
+        restoreFetch?.();
+        browser.dispose();
+        invalidate();
+        resetStoreForTest();
+      },
+    };
+  } catch (failure) {
+    disposeShell?.();
+    restoreFetch?.();
+    browser.dispose();
+    invalidate();
+    resetStoreForTest();
+    throw failure;
+  }
 }

@@ -114,7 +114,7 @@ bash ci/release/verify-deployment-package.sh <*.tar.gz> --tag <v版本>        #
 
 feature、产物目录、工具、体积预算、构建回执与复用身份全部由 `ci/release/build-identity.sh` 的逐 surface 技术栈选择得出，cargo feature 由其中的 `web_cargo_features` 汇总。缺省与显式 `AUCTION_WEB_STACK=dioxus` 得到原来的 `auction-public-api/web-embed,auction-admin-api/web-embed` 与 `auction-server/web-embed`；`solid` 表示 Public 与 Admin 都用 Solid，因此 embedded 为 `auction-public-api/web-solid,auction-admin-api/web-solid`，single 为 `auction-server/web-embed,auction-server/web-solid-public,auction-server/web-solid-admin`。三种合法组合（API-only、Dioxus、Solid）都可用于本地构建与分支上的手动候选构建；正式发行仍只产出 Dioxus。
 
-**正式发行（`v<版本>` tag 触发的 Release）仍然只产出 Rust 版页面。** 发布脚本以 CI 的显式触发上下文判定正式发行：`GITHUB_ACTIONS=true` 且 `GITHUB_REF_TYPE=tag`；此时任一端为 Solid 会在任何工具、临时目录、构建或装包步骤之前以“正式发行只产出 Rust 版页面”拒绝。本地构建与手动触发（`workflow_dispatch`，`GITHUB_REF_TYPE=branch`）的候选构建不受此限制；`--allow-dirty` 不会改变正式发行判定。`build-api`、`build-embedded`、`build-single`、`verify-artifacts`、`verify-single` 与候选性质的 `release-check`/`package` 在 Solid 下可用。候选包仍不可部署。
+**正式发行（`v<版本>` tag 触发的 Release）只产出 Rust 版页面。** 发布脚本只把 `GITHUB_ACTIONS=true`、`GITHUB_EVENT_NAME=push`、`GITHUB_REF_TYPE=tag` 识别为正式发行；任一端为 Solid 时会在任何工具、临时目录、构建或装包步骤之前拒绝。`workflow_dispatch` 即使选择 tag 也属于候选构建，包名带 `-candidate`；tag 上手动选择 Solid 仍由工作流在安装工具前拒绝。`--allow-dirty` 不改变正式发行判定。
 
 ### 门禁
 
@@ -126,7 +126,7 @@ feature、产物目录、工具、体积预算、构建回执与复用身份全�
 - **已发布迁移**：发布 tag 中存在的 `migrations/postgres/*.up.sql` 必须在当前工作树逐字节不变；修改、重命名或删除已发布文件使 `published-migrations` 与发布工作流失败，只允许追加新编号。
 - **装包**：文件白名单与权限固定（程序 755、文档 644、配置示例 640、敏感示例 600），禁止符号链接、日志与真实敏感文件名；归档确定性生成（固定排序、mtime、owner），解包复核后输出 `SHA256SUMS` 与 `DEPENDENCIES.md`。正式发布要求干净工作树（`--allow-dirty` 只用于本地证据，包名带 `-dirty`）。
 
-发布包名为 `auction-rust-<版本>-<提交前 12 位>[-single][-dirty].tar.gz`，内容见[ops/README.md#部署形态](../ops/README.md#部署形态)。仓库 Markdown 链接相对各文档目录；装包时按同一文件安装清单重定位全部已打包文档（含 `config/README.md`），保留标题锚点，并映射敏感模板的 `.toml.example` 文件名。已打包的目标使用包内相对链接；未打包的源码、其他变体模板和文档链接到本次源码提交的 GitHub 页面，需要联网浏览。
+发布包名为 `auction-rust-<版本>-<提交前 12 位>[-single][-dirty][-candidate].tar.gz`；候选后缀只用于非正式构建，正式 GitHub Release 资产不带该后缀。内容见[ops/README.md#部署形态](../ops/README.md#部署形态)。仓库 Markdown 链接相对各文档目录；装包时按同一文件安装清单重定位全部已打包文档（含 `config/README.md`），保留标题锚点，并映射敏感模板的 `.toml.example` 文件名。已打包的目标使用包内相对链接；未打包的源码、其他变体模板和文档链接到本次源码提交的 GitHub 页面，需要联网浏览。
 
 ### 版本 tag 与部署制品
 
@@ -150,7 +150,7 @@ mise run verify-package auction-rust-<版本>-<12位>.tar.gz --tag v<版本>
 
 脚本失败关闭地核对：外层与包内 `SHA256SUMS`、归档成员无路径穿越/链接、`RELEASE-MANIFEST.v1` 与 `DEPENDENCIES.md` 的源码提交一致、工作树为 `clean`、构建提交可从指定发布 tag 到达，并通过 `gh attestation verify` 绑定 `release.yml` 工作流、tag 与提交的来源证明。`--offline` 只跳过来源证明，输出明确警告，不能作为部署依据。
 
-普通 CI 的 1 天候选 Actions artifact 只用于构建核对，没有 Release 资产身份与来源证明，不满足部署条件。`auction-cli deploy` 会复用同一校验；不含该命令的版本由部署人员手工执行该脚本。
+普通 CI 的 1 天候选 Actions artifact 只用于构建核对；部署必须先下载 GitHub Release 资产并运行上方的来源校验脚本。`auction-cli deploy` 离线复核制品文件、清单、payload、profile 与 CLI 身份，但不查询 Release 所属关系或 GitHub attestation，不能替代来源校验；不含该命令的版本由部署人员手工执行脚本。
 
 ### 构建 profile
 
@@ -182,7 +182,7 @@ Solid 路径不联网：`mise run web-prepare` 在 `bun install --frozen-lockfil
 
 `WEB-BUILD-INFO` 记录单端输入指纹、构建环境指纹、构建工具版本与实际编译进 payload 的构建号（`build_id`）；Dioxus 记录 dx/rustc/brotli，Solid 记录 bun/brotli 与 `stack=solid`。复用要求回执全部字段匹配，且现有 payload 再次通过完整门禁。任一端的变更使共享构建号变化时，两端都要重建。缺少该字段的旧回执同样触发重建。构建结束后重新计算单端输入指纹、环境指纹与共享构建号，全部与构建前匹配才原子发布回执。
 
-发布入口 `ci/release/release.sh` 的 `build-api`、`build-embedded`、`build-single`、`verify-artifacts`、`verify-single`、`verify-web-size` 与 `release-check`/`package` 都接受三种组合：API-only、缺省 Dioxus、Solid（Public 与 Admin 都用 Solid）。正式发行路径见[制品变体](#制品变体)：`GITHUB_ACTIONS=true` 且 `GITHUB_REF_TYPE=tag` 的 CI 运行中，任一端为 Solid 会在任何有副作用的步骤之前以“正式发行只产出 Rust 版页面”拒绝；本地与分支上的手动候选不受限制，tag 上的手动触发同样会在安装工具前拒绝。复用原生制品前还会核对两端稳定页面目录的当前 payload 摘要，缺失或与制品回执不一致时先重建页面。`DEPENDENCIES.md` 任一端为 Solid 时附带 `web/bun.lock` 的 SHA-256 与两端技术栈，缺省输出不变。
+发布入口 `ci/release/release.sh` 的 `build-api`、`build-embedded`、`build-single`、`verify-artifacts`、`verify-single`、`verify-web-size` 与 `release-check`/`package` 都接受三种组合：API-only、缺省 Dioxus、Solid（Public 与 Admin 都用 Solid）。正式发行路径见[制品变体](#制品变体)：只有 `GITHUB_ACTIONS=true`、`GITHUB_EVENT_NAME=push`、`GITHUB_REF_TYPE=tag` 同时成立时才按正式发行守卫；任一端为 Solid 会在任何有副作用的步骤之前以“正式发行只产出 Rust 版页面”拒绝。手动候选构建（包括选择 tag 的 `workflow_dispatch`）会在包名附加 `-candidate`；tag 上的 Solid 手动触发仍会在安装工具前拒绝。
 
 `verify_web_payload` 的 Solid 分支要求入口文档只允许带 `src` 的模块脚本恰好一个、入口引用的资源都存在于 payload、入口恰好有一个 `<link rel="icon" href="/favicon.ico">` 且 `assets/` 下恰好有一个 `favicon-*.svg`、`assets/` 下每个文件名都带 Vite 风格的内容指纹（`<name>-<8 位 base64url 字符>.<扩展名>`，压缩副本的 `.br` 不改变此判定），profile 固定为 `solid-release`。入口 HTML 不做通用解析：出现 HTML 注释起始符（`<!` 后接 `--`）直接失败；`template`、`base`、`iframe`、`object`、`embed` 出现即失败；每个 `<script>`/`<link>` 必须整体匹配 Vite 产物固定的四种写法（属性顺序固定、大小写敏感、双引号、同行闭合），入口、样式表、预加载和图标共用这一份引用清单。单引号、无引号、未知 link 类型或无法执行的枚举命令都会失败关闭。入口模块与 `modulepreload` 声明的 JS 计入首屏 JS。
 

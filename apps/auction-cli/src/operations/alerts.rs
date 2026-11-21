@@ -114,13 +114,17 @@ async fn report(
                     config.worker.operations_alert.batch_window_seconds,
                 ),
             };
+            let sources = observations
+                .iter()
+                .map(SourceReport::try_from)
+                .collect::<anyhow::Result<Vec<_>>>()?;
             store.observe_host(command).await?;
             print_json(&Report {
                 outcome: "reported",
                 reason: "",
                 now,
                 batch_window_seconds: config.worker.operations_alert.batch_window_seconds,
-                sources: observations.iter().map(SourceReport::from).collect(),
+                sources,
             })
         },
     )
@@ -180,7 +184,7 @@ fn backup_observation(
     };
     let facts = OperationsAlertHostBackupFacts {
         restore_drill,
-        disk: disk.map(|DiskUsage { total_bytes, available_bytes }| OperationsAlertHostDisk {
+        disk: disk.map(|DiskUsage { total_bytes, available_bytes, .. }| OperationsAlertHostDisk {
             total_bytes,
             available_bytes,
             min_free_bytes: config.backup.min_free_bytes,
@@ -208,7 +212,8 @@ fn wal_observation(
             observation: evaluate_host_wal(&OperationsAlertHostWalFacts::default())?,
         });
     }
-    let now_unix_seconds = u64::try_from(now.timestamp()).unwrap_or(0);
+    let now_unix_seconds =
+        u64::try_from(now.timestamp()).context("当前时间早于 Unix 纪元，无法评估 WAL 年龄")?;
     let facts = match staged_wal_facts(staging_dir, now_unix_seconds) {
         Ok(facts) => facts,
         Err(error) => {
@@ -260,9 +265,11 @@ struct SourceReport {
     signals: Vec<SignalReport>,
 }
 
-impl From<&Observation> for SourceReport {
-    fn from(observation: &Observation) -> Self {
-        Self {
+impl TryFrom<&Observation> for SourceReport {
+    type Error = anyhow::Error;
+
+    fn try_from(observation: &Observation) -> anyhow::Result<Self> {
+        Ok(Self {
             source: observation.source.as_str(),
             available: observation.observation.available,
             warnings: observation.warnings.clone(),
@@ -270,18 +277,18 @@ impl From<&Observation> for SourceReport {
                 .observation
                 .signals
                 .iter()
-                .filter_map(|signal| {
-                    Some(SignalReport {
+                .map(|signal| {
+                    Ok(SignalReport {
                         kind: signal.kind.as_str(),
                         scope: signal.scope.clone(),
                         count: signal.count,
                         age_seconds: signal.age_seconds,
                         fingerprint: lower_hex(&signal.fingerprint),
-                        summary: signal.render_summary().ok()?,
+                        summary: signal.render_summary()?,
                     })
                 })
-                .collect(),
-        }
+                .collect::<anyhow::Result<Vec<_>>>()?,
+        })
     }
 }
 

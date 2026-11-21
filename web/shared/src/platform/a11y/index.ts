@@ -399,8 +399,10 @@ export function useDialogFocusTrap(lockBackgroundScroll: boolean, fallbackFocusI
         }
       }
       const opener = state.opener;
-      if (opener?.isConnected === true) {
+      if (opener !== null && isFocusable(opener)) {
         focusElement(opener);
+      } else if (fallbackFocusId !== undefined) {
+        focusElementById(fallbackFocusId);
       }
     };
   });

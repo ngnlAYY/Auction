@@ -10,6 +10,7 @@ use sqlx::{Postgres, Row};
 use crate::database::accounts::credentials::lock_mail_runtime_generation_row;
 use crate::database::delivery::scheduler::attempts;
 use crate::database::delivery::sent_confirmation::{Error, snapshot};
+use crate::database::mail::mailbox_sweep::recovery::resume_settlement_send;
 use crate::database::operations::audit_health::AuditWriteResult as _;
 use crate::database::{TrackedTransaction as Transaction, settlement::funding};
 
@@ -170,7 +171,7 @@ pub(super) async fn apply(
         )
         .await?;
     }
-    crate::database::mail::mailbox_sweep::resume_settlement_send(
+    resume_settlement_send(
         tx,
         obligation_id,
         command.delivery_id,

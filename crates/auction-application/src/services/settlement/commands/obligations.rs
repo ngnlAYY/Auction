@@ -45,10 +45,12 @@ fn for_each_obligation(
     plan: &SettlementPlan,
     mut consume: impl FnMut(SettlementObligation),
 ) -> Result<(), auction_domain::DomainError> {
-    // 只索引借用的明细；输出仍严格沿用锁内事实顺序，不能依赖 HashMap 迭代顺序。
+    // 保持锁内事实顺序且拒绝重复自然键，避免不同金额的第二条明细被索引时静默隐藏。
     let mut lines_by_id = HashMap::with_capacity(plan.lines.len());
     for line in &plan.lines {
-        lines_by_id.entry(line.lot_id).or_insert(line);
+        if lines_by_id.insert(line.lot_id, line).is_some() {
+            return Err(auction_domain::DomainError::InvalidSettlementFacts("结算明细 lot 重复"));
+        }
     }
 
     for fact in &snapshot.facts {

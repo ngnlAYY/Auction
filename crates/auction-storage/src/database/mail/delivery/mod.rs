@@ -10,23 +10,18 @@ use auction_application::mail::{
 use crate::database::DatabaseStore;
 
 mod activation;
-mod disposition;
+pub(in crate::database) mod disposition;
 mod errors;
 mod outbox;
 mod preparation;
-mod restart;
+pub(in crate::database) mod restart;
 mod validation;
 
 pub(crate) use activation::activate_in_transaction;
 use activation::activate_postgres;
-pub(in crate::database) use disposition::{
-    has_return_intent, mail_handed_over, return_take_blocked_sql, settlement_return_take_conflicts,
-    unexecuted_intent_sql,
-};
 pub(crate) use errors::MailDeliveryTransactionError;
 use outbox::enqueue_within_limit_postgres;
 use outbox::{enqueue_postgres, prepare_postgres};
-pub(in crate::database) use restart::restart_unstarted_take_in_transaction;
 use validation::validate_command;
 
 impl MailDeliveryEnqueuer for DatabaseStore {

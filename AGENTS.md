@@ -124,7 +124,7 @@
 - `web/` 是第二套实现（TypeScript + SolidJS，同样是纯客户端渲染），规则以[web/README.md](web/README.md)为准，运行期依赖限于该文件列出的几项。两套实现共用样式表（`crates/auction-web-shared/style`、各 surface 的 `assets/`）与译文（`i18n/*.ftl`）：改这些共用文件会同时影响两套实现，改完两边都要核对。Solid 版与 Rust 版有意不同的地方逐项登记在 web/README.md 的差异表里，没有登记的行为应保持一致。
 - 技术栈开关只有 `ci/release/build-identity.sh` 一个解析点：`AUCTION_WEB_STACK` 取 `dioxus`（缺省）或 `solid`，按已支持 Solid 的 surface 清单换算成每端的实际技术栈与 `web-embed`/`web-solid` feature，构建、运行、体积预算与发布回执都复用它。Public 与 Admin 都支持 Solid；非法取值在加载身份脚本时失败。
 - `mise run web-build` 用 `dx bundle` 以 `wasm-release` profile 构建默认的 Dioxus 产物，复制到稳定目录后由后端 `web-embed` 内嵌；Solid 产物由 `AUCTION_WEB_STACK=solid` 构建，由 `web-solid` 内嵌。未构建时后端仍可编译，页面路由返回 503。只有显式内嵌 feature（`web-embed` 或 `web-solid`）才内嵌资源，两者都未启用时使用固定空资源目录；Public 二进制不得包含 Admin 资源，反之亦然。
-- 正式发行（`v<版本>` tag）只产出 Rust 版页面：CI 的 tag 运行不传 `web_stack`，发布脚本在 `GITHUB_ACTIONS=true` 且 `GITHUB_REF_TYPE=tag` 时拒绝任一端为 Solid；在 tag 上手动触发候选构建并选择 `solid` 也会在安装工具前失败，候选构建请在分支上触发。分支上的手动候选构建可选择 `solid`，候选包不可部署。
+- 正式发行（`v<版本>` tag）只产出 Rust 版页面：CI 的 tag 运行不传 `web_stack`，发布脚本仅在 `GITHUB_ACTIONS=true`、`GITHUB_EVENT_NAME=push` 且 `GITHUB_REF_TYPE=tag` 时识别为正式发行并拒绝任一端为 Solid；在 tag 上手动触发候选构建并选择 `solid` 也会在安装工具前失败，候选构建请在分支上触发。分支上的手动候选构建可选择 `solid`，候选包不可部署。
 - 浏览器只消费 `auction-contracts` DTO；改变状态的动作携带 `command_id`，结果未知时只允许原样重试。不在浏览器重建业务状态机。
 - 浏览器支持口径（两套实现与共用样式都适用）：各主流浏览器多年来都支持的特性直接用；较新、主流浏览器已全部支持的特性（如 Popover API、`:has()`）先做特性检测（`@supports` 或接口存在性判断），不支持时退回现有的手写实现或保持原有外观；不引入 polyfill，不从第三方源加载脚本。时间换算沿用仓库现有实现，不使用 Temporal。
 - 所有界面文案走各自的 `i18n/*.ftl`：五种语言（en、zh-CN、zh-TW、ja、ko）键集合一致，键名用连字符、不含点号（`i18n` 门禁，同时检查两套实现的引用）。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang`、`hv.theme` 是固定契约。

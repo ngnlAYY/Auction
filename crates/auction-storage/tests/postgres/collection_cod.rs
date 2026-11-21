@@ -1,5 +1,5 @@
-//! COD 与载体付款在“等待领取”拆分后的完整路径，全部以运行账号执行：
-//! - 付款投递只经投递端口按 Worker 的真实顺序推进（领取 → 发送围栏带冻结 Send 身份 →
+//! COD 与载体付款在“等待领取”拆分后的完整路径及历史迁移回归，以运行账号写入：
+//! - 当前行为场景的付款投递经投递端口按 Worker 的真实顺序推进（领取 → 发送围栏带冻结 Send 身份 →
 //!   `succeed` 绑定唯一 Sent MID），数据库据此判定冻结发送证明成立。载荷、canonical 主题与成功
 //!   metadata 与生产生成方及传输层逐字段一致；存在受保护资金账户时，载体付款寄出的 1 Credit
 //!   与 Worker 一样只经现金门（同 session 证据）预留；
@@ -36,13 +36,13 @@ use auction_application::settlement::{
     MailRuntimeBinding, SettlementFulfillmentClaim, SettlementFulfillmentProof,
     SettlementFulfillmentReconcileStatus, SettlementFulfillmentStore, SettlementInternalCommand,
     SettlementInternalCommitOutcome, SettlementInternalEvidenceSnapshot,
-    SettlementInternalFulfillmentStore, VerifiedMailSentCollectionObservation,
-    canonical_settlement_fulfillment_subject,
+    SettlementInternalFulfillmentStore, VerifiedMailEquipmentPresence,
+    VerifiedMailSentCollectionObservation, canonical_settlement_fulfillment_subject,
 };
 use auction_domain::{
     RecoveryPolicy, SettlementId, SettlementMode, SettlementObligationKind, SettlementWorld,
 };
-use auction_storage::DatabaseStore;
+use auction_storage::{DatabaseStore, postgres_migrate_to};
 use auction_time::{Duration, Timestamp};
 use serde_json::json;
 use sqlx::PgPool;
@@ -62,13 +62,13 @@ const SETTLEMENT_POLICY_VERSION: i32 = 2;
 const SETTLEMENT_MODE: SettlementMode = SettlementMode::HoldCurveV2;
 /// 同一快照冻结的恢复策略版本（`RecoveryPolicy::default()`）；恢复记录按生产口径记这个版本。
 const RECOVERY_POLICY_VERSION: i32 = 1;
-/// 冻结结算明细（v2 曲线首锚点：hold 0 对应 +8% 调整）：成交价 1000，税费
-/// floor(1000 × 8%) = 80，买方付 1080，卖方得成交价；付款、退款与货款义务金额都取自这条明细。
+/// 冻结 v2 拆分：300,000 ppm 锚点以 4C 补偿覆盖折扣，买方付 996C，卖方仍收 1000C。
 const END_PRICE: i64 = 1_000;
-const HOLD_PPM: i64 = 0;
-const ADJUSTMENT_PPM: i64 = 80_000;
-const TAX_CREDITS: i64 = 80;
-const BUYER_CREDITS: i64 = END_PRICE + TAX_CREDITS;
+const HOLD_PPM: i64 = 300_000;
+const ADJUSTMENT_PPM: i64 = -4_000;
+const TAX_CREDITS: i64 = 0;
+const COMPENSATION_CREDITS: i64 = 4;
+const BUYER_CREDITS: i64 = END_PRICE - COMPENSATION_CREDITS;
 const SELLER_CREDITS: i64 = END_PRICE;
 const THRESHOLD: StdDuration = StdDuration::from_secs(259_200);
 /// 合成邮件账号：资金账户 UID、凭据的预期玩家名与初始运行代际。
@@ -137,25 +137,43 @@ struct CodCase {
 /// `created_at` + 冻结恢复策略（`RECOVERY_POLICY_VERSION`）的付款期限，与资金化准入重建期望载荷
 /// 的口径一致。
 async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: Timestamp) -> CodCase {
+    seed_case_with_delivery(pool, payment, payment_deadline, true, WINNER).await
+}
+
+async fn seed_internal_case(
+    pool: &PgPool,
+    payment: Payment,
+    payment_deadline: Timestamp,
+) -> CodCase {
+    seed_case_with_delivery(pool, payment, payment_deadline, false, BOT_NAME).await
+}
+
+async fn seed_case_with_delivery(
+    pool: &PgPool,
+    payment: Payment,
+    payment_deadline: Timestamp,
+    create_delivery: bool,
+    recipient_name: &str,
+) -> CodCase {
     let world = payment.world();
     let id = |suffix: &str| stable_id(SEED, &format!("{world}-{suffix}"));
     let winner = id("winner");
-    seed_user(pool, winner, WINNER).await;
+    seed_user(pool, winner, recipient_name).await;
     let ended = Timestamp::now() - Duration::days(1);
     let auction = id("auction");
     let command = id("command");
     let policy = policy_snapshot(ended, END_PRICE, 100);
-    // 下面的义务版本、明细标签与载荷变量都按这份快照冻结的策略写；快照的版本、模式或 hold 0
-    // 锚点变了就先在这里失败，夹具不会悄悄退回历史 v1 兼容读路径。
+    // 下面的义务版本、明细标签与载荷变量都按冻结快照写；v2 的 300,000 ppm 锚点以 4C 补偿覆盖折扣。
+    // 版本、模式或对应锚点漂移时失败关闭，不退回历史 v1 兼容读路径。
     let frozen = &policy["settlement"];
     assert_eq!(
-        (&frozen["version"], &frozen["mode"], &frozen["anchors"][0]),
+        (&frozen["version"], &frozen["mode"], &frozen["anchors"][6]),
         (
             &json!(SETTLEMENT_POLICY_VERSION),
             &json!(SETTLEMENT_MODE.as_str()),
             &json!({"hold_ppm": HOLD_PPM, "adjustment_ppm": ADJUSTMENT_PPM}),
         ),
-        "场次快照冻结当前默认结算策略 v2，hold 0 落在 +8% 首锚点"
+        "场次快照冻结当前默认结算策略 v2，300,000 ppm 锚点为 -4,000 ppm"
     );
     assert_eq!(
         policy["recovery"]["version"],
@@ -222,13 +240,15 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: Timestamp)
         "INSERT INTO public.lot_settlements
             (lot_id, end_price, listed_price, buyer_amount, seller_amount, tax_amount,
              compensation_amount, hold_ppm, adjustment_ppm, adjustment_metadata)
-         VALUES ($1, $2, $2, $3, $4, $5, 0, $6, $7, $8)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
     )
     .bind(lot)
     .bind(END_PRICE)
     .bind(BUYER_CREDITS)
+    .bind(BUYER_CREDITS)
     .bind(SELLER_CREDITS)
     .bind(TAX_CREDITS)
+    .bind(COMPENSATION_CREDITS)
     .bind(HOLD_PPM)
     .bind(ADJUSTMENT_PPM)
     .bind(json!({ "policy": SETTLEMENT_MODE.as_str() }))
@@ -332,8 +352,8 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: Timestamp)
                 "adjustment_ppm": ADJUSTMENT_PPM.to_string(),
                 "winning_bid": END_PRICE.to_string(),
                 "pricing_mode": "hold_curve_v2",
-                "adjusted_price": BUYER_CREDITS.to_string(),
-                "pool_credit": "0"
+                "adjusted_price": END_PRICE.to_string(),
+                "pool_credit": COMPENSATION_CREDITS.to_string()
             },
             "credits": 0,
             "cod": cod,
@@ -355,22 +375,24 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: Timestamp)
             "equipment_secret_refs": []
         }),
     };
-    sqlx::query(
-        "INSERT INTO public.deliveries
-            (id, command_id, request_digest, origin_kind, origin_id, recipient, payload, status,
-             activation_command_id, activation_request_digest, activated_at)
-         VALUES ($1, $2, decode(repeat('a1', 32), 'hex'), 'settlement', $3, $4, $5, 'pending',
-                 $6, decode(repeat('a2', 32), 'hex'), now())",
-    )
-    .bind(delivery)
-    .bind(id("prepare"))
-    .bind(payment_id.to_string())
-    .bind(WINNER)
-    .bind(payload)
-    .bind(id("activate"))
-    .execute(pool)
-    .await
-    .expect("写入付款投递");
+    if create_delivery {
+        sqlx::query(
+            "INSERT INTO public.deliveries
+                (id, command_id, request_digest, origin_kind, origin_id, recipient, payload, status,
+                 activation_command_id, activation_request_digest, activated_at)
+             VALUES ($1, $2, decode(repeat('a1', 32), 'hex'), 'settlement', $3, $4, $5, 'pending',
+                     $6, decode(repeat('a2', 32), 'hex'), now())",
+        )
+        .bind(delivery)
+        .bind(id("prepare"))
+        .bind(payment_id.to_string())
+        .bind(recipient_name)
+        .bind(payload)
+        .bind(id("activate"))
+        .execute(pool)
+        .await
+        .expect("写入付款投递");
+    }
 
     let fulfillment = |obligation_id: Uuid, state: &str, dispatch: &str, delivery: Option<Uuid>| {
         let state = state.to_owned();
@@ -399,7 +421,13 @@ async fn seed_case(pool: &PgPool, payment: Payment, payment_deadline: Timestamp)
             .expect("写入测试履约");
         }
     };
-    fulfillment(payment_id, "enqueued", "main", Some(delivery)).await;
+    fulfillment(
+        payment_id,
+        if create_delivery { "enqueued" } else { "pending" },
+        "main",
+        create_delivery.then_some(delivery),
+    )
+    .await;
     if let Some(handoff) = handoff {
         fulfillment(handoff, "pending", "isekai", None).await;
     }
@@ -960,6 +988,147 @@ async fn postgres_collection_cod_with_frozen_send_proof_waits_for_payment() {
     }
 }
 
+/// 记录型付款走真实内部履约与资金 owner；来源、补偿与 seller credit 都由生产事务生成。
+#[tokio::test]
+async fn postgres_record_only_internal_purchase_uses_frozen_lot_sources() {
+    let database = support::TestDatabase::create().await.expect("克隆模板库");
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let case =
+        seed_internal_case(pool, Payment::EquipmentCod, Timestamp::now() + Duration::days(1)).await;
+    let funding = seed_funding(pool).await;
+    let claimed_at =
+        Timestamp::now().duration_trunc(Duration::microseconds(1)).expect("领取时间精确到微秒");
+    let mut claims = SettlementFulfillmentStore::claim_due(
+        &store,
+        "internal-purchase-test-worker".to_owned(),
+        claimed_at,
+        claimed_at + Duration::minutes(5),
+        10,
+    )
+    .await
+    .expect("领取内部付款义务");
+    let claim = claims
+        .drain(..)
+        .find(|claim| claim.obligation_id.as_uuid() == case.payment)
+        .expect("领取目标 COD 义务");
+    let recipient_version: i64 =
+        sqlx::query_scalar("SELECT state_version FROM public.users WHERE id = $1")
+            .bind(claim.recipient_user_id.expect("付款收件人"))
+            .fetch_one(pool)
+            .await
+            .expect("读取收件人版本");
+    let recipient_version = u64::try_from(recipient_version).expect("收件人版本必须为非负数");
+    let command = SettlementInternalCommand::new(claim, Some(recipient_version), false)
+        .expect("构造稳定内部付款命令");
+    let observed = Timestamp::now()
+        .duration_trunc(Duration::microseconds(1))
+        .expect("领取后的观测时间精确到微秒");
+    let mut identity = MailAccountEvidenceBinding {
+        credential_id: funding.credential,
+        credential_version: 1,
+        runtime: MailRuntimeBinding { generation: MAIL_GENERATION },
+        authenticated_uid: FUNDING_UID.to_owned(),
+        player_name: command.claim.recipient.clone(),
+        world: SettlementWorld::Main,
+        observed_at: observed,
+        protocol_version: INTERNAL_EVIDENCE_PROTOCOL,
+        digest: [0; 32],
+    };
+    identity.digest = identity.compute_digest();
+    let mut equipment = VerifiedMailEquipmentPresence {
+        binding: identity.clone(),
+        equipment_id: command.claim.equipment_id,
+        external_equipment_id: command.claim.external_equipment_id.clone(),
+        category: "weapon_1handed".to_owned(),
+        observed_at: observed,
+        digest: [0; 32],
+    };
+    equipment.digest = equipment.compute_digest();
+    let mut evidence = SettlementInternalEvidenceSnapshot {
+        operation_id: command.command_id,
+        purpose: InternalEvidencePurpose::SettlementClaim {
+            obligation_id: command.claim.obligation_id.as_uuid(),
+            claim_token: command.claim.claim_token,
+            claim_fencing: command.claim.claim_fencing,
+            state_version: command.claim.state_version,
+        },
+        identity,
+        equipment: Some(equipment),
+        main_cash: None,
+        sent_collection: None,
+        observed_from: observed,
+        expires_at: observed + Duration::seconds(60),
+        digest: [0; 32],
+    };
+    evidence.digest = evidence.compute_digest();
+
+    match SettlementInternalFulfillmentStore::satisfy_internal(&store, &command, &evidence).await {
+        Ok(SettlementInternalCommitOutcome::Committed) => {}
+        Ok(SettlementInternalCommitOutcome::FundingDeferred) => {
+            panic!("有效 record_only 资金证据不得延期")
+        }
+        Ok(SettlementInternalCommitOutcome::RolledBack(error)) | Err(error) => {
+            panic!("内部付款资金化失败：{error:?}")
+        }
+    }
+
+    let (payment_amount, compensation_amount): (i64, i64) = sqlx::query_as(
+        "SELECT buyer_amount, compensation_amount FROM public.lot_settlements WHERE lot_id = $1",
+    )
+    .bind(case.lot)
+    .fetch_one(pool)
+    .await
+    .expect("读取冻结资金拆分");
+    let (purchase_source, compensation_source): (i64, i64) = sqlx::query_as(
+        "SELECT max(source.amount) FILTER (WHERE source.kind = 'record_internal_purchase'),
+                max(source.amount) FILTER (WHERE source.kind = 'record_compensation')
+         FROM public.settlement_funding_sources AS source
+         WHERE source.uid = $1 AND source.source_key = $2",
+    )
+    .bind(FUNDING_UID)
+    .bind(case.payment)
+    .fetch_one(pool)
+    .await
+    .expect("读取内部购买来源");
+    assert_eq!((purchase_source, compensation_source), (payment_amount, compensation_amount));
+    let (seller_credit, seller_obligation, seller_amount): (Uuid, Uuid, i64) = sqlx::query_as(
+        "SELECT allocation.id, allocation.obligation_id, allocation.amount
+         FROM public.settlement_funding_allocations AS allocation
+         WHERE allocation.uid = $1 AND allocation.lot_id = $2 AND allocation.purpose = 'seller'",
+    )
+    .bind(FUNDING_UID)
+    .bind(case.lot)
+    .fetch_one(pool)
+    .await
+    .expect("读取 seller payout credit allocation");
+    assert_eq!((seller_obligation, seller_amount), (case.payout, SELLER_CREDITS));
+    let issues_target_seller: Option<bool> = sqlx::query_scalar(
+        "SELECT bool_and(entry.credit_id = $2)
+         FROM public.settlement_funding_entries AS entry
+         JOIN public.settlement_funding_sources AS source ON source.id = entry.source_id
+         WHERE entry.command_id = $1 AND entry.kind = 'issue'
+           AND source.kind IN ('record_internal_purchase', 'record_compensation')",
+    )
+    .bind(command.command_id)
+    .bind(seller_credit)
+    .fetch_one(pool)
+    .await
+    .expect("检查内部购买发行目标");
+    assert_eq!(issues_target_seller, Some(true), "记录型来源只发行至 seller allocation");
+    let action: String = sqlx::query_scalar(
+        "SELECT action FROM public.settlement_funding_commands
+         WHERE command_id = $1 AND target_id = $2",
+    )
+    .bind(command.command_id)
+    .bind(case.lot)
+    .fetch_one(pool)
+    .await
+    .expect("读取内部购买资金命令");
+    assert_eq!(action, "internal_purchase");
+    pool.close().await;
+}
+
 /// 存在受保护资金账户时，旧满足入口拒绝 COD 与载体付款：领取后必须经资金化校验，义务保持
 /// 等待付款，不被旧路径直接满足。
 #[tokio::test]
@@ -1001,8 +1170,8 @@ async fn postgres_collection_cod_collected_requires_funding_when_protected() {
 
 /// 资金化正向路径（不变量 1、2、6）：两类付款都直接调用真实 `satisfy_collected`。先以错 MID 与
 /// 失效运行代际各试一次，整事务回滚、不留任何写入；再以当前代际的同 session 实收证明提交：
-/// 付款满足、直接依赖解锁，买方金额登记为 collected_payment 来源并按冻结明细分配给货款与税费；
-/// 同一证明重放返回已提交结果，不重复入账。
+/// 付款满足并解除直接依赖，买方实收登记为 collected_payment 来源；冻结补偿份额经 receipt 绑定的
+/// record_compensation 来源发行到 seller 分配。同一证明重放不重复入账。
 #[tokio::test]
 async fn postgres_collection_cod_collected_payment_is_funded_through_satisfy_collected() {
     for payment in [Payment::EquipmentCod, Payment::CarrierCod] {
@@ -1126,6 +1295,42 @@ async fn postgres_collection_cod_collected_payment_is_funded_through_satisfy_col
         .await
         .expect("读取 lot 资金绑定");
         assert_eq!(lot_binding, (case.payment, "collected".to_owned(), "seller".to_owned()));
+        let compensation_binding: (i64, String, Uuid, String, Uuid, String, String, Uuid, i64) =
+            sqlx::query_as(
+                "SELECT compensation.amount, compensation.uid, compensation.source_key,
+                        funded.source_kind, receipt.payment_obligation_id, receipt.uid,
+                        buyer.kind, buyer.source_key, buyer.amount
+                 FROM public.settlement_funding_sources AS compensation
+                 JOIN public.settlement_funding_lots AS funded
+                   ON funded.lot_id = $1 AND funded.uid = compensation.uid
+                 JOIN public.settlement_funding_receipts AS receipt
+                   ON receipt.uid = compensation.uid
+                  AND receipt.payment_obligation_id = compensation.source_key
+                 JOIN public.settlement_funding_sources AS buyer ON buyer.id = receipt.source_id
+                 WHERE compensation.uid = $2 AND compensation.kind = 'record_compensation'
+                   AND compensation.source_key = $3",
+            )
+            .bind(case.lot)
+            .bind(FUNDING_UID)
+            .bind(case.payment)
+            .fetch_one(pool)
+            .await
+            .expect("读取绑定实收收据的记录补偿来源");
+        assert_eq!(
+            compensation_binding,
+            (
+                COMPENSATION_CREDITS,
+                FUNDING_UID.to_owned(),
+                case.payment,
+                "collected".to_owned(),
+                case.payment,
+                FUNDING_UID.to_owned(),
+                "collected_payment".to_owned(),
+                case.payment,
+                BUYER_CREDITS,
+            ),
+            "记录补偿只绑定同 UID、lot、付款义务与实收来源"
+        );
         let allocations: Vec<(String, Option<Uuid>, i64, String)> = sqlx::query_as(
             "SELECT purpose, obligation_id, amount, state FROM public.settlement_funding_allocations
              WHERE lot_id = $1 AND purpose IN ('seller', 'tax') ORDER BY purpose",
@@ -1144,7 +1349,7 @@ async fn postgres_collection_cod_collected_payment_is_funded_through_satisfy_col
         );
         let entries: Vec<(String, i64)> = sqlx::query_as(
             "SELECT kind, amount FROM public.settlement_funding_entries
-             WHERE command_id = $1 ORDER BY kind",
+             WHERE command_id = $1 ORDER BY kind, amount",
         )
         .bind(command.command_id)
         .fetch_all(pool)
@@ -1152,8 +1357,8 @@ async fn postgres_collection_cod_collected_payment_is_funded_through_satisfy_col
         .expect("读取本命令分录");
         assert_eq!(
             entries,
-            vec![("issue".to_owned(), BUYER_CREDITS), ("transfer".to_owned(), TAX_CREDITS)],
-            "{payment:?} 入账一次，再把税费转出"
+            vec![("issue".to_owned(), COMPENSATION_CREDITS), ("issue".to_owned(), BUYER_CREDITS),],
+            "{payment:?} 真实实收与补偿来源都只按冻结金额发行"
         );
         assert_eq!(after.account_version, before.account_version + 1);
         assert_eq!(after.funded_audits, 1);
@@ -1235,4 +1440,200 @@ async fn postgres_collection_cod_without_frozen_send_proof_is_not_waiting_paymen
     assert_eq!(fulfillment.pending, 1, "按既有口径仍是待处理");
 
     pool.close().await;
+}
+
+/// 迁移 120 验证历史 carrier issue 时必须使用只追加派发历史，而非可变的当前履约指针。
+#[tokio::test]
+async fn postgres_migration_120_accepts_historical_superseded_record_carrier_issue() {
+    let database = support::TestDatabase::create_empty().await.expect("创建未迁移测试库");
+    let maintenance = database.maintenance_store().await.expect("连接测试库 owner");
+    postgres_migrate_to(maintenance.postgres_pool(), 119).await.expect("迁移到 119");
+
+    let store = database.store().await.expect("以运行账号连接");
+    let pool = store.postgres_pool();
+    let case = seed_case(pool, Payment::CarrierCod, Timestamp::now() + Duration::days(3)).await;
+    sqlx::query(
+        "INSERT INTO public.settlement_fulfillment_dispatches
+            (obligation_id, dispatch_no, delivery_id, authorized_by, recorded_at)
+         VALUES ($1, 1, $2, NULL, now())",
+    )
+    .bind(case.payment)
+    .bind(case.delivery)
+    .execute(pool)
+    .await
+    .expect("登记首寄历史");
+    // 迁移只读取历史来源、发行分录及派发身份；直接以 119 的列写入，不调用依赖 131 的资金入口。
+    sqlx::query(
+        "INSERT INTO public.settlement_funding_accounts
+            (uid, accounting_mode, status, state_version)
+         VALUES ($1, 'record_only', 'ready', 1)",
+    )
+    .bind(FUNDING_UID)
+    .execute(pool)
+    .await
+    .expect("写入历史只记账账户");
+    let allocation = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO public.settlement_funding_allocations
+            (id, uid, purpose, lot_id, obligation_id, amount)
+         VALUES ($1, $2, 'carrier', $3, $4, 1)",
+    )
+    .bind(allocation)
+    .bind(FUNDING_UID)
+    .bind(case.lot)
+    .bind(case.payment)
+    .execute(pool)
+    .await
+    .expect("写入历史载体分配");
+    sqlx::query(
+        "WITH source AS (
+            INSERT INTO public.settlement_funding_sources
+                (id, uid, kind, source_key, amount, proof_digest)
+            VALUES ($1, $2, 'record_carrier', $3, 1, decode(repeat('31', 32), 'hex'))
+            RETURNING id, uid, amount, proof_digest
+         )
+         INSERT INTO public.settlement_funding_entries
+            (id, command_id, uid, credit_id, source_id, amount, kind, proof_digest)
+         SELECT $4, $3, source.uid, $5, source.id, source.amount, 'issue', source.proof_digest
+         FROM source",
+    )
+    .bind(Uuid::new_v4())
+    .bind(FUNDING_UID)
+    .bind(case.delivery)
+    .bind(Uuid::new_v4())
+    .bind(allocation)
+    .execute(pool)
+    .await
+    .expect("写入首寄载体来源及发行分录");
+
+    let existing_issue: i64 = sqlx::query_scalar(
+        "SELECT count(*)::bigint
+         FROM public.settlement_funding_sources AS source
+         JOIN public.settlement_funding_entries AS entry ON entry.source_id = source.id
+         WHERE source.kind = 'record_carrier' AND source.source_key = $1 AND entry.kind = 'issue'",
+    )
+    .bind(case.delivery)
+    .fetch_one(pool)
+    .await
+    .expect("确认历史 carrier issue");
+    assert_eq!(existing_issue, 1, "首寄必须已有一笔 1-credit carrier issue");
+
+    let now = Timestamp::now();
+    let return_mail_id = Uuid::new_v4();
+    let external_mail_id = Uuid::new_v4().as_u128().to_string();
+    let next_delivery = Uuid::new_v4();
+    let next_prepare = Uuid::new_v4();
+    let next_activate = Uuid::new_v4();
+    let mut transaction = pool.begin().await.expect("开启补寄历史事务");
+    sqlx::query(
+        "INSERT INTO public.inbound_mail
+            (id, mailbox_key, external_mail_id, world_id, mail_kind, content_digest,
+             received_at, status, decision_code, processed_at, created_at)
+         VALUES ($1, 'main:bot', $2, 'main', 'delivery', decode(repeat('55', 32), 'hex'),
+                 $3, 'accepted', 'settlement_recovery_returned', $3, $3)",
+    )
+    .bind(return_mail_id)
+    .bind(&external_mail_id)
+    .bind(now)
+    .execute(&mut *transaction)
+    .await
+    .expect("写入补寄授权退件");
+    sqlx::query(
+        "INSERT INTO public.settlement_return_evidence
+            (return_mail_id, match_state, reason_code, obligation_id, delivery_id,
+             previous_execution_state, recorded_at)
+         VALUES ($1, 'manual_reconcile', 'source_unproven', $2, $3, 'enqueued', $4)",
+    )
+    .bind(return_mail_id)
+    .bind(case.payment)
+    .bind(case.delivery)
+    .bind(now)
+    .execute(&mut *transaction)
+    .await
+    .expect("写入补寄退件证据");
+    sqlx::query(
+        "INSERT INTO public.settlement_return_cases
+            (return_mail_id, world_id, obligation_id, delivery_id, dispatch_no, status,
+             reason_code, plan, resend_limit, resend_dispatch_no, created_at, updated_at)
+         VALUES ($1, 'main', $2, $3, 1, 'resend_pending', 'source_unproven', 'resend',
+                 3, 2, $4, $4)",
+    )
+    .bind(return_mail_id)
+    .bind(case.payment)
+    .bind(case.delivery)
+    .bind(now)
+    .execute(&mut *transaction)
+    .await
+    .expect("写入补寄授权案件");
+    let cloned = sqlx::query(
+        "INSERT INTO public.deliveries
+            (id, command_id, request_digest, origin_kind, origin_id, recipient, payload,
+             status, activation_command_id, activation_request_digest, activated_at,
+             created_at, updated_at)
+         SELECT $1, $2, decode(repeat('b1', 32), 'hex'), origin_kind, origin_id, recipient,
+                payload, 'pending', $3, decode(repeat('b2', 32), 'hex'), $4, $4, $4
+         FROM public.deliveries WHERE id = $5",
+    )
+    .bind(next_delivery)
+    .bind(next_prepare)
+    .bind(next_activate)
+    .bind(now)
+    .bind(case.delivery)
+    .execute(&mut *transaction)
+    .await
+    .expect("写入补寄投递");
+    assert_eq!(cloned.rows_affected(), 1, "必须从首寄载荷复制补寄投递");
+    sqlx::query(
+        "INSERT INTO public.settlement_fulfillment_dispatches
+            (obligation_id, dispatch_no, delivery_id, authorized_by, recorded_at)
+         VALUES ($1, 2, $2, $3, $4)",
+    )
+    .bind(case.payment)
+    .bind(next_delivery)
+    .bind(return_mail_id)
+    .bind(now)
+    .execute(&mut *transaction)
+    .await
+    .expect("登记补寄派发历史");
+    sqlx::query(
+        "UPDATE public.settlement_obligation_fulfillments
+         SET dispatch_no = 2, delivery_id = $2, prepare_command_id = $3,
+             prepare_request_digest = decode(repeat('b1', 32), 'hex'),
+             activate_command_id = $4,
+             activate_request_digest = decode(repeat('b2', 32), 'hex'),
+             state_version = state_version + 1, updated_at = $5
+         WHERE obligation_id = $1",
+    )
+    .bind(case.payment)
+    .bind(next_delivery)
+    .bind(next_prepare)
+    .bind(next_activate)
+    .bind(now)
+    .execute(&mut *transaction)
+    .await
+    .expect("把当前履约切换到补寄派发");
+    transaction.commit().await.expect("提交补寄历史");
+
+    let current_delivery: Uuid = sqlx::query_scalar(
+        "SELECT delivery_id FROM public.settlement_obligation_fulfillments
+         WHERE obligation_id = $1",
+    )
+    .bind(case.payment)
+    .fetch_one(pool)
+    .await
+    .expect("读取当前派发");
+    assert_ne!(current_delivery, case.delivery, "测试必须让首寄成为已被换代的历史派发");
+
+    store.postgres_pool().close().await;
+    postgres_migrate_to(maintenance.postgres_pool(), 120)
+        .await
+        .expect("迁移 120 必须接受只由派发历史证明的既有 carrier issue");
+    let applied: i64 = sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM public._sqlx_migrations WHERE version = 120",
+    )
+    .fetch_one(maintenance.postgres_pool())
+    .await
+    .expect("确认迁移 120 已应用");
+    assert_eq!(applied, 1, "升级路径必须执行迁移 120");
+    maintenance.postgres_pool().close().await;
 }

@@ -141,6 +141,9 @@ impl OperationsAlertConsoleEntry {
             || self.age_seconds < 0
             || self.last_seen_at < self.first_seen_at
             || self.acknowledged_by.as_ref().is_some_and(|actor| !valid_alert_actor(actor))
+            || self.acknowledged_at.is_some() != self.acknowledged_by.is_some()
+            || self.acknowledged_at.is_some_and(|value| value.timestamp_nanos_opt().is_none())
+            || (!self.active && self.silenced_until.is_some())
             || (self.active == self.resolved_at.is_some())
             || (self.active && self.next_notify_at.is_none())
             || (!self.active && self.next_notify_at.is_some())
@@ -265,7 +268,13 @@ impl OperationsAlertAcknowledgeCommand {
             || self.incident_generation < 0
             || !valid_alert_actor(&self.actor_id)
             || !valid_alert_reason(&self.reason)
-            || self.request_hash.as_bytes() == [0; 32]
+            || self.request_hash
+                != Self::request_hash(
+                    &self.fingerprint,
+                    self.incident_generation,
+                    &self.actor_id,
+                    &self.reason,
+                )
         {
             return Err(OperationsAlertError::Invalid);
         }
@@ -341,7 +350,14 @@ impl OperationsAlertSilenceCommand {
                 .contains(&self.silence_seconds)
             || !valid_alert_actor(&self.actor_id)
             || !valid_alert_reason(&self.reason)
-            || self.request_hash.as_bytes() == [0; 32]
+            || self.request_hash
+                != Self::request_hash(
+                    &self.fingerprint,
+                    self.incident_generation,
+                    self.silence_seconds,
+                    &self.actor_id,
+                    &self.reason,
+                )
         {
             return Err(OperationsAlertError::Invalid);
         }
@@ -405,6 +421,53 @@ pub struct OperationsAlertWebhookEntry {
 /// 单次运营视图最多返回的 webhook 投递数。
 pub const MAX_OPERATIONS_ALERT_WEBHOOK_VIEW: usize = 100;
 
+impl OperationsAlertWebhookEntry {
+    /// 校验 webhook 投递的闭集状态、失败码和安全展示边界。
+    pub fn validate(&self) -> Result<(), OperationsAlertError> {
+        let failure_matches_status = matches!(
+            (self.status.as_str(), self.failure_code.as_deref()),
+            ("pending" | "sending" | "succeeded", None)
+                | ("failed", Some("permanent" | "retry_exhausted"))
+                | ("manual_reconcile", Some("outcome_unknown")),
+        );
+        let timestamps_match_status = match self.status.as_str() {
+            "pending" => {
+                self.next_attempt_at.is_some()
+                    && self.sending_at.is_none()
+                    && self.completed_at.is_none()
+            }
+            "sending" => {
+                self.next_attempt_at.is_none()
+                    && self.sending_at.is_some()
+                    && self.completed_at.is_none()
+            }
+            "succeeded" | "failed" => {
+                self.next_attempt_at.is_none()
+                    && self.sending_at.is_none()
+                    && self.completed_at.is_some()
+            }
+            "manual_reconcile" => {
+                self.next_attempt_at.is_none()
+                    && self.sending_at.is_none()
+                    && self.completed_at.is_some()
+            }
+            _ => false,
+        };
+        if self.delivery_id.is_nil()
+            || !failure_matches_status
+            || !timestamps_match_status
+            || self.attempt_count > i32::MAX as u32
+            || self.created_at.timestamp_nanos_opt().is_none()
+            || self.next_attempt_at.is_some_and(|value| value.timestamp_nanos_opt().is_none())
+            || self.sending_at.is_some_and(|value| value.timestamp_nanos_opt().is_none())
+            || self.completed_at.is_some_and(|value| value.timestamp_nanos_opt().is_none())
+        {
+            return Err(OperationsAlertError::StoredResultCorrupt);
+        }
+        Ok(())
+    }
+}
+
 /// 从路径/浏览器读取告警标识；只接受 64 位小写或大写十六进制。
 pub fn parse_alert_id(value: &str) -> Option<[u8; 32]> {
     if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -426,7 +489,7 @@ fn request_digest(
     actor_id: &str,
     reason: &str,
 ) -> RequestHash {
-    let mut payload = Vec::with_capacity(192 + reason.len());
+    let mut payload = Vec::with_capacity(192 + actor_id.len() + reason.len());
     payload.extend_from_slice(b"{\"action\":\"");
     payload.extend_from_slice(action.as_bytes());
     payload.extend_from_slice(b"\",\"fingerprint\":\"");
@@ -436,8 +499,14 @@ fn request_digest(
     payload.extend_from_slice(incident_generation.to_string().as_bytes());
     payload.extend_from_slice(b",\"silence_seconds\":");
     payload.extend_from_slice(silence_seconds.to_string().as_bytes());
+    // 只转义 JSON 分隔符；普通 actor 的摘要字节保持不变，危险字符不能跨字段拼接。
     payload.extend_from_slice(b",\"actor_id\":\"");
-    payload.extend_from_slice(actor_id.as_bytes());
+    for byte in actor_id.bytes() {
+        if matches!(byte, b'"' | b'\\') {
+            payload.push(b'\\');
+        }
+        payload.push(byte);
+    }
     payload.extend_from_slice(b"\",\"reason\":");
     payload.extend_from_slice(reason.len().to_string().as_bytes());
     payload.push(b':');

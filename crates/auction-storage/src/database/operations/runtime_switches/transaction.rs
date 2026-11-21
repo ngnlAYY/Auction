@@ -1,7 +1,7 @@
 //! 命令锁 → 名称锁 → 最新版本 CAS；事实、接收结果和追加审计同事务提交。
 
 use auction_application::runtime_switches::{
-    RuntimeSwitchCommand, RuntimeSwitchError, RuntimeSwitchEvent,
+    RuntimeSwitchCommand, RuntimeSwitchError, RuntimeSwitchEvent, RuntimeSwitchOperation,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -39,14 +39,17 @@ pub(super) async fn write(
         .fetch_optional(&mut *tx)
         .await?
     {
-        // 重放规则由应用命令定义；不重新检查到期或当前版本，不追加第二份审计。
-        return command
+        let event = command
             .replay(
                 row.try_get("digest_version")?,
                 &row.try_get::<Vec<u8>, _>("request_digest")?,
                 queries::map(&row)?,
             )
-            .map_err(WriteError::Application);
+            .map_err(WriteError::Application)?;
+        let audit_id = row.try_get("audit_id")?;
+        validate_replay_audit(&mut tx, command, audit_id).await?;
+        validate_replay_provenance(&mut tx, command, &event).await?;
+        return Ok(event);
     }
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))")
         .bind(format!("runtime_switch:{}", command.name.label()))
@@ -92,6 +95,61 @@ pub(super) async fn write(
         return Err(RuntimeSwitchError::OutcomeUnknown.into());
     }
     Ok(event)
+}
+async fn validate_replay_audit(
+    tx: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
+    command: &RuntimeSwitchCommand,
+    audit_id: Uuid,
+) -> Result<(), WriteError> {
+    let source = match command.entrypoint.as_str() {
+        "admin" => "admin",
+        "cli" => "cli",
+        _ => "system",
+    };
+    let found: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1 FROM public.audit_records
+            WHERE id = $1 AND action = $2 AND entity_type = 'runtime_switch'
+              AND entity_id = $3 AND result = 'success' AND source = $4
+              AND metadata->>'command_id' = $5
+        )",
+    )
+    .bind(audit_id)
+    .bind(format!("runtime_switch.{}", command.operation.label()))
+    .bind(command.name.label())
+    .bind(source)
+    .bind(command.command_id.to_string())
+    .fetch_one(&mut **tx)
+    .await?;
+    if !found {
+        return Err(RuntimeSwitchError::Corrupt.into());
+    }
+    Ok(())
+}
+
+async fn validate_replay_provenance(
+    tx: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
+    command: &RuntimeSwitchCommand,
+    event: &RuntimeSwitchEvent,
+) -> Result<(), WriteError> {
+    if command.operation != RuntimeSwitchOperation::Expire {
+        return Ok(());
+    }
+    let predecessor_id = command.expired_command_id.ok_or(RuntimeSwitchError::Corrupt)?;
+    let row = sqlx::query("SELECT * FROM public.runtime_switch_events WHERE command_id = $1")
+        .bind(predecessor_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or(RuntimeSwitchError::Corrupt)?;
+    let predecessor = queries::map(&row)?;
+    if predecessor.name != command.name
+        || predecessor.revision != command.expected_revision
+        || predecessor.operation != RuntimeSwitchOperation::Set
+        || predecessor.expires_at.is_none_or(|deadline| deadline > event.recorded_at)
+    {
+        return Err(RuntimeSwitchError::Corrupt.into());
+    }
+    Ok(())
 }
 
 fn invalid<T>(_: T) -> RuntimeSwitchError {

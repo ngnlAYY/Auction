@@ -1,10 +1,9 @@
 //! 装备标记的整场读取与身份隔离 owner；所有行共享集合，不逐行请求。
 
-mod cache;
-mod commands;
-mod control;
+pub(super) mod cache;
+pub(super) mod commands;
+pub(super) mod control;
 
-pub(super) use cache::invalidate_lot_watches;
 #[cfg(test)]
 pub(super) use cache::{load as load_watch_cache, save as save_watch_cache};
 pub(crate) use commands::use_watch_command_owner;
@@ -16,7 +15,7 @@ use auction_contracts::{PublicLotWatchesResponse, PublicSetLotWatchRequest};
 use auction_web_shared::t;
 use dioxus::prelude::*;
 
-use super::commands::{CommandSession, SessionAuthority};
+use super::commands::session::{CommandSession, SessionAuthority};
 use super::{PublicCommandOwner, PublicSessionResource};
 use crate::api::{CommandError, PublicSession, fetch_lot_watches};
 

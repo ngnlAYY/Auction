@@ -96,6 +96,8 @@ pub struct HeartbeatPublisher {
     live_details: Option<Box<LiveDetails>>,
     /// 本实例最近一次成功发布 Ready 心跳的本地时刻；失败、Degraded 或 Stopping 立即清空。
     last_ready_at: std::sync::RwLock<Option<Timestamp>>,
+    /// 保持发布顺序与 readiness 缓存一致；失败尝试不提交序号。
+    publish_gate: tokio::sync::Mutex<()>,
 }
 
 impl HeartbeatPublisher {
@@ -119,6 +121,7 @@ impl HeartbeatPublisher {
             observation_sequence: AtomicI64::new(0),
             details: serde_json::json!({}),
             live_details: None,
+            publish_gate: tokio::sync::Mutex::new(()),
             last_ready_at: std::sync::RwLock::new(None),
         }
     }
@@ -154,13 +157,15 @@ impl HeartbeatPublisher {
         audit_failure_count: i64,
         tracing: TracingHealth,
     ) -> Result<(), HealthError> {
-        let previous = self
-            .observation_sequence
-            .try_update(Ordering::SeqCst, Ordering::SeqCst, |value| value.checked_add(1))
-            .map_err(|_| HealthError::InvalidCommand)?;
-        let observation_sequence = previous.checked_add(1).ok_or(HealthError::InvalidCommand)?;
         let details =
             self.live_details.as_ref().map_or_else(|| self.details.clone(), |read| read());
+        let tracing_ready = tracing.status != TracingStatus::Degraded;
+        let _publish = self.publish_gate.lock().await;
+        let observation_sequence = self
+            .observation_sequence
+            .load(Ordering::Relaxed)
+            .checked_add(1)
+            .ok_or(HealthError::InvalidCommand)?;
         let result = if valid_details(&details) {
             self.store
                 .publish(HeartbeatCommand {
@@ -181,12 +186,17 @@ impl HeartbeatPublisher {
         } else {
             Err(HealthError::InvalidCommand)
         };
+        if result.is_ok() {
+            self.observation_sequence.store(observation_sequence, Ordering::Relaxed);
+        }
+
         let mut last_ready =
             self.last_ready_at.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         if result.is_ok()
             && status == HeartbeatStatus::Ready
             && readiness
             && audit_failure_count == 0
+            && tracing_ready
         {
             *last_ready = Some(Timestamp::now());
         } else {

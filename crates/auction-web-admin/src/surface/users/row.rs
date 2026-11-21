@@ -40,7 +40,9 @@ pub(super) fn AdminUserRow(
     let owner = use_context::<PendingCommands>();
     // 原命令了结后旧行可显示，获取当前用户版本前不能打开或提交会写入的对话框。
     let read_is_current = move || reload_generation() == loaded_generation;
-    let blocked = !read_is_current() || owner.contains(&user_command_entity(&user.id));
+    let status_recognized = matches!(user.status.as_str(), "active" | "blacklisted");
+    let blocked =
+        !read_is_current() || !status_recognized || owner.contains(&user_command_entity(&user.id));
     let user_for_forum_dialog = user.clone();
     let user_for_revoke = user.clone();
     let user_for_reissue = user.clone();
@@ -336,6 +338,7 @@ fn BlacklistHistoryCell(user: AdminUser) -> Element {
     let mut focused = use_signal(|| false);
     let mut history_open = use_signal(|| false);
     let mut tooltip_position = use_signal(|| None::<HistoryTooltipPosition>);
+    use_history_tooltip_geometry_guard(tooltip_position);
     let tooltip_id = use_signal(|| {
         format!(
             "admin-users-history-tooltip-{}",
@@ -449,6 +452,80 @@ fn BlacklistHistoryEntries(user: AdminUser) -> Element {
     }
 }
 
+fn use_history_tooltip_geometry_guard(tooltip_position: Signal<Option<HistoryTooltipPosition>>) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use std::{cell::RefCell, rc::Rc};
+        use wasm_bindgen::{JsCast, closure::Closure};
+
+        let guard = use_hook(|| Rc::new(RefCell::new(None::<HistoryTooltipGeometryGuard>)));
+        let cleanup = Rc::clone(&guard);
+        use_drop(move || {
+            cleanup.borrow_mut().take();
+        });
+        use_effect(move || {
+            if tooltip_position.read().is_none() {
+                guard.borrow_mut().take();
+                return;
+            }
+            if guard.borrow().is_some() {
+                return;
+            }
+            let Some(window) = web_sys::window() else { return };
+            let mut close_position = tooltip_position;
+            let callback = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+                close_position.set(None);
+            });
+            if window
+                .add_event_listener_with_callback_and_bool(
+                    "scroll",
+                    callback.as_ref().unchecked_ref(),
+                    true,
+                )
+                .is_err()
+            {
+                return;
+            }
+            if window
+                .add_event_listener_with_callback("resize", callback.as_ref().unchecked_ref())
+                .is_err()
+            {
+                let _ = window.remove_event_listener_with_callback_and_bool(
+                    "scroll",
+                    callback.as_ref().unchecked_ref(),
+                    true,
+                );
+                return;
+            }
+            guard.replace(Some(HistoryTooltipGeometryGuard { window, callback }));
+        });
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = tooltip_position;
+}
+
+#[cfg(target_arch = "wasm32")]
+struct HistoryTooltipGeometryGuard {
+    window: web_sys::Window,
+    callback: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::Event)>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for HistoryTooltipGeometryGuard {
+    fn drop(&mut self) {
+        use wasm_bindgen::JsCast;
+
+        let _ = self.window.remove_event_listener_with_callback_and_bool(
+            "scroll",
+            self.callback.as_ref().unchecked_ref(),
+            true,
+        );
+        let _ = self
+            .window
+            .remove_event_listener_with_callback("resize", self.callback.as_ref().unchecked_ref());
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn show_history_tooltip(
     element: Option<web_sys::Element>,
@@ -490,7 +567,7 @@ mod tests {
 
     use super::AdminUserRow;
     use crate::api::{AdminApiFailure, AdminUser};
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         button, click_button, has_live_text, init_i18n, mount_writer,
     };
     use crate::surface::pending::{use_pending_command_gate, use_pending_commands_with_gate};

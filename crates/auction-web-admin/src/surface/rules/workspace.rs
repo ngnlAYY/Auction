@@ -377,7 +377,7 @@ mod tests {
 
     use super::{AdminRulesWorkspace, RulesBaseline};
     use crate::api::{AdminApiFailure, AdminDocumentKind, AdminRules, AdminRulesCandidate};
-    use crate::surface::auctions::draft_page_tests::{
+    use crate::surface::auctions::editor::tests::{
         button, click_button, has_live_text, init_i18n, mount_writer,
     };
     use crate::surface::pending::{PendingCommandPanel, use_pending_commands};

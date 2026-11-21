@@ -67,16 +67,11 @@ async fn run_reporting(
     if receipt.failure.is_none() {
         if let Some(config) = config.as_ref() {
             let deadline = started + Duration::from_secs(config.backup.timeout_seconds);
-            let result = if Instant::now() >= deadline {
-                Err(())
-            } else {
-                tokio::time::timeout_at(
-                    deadline,
-                    pipeline::execute(&journal, config, database, &mut receipt),
-                )
-                .await
-                .map_err(|_| ())
-            };
+            let result = tokio::time::timeout_at(
+                deadline,
+                pipeline::execute(&journal, config, database, &mut receipt),
+            )
+            .await;
             match result {
                 Ok(Ok(())) if Instant::now() <= deadline && receipt.failure.is_none() => {
                     receipt.outcome = Outcome::Completed;
@@ -92,8 +87,11 @@ async fn run_reporting(
                         receipt.fail(code);
                     }
                 }
-                // 超时没有错误对象，固定码 timeout 已足以说明原因。
-                Err(()) => offsite::timeout(&mut receipt),
+                // Elapsed 类型确认这是整体备份期限到达，收据使用固定 timeout 码。
+                Err(error) => {
+                    report(detail_line(receipt.run_id, receipt.stage, &anyhow::Error::new(error)));
+                    offsite::timeout(&mut receipt);
+                }
             }
         } else {
             receipt.fail("config_error");

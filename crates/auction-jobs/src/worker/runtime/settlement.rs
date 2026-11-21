@@ -129,10 +129,15 @@ where
                 }
             }
             SettlementFulfillmentState::Prepared => {
+                let now = clock.now();
+                let deadline = fulfillment_budget(&claim, now);
                 let Some(result) = guard_fulfillment_panic(
                     &fulfillment_store,
                     claim.clone(),
-                    fulfillment_commands.activate(claim, clock.now(), retry_delay),
+                    bounded_fulfillment(
+                        deadline,
+                        fulfillment_commands.activate(claim, now, retry_delay),
+                    ),
                 )
                 .await
                 else {
@@ -430,13 +435,14 @@ where
     ) {
         Ok(hash) => hash,
         Err(error) => {
-            record_settlement_failure(
-                settlement_store,
-                claim,
-                "internal",
-                format!("无法生成结算命令摘要: {error}"),
-            )
-            .await;
+            let safe_detail = match error.classify() {
+                serde_json::error::Category::Io => "结算命令摘要序列化 I/O 失败",
+                serde_json::error::Category::Syntax => "结算命令摘要格式无效",
+                serde_json::error::Category::Data => "结算命令摘要数据无效",
+                serde_json::error::Category::Eof => "结算命令摘要输出不完整",
+            }
+            .to_owned();
+            record_settlement_failure(settlement_store, claim, "internal", safe_detail).await;
             return WorkerResult::Error;
         }
     };
@@ -467,8 +473,13 @@ where
         }
         Err(error) => {
             let failure_code = settlement_failure_code(&error);
-            record_settlement_failure(settlement_store, claim, failure_code, error.to_string())
-                .await;
+            record_settlement_failure(
+                settlement_store,
+                claim,
+                failure_code,
+                format!("结算处理失败，分类: {failure_code}"),
+            )
+            .await;
             WorkerResult::Error
         }
     }

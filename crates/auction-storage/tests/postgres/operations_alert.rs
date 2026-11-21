@@ -1548,8 +1548,13 @@ async fn postgres_mail_poller_paused_since_ignores_forced_poll_updates() {
     .await
     .expect("写入暂停命令");
     let snapshot = store.dashboard_snapshot().await.expect("读取邮件 dashboard");
+    let poller = snapshot
+        .pollers
+        .iter()
+        .find(|poller| poller.mailbox_key == "main-mailbox")
+        .expect("main-mailbox poller");
     assert_eq!(
-        snapshot.pollers[0].paused_since.expect("暂停时间").timestamp_micros(),
+        poller.paused_since.expect("暂停时间").timestamp_micros(),
         paused_at.timestamp_micros()
     );
 
@@ -1562,8 +1567,13 @@ async fn postgres_mail_poller_paused_since_ignores_forced_poll_updates() {
     .await
     .expect("模拟强制轮询更新时间");
     let snapshot = store.dashboard_snapshot().await.expect("再次读取邮件 dashboard");
+    let poller = snapshot
+        .pollers
+        .iter()
+        .find(|poller| poller.mailbox_key == "main-mailbox")
+        .expect("main-mailbox poller");
     assert_eq!(
-        snapshot.pollers[0].paused_since.expect("暂停时间").timestamp_micros(),
+        poller.paused_since.expect("暂停时间").timestamp_micros(),
         paused_at.timestamp_micros()
     );
     store.postgres_pool().close().await;
@@ -2007,6 +2017,7 @@ async fn postgres_operations_alert_actions_bind_to_the_observed_incident() {
     observe(false, 2).await.expect("观察到恢复");
     let resolved = read_alert().await;
     assert!(!resolved.active);
+    assert_eq!(resolved.silenced_until, None);
     assert_eq!(resolved.incident_generation, generation);
     observe(true, 3).await.expect("观察到复发");
     let current = read_alert().await;

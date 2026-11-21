@@ -202,11 +202,16 @@ impl std::fmt::Debug for AdminCanonicalEquipmentStatRequest {
     }
 }
 
+// 仅尽力清除当前 String 的有效字节；反序列化输入或更早分配产生的副本不在此对象控制范围内。
 impl Drop for AdminCanonicalEquipmentRequest {
     fn drop(&mut self) {
         if let Some(key) = self.key.take() {
             let mut bytes = key.into_bytes();
-            bytes.fill(0);
+            for byte in &mut bytes {
+                // SAFETY: `byte` 指向已初始化且独占的敏感字节；volatile 写避免清零被优化掉。
+                unsafe { std::ptr::write_volatile(byte, 0) };
+            }
+            std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
         }
     }
 }

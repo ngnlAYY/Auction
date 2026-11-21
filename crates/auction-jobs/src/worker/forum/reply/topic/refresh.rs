@@ -11,7 +11,7 @@ use super::super::ForumReplyRuntime;
 use super::super::completion::repository_error;
 use super::schedule::{completed_scan_times, next_scan_at};
 use crate::worker::diagnostics;
-use crate::worker::forum::sync::resolve_public_url;
+use crate::worker::forum::sync::links::resolve_public_url;
 
 pub(super) struct TopicScanProgress {
     pub(super) processed_through_post_number: usize,

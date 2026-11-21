@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::{WatchContext, WatchSubmit};
 use crate::api::{PublicSessionCheckTrigger, SessionRefreshReason};
-use crate::surface::commands::CommandSession;
+use crate::surface::commands::session::CommandSession;
 use crate::surface::login_href_for_current_location;
 
 /// 目录行的“已标记”展示状态，用于行首色条。与标记按钮读取同一份整场状态，不发请求；

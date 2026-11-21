@@ -5,6 +5,8 @@
 //! 计数不超过上限，两种首次付款状态（待寄出 COD、等待确认收款）不带退回次数；非空页按请求页码
 //! 算出的 offset 加本页行数不超过总数。浏览器只校验这些形状，不重建状态判定。
 
+use std::collections::HashSet;
+
 use auction_contracts::PublicFulfillmentPageResponse;
 use auction_web_shared::valid_uuid;
 use auction_web_shared::wire::json_keys_only;
@@ -80,9 +82,12 @@ fn valid_fulfillment_page(
                 count <= page_size
                     && (count == 0 || page_within_total(page, page_size, count, total))
             }) && lots.iter().all(valid_lot)
-                && lots.iter().enumerate().all(|(index, lot)| {
-                    lots[..index].iter().all(|other| other.get("lot_id") != lot.get("lot_id"))
-                })
+                && {
+                    let mut ids = HashSet::with_capacity(lots.len());
+                    lots.iter().all(|lot| {
+                        lot.get("lot_id").and_then(Value::as_str).is_some_and(|id| ids.insert(id))
+                    })
+                }
         })
 }
 

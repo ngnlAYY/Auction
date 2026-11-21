@@ -8,6 +8,13 @@ use auction_application::core::{
 use auction_domain::CompetitionPlan;
 use auction_time::Timestamp;
 
+use super::audit::{
+    insert_audit_for_bid, insert_audit_for_proxy_changes, insert_audit_for_public_command,
+    insert_audit_for_slow_proxy,
+};
+use super::facts::{insert_bid, update_lot};
+use super::proxy::apply_proxy_changes;
+use super::realtime::insert_realtime_event;
 use crate::database::auction::competition::{
     PostgresCompetitionTransaction, invalid_state, plan_command_id,
 };
@@ -21,13 +28,13 @@ impl PostgresCompetitionTransaction {
         occurred_at: Timestamp,
     ) -> Result<(), CompetitionTransactionError> {
         plan.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
-        super::apply_proxy_changes(self, plan, occurred_at).await?;
+        apply_proxy_changes(self, plan, occurred_at).await?;
         let mut auction_id = None;
         for bid in &plan.public_bids {
-            super::insert_bid(self, bid, occurred_at).await?;
-            super::insert_realtime_event(self, &mut auction_id, bid).await?;
+            insert_bid(self, bid, occurred_at).await?;
+            insert_realtime_event(self, &mut auction_id, bid).await?;
         }
-        super::update_lot(self, plan, occurred_at).await?;
+        update_lot(self, plan, occurred_at).await?;
         // 普通出价也可能在本次事务内耗尽/击败慢速代理；不能把 pending
         // 提醒只留给提交后的 outbox，否则“同一事务入队”不成立。
         let notifications = Arc::clone(&self.notifications);
@@ -44,7 +51,7 @@ impl PostgresCompetitionTransaction {
         .await?;
         self.delivery_wakeup |= pending_wakeup;
         if let Some(audit) = audit {
-            super::insert_audit_for_public_command(self, plan, audit).await?;
+            insert_audit_for_public_command(self, plan, audit).await?;
         }
         Ok(())
     }
@@ -58,16 +65,15 @@ impl PostgresCompetitionTransaction {
     ) -> Result<(), CompetitionTransactionError> {
         plan.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
         let command_id = plan_command_id(plan)?;
-        super::apply_proxy_changes(self, plan, occurred_at).await?;
+        apply_proxy_changes(self, plan, occurred_at).await?;
         let mut auction_id = None;
         for bid in &plan.public_bids {
-            super::insert_bid(self, bid, occurred_at).await?;
-            super::insert_audit_for_bid(self, bid, request_id.as_deref()).await?;
-            super::insert_realtime_event(self, &mut auction_id, bid).await?;
+            insert_bid(self, bid, occurred_at).await?;
+            insert_audit_for_bid(self, bid, request_id.as_deref()).await?;
+            insert_realtime_event(self, &mut auction_id, bid).await?;
         }
-        super::insert_audit_for_proxy_changes(self, plan, command_id, request_id.as_deref())
-            .await?;
-        super::update_lot(self, plan, occurred_at).await
+        insert_audit_for_proxy_changes(self, plan, command_id, request_id.as_deref()).await?;
+        update_lot(self, plan, occurred_at).await
     }
 
     /// 慢速代理计划沿用竞价事实/事件写入，但使用 Worker 专属旧版审计语义。
@@ -79,13 +85,13 @@ impl PostgresCompetitionTransaction {
         plan.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
         context.validate()?;
         let occurred_at = context.executed_at;
-        super::apply_proxy_changes(self, plan, occurred_at).await?;
+        apply_proxy_changes(self, plan, occurred_at).await?;
         let mut auction_id = None;
         for bid in &plan.public_bids {
-            super::insert_bid(self, bid, occurred_at).await?;
-            super::insert_realtime_event(self, &mut auction_id, bid).await?;
+            insert_bid(self, bid, occurred_at).await?;
+            insert_realtime_event(self, &mut auction_id, bid).await?;
         }
-        super::update_lot(self, plan, occurred_at).await?;
+        update_lot(self, plan, occurred_at).await?;
         // 慢代理计划不产生 `bid_accepted` outbox 事件；反超成功要作废待定提醒，
         // 到期/Final 耗尽要在同一事务入队。resolve_pending 同时覆盖两种结果。
         let notifications = Arc::clone(&self.notifications);
@@ -101,6 +107,6 @@ impl PostgresCompetitionTransaction {
         )
         .await?;
         self.delivery_wakeup |= pending_wakeup;
-        super::insert_audit_for_slow_proxy(self, plan, context).await
+        insert_audit_for_slow_proxy(self, plan, context).await
     }
 }

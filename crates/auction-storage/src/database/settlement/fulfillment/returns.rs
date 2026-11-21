@@ -17,9 +17,10 @@ use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
-use super::mapping::{map_storage_error, repository_error};
+use super::mapping::map_storage_error;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::operations::audit_health::AuditWriteResult as _;
+use crate::database::repository_error;
 use crate::database::settlement::returns::open_case;
 
 /// 退件转人工对账写入履约的稳定原因码。

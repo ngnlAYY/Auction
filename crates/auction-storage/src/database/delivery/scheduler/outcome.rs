@@ -4,12 +4,12 @@ use auction_application::delivery::{DeliverySendResult, DeliveryWorkClaim};
 use auction_time::Timestamp;
 use sqlx::Postgres;
 
-use super::mapping::repository_error;
 use super::recipient::key_reply_user;
 use crate::database::delivery::audit::{
     DeliveryAudit, FAIL, OUTCOME_UNKNOWN, SUCCEED, append as append_delivery_audit,
     worker_state_metadata,
 };
+use crate::database::repository_error;
 use crate::database::settlement::funding;
 
 pub(super) async fn succeed_postgres(

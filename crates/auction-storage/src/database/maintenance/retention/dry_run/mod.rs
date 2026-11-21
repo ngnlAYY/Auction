@@ -94,16 +94,20 @@ impl DatabaseStore {
             .map_err(|source| query_error("database_identity", source))?;
 
         let marker_exists =
-            crate::database::migrations::postgres_history_present(&mut *transaction)
+            crate::database::migrations::evidence::postgres_history_present(&mut *transaction)
                 .await
                 .map_err(|source| query_error("migration_marker", source))?;
         if !marker_exists {
             return Err(RetentionDryRunError::MigrationHistoryMissing);
         }
-        let migrations = crate::database::migrations::read_postgres_history(&mut *transaction)
-            .await
-            .map_err(|source| query_error("migration_identity", source))?;
-        if !crate::database::migrations::postgres_history_matches(&migrations, expected_version) {
+        let migrations =
+            crate::database::migrations::evidence::read_postgres_history(&mut *transaction)
+                .await
+                .map_err(|source| query_error("migration_identity", source))?;
+        if !crate::database::migrations::history::postgres_history_matches(
+            &migrations,
+            expected_version,
+        ) {
             return Err(RetentionDryRunError::MigrationNotCurrent);
         }
 
