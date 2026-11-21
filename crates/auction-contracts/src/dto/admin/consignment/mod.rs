@@ -103,8 +103,9 @@ json_object! {
 
 write_object! {
     /// 下架请求。不变量 1、6、7：携带稳定 ID、预期版本及私有说明。
-    /// 说明只进 Admin 私有视图。自由文本仅筛查已知的装备链接与 key 形态，
-    /// 无法可靠识别任意凭据。
+    /// 说明只进 Admin 私有视图。与应用层一致，在全文按 ASCII 大小写无关匹配
+    /// `/equip/`、`/equip?`、`key=`，并拒绝独立的 10 位十六进制片段和
+    /// 恰为 43 个 ASCII 字母、数字、连字符或下划线的片段。
     #[derive(Clone, PartialEq, Eq)]
     pub struct AdminDelistListing {
         pub command_id: Uuid => ("uuid", "必须为规范小写的非零 UUID"),
@@ -140,67 +141,23 @@ fn validate_delist_reason(reason: &str) -> Result<(), &'static str> {
         return Err("运营下架说明不得包含行分隔符");
     }
     if contains_equipment_link(reason)
-        || contains_equipment_query_key(reason)
-        || contains_bare_key(reason)
+        || reason.split(|ch: char| !ch.is_ascii_alphanumeric()).any(is_equipment_key)
+        || reason
+            .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_')))
+            .any(|token| token.len() == 43)
     {
         return Err("运营下架说明不得包含装备链接或已知凭据形态");
     }
     Ok(())
 }
 
-fn contains_equipment_query_key(reason: &str) -> bool {
-    reason.split(|ch: char| ch.is_whitespace() || matches!(ch, '<' | '>' | '"' | '\'')).any(
-        |token| {
-            let before_fragment = token.split('#').next().unwrap_or_default();
-            let Some((target, query)) = before_fragment.split_once('?') else {
-                return false;
-            };
-            let address = target.rsplit_once("://").map_or_else(
-                || target.trim_start_matches(['(', '[', '（', '【']),
-                |(_, address)| address,
-            );
-            let address = address.strip_prefix("//").unwrap_or(address);
-            let is_source = address.split_once('/').is_some_and(|(authority, path)| {
-                let host = authority.split(':').next().unwrap_or_default();
-                host.eq_ignore_ascii_case("hvdata.gisadan.dev")
-                    && path.eq_ignore_ascii_case("equip")
-            });
-            query.split('&').filter_map(|pair| pair.split_once('=')).any(|(name, value)| {
-                let value = value.trim_end_matches([
-                    ')', ']', '.', ',', '!', ';', '）', '】', '。', '，', '！', '；', '、',
-                ]);
-                name.eq_ignore_ascii_case("key") && (is_source || is_equipment_key(value))
-            })
-        },
-    )
-}
-
 fn is_equipment_key(value: &str) -> bool {
     value.len() == 10 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn contains_bare_key(reason: &str) -> bool {
-    // 路径和赋值留在同一段，避免把链接内部的片段当成独立凭据。
-    reason
-        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '=' | '/')))
-        .any(|token| is_equipment_key(token) || (token.len() == 43 && !token.contains(['=', '/'])))
-}
-
 fn contains_equipment_link(reason: &str) -> bool {
-    const EQUIP_PATH: &[u8] = b"/equip/";
-    let bytes = reason.as_bytes();
-    bytes.windows(EQUIP_PATH.len()).enumerate().any(|(start, prefix)| {
-        if !prefix.eq_ignore_ascii_case(EQUIP_PATH) {
-            return false;
-        }
-        let suffix = &bytes[start + EQUIP_PATH.len()..];
-        let eid_len = suffix.iter().take_while(|byte| byte.is_ascii_digit()).count();
-        if eid_len == 0 || suffix.get(eid_len) != Some(&b'/') {
-            return false;
-        }
-        let key = &suffix[eid_len + 1..];
-        let hex_len = key.iter().take_while(|byte| byte.is_ascii_hexdigit()).count();
-        hex_len > 0 && !key.get(hex_len).is_some_and(u8::is_ascii_alphanumeric)
+    [b"/equip/".as_slice(), b"/equip?".as_slice(), b"key=".as_slice()].into_iter().any(|fragment| {
+        reason.as_bytes().windows(fragment.len()).any(|part| part.eq_ignore_ascii_case(fragment))
     })
 }
 

@@ -16,42 +16,13 @@ import { ActiveListingStateSchema } from "../../public/consignment/states";
 const MAX_AUCTION_CONFLICTS = 50;
 const EQUIPMENT_KEY = /^[0-9a-f]{10}$/i;
 
-function containsEquipmentQueryKey(reason: string): boolean {
-  return reason.split(/[\p{White_Space}<>"']/u).some((token) => {
-    const beforeFragment = token.split("#", 1)[0] ?? "";
-    const queryStart = beforeFragment.indexOf("?");
-    if (queryStart < 0) return false;
-    const target = beforeFragment.slice(0, queryStart);
-    const schemeEnd = target.lastIndexOf("://");
-    const address = schemeEnd < 0 ? target.replace(/^[([（【]+/u, "") : target.slice(schemeEnd + 3);
-    const isSource = /^(?:\/\/)?hvdata\.gisadan\.dev(?::[^/]*)?\/equip$/i.test(address);
-    return beforeFragment
-      .slice(queryStart + 1)
-      .split("&")
-      .some((pair) => {
-        const equals = pair.indexOf("=");
-        return (
-          equals >= 0 &&
-          /^key$/i.test(pair.slice(0, equals)) &&
-          (isSource ||
-            EQUIPMENT_KEY.test(pair.slice(equals + 1).replace(/[)\].,!;）】。，！；、]+$/u, "")))
-        );
-      });
-  });
-}
-
 const DELIST_REASON = v.pipe(
   consignmentTextSchema(256),
   // consignmentTextSchema 已拒绝控制字符，其中包括 U+0085。
   v.check((reason) => !/[\u2028\u2029]/u.test(reason)),
-  v.check((reason) => !/\/equip\/[0-9]+\/[0-9a-f]+(?![0-9a-z])/i.test(reason)),
-  v.check((reason) => !containsEquipmentQueryKey(reason)),
-  v.check(
-    (reason) =>
-      !reason
-        .split(/[^0-9a-z_=/-]/i)
-        .some((token) => EQUIPMENT_KEY.test(token) || (token.length === 43 && !/[=/]/.test(token))),
-  ),
+  v.check((reason) => !/\/equip[/?]|key=/i.test(reason)),
+  v.check((reason) => !reason.split(/[^0-9a-z]/i).some((token) => EQUIPMENT_KEY.test(token))),
+  v.check((reason) => !reason.split(/[^0-9a-z_-]/i).some((token) => token.length === 43)),
 );
 
 /** 运营可见的挂单投影，不可借运营会话执行卖家操作。 */
@@ -102,7 +73,9 @@ export type AdminListingDetail = v.InferOutput<typeof AdminListingDetailSchema>;
 
 /**
  * 不变量 1、6、7：下架绑定稳定命令、预期版本与私有说明。
- * 说明只进 Admin 私有视图。自由文本仅筛查已知的装备链接与 key 形态，无法可靠识别任意凭据。
+ * 说明只进 Admin 私有视图。与应用层一致，在全文按 ASCII 大小写无关匹配
+ * `/equip/`、`/equip?`、`key=`，并拒绝独立的 10 位十六进制片段和
+ * 恰为 43 个 ASCII 字母、数字、连字符或下划线的片段。
  */
 export interface AdminDelistListing {
   command_id: string;

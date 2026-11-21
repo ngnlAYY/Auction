@@ -914,7 +914,7 @@ fn operations_notes_reject_equipment_paths_and_hide_debug() {
         assert!(serde_json::to_string(&request).is_err());
     }
 
-    for note in ["登记重复，请人工复核", "请参阅 /equipment/42/a0b1c2d3e4"] {
+    for note in ["登记重复，请人工复核", "请参阅 /equipment/42/fixture"] {
         assert!(
             serde_json::from_value::<AdminDelistListing>(with_field(
                 &request,
@@ -1174,6 +1174,58 @@ fn effective_expiry_keeps_snapshot_of_a_published_listing() {
             assert_rejects::<OwnedListing>(wire, "解析期终结却携带装备快照");
             assert!(serde_json::to_value(&listing).is_err());
         }
+    }
+}
+
+#[test]
+fn persisted_terminal_views_only_keep_tradeable_snapshots() {
+    let detail: ApiResponse<AdminListingDetail> = decode(admin_fixture!("listing-detail"));
+    let admin = detail.data.record;
+    let ListingView::Closed { equipment: Some(snapshot), reason } = &admin.listing.view else {
+        panic!("运营详情夹具须包含带快照的关闭视图");
+    };
+    let untradeable = EquipmentView { tradeable: false, ..snapshot.clone() };
+    let soulbound = EquipmentView { level: EquipmentLevel::Soulbound {}, ..untradeable.clone() };
+    let admin_wire = serde_json::to_value(&admin).unwrap();
+    for (state, reason, equipment, accepted, scenario) in [
+        (ListingState::Closed, *reason, None, true, "落库关闭无快照"),
+        (ListingState::Closed, *reason, Some(snapshot.clone()), true, "落库关闭带可交易快照"),
+        (ListingState::Closed, *reason, Some(soulbound), false, "落库关闭带灵魂绑定快照"),
+        (
+            ListingState::Expired,
+            ListingReason::DisplayExpired,
+            Some(untradeable),
+            false,
+            "落库到期带不可交易快照",
+        ),
+    ] {
+        let mut wire = admin_wire["listing"].clone();
+        wire["stored_state"] = json!(state);
+        wire["effective_state"] = json!(state);
+        wire["effective_reason"] = json!(reason);
+        wire["view"] = json!({"kind": state, "reason": reason, "equipment": equipment});
+        let owned_decodes = serde_json::from_value::<OwnedListing>(wire.clone()).is_ok();
+        let admin_decodes =
+            serde_json::from_value::<AdminListing>(with_field(&admin_wire, "listing", wire))
+                .is_ok();
+
+        let mut listing = admin.listing.clone();
+        listing.stored_state = state;
+        listing.effective_state = state;
+        listing.effective_reason = Some(reason);
+        listing.view = if state == ListingState::Closed {
+            ListingView::Closed { reason, equipment }
+        } else {
+            ListingView::Expired { reason, equipment }
+        };
+        let owned_encodes = serde_json::to_value(&listing).is_ok();
+        let record = AdminListing { listing, ..admin.clone() };
+        let admin_encodes = serde_json::to_value(&record).is_ok();
+        assert_eq!(
+            (owned_decodes, admin_decodes, owned_encodes, admin_encodes),
+            (accepted, accepted, accepted, accepted),
+            "本人解码、运营解码、本人编码、运营编码：{scenario}"
+        );
     }
 }
 

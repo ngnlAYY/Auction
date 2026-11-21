@@ -204,15 +204,17 @@ test("已发布挂单关闭或到期须保留可交易快照", async () => {
         view: { kind, reason, equipment },
       };
       expect(decode(OwnedListingSchema, terminal).ok, reason).toBe(true);
-      for (const snapshot of [null, soulbound, { ...equipment, tradeable: false }]) {
+      for (const [snapshot, scenario] of [
+        [null, "无快照"],
+        [soulbound, "灵魂绑定快照"],
+        [{ ...equipment, tradeable: false }, "不可交易快照"],
+      ] as const) {
         const invalid = { ...terminal, view: { ...terminal.view, equipment: snapshot } };
-        expect(decode(OwnedListingSchema, invalid).ok, reason).toBe(false);
-        if (kind === "expired") {
-          expect(
-            decode(OwnedListingSchema, { ...invalid, stored_state: "expired" }).ok,
-            reason,
-          ).toBe(false);
-        }
+        expect(decode(OwnedListingSchema, invalid).ok, `${reason}，${scenario}`).toBe(false);
+        expect(
+          decode(OwnedListingSchema, { ...invalid, stored_state: kind }).ok,
+          `已落库：${reason}，${scenario}`,
+        ).toBe(kind === "closed" && snapshot === null);
       }
       expect(decode(OwnedListingSchema, { ...terminal, stored_state: kind }).ok, reason).toBe(true);
     }

@@ -143,10 +143,11 @@ function isConsistentProjection(listing: v.InferOutput<typeof OWNED_LISTING_FIEL
     return false;
   }
   if (view.kind === "closed" || view.kind === "expired") {
-    // 不变量 6：可确定前态时保留发布时的可交易快照；已落库的关闭原因无法区分前态。
+    // 不变量 6：终态的快照来自已通过发布资格的装备，前态只决定快照是否必须存在。
+    if (view.equipment !== null && !view.equipment.tradeable) return false;
     const previous = expirySource ?? stored_state;
     if (previous === "displayed" || previous === "awaiting_deposit") {
-      return view.equipment?.tradeable === true;
+      return view.equipment !== null;
     }
     if (previous === "resolving") return view.equipment === null;
   }

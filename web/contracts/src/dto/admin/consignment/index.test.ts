@@ -79,6 +79,45 @@ test("运营详情拒绝缺少截断标记、超 50 条碰撞及多余碰撞字�
   ).toBe(false);
 });
 
+test("运营详情的落库终态仅保留可交易快照", async () => {
+  const { data: detail } = await readResponse(DETAIL, AdminListingDetailSchema);
+  const { record } = detail;
+  const { listing } = record;
+  const { view } = listing;
+  if (view.kind !== "closed" || view.equipment === null) {
+    throw new Error("运营详情夹具须包含带快照的关闭视图");
+  }
+  const { equipment } = view;
+  for (const [kind, reason, snapshot, accepted, scenario] of [
+    ["closed", view.reason, null, true, "落库关闭无快照"],
+    ["closed", view.reason, equipment, true, "落库关闭带可交易快照"],
+    [
+      "closed",
+      view.reason,
+      { ...equipment, level: { kind: "soulbound" }, tradeable: false },
+      false,
+      "落库关闭带灵魂绑定快照",
+    ],
+    [
+      "expired",
+      "display_expired",
+      { ...equipment, tradeable: false },
+      false,
+      "落库到期带不可交易快照",
+    ],
+  ] as const) {
+    const terminal = {
+      ...listing,
+      stored_state: kind,
+      effective_state: kind,
+      effective_reason: reason,
+      view: { kind, reason, equipment: snapshot },
+    };
+    const input = { ...detail, record: { ...record, listing: terminal } };
+    expect(decode(AdminListingDetailSchema, input).ok, scenario).toBe(accepted);
+  }
+});
+
 test("运营详情仅在恰好返回 50 条碰撞时可标记截断", async () => {
   const { data: detail } = await readResponse(DETAIL, AdminListingDetailSchema);
   const [conflict] = detail.conflicts;
