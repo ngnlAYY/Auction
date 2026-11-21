@@ -1,17 +1,22 @@
 //! 强制终止优先序、真实证据、碰撞差集与提交时故障。
 
+use auction_application::admin::{
+    RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON,
+    RecoveryBuyerBlacklistCommand, RecoveryBuyerBlacklister,
+};
 use auction_application::consignment::{
     AutoCloseEvidence, ConsignmentError, ListingAutoCloseEffect,
-    ListingBusinessRejection as Rejection, ListingCommandOutcome, ListingCommandStore,
-    ListingLookupEffect, StoredListingDecision,
+    ListingBusinessRejection as Rejection, ListingCommandOutcome, ListingCommandRejection,
+    ListingCommandStore, ResolveListingService, StoredListingDecision,
 };
-use auction_domain::LotId;
-use auction_domain::consignment::{ListingMode, ListingReason, ListingState};
+use auction_domain::consignment::{ListingMode, ListingReason, ListingVersion};
+use auction_domain::{CommandId, LotId, SettlementId};
+use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::fixture::{
-    Fixture, OTHER, SELLER, apply, auto, expire_listing, gear, new_id, observation, reprice,
-    withdraw,
+    Fixture, OTHER, SELLER, apply, auto, digest, expire_listing, gear, new_id, observation,
+    reprice, withdraw,
 };
 
 #[tokio::test]
@@ -151,7 +156,7 @@ async fn postgres_forced_closure_reason_precedence_and_ownership_are_atomic() {
         assert_eq!(f.state(listing_id).await.1, 1);
         let cmd = reprice(cmd_id, listing_id, seller, 2, 900);
         assert_eq!(
-            f.store.reprice(cmd).await.unwrap().into_result(),
+            f.store.reprice(cmd.clone()).await.unwrap().into_result(),
             Err(Rejection::ListingNotActive.into())
         );
         assert_eq!(f.state(listing_id).await, (state.into(), 2, Some(reason.into()), false));
@@ -205,7 +210,7 @@ async fn postgres_forced_close_and_user_rejection_roll_back_on_commit_or_audit_e
     let cmd_id = new_id();
     let closure = withdraw(cmd_id, listing_id, SELLER, 1);
     let before = f.persisted().await;
-    assert_eq!(f.store.withdraw(closure).await, Err(ConsignmentError::Unavailable));
+    assert_eq!(f.store.withdraw(closure.clone()).await, Err(ConsignmentError::Unavailable));
     assert!(f.persisted().await == before, "相关持久事实须保持一致");
     sqlx::raw_sql(
         "DROP TRIGGER fake_consignment_commit_failure ON public.consignment_events;
@@ -215,7 +220,7 @@ async fn postgres_forced_close_and_user_rejection_roll_back_on_commit_or_audit_e
     .execute(f.owner.postgres_pool())
     .await
     .unwrap();
-    assert_eq!(f.store.withdraw(closure).await, Err(ConsignmentError::Unavailable));
+    assert_eq!(f.store.withdraw(closure.clone()).await, Err(ConsignmentError::Unavailable));
     assert!(f.persisted().await == before, "相关持久事实须保持一致");
     assert_eq!(f.command_count(cmd_id).await, 0);
 
@@ -298,8 +303,11 @@ async fn postgres_lookup_cannot_publish_over_collision_or_disabled_epoch() {
         let equipment = gear("main", eid);
         let work_id = f.registered(listing_id, &equipment, SELLER, ListingMode::Direct).await;
         let fence = f.grant(listing_id, work_id, 1, 30).await;
-        if reason == ListingReason::AuctionLotCreated {
-            f.lot(eid, 1).await;
+        let (evidence, lot_id) = if reason == ListingReason::AuctionLotCreated {
+            // 多项强制事实同时成立，碰撞仍优先。
+            let lot_id = f.lot(eid, 1).await;
+            expire_listing(&f, listing_id).await;
+            (AutoCloseEvidence::AuctionLotCreated(LotId::from_uuid(lot_id)), Some(lot_id))
         } else {
             sqlx::query(
                 "UPDATE public.consignment_lookup_control SET admitting=false, enabled_epoch=2",
@@ -307,13 +315,17 @@ async fn postgres_lookup_cannot_publish_over_collision_or_disabled_epoch() {
             .execute(f.pool())
             .await
             .unwrap();
-        }
+            (AutoCloseEvidence::ServiceDisabled(2), None)
+        };
         let cmd = new_id();
         let input =
             || apply(cmd, fence, observation(&equipment, &f.key, "FakeWriteSeller", true), 1);
-        let effect = f.store.apply_lookup(input()).await.unwrap().into_result().unwrap();
-        assert!(matches!(effect, ListingLookupEffect::ListingChanged(projection) if
-            projection.reason == Some(reason) && projection.state == ListingState::Closed));
+        assert_eq!(
+            f.store.apply_lookup(input()).await.unwrap(),
+            ListingCommandOutcome::Rejected(ListingCommandRejection::Recorded(
+                Rejection::ListingNotActive
+            ))
+        );
         assert_eq!(
             f.state(listing_id).await,
             ("closed".into(), 2, Some(reason.as_str().into()), false)
@@ -321,7 +333,76 @@ async fn postgres_lookup_cannot_publish_over_collision_or_disabled_epoch() {
         assert!(f.retired(listing_id).await);
         assert_eq!(
             f.store.apply_lookup(input()).await.unwrap(),
-            ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(effect))
+            ListingCommandOutcome::Replayed(StoredListingDecision::Rejected(
+                Rejection::ListingNotActive
+            ))
+        );
+
+        let (system_id, _) = ResolveListingService::forced_close_identity(
+            listing_id,
+            ListingVersion::FIRST,
+            reason,
+            Some(evidence),
+            CommandId::from_uuid(cmd),
+        );
+        assert_ne!(system_id.as_uuid(), cmd);
+        let mut reader = f.owner.postgres_pool().acquire().await.unwrap();
+        let persisted: (Uuid, String, String, String, i16, String) = sqlx::query_as(
+            "SELECT e.command_id, e.actor_kind, c.actor_kind, c.operation, c.result_status, c.result_code
+             FROM public.consignment_events e JOIN public.consignment_commands c USING (command_id)
+             WHERE e.listing_id=$1 AND e.state_version=2",
+        ).bind(listing_id).fetch_one(&mut *reader).await.unwrap();
+        assert_eq!(
+            persisted,
+            (
+                system_id.as_uuid(),
+                "system".into(),
+                "system".into(),
+                "auto_close".into(),
+                200,
+                "ok".into()
+            )
+        );
+        let worker: (String, i16, String, serde_json::Value) = sqlx::query_as(
+            "SELECT actor_kind, result_status, result_code, result_body
+             FROM public.consignment_commands WHERE command_id=$1",
+        )
+        .bind(cmd)
+        .fetch_one(&mut *reader)
+        .await
+        .unwrap();
+        assert_eq!(
+            (worker.0.as_str(), worker.1, worker.2.as_str()),
+            ("worker", 409, "listing_not_active")
+        );
+        assert_eq!(
+            worker.3,
+            serde_json::json!({
+                "command_id": cmd, "operation": "apply_lookup", "listing_id": listing_id,
+                "disposition": "rejected", "listing_version": null, "state": null, "price": null
+            })
+        );
+        let work_released: bool = sqlx::query_scalar(
+            "SELECT w.state='done' AND w.completed_at IS NOT NULL
+                AND num_nonnulls(w.token,w.lease_until,w.next_attempt_at,c.holder_work_id)=0
+             FROM public.consignment_lookup_work w CROSS JOIN public.consignment_lookup_control c WHERE w.id=$1",
+        ).bind(work_id).fetch_one(&mut *reader).await.unwrap();
+        assert!(work_released);
+        let conflicts: Vec<(Uuid, Uuid)> = sqlx::query_as(
+            "SELECT lot_id, command_id FROM public.consignment_listing_auction_conflicts WHERE listing_id=$1",
+        ).bind(listing_id).fetch_all(&mut *reader).await.unwrap();
+        assert_eq!(conflicts, lot_id.map(|lot_id| (lot_id, system_id.as_uuid())).as_slice());
+        let audit: Vec<(String, String, String, Option<String>)> = sqlx::query_as(
+            "SELECT actor_type, action, result, request_id FROM public.audit_records
+             WHERE entity_type='consignment_listing' AND entity_id=$1 AND action IN ('consignment.auto_close','consignment.apply_lookup')
+             ORDER BY action"
+        ).bind(listing_id.to_string()).fetch_all(&mut *reader).await.unwrap();
+        assert_eq!(
+            audit,
+            [
+                ("worker".into(), "consignment.apply_lookup".into(), "rejected".into(), None),
+                ("system".into(), "consignment.auto_close".into(), "success".into(), None),
+            ]
         );
     }
 }
@@ -374,4 +455,90 @@ async fn postgres_auto_close_revalidates_stale_epoch_and_seller_history_evidence
         Err(ConsignmentError::ConditionNotMet)
     );
     assert_eq!(f.state(current).await.1, 1);
+}
+
+#[tokio::test]
+async fn postgres_auto_close_uses_registration_blacklist_baseline_not_business_time() {
+    let f = Fixture::new().await;
+    let pool = f.owner.postgres_pool();
+    let old_fact = new_id();
+    let other_seller_fact = new_id();
+    // 先提交的卖家事实故意用比登记更晚的业务时刻，不能因此成为本单清退证据。
+    for (fact, seller) in [(old_fact, SELLER), (other_seller_fact, OTHER)] {
+        sqlx::query(
+            "INSERT INTO public.user_blacklist_history (id,user_id,public_reason,actor,blacklisted_at)
+             VALUES ($1,$2,'测试历史','fake-audit',statement_timestamp() + interval '1 day')",
+        )
+        .bind(fact).bind(seller).execute(pool).await.unwrap();
+    }
+    let listing_id = new_id();
+    let work_id =
+        f.registered(listing_id, &gear("main", "470"), SELLER, ListingMode::Consigned).await;
+    let (count, ids, registered_at): (i64, Vec<Uuid>, Timestamp) = sqlx::query_as(
+        "SELECT blacklist_count_at_register,blacklist_baseline_ids,created_at
+         FROM public.consignment_listings WHERE id=$1",
+    )
+    .bind(listing_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!((count, ids), (1, vec![old_fact]));
+
+    let occurred_at: Timestamp =
+        sqlx::query_scalar("SELECT updated_at FROM public.users WHERE id=$1")
+            .bind(SELLER)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(occurred_at < registered_at);
+    let recovery_id = new_id();
+    f.store
+        .ensure_buyer_blacklisted(RecoveryBuyerBlacklistCommand {
+            command_id: recovery_id,
+            request_hash: digest(&[recovery_id.as_bytes()]),
+            recovery_id: SettlementId::from_uuid(recovery_id),
+            action_id: SettlementId::from_uuid(new_id()),
+            buyer_user_id: SELLER,
+            public_reason: RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON.into(),
+            actor_id: RECOVERY_BUYER_BLACKLIST_ACTOR.into(),
+            occurred_at,
+        })
+        .await
+        .unwrap();
+    let (fact, stored_time): (Uuid, Timestamp) = sqlx::query_as(
+        "SELECT id,blacklisted_at FROM public.user_blacklist_history WHERE user_id=$1 AND id<>$2",
+    )
+    .bind(SELLER)
+    .bind(old_fact)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(stored_time, occurred_at);
+
+    let before = f.persisted().await;
+    for invalid_fact in [new_id(), other_seller_fact, old_fact] {
+        let cmd_id = new_id();
+        let command = auto(cmd_id, listing_id, AutoCloseEvidence::SellerIneligible(invalid_fact));
+        assert_eq!(
+            f.store.auto_close(command).await.unwrap().into_result(),
+            Err(ConsignmentError::ConditionNotMet)
+        );
+        assert_eq!(f.command_count(cmd_id).await, 0);
+    }
+    assert_eq!(f.persisted().await, before);
+    let command = auto(new_id(), listing_id, AutoCloseEvidence::SellerIneligible(fact));
+    assert!(matches!(f.store.auto_close(command).await.unwrap().into_result(),
+        Ok(ListingAutoCloseEffect::Terminated(listing)) if listing.reason == Some(ListingReason::SellerIneligible)));
+    assert_eq!(
+        f.state(listing_id).await,
+        ("closed".into(), 2, Some("seller_ineligible".into()), false)
+    );
+    assert!(f.retired(listing_id).await);
+    let work_state: String =
+        sqlx::query_scalar("SELECT state FROM public.consignment_lookup_work WHERE id=$1")
+            .bind(work_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(work_state, "cancelled");
 }

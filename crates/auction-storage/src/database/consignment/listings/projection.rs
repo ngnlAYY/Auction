@@ -57,8 +57,6 @@ pub(crate) struct LockedListing {
     pub(crate) service_epoch: i64,
     /// 登记时已见的拉黑历史事实数。
     pub(crate) blacklist_count_at_register: i64,
-    /// 数据库登记时刻。
-    pub(crate) created_at: Timestamp,
     #[allow(dead_code, reason = "由后续任务 2D / 2F 读取锁内投影")]
     /// 最近一次投影变动的数据库时刻。
     pub(crate) updated_at: Timestamp,
@@ -90,7 +88,6 @@ impl LockedListing {
                 .map_err(invalid_projection)?,
             service_epoch: row.try_get("service_epoch")?,
             blacklist_count_at_register: row.try_get("blacklist_count_at_register")?,
-            created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
     }
@@ -136,7 +133,7 @@ pub(crate) async fn lock_listings(
     let rows = sqlx::query(
         "SELECT id, seller_user_id, world_id, external_equipment_id, mode, state,
                 state_version, price, current_snapshot_id, fee_bps, service_epoch,
-                blacklist_count_at_register, created_at, updated_at, expires_at, reason_code
+                blacklist_count_at_register, updated_at, expires_at, reason_code
          FROM public.consignment_listings WHERE id = ANY($1) ORDER BY id FOR UPDATE",
     )
     .bind(listing_ids)
@@ -155,8 +152,6 @@ pub(crate) struct NewListing<'a> {
     pub(crate) fee_bps: FeeBps,
     /// 登记时固定的服务代次。
     pub(crate) service_epoch: i64,
-    /// 登记时已见的拉黑历史事实数。
-    pub(crate) blacklist_count_at_register: i64,
 }
 
 pub(in crate::database::consignment) async fn insert(
@@ -165,13 +160,15 @@ pub(in crate::database::consignment) async fn insert(
     snapshot: ListingSnapshot,
     now: Timestamp,
 ) -> Result<(), WriteError> {
-    // 不变量 2、3、10：同一顶层事务创建冻结身份与版本，命令和事件由事实写入器补齐。
+    // 不变量 2、3、10：持卖家锁从同一快照冻结拉黑事实集合与计数，命令和事件同提交。
     sqlx::query(
         "INSERT INTO public.consignment_listings
             (id, seller_user_id, world_id, external_equipment_id, mode, state, price,
              pricing_version, fee_bps, state_version, service_epoch, blacklist_count_at_register,
-             created_at, updated_at, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, $10, $11, $12, $12, $13)",
+             blacklist_baseline_ids, created_at, updated_at, expires_at)
+         SELECT $1, $2, $3, $4, $5, $6, $7, 1, $8, $9, $10, count(*),
+                coalesce(array_agg(h.id ORDER BY h.id), '{}'::uuid[]), $11, $11, $12
+         FROM public.user_blacklist_history AS h WHERE h.user_id = $2",
     )
     .bind(new.listing_id)
     .bind(new.identity.seller_user_id)
@@ -183,7 +180,6 @@ pub(in crate::database::consignment) async fn insert(
     .bind(new.fee_bps.value().cast_signed())
     .bind(snapshot.state_version.value().cast_signed())
     .bind(new.service_epoch)
-    .bind(new.blacklist_count_at_register)
     .bind(now)
     .bind(snapshot.expires_at)
     .execute(connection)

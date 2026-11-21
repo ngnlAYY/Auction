@@ -418,3 +418,28 @@ async fn postgres_register_concurrent_worlds_share_seller_active_budget() {
             | (Err(ConsignmentError::Business(Rejection::ListingLimitReached)), Ok(_))
     ));
 }
+
+#[tokio::test]
+async fn postgres_register_rejects_unavailable_database_world_even_when_config_allows_it() {
+    let f = Fixture::new().await;
+    let g = gear("main", "424");
+    for (enabled, availability) in [(false, "available"), (true, "unavailable")] {
+        sqlx::query("UPDATE public.worlds SET enabled=$1, availability=$2 WHERE id='main'")
+            .bind(enabled)
+            .bind(availability)
+            .execute(f.owner.postgres_pool())
+            .await
+            .unwrap();
+        let cmd = register(new_id(), new_id(), &g, &f.key, SELLER, ListingMode::Direct);
+        assert!(cmd.policy.worlds.main);
+        let command_id = cmd.command_id.as_uuid();
+        assert_eq!(
+            f.store.register(cmd, Some(&f.crypto), Some(&f.crypto)).await.unwrap(),
+            ListingCommandOutcome::Rejected(ListingCommandRejection::Recorded(
+                Rejection::WorldUnavailable
+            ))
+        );
+        assert_eq!(f.command_count(command_id).await, 1);
+    }
+    assert!(f.crypto.seals.lock().unwrap().is_empty());
+}

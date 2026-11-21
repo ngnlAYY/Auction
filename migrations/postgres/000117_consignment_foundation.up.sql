@@ -78,6 +78,13 @@ CREATE TABLE public.consignment_listings (
         CONSTRAINT consignment_listing_service_epoch CHECK (service_epoch BETWEEN 1 AND 9007199254740991),
     blacklist_count_at_register bigint NOT NULL
         CONSTRAINT consignment_listing_blacklist_count_at_register CHECK (blacklist_count_at_register >= 0),
+    blacklist_baseline_ids uuid[] NOT NULL
+        CONSTRAINT consignment_listing_blacklist_ids_at_register CHECK (
+            CASE WHEN array_ndims(blacklist_baseline_ids) > 1 THEN false ELSE
+                array_position(blacklist_baseline_ids, NULL) IS NULL
+                    AND cardinality(blacklist_baseline_ids) = blacklist_count_at_register
+            END
+        ),
     current_snapshot_id uuid
         CONSTRAINT consignment_listing_current_snapshot_id CHECK (current_snapshot_id <> uuid '00000000-0000-0000-0000-000000000000'),
     reason_code text,
@@ -288,6 +295,9 @@ AS $function$
                         AND (body->>'price')::numeric <= 1000000000
                     ELSE false END
             AND CASE
+                WHEN status >= 400 AND operation = 'apply_lookup' THEN listing_id IS NOT NULL AND body->>'disposition' = 'rejected'
+                    AND body->'listing_version' = 'null'::jsonb AND body->'state' = 'null'::jsonb
+                    AND body->'price' = 'null'::jsonb
                 WHEN status >= 400 THEN body->>'disposition' = 'rejected'
                 WHEN operation = 'register' THEN body->>'disposition' = 'registered'
                     AND listing_id IS NOT NULL AND body->>'listing_version' = '1'
@@ -369,6 +379,7 @@ CREATE TABLE public.consignment_commands (
             ))
             OR (result_status = 429 AND result_code IN ('registration_rate_limited', 'listing_limit_reached'))
         ))
+        OR (operation = 'apply_lookup' AND result_status = 409 AND result_code = 'listing_not_active')
         OR (operation IN ('reprice', 'withdraw', 'admin_delist') AND (
             (result_status = 404 AND result_code = 'listing_not_found')
             OR (result_status = 409 AND result_code IN ('stale_version', 'listing_not_active'))
@@ -528,11 +539,11 @@ BEGIN
 
     IF ROW(OLD.id, OLD.seller_user_id, OLD.world_id, OLD.external_equipment_id, OLD.mode,
            OLD.pricing_version, OLD.fee_bps, OLD.service_epoch, OLD.blacklist_count_at_register,
-           OLD.created_at, OLD.registration_xact_id)
+           OLD.blacklist_baseline_ids, OLD.created_at, OLD.registration_xact_id)
        IS DISTINCT FROM
        ROW(NEW.id, NEW.seller_user_id, NEW.world_id, NEW.external_equipment_id, NEW.mode,
            NEW.pricing_version, NEW.fee_bps, NEW.service_epoch, NEW.blacklist_count_at_register,
-           NEW.created_at, NEW.registration_xact_id)
+           NEW.blacklist_baseline_ids, NEW.created_at, NEW.registration_xact_id)
        OR OLD.state NOT IN ('resolving', 'displayed', 'awaiting_deposit')
        OR NEW.state_version <> OLD.state_version + 1 OR NEW.updated_at < OLD.updated_at
        -- 不变量 6：用本次数据库写入时刻比较旧截止；系统强制关闭先于到期。

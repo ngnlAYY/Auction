@@ -112,6 +112,7 @@ pub(crate) struct CommandWriter<'tx, 'conn> {
     pub(super) target: Target,
     pub(super) events: Vec<PendingEvent>,
     request_hash: Option<RequestHash>,
+    pub(super) request_id: Option<&'tx str>,
 }
 
 impl<'conn> CommandTransaction<'conn> {
@@ -148,6 +149,7 @@ impl<'conn> CommandTransaction<'conn> {
                 target,
                 events: Vec::new(),
                 request_hash,
+                request_id: None,
             }));
         };
         if row.try_get::<&str, _>("actor_kind")? != actor.kind()

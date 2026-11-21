@@ -384,6 +384,7 @@ pub(super) fn register<'a>(
     mode: ListingMode,
 ) -> RegisterListingCommand<'a> {
     RegisterListingCommand {
+        request_id: None,
         command_id: CommandId::from_uuid(command_id),
         seller_user_id: UserId::from_uuid(seller_user_id),
         input: RegistrationInput {
@@ -434,6 +435,7 @@ pub(super) fn reprice(
     new_price: i64,
 ) -> RepriceListingCommand {
     RepriceListingCommand {
+        request_id: None,
         request_hash: digest(&[
             listing_id.as_bytes(),
             &version.to_be_bytes(),
@@ -452,6 +454,7 @@ pub(super) fn withdraw(
     version: u64,
 ) -> WithdrawListingCommand {
     WithdrawListingCommand {
+        request_id: None,
         request_hash: digest(&[listing_id.as_bytes(), &version.to_be_bytes()]),
         target: seller_target(command_id, listing_id, seller, version),
     }
@@ -464,6 +467,7 @@ pub(super) fn delist(
     reason: &str,
 ) -> AdminDelistListingCommand {
     AdminDelistListingCommand {
+        request_id: None,
         admin_actor: "fake-admin".into(),
         request_hash: digest(&[listing_id.as_bytes(), &version.to_be_bytes(), reason.as_bytes()]),
         command_id: CommandId::from_uuid(command_id),

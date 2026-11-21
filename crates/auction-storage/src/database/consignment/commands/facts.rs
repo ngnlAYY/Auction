@@ -284,8 +284,7 @@ impl CommandWriter<'_, '_> {
             Audit {
                 actor: self.actor,
                 action: operation_action(self.operation),
-                // 2Q 并入后从外层已认证命令人口取请求关联号，不参与账本比较。
-                request_id: None,
+                request_id: self.request_id,
                 listing_id,
                 accepted: result.status < 400,
                 now,

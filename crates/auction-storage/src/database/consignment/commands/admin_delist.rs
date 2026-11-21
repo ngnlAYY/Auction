@@ -25,6 +25,7 @@ pub(super) async fn admin_delist(
                 operation: ListingOperation::AdminDelist,
                 listing_id: cmd.listing_id,
                 request_hash: cmd.request_hash,
+                request_id: cmd.request_id.as_deref(),
                 trigger: ListingTrigger::AdminDelist { expected_version: cmd.expected_version },
                 changed: ChangedOperation::AdminDelist(&cmd.reason),
                 enabled: true,

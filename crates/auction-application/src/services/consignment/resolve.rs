@@ -4,17 +4,23 @@ use std::future::{Future, poll_fn};
 use std::sync::Arc;
 use std::task::Poll;
 
-use auction_domain::consignment::ListingPublicationTtls;
+use auction_domain::CommandId;
+use auction_domain::consignment::{ListingPublicationTtls, ListingReason, ListingVersion};
 use auction_time::Timestamp;
+use uuid::Uuid;
 
 use crate::ports::consignment::{
-    ApplyListingLookupCommand, ConsignmentError, ListingCommandOutcome, ListingCommandStore,
+    ApplyListingLookupCommand, AutoCloseCandidate, AutoCloseEvidence, ConsignmentError,
+    ListingBusinessRejection, ListingCommandOutcome, ListingCommandRejection, ListingCommandStore,
     ListingCredentialError, ListingEquipmentKeyOpener, ListingEquipmentLookup,
-    ListingEquipmentLookupError, ListingLookupClaim, ListingLookupEffect, LookupAbandonment,
-    LookupClaimRequest, LookupDispatch, LookupLeaseUpdate, LookupObservation, LookupWorkStore,
+    ListingEquipmentLookupError, ListingLookupClaim, ListingLookupEffect, ListingOperation,
+    LookupAbandonment, LookupClaimRequest, LookupDispatch, LookupLeaseUpdate, LookupObservation,
+    LookupWorkStore, StoredListingDecision,
 };
-use crate::ports::core::Clock;
-use crate::services::consignment::encoding::lookup_command_identity;
+use crate::ports::core::{Clock, RequestHash};
+use crate::services::consignment::encoding::{
+    ListingCommandEncoding, auto_close_command, lookup_command_identity,
+};
 
 /// 一轮解析的结果及 Worker 调度依据。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +34,8 @@ pub enum ListingLookupRound {
     Paused,
     /// 观察已有确定的提交结果，可重新领取其他工作。
     Applied(ListingLookupEffect),
+    /// 系统已结束这项工作，Worker 应立即继续下一轮。
+    WorkEnded,
     /// 原围栏已失效。只供计数和调度，不能重提本次观察或变更新许可。
     LeaseLost,
     /// Worker 正在排空；原许可已按请求状态让出或保留时间栅栏。
@@ -46,6 +54,32 @@ pub struct ResolveListingService {
 }
 
 impl ResolveListingService {
+    /// 生成解析事务内系统关闭的身份和摘要。独立补扫可用的证据沿用其规范编码。
+    /// 只有当前账户失资格且没有新增拉黑事实时，才绑定此次解析命令与被关闭的版本。
+    pub fn forced_close_identity(
+        listing_id: Uuid,
+        version: ListingVersion,
+        reason: ListingReason,
+        evidence: Option<AutoCloseEvidence>,
+        lookup_command_id: CommandId,
+    ) -> (CommandId, RequestHash) {
+        if let Some(evidence) = evidence {
+            let command = auto_close_command(AutoCloseCandidate { listing_id, evidence });
+            return (command.command_id, command.request_hash);
+        }
+        // 不变量 1、2：账户当前状态没有补扫用的历史 UUID。用独立的证据标签绑定锁内版本和原观察。
+        let mut input = ListingCommandEncoding::target_version(
+            ListingOperation::AutoClose,
+            listing_id,
+            version,
+        );
+        input.text("lookup_forced_close");
+        input.text(reason.as_str());
+        input.bytes(lookup_command_id.as_uuid().as_bytes());
+        let digest = input.request_hash();
+        (CommandId::from_uuid(Uuid::new_v5(&listing_id, &digest.as_bytes())), digest)
+    }
+
     /// 注入工作、写入及装备端口、现有外部暂停快照、本地出站时钟和发布期限。
     pub fn new(
         work: Arc<dyn LookupWorkStore>,
@@ -195,9 +229,18 @@ impl ResolveListingService {
                 }
             }
             other => other,
+        };
+        if matches!(
+            result,
+            Ok(ListingCommandOutcome::Rejected(ListingCommandRejection::Recorded(
+                ListingBusinessRejection::ListingNotActive
+            ))) | Ok(ListingCommandOutcome::Replayed(StoredListingDecision::Rejected(
+                ListingBusinessRejection::ListingNotActive
+            )))
+        ) {
+            return Ok(ListingLookupRound::WorkEnded);
         }
-        .and_then(ListingCommandOutcome::into_result);
-        match result {
+        match result.and_then(ListingCommandOutcome::into_result) {
             Ok(effect) => Ok(ListingLookupRound::Applied(effect)),
             Err(ConsignmentError::LeaseLost) => Ok(lease_lost(claim)),
             Err(error) => Err(error),

@@ -25,6 +25,7 @@ pub(super) async fn withdraw(
                 operation: ListingOperation::Withdraw,
                 listing_id: cmd.target.listing_id,
                 request_hash: cmd.request_hash,
+                request_id: cmd.request_id.as_deref(),
                 trigger: ListingTrigger::Withdraw { expected_version: cmd.target.expected_version },
                 changed: ChangedOperation::Withdraw,
                 enabled: true,

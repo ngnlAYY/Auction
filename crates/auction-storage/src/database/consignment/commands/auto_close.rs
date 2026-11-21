@@ -149,15 +149,15 @@ async fn observe(
         }
         AutoCloseEvidence::SellerIneligible(fact_id) => {
             // 端口只定义拉黑历史 UUID，没有独立的账号停用证据身份。无可信历史 UUID 时
-            // 不占系统命令 ID；本人、Admin 或解析写仍可依据已锁卖家状态内联清退。
+            // 不占系统命令 ID。用登记时冻结的集合判定新旧，业务时刻不代表提交顺序。
             (seller_ineligible || listing.snapshot.reason == Some(ListingReason::SellerIneligible))
                 && sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM public.user_blacklist_history
-                      WHERE id = $1 AND user_id = $2 AND blacklisted_at >= $3)",
+                    "SELECT EXISTS(SELECT 1 FROM public.user_blacklist_history h
+                      JOIN public.consignment_listings l ON l.seller_user_id = h.user_id
+                      WHERE h.id = $1 AND l.id = $2 AND NOT (h.id = ANY(l.blacklist_baseline_ids)))",
                 )
                 .bind(fact_id)
-                .bind(listing.identity.seller_user_id)
-                .bind(listing.created_at)
+                .bind(listing.listing_id)
                 .fetch_one(conn)
                 .await?
         }
@@ -237,7 +237,6 @@ mod tests {
             fee_bps: FeeBps::DIRECT,
             service_epoch: 1,
             blacklist_count_at_register: 0,
-            created_at: deadline - Duration::days(1),
             updated_at: deadline - Duration::days(1),
         };
         assert!(!deadline_confirmed(

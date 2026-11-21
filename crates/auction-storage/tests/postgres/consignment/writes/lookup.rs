@@ -3,12 +3,15 @@
 use std::time::Duration;
 
 use auction_application::consignment::{
-    ConsignmentError, ListingCommandOutcome, ListingCommandStore, ListingEquipmentLookupError,
-    ListingLookupEffect, LookupFence, LookupObservation, LookupPermanentReason, LookupRetryAfter,
-    LookupTransientReason, StoredListingDecision,
+    ConsignmentError, ListingBusinessRejection, ListingCommandOutcome, ListingCommandRejection,
+    ListingCommandStore, ListingEquipmentLookupError, ListingLookupEffect, LookupFence,
+    LookupObservation, LookupPermanentReason, LookupRetryAfter, LookupTransientReason,
+    StoredListingDecision,
 };
-use auction_domain::consignment::{ListingMode, ListingReason, ListingState};
-use auction_time::Timestamp;
+use auction_domain::consignment::{
+    ListingMode, ListingPublicationTtls, ListingReason, ListingState,
+};
+use auction_time::{Duration as TimeDelta, Timestamp};
 use uuid::Uuid;
 
 use super::fixture::{
@@ -381,4 +384,87 @@ async fn postgres_apply_lookup_final_cas_rolls_back_snapshot_when_lease_expires_
     assert!(
         matches!(applied, ListingLookupEffect::ListingChanged(snapshot) if snapshot.state == ListingState::Displayed)
     );
+}
+
+#[tokio::test]
+async fn postgres_apply_lookup_uses_publication_time_and_mode_specific_configured_ttl() {
+    let f = Fixture::new().await;
+    let pool = f.owner.postgres_pool();
+    for (eid, mode, state, days) in [
+        ("447", ListingMode::Direct, ListingState::Displayed, 37),
+        ("448", ListingMode::Consigned, ListingState::AwaitingDeposit, 9),
+    ] {
+        let g = gear("main", eid);
+        let listing_id = new_id();
+        let work_id = f.registered(listing_id, &g, SELLER, mode).await;
+        let fence = f.grant(listing_id, work_id, 1, 30).await;
+        let mut cmd = apply(new_id(), fence, observation(&g, &f.key, "FakeWriteSeller", true), 1);
+        cmd.publication_ttls = ListingPublicationTtls::new(37, 9).unwrap();
+        let published = f.store.apply_lookup(cmd).await.unwrap().into_result().unwrap();
+        let (published_at, expires_at, event_at): (Timestamp, Timestamp, Timestamp) = sqlx::query_as(
+            "SELECT l.updated_at,l.expires_at,e.occurred_at FROM public.consignment_listings l
+             JOIN public.consignment_events e ON e.listing_id=l.id AND e.state_version=l.state_version
+             WHERE l.id=$1 AND e.event_kind='published'",
+        ).bind(listing_id).fetch_one(pool).await.unwrap();
+        assert_eq!(event_at, published_at);
+        assert_eq!(expires_at, published_at + TimeDelta::days(days), "{mode:?}");
+        assert!(matches!(published, ListingLookupEffect::ListingChanged(listing)
+            if listing.state == state && listing.expires_at == expires_at));
+    }
+}
+
+#[tokio::test]
+async fn postgres_apply_lookup_cannot_publish_when_snapshot_write_crosses_listing_deadline() {
+    let f = Fixture::new().await;
+    let g = gear("main", "449");
+    let listing_id = new_id();
+    let work_id = f.registered(listing_id, &g, SELLER, ListingMode::Direct).await;
+    let pool = f.owner.postgres_pool();
+    let fence = f.grant(listing_id, work_id, 1, 30).await;
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::raw_sql(
+        "CREATE FUNCTION public.fake_consignment_wait_for_listing_deadline() RETURNS trigger
+           LANGUAGE plpgsql AS $$
+         BEGIN
+           PERFORM pg_sleep_until(l.expires_at) FROM public.consignment_listings l WHERE l.id=NEW.listing_id;
+           RETURN NEW;
+         END $$;
+         CREATE TRIGGER fake_consignment_wait_for_listing_deadline
+           BEFORE INSERT ON public.consignment_snapshots
+           FOR EACH ROW EXECUTE FUNCTION public.fake_consignment_wait_for_listing_deadline();
+         ALTER TABLE public.consignment_listings DISABLE TRIGGER USER;",
+    ).execute(&mut *tx).await.unwrap();
+    let cutoff: Timestamp = sqlx::query_scalar(
+        "UPDATE public.consignment_listings SET expires_at=statement_timestamp() + interval '2 seconds'
+         WHERE id=$1 RETURNING expires_at",
+    ).bind(listing_id).fetch_one(&mut *tx).await.unwrap();
+    sqlx::query("ALTER TABLE public.consignment_listings ENABLE TRIGGER USER")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    let cmd_id = new_id();
+    let received = f
+        .store
+        .apply_lookup(apply(cmd_id, fence, observation(&g, &f.key, "FakeWriteSeller", true), 1))
+        .await
+        .unwrap();
+    assert_eq!(
+        received,
+        ListingCommandOutcome::Rejected(ListingCommandRejection::Recorded(
+            ListingBusinessRejection::ListingNotActive
+        ))
+    );
+    assert_eq!(
+        f.state(listing_id).await,
+        ("expired".into(), 2, Some("lookup_deadline".into()), false)
+    );
+    assert_eq!(f.deadline(listing_id).await, cutoff);
+    let (written_at, completed_at): (Timestamp, Timestamp) = sqlx::query_as(
+        "SELECT l.updated_at,w.completed_at FROM public.consignment_listings l
+         JOIN public.consignment_lookup_work w ON w.listing_id=l.id WHERE l.id=$1 AND w.state='done'"
+    ).bind(listing_id).fetch_one(pool).await.unwrap();
+    assert!(written_at >= cutoff && completed_at >= cutoff);
+    assert!(f.retired(listing_id).await);
 }

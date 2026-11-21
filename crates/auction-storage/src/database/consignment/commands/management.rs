@@ -23,6 +23,7 @@ pub(super) struct Management<'a> {
     pub(super) operation: ListingOperation,
     pub(super) listing_id: Uuid,
     pub(super) request_hash: RequestHash,
+    pub(super) request_id: Option<&'a str>,
     pub(super) trigger: ListingTrigger,
     pub(super) changed: ChangedOperation<'a>,
     pub(super) enabled: bool,
@@ -47,6 +48,7 @@ pub(super) async fn execute<T>(
         Arbitration::Replay(stored) => return replay(&stored, decode),
         Arbitration::First(writer) => writer,
     };
+    writer.request_id = cmd.request_id;
     let expected_seller = match cmd.actor {
         Actor::PublicUser(seller_user_id) => Some(seller_user_id),
         Actor::Admin(_) => None,

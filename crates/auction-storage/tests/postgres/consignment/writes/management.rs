@@ -6,7 +6,9 @@ use auction_application::consignment::{
 };
 use auction_domain::consignment::ListingMode;
 
-use super::fixture::{Fixture, OTHER, SELLER, delist, gear, new_id, price, reprice, withdraw};
+use super::fixture::{
+    Fixture, OTHER, SELLER, delist, gear, new_id, price, register, reprice, withdraw,
+};
 
 #[tokio::test]
 async fn postgres_reprice_same_price_no_event_and_parallel_versions() {
@@ -24,8 +26,11 @@ async fn postgres_reprice_same_price_no_event_and_parallel_versions() {
     let a = reprice(new_id(), listing_id, SELLER, 1, 200);
     let b = reprice(new_id(), listing_id, SELLER, 1, 300);
     let blocker = f.block_control().await;
-    let (a_result, b_result, ()) =
-        tokio::join!(f.store.reprice(a), f.store.reprice(b), f.release_when_waiting(blocker, 2),);
+    let (a_result, b_result, ()) = tokio::join!(
+        f.store.reprice(a.clone()),
+        f.store.reprice(b.clone()),
+        f.release_when_waiting(blocker, 2),
+    );
     let a_result = a_result.unwrap().into_result();
     let b_result = b_result.unwrap().into_result();
     let (winner, receipt, loser) = match (a_result, b_result) {
@@ -36,7 +41,7 @@ async fn postgres_reprice_same_price_no_event_and_parallel_versions() {
     assert_eq!(receipt.price, winner.price);
     assert_eq!(receipt.version.value(), 2);
     assert_eq!(f.deadline(listing_id).await, deadline);
-    let mut replay = winner;
+    let mut replay = winner.clone();
     replay.enabled = false;
     assert_eq!(
         f.store.reprice(replay).await.unwrap(),
@@ -109,7 +114,7 @@ async fn postgres_withdraw_and_admin_delist_preserve_first_terminal_fact_and_rep
     let admin = delist(new_id(), listing_id, 1, "测试运营说明");
     let blocker = f.block_control().await;
     let (seller, operator, ()) = tokio::join!(
-        f.store.withdraw(cancel),
+        f.store.withdraw(cancel.clone()),
         f.store.admin_delist(admin.clone()),
         f.release_when_waiting(blocker, 2),
     );
@@ -117,7 +122,7 @@ async fn postgres_withdraw_and_admin_delist_preserve_first_terminal_fact_and_rep
     let reason = match (seller, operator) {
         (Ok(receipt), Err(ConsignmentError::Business(Rejection::StaleVersion))) => {
             assert_eq!(
-                f.store.withdraw(cancel).await.unwrap(),
+                f.store.withdraw(cancel.clone()).await.unwrap(),
                 ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(receipt))
             );
             "seller_cancelled"
@@ -164,11 +169,11 @@ async fn postgres_withdraw_and_admin_delist_preserve_first_terminal_fact_and_rep
     );
     let hidden = withdraw(new_id(), listing_id, OTHER, 1);
     assert_eq!(
-        f.store.withdraw(hidden).await.unwrap().into_result(),
+        f.store.withdraw(hidden.clone()).await.unwrap().into_result(),
         Err(Rejection::ListingNotFound.into())
     );
     assert_eq!(
-        f.store.withdraw(hidden).await.unwrap(),
+        f.store.withdraw(hidden.clone()).await.unwrap(),
         ListingCommandOutcome::Replayed(StoredListingDecision::Rejected(
             Rejection::ListingNotFound
         ))
@@ -187,7 +192,7 @@ async fn postgres_withdraw_and_admin_delist_preserve_first_terminal_fact_and_rep
     let owned = new_id();
     f.registered(owned, &gear("main", "435"), SELLER, ListingMode::Direct).await;
     let withdrawal = withdraw(new_id(), owned, SELLER, 1);
-    let closed = f.store.withdraw(withdrawal).await.unwrap().into_result().unwrap();
+    let closed = f.store.withdraw(withdrawal.clone()).await.unwrap().into_result().unwrap();
     assert_eq!(
         f.store.withdraw(withdrawal).await.unwrap(),
         ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(closed))
@@ -252,4 +257,123 @@ async fn postgres_reprice_local_disable_arbitrates_then_checks_owner_without_wri
         Err(Rejection::ListingNotActive.into())
     );
     assert_eq!(f.state(listing_id).await.2.as_deref(), Some("service_disabled"));
+}
+
+#[tokio::test]
+async fn postgres_write_request_id_is_audited_once_and_does_not_change_replay() {
+    let f = Fixture::new().await;
+    let listing_id = new_id();
+    let equipment = gear("main", "438");
+    let registration_id = new_id();
+    let registration = |request_id: &str| {
+        let mut cmd =
+            register(registration_id, listing_id, &equipment, &f.key, SELLER, ListingMode::Direct);
+        cmd.request_id = Some(request_id.into());
+        cmd
+    };
+    let registered = f
+        .store
+        .register(registration("register-first"), Some(&f.crypto), Some(&f.crypto))
+        .await
+        .unwrap()
+        .into_result()
+        .unwrap();
+    assert_eq!(
+        f.store.register(registration("register-retry"), None, Some(&f.crypto)).await.unwrap(),
+        ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(registered))
+    );
+
+    let reprice_id = new_id();
+    let mut price_command = reprice(reprice_id, listing_id, SELLER, 1, 173);
+    price_command.request_id = Some("reprice-first".into());
+    let repriced = f.store.reprice(price_command.clone()).await.unwrap().into_result().unwrap();
+    assert_eq!(repriced.disposition, ListingPriceDisposition::Repriced);
+    price_command.request_id = Some("reprice-retry".into());
+    assert_eq!(
+        f.store.reprice(price_command).await.unwrap(),
+        ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(repriced))
+    );
+
+    let withdraw_id = new_id();
+    let mut withdraw_command = withdraw(withdraw_id, listing_id, SELLER, 2);
+    withdraw_command.request_id = Some("withdraw-first".into());
+    let withdrawn =
+        f.store.withdraw(withdraw_command.clone()).await.unwrap().into_result().unwrap();
+    withdraw_command.request_id = Some("withdraw-retry".into());
+    assert_eq!(
+        f.store.withdraw(withdraw_command).await.unwrap(),
+        ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(withdrawn))
+    );
+
+    let delist_listing_id = new_id();
+    f.registered(delist_listing_id, &gear("main", "439"), SELLER, ListingMode::Consigned).await;
+    let delist_id = new_id();
+    let mut delist_command = delist(delist_id, delist_listing_id, 1, "测试请求关联");
+    delist_command.request_id = Some("delist-first".into());
+    let delisted =
+        f.store.admin_delist(delist_command.clone()).await.unwrap().into_result().unwrap();
+    delist_command.request_id = Some("delist-retry".into());
+    assert_eq!(
+        f.store.admin_delist(delist_command).await.unwrap(),
+        ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(delisted))
+    );
+
+    // 经维护池的独立连接核对提交结果，包括改价成功的动作、对象及审计处置。
+    let mut reader = f.owner.postgres_pool().acquire().await.unwrap();
+    type AuditRow = (String, String, String, String, String, Option<String>, String);
+    for (command_id, action, actor, actor_id, audited_listing_id, request_id, disposition) in [
+        (
+            registration_id,
+            "consignment.register",
+            "public_user",
+            SELLER.to_string(),
+            listing_id,
+            "register-first",
+            "registered",
+        ),
+        (
+            reprice_id,
+            "consignment.reprice",
+            "public_user",
+            SELLER.to_string(),
+            listing_id,
+            "reprice-first",
+            "repriced",
+        ),
+        (
+            withdraw_id,
+            "consignment.withdraw",
+            "public_user",
+            SELLER.to_string(),
+            listing_id,
+            "withdraw-first",
+            "closed",
+        ),
+        (
+            delist_id,
+            "consignment.admin_delist",
+            "admin",
+            "fake-admin".into(),
+            delist_listing_id,
+            "delist-first",
+            "closed",
+        ),
+    ] {
+        let persisted: Vec<AuditRow> = sqlx::query_as(
+            "SELECT action,actor_type,actor_id,entity_id,result,request_id,metadata->>'disposition'
+             FROM public.audit_records WHERE metadata->>'command_id'=$1 AND entity_type='consignment_listing'"
+        ).bind(command_id.to_string()).fetch_all(&mut *reader).await.unwrap();
+        assert_eq!(
+            persisted,
+            [(
+                action.into(),
+                actor.into(),
+                actor_id,
+                audited_listing_id.to_string(),
+                "success".into(),
+                Some(request_id.into()),
+                disposition.into()
+            )]
+        );
+    }
 }

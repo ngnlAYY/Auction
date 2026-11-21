@@ -595,3 +595,34 @@ fn shutdown_before_send_or_in_flight_uses_the_correct_permit_fence() {
     );
     assert!(fixture.commands.apply_lookup.take_calls().is_empty());
 }
+
+#[test]
+fn recorded_listing_not_active_ends_lookup_on_first_submit_or_unknown_commit_replay() {
+    use crate::ports::consignment::ListingBusinessRejection;
+
+    let fixture = ResolutionFixture::default();
+    let reason = ListingBusinessRejection::ListingNotActive;
+    for replay in [false, true] {
+        fixture.prepare_dispatch(LookupDispatch::Allowed { deadline: time(7) });
+        fixture.equipment.lookup.reply(Err(ListingEquipmentLookupError::SourceTimeout));
+        if replay {
+            fixture.commands.apply_lookup.reply(Err(ConsignmentError::OutcomeUnknown));
+            fixture.commands.apply_lookup.reply(Ok(ListingCommandOutcome::Replayed(
+                StoredListingDecision::Rejected(reason),
+            )));
+        } else {
+            fixture.commands.apply_lookup.reply(Ok(ListingCommandOutcome::Rejected(
+                ListingCommandRejection::Recorded(reason),
+            )));
+        }
+        assert_eq!(fixture.run(), Ok(ListingLookupRound::WorkEnded));
+        let calls = fixture.commands.apply_lookup.take_calls();
+        assert_eq!(calls.len(), if replay { 2 } else { 1 });
+        if replay {
+            assert_eq!(calls[0].command_id, calls[1].command_id);
+            assert_eq!(calls[0].request_hash, calls[1].request_hash);
+        }
+        assert_eq!(fixture.equipment.lookup.take_calls().len(), 1);
+        assert!(fixture.work.abandon.take_calls().is_empty());
+    }
+}

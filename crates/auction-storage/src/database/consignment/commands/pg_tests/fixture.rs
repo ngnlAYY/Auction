@@ -129,7 +129,6 @@ pub(super) async fn register(
                                     identity: operation_identity,
                                     fee_bps: FeeBps::DIRECT,
                                     service_epoch: 1,
-                                    blacklist_count_at_register: 0,
                                 },
                                 ListingSnapshot {
                                     mode: ListingMode::Direct,

@@ -86,6 +86,7 @@ async fn execute(
         Arbitration::First(writer) => writer,
     };
 
+    writer.request_id = command.request_id.as_deref();
     if !command.policy.enabled {
         return Err(ConsignmentError::Disabled.into());
     }
@@ -172,7 +173,6 @@ async fn execute(
         return Ok(ListingCommandOutcome::Rejected(ListingCommandRejection::Recorded(reason)));
     }
 
-    let seller = seller.ok_or_else(|| WriteError::invariant("consignment_registration_seller"))?;
     let envelope =
         sealer.seal(command.aad_equipment_id, command.input.key).map_err(seal_unavailable)?;
     let ListingTransition::Changed { listing, .. } = transition_listing(
@@ -192,7 +192,6 @@ async fn execute(
                 identity: &input.identity,
                 fee_bps: fee,
                 service_epoch: control.enabled_epoch,
-                blacklist_count_at_register: seller.blacklist_count,
             },
             listing,
             now,

@@ -97,9 +97,9 @@ fn new_listing(
         "INSERT INTO public.consignment_listings
             (id, seller_user_id, world_id, external_equipment_id, mode, state, price,
              pricing_version, fee_bps, state_version, service_epoch, blacklist_count_at_register,
-             created_at, updated_at, expires_at)
+             blacklist_baseline_ids, created_at, updated_at, expires_at)
          VALUES ('{listing_id}', '{seller_user_id}', '{world}', '{eid}', '{mode}', 'resolving', 101,
-                 1, {fee_bps}, 1, 1, 0, '{START}', '{START}', '{END}');"
+                 1, {fee_bps}, 1, 1, 0, ARRAY[]::uuid[], '{START}', '{START}', '{END}');"
     )
 }
 
@@ -1427,13 +1427,18 @@ fn rejection_command(command_id: &str, operation: &str, status: u16, code: &str)
     } else {
         (LISTING_1, "NULL".to_owned())
     };
+    let (listing, body_listing) = if operation == "apply_lookup" {
+        (format!("'{LISTING_1}'"), format!(r#""{LISTING_1}""#))
+    } else {
+        ("NULL".to_owned(), "null".to_owned())
+    };
     format!(
         r#"INSERT INTO public.consignment_commands
                 (command_id, actor_kind, actor_ref, operation, request_target, request_digest,
                  replay_key_id, listing_id, result_status, result_code, result_body, created_at)
             VALUES ('{command_id}', '{actor}', '{actor_ref}', '{operation}', '{target}',
-                    decode(repeat('11', 32), 'hex'), {replay_key}, NULL, {status}, '{code}',
-                    '{{"command_id":"{command_id}","operation":"{operation}","listing_id":null,
+                    decode(repeat('11', 32), 'hex'), {replay_key}, {listing}, {status}, '{code}',
+                    '{{"command_id":"{command_id}","operation":"{operation}","listing_id":{body_listing},
                        "listing_version":null,"state":null,"disposition":"rejected","price":null}}',
                     '{START}');"#
     )
@@ -1445,6 +1450,7 @@ async fn postgres_consignment_failure_receipts_match_the_operation_status_matrix
     let runtime = database.store().await.expect("以运行账号连接");
     let pool = runtime.postgres_pool();
     seed_users_and_key(pool).await;
+    succeeds(pool, &register(LISTING_1, USER_1, "main", "42", "direct", REGISTER_1)).await;
     let cases: &[(u16, &str, &[&str])] = &[
         (403, "participant_ineligible", &["register"]),
         (404, "listing_not_found", &["reprice", "withdraw", "admin_delist"]),
@@ -1456,7 +1462,8 @@ async fn postgres_consignment_failure_receipts_match_the_operation_status_matrix
         (409, "fee_changed", &["register"]),
         (409, "world_unavailable", &["register"]),
         (409, "stale_version", &["reprice", "withdraw", "admin_delist"]),
-        (409, "listing_not_active", &["reprice", "withdraw", "admin_delist"]),
+        (409, "listing_not_active", &["reprice", "withdraw", "admin_delist", "apply_lookup"]),
+        (404, "listing_not_active", &[]),
         (429, "registration_rate_limited", &["register"]),
         (429, "listing_limit_reached", &["register"]),
         (409, "command_id_conflict", &[]),
@@ -1537,4 +1544,71 @@ async fn postgres_consignment_command_inserted_under_savepoint_fails_closed() {
     );
     check(pool, &nested, "consignment_listing_version_event").await;
     succeeds(pool, &registration).await;
+}
+
+#[tokio::test]
+async fn postgres_consignment_blacklist_baseline_requires_exact_count_and_is_frozen() {
+    let database = TestDatabase::create().await.expect("克隆模板库");
+    let runtime = database.store().await.expect("以运行账号连接");
+    let owner = database.maintenance_store().await.expect("以维护账号连接");
+    let pool = runtime.postgres_pool();
+    seed_users_and_key(pool).await;
+    let registered = register(LISTING_1, USER_1, "main", "42", "direct", REGISTER_1);
+    let exact =
+        registered.replace("1, 0, ARRAY[]::uuid[]", &format!("1, 1, ARRAY['{LOT_1}'::uuid]"));
+    checks(
+        pool,
+        &exact,
+        &[
+            (
+                &format!("ARRAY['{LOT_1}'::uuid]"),
+                "ARRAY[]::uuid[]",
+                "consignment_listing_blacklist_ids_at_register",
+            ),
+            (
+                &format!("ARRAY['{LOT_1}'::uuid]"),
+                "ARRAY[NULL::uuid]",
+                "consignment_listing_blacklist_ids_at_register",
+            ),
+        ],
+    )
+    .await;
+    fails(pool, &exact.replace(&format!("ARRAY['{LOT_1}'::uuid]"), "NULL"), "23502", None).await;
+    succeeds(pool, &exact).await;
+    let update = format!(
+        "UPDATE public.consignment_listings SET price=102,state_version=2,updated_at='{LATER}',
+         blacklist_baseline_ids=ARRAY['{LOT_2}'::uuid] WHERE id='{LISTING_1}';"
+    );
+    check(owner.postgres_pool(), &update, "consignment_listing_transition").await;
+    fails(pool, &update, "42501", None).await;
+}
+
+#[tokio::test]
+async fn postgres_consignment_lookup_rejection_receipt_has_target_without_transition_fields() {
+    let database = TestDatabase::create().await.expect("克隆模板库");
+    let runtime = database.store().await.expect("以运行账号连接");
+    let pool = runtime.postgres_pool();
+    seed_users_and_key(pool).await;
+    succeeds(pool, &register(LISTING_1, USER_1, "main", "42", "direct", REGISTER_1)).await;
+    let valid = rejection_command(LOOKUP_1, "apply_lookup", 409, "listing_not_active");
+    checks(
+        pool,
+        &valid,
+        &[
+            (r#""listing_version":null"#, r#""listing_version":2"#, "consignment_command_receipt"),
+            (r#""state":null"#, r#""state":"closed""#, "consignment_command_receipt"),
+            (r#""price":null"#, r#""price":101"#, "consignment_command_receipt"),
+            (
+                r#""disposition":"rejected""#,
+                r#""disposition":"closed""#,
+                "consignment_command_receipt",
+            ),
+        ],
+    )
+    .await;
+    let missing_listing = valid
+        .replace(&format!("NULL, '{LISTING_1}', 409"), "NULL, NULL, 409")
+        .replace(&format!(r#""listing_id":"{LISTING_1}""#), r#""listing_id":null"#);
+    check(pool, &missing_listing, "consignment_command_receipt").await;
+    succeeds(pool, &valid).await;
 }

@@ -1,22 +1,24 @@
 //! 提交一次活围栏的解析观察以及相应挂单、工作和许可事实。
 
 use auction_application::consignment::{
-    ApplyListingLookupCommand, ConsignmentError, ListingCommandOutcome,
-    ListingEquipmentLookupError, ListingLookupEffect, ListingLookupSnapshot, ListingOperation,
-    LookupLeaseUpdate, LookupObservation, LookupTransientReason, MAX_LISTING_LOOKUP_ATTEMPTS,
+    ApplyListingLookupCommand, AutoCloseEvidence, ConsignmentError, ListingBusinessRejection,
+    ListingCommandOutcome, ListingCommandRejection, ListingEquipmentLookupError,
+    ListingLookupEffect, ListingLookupSnapshot, ListingOperation, LookupLeaseUpdate,
+    LookupObservation, LookupTransientReason, MAX_LISTING_LOOKUP_ATTEMPTS, ResolveListingService,
 };
-use auction_domain::UserId;
 use auction_domain::consignment::{
-    ForcedTerminationFacts, ListingChange, ListingError, ListingReason, ListingState,
-    ListingTransition, ListingTrigger, check_listing_history, transition_listing,
+    ListingChange, ListingError, ListingReason, ListingSnapshot, ListingState, ListingTransition,
+    ListingTrigger, check_listing_history, transition_listing,
 };
+use auction_domain::{LotId, UserId};
 use auction_time::Timestamp;
 use sqlx::PgConnection;
+use uuid::Uuid;
 
 use super::credentials::retire_secret;
 use super::errors::{WriteError, invalid_projection};
 use super::facts::{ChangedOperation, Decision};
-use super::ledger::{Actor, Arbitration, RequestProof, Target};
+use super::ledger::{Actor, Arbitration, CommandWriter, RequestProof, Target};
 use super::receipts;
 use super::session::CommandTransaction;
 use super::snapshot;
@@ -25,11 +27,12 @@ use super::termination::{forced_facts, retire_occupants, stage_closure};
 use crate::database::DatabaseStore;
 use crate::database::consignment::eligibility::accounts::{OwnerMatch, match_current_owner};
 use crate::database::consignment::eligibility::history::read_listing_history;
+use crate::database::consignment::eligibility::lots::unassociated_collision_lots;
 use crate::database::consignment::eligibility::occupancy::{
     EquipmentOccupant, lock_equipment_occupants,
 };
 use crate::database::consignment::listings::projection::{ListingLockIdentity, LockedListing};
-use crate::database::consignment::lookup::control::lock_control;
+use crate::database::consignment::lookup::control::{LookupControl, lock_control};
 use crate::database::consignment::lookup::work::{
     LookupFenceCheck, LookupResolution, MatchedLookupLease, check_lookup_fence, finish_lookup,
 };
@@ -85,29 +88,16 @@ async fn execute(
     let as_of = now(writer.connection()).await?;
     match transition_listing(Some(current.snapshot), ListingTrigger::AutoClose, as_of, facts) {
         Ok(ListingTransition::Changed { listing, change }) => {
-            // 000117 限 apply_lookup 记 200，采用已提交的系统终态回执，绝不接受发布。
-            // 若确实已收到 429，同时保留有效请求施加的全局冷却。
-            let resolution = match cmd.observation {
-                LookupObservation::Failed(ListingEquipmentLookupError::SourceRateLimited(
-                    retry_after,
-                )) => LookupResolution::Transient {
-                    reason: LookupTransientReason::SourceRateLimited,
-                    retry_after,
-                },
-                _ => LookupResolution::Done,
-            };
-            complete(writer.connection(), lease, resolution).await?;
-            let collision = stage_closure(&mut writer, &current, listing, change, as_of).await?;
-            writer
-                .finish_with_collisions(
-                    Decision::Changed { listing_id, operation: ChangedOperation::ApplyLookup },
-                    collision.as_slice(),
-                    as_of,
-                )
-                .await?;
-            return Ok(ListingCommandOutcome::Accepted(ListingLookupEffect::ListingChanged(
-                listing,
-            )));
+            return finish_forced(
+                writer,
+                cmd,
+                &current,
+                &control,
+                lease,
+                ForcedClosure { listing, change, written_at: as_of },
+                &[],
+            )
+            .await;
         }
         Err(ListingError::InvalidTransition { action: "auto_close", .. }) => {}
         Err(error) => return Err(invalid_projection(error)),
@@ -175,22 +165,7 @@ async fn execute(
         }
     };
 
-    let ListingTransition::Changed { listing, change } = transition_listing(
-        Some(current.snapshot),
-        trigger,
-        as_of,
-        ForcedTerminationFacts::default(),
-    )
-    .map_err(invalid_projection)?
-    else {
-        return Err(WriteError::invariant("consignment_lookup_transition"));
-    };
-    let snapshot_id = if matches!(
-        change,
-        ListingChange::Published | ListingChange::Rejected { keep_snapshot: true }
-    ) {
-        let observation =
-            observation.ok_or_else(|| WriteError::invariant("consignment_lookup_snapshot"))?;
+    let snapshot_id = if let Some(observation) = observation {
         // 挂单代次与已仲裁命令分别受唯一约束；解析命令 UUID 同时可用作独立快照的主键。
         let snapshot_id = cmd.command_id.as_uuid();
         snapshot::insert(
@@ -205,19 +180,156 @@ async fn execute(
     } else {
         None
     };
-    writer.stage_change(&current, listing, snapshot_id, change, as_of).await?;
+    // 不变量 2、6：快照与占用写入可能跨过解析总截止。最终迁移、更新时间与新期限
+    // 使用同一个数据库墙钟；同一事务快照内的强制事实仍按领域优先序裁定。
+    let written_at = now(writer.connection()).await?;
+    let (listing, change) =
+        match transition_listing(Some(current.snapshot), trigger, written_at, facts)
+            .map_err(invalid_projection)?
+        {
+            ListingTransition::Changed { listing, change } => (listing, change),
+            ListingTransition::ForcedTermination { listing, change } => {
+                return finish_forced(
+                    writer,
+                    cmd,
+                    &current,
+                    &control,
+                    lease,
+                    ForcedClosure { listing, change, written_at },
+                    &collisions,
+                )
+                .await;
+            }
+            ListingTransition::Unchanged(_) => {
+                return Err(WriteError::invariant("consignment_lookup_transition"));
+            }
+        };
+    writer.stage_change(&current, listing, snapshot_id, change, written_at).await?;
     if complete(writer.connection(), lease, resolution).await?.is_some() {
         return Err(WriteError::invariant("consignment_lookup_terminal_work"));
     }
-    retire_secret(writer.connection(), listing_id, as_of).await?;
+    retire_secret(writer.connection(), listing_id, written_at).await?;
     writer
         .finish_with_collisions(
             Decision::Changed { listing_id, operation: ChangedOperation::ApplyLookup },
             &collisions,
-            as_of,
+            written_at,
         )
         .await?;
     Ok(ListingCommandOutcome::Accepted(ListingLookupEffect::ListingChanged(listing)))
+}
+
+struct ForcedClosure {
+    listing: ListingSnapshot,
+    change: ListingChange,
+    written_at: Timestamp,
+}
+
+/// 不变量 1、2、3、5、7、8：关闭归系统命令，解析拒绝归原 Worker 命令，二者同提交。
+async fn finish_forced(
+    mut writer: CommandWriter<'_, '_>,
+    cmd: &ApplyListingLookupCommand,
+    current: &LockedListing,
+    control: &LookupControl,
+    lease: MatchedLookupLease,
+    closure: ForcedClosure,
+    other_collisions: &[Uuid],
+) -> Result<ListingCommandOutcome<ListingLookupEffect>, WriteError> {
+    let ForcedClosure { listing, change, written_at } = closure;
+    let listing_id = current.listing_id;
+    let reason =
+        listing.reason.ok_or_else(|| WriteError::invariant("consignment_lookup_forced_reason"))?;
+    let evidence = closure_evidence(writer.connection(), current, control, reason).await?;
+    // 已收到的 429 仍施加全局冷却；其他活围栏提交完成工作并释放本次许可。
+    let resolution = match cmd.observation {
+        LookupObservation::Failed(ListingEquipmentLookupError::SourceRateLimited(retry_after)) => {
+            LookupResolution::Transient {
+                reason: LookupTransientReason::SourceRateLimited,
+                retry_after,
+            }
+        }
+        _ => LookupResolution::Done,
+    };
+    complete(writer.connection(), lease, resolution).await?;
+    let (system_id, request_hash) = ResolveListingService::forced_close_identity(
+        listing_id,
+        current.snapshot.state_version,
+        reason,
+        evidence,
+        cmd.command_id,
+    );
+    // 本事务已经持有目标挂单锁。系统关闭不另外取会话命令锁，重复命令由全局主键失败关闭。
+    let mut system_tx = CommandTransaction {
+        command_id: system_id.as_uuid(),
+        keys: writer.tx.keys,
+        connection: writer.connection(),
+    };
+    let Arbitration::First(mut system_writer) = system_tx
+        .arbitrate(
+            Actor::System,
+            ListingOperation::AutoClose,
+            Target::Listing(listing_id),
+            RequestProof::Digest(request_hash),
+        )
+        .await?
+    else {
+        return Err(WriteError::invariant("consignment_lookup_system_command_replay"));
+    };
+    let collision = stage_closure(&mut system_writer, current, listing, change, written_at).await?;
+    system_writer
+        .finish_with_collisions(
+            Decision::Changed { listing_id, operation: ChangedOperation::AutoClose },
+            collision.as_slice(),
+            written_at,
+        )
+        .await?;
+    let rejection = ListingBusinessRejection::ListingNotActive;
+    writer
+        .finish_with_collisions(
+            Decision::Rejected { listing_id: Some(listing_id), reason: rejection },
+            other_collisions,
+            written_at,
+        )
+        .await?;
+    Ok(ListingCommandOutcome::Rejected(ListingCommandRejection::Recorded(rejection)))
+}
+
+async fn closure_evidence(
+    conn: &mut PgConnection,
+    current: &LockedListing,
+    control: &LookupControl,
+    reason: ListingReason,
+) -> Result<Option<AutoCloseEvidence>, WriteError> {
+    let evidence = match reason {
+        ListingReason::AuctionLotCreated => {
+            let lot_id = unassociated_collision_lots(conn, current.listing_id)
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(|| WriteError::invariant("consignment_lookup_collision_evidence"))?;
+            AutoCloseEvidence::AuctionLotCreated(LotId::from_uuid(lot_id))
+        }
+        ListingReason::SellerIneligible => {
+            return Ok(sqlx::query_scalar(
+                "SELECT h.id FROM public.user_blacklist_history h
+                 JOIN public.consignment_listings l ON l.seller_user_id = h.user_id
+                 WHERE l.id = $1 AND NOT (h.id = ANY(l.blacklist_baseline_ids))
+                 ORDER BY h.id LIMIT 1",
+            )
+            .bind(current.listing_id)
+            .fetch_optional(conn)
+            .await?
+            .map(AutoCloseEvidence::SellerIneligible));
+        }
+        ListingReason::ServiceDisabled => {
+            AutoCloseEvidence::ServiceDisabled(control.enabled_epoch.cast_unsigned())
+        }
+        ListingReason::LookupDeadline => {
+            AutoCloseEvidence::LookupDeadline(current.snapshot.expires_at)
+        }
+        _ => return Err(WriteError::invariant("consignment_lookup_forced_reason")),
+    };
+    Ok(Some(evidence))
 }
 
 async fn complete(

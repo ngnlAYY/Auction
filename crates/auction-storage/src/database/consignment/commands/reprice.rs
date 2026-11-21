@@ -25,6 +25,7 @@ pub(super) async fn reprice(
                 operation: ListingOperation::Reprice,
                 listing_id: cmd.target.listing_id,
                 request_hash: cmd.request_hash,
+                request_id: cmd.request_id.as_deref(),
                 trigger: ListingTrigger::Reprice {
                     expected_version: cmd.target.expected_version,
                     price: cmd.price,
