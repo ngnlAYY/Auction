@@ -78,6 +78,7 @@ const DISPOSITION_KEYS = {
 } satisfies Record<ListingDisposition, string | null>;
 
 // 契约闭集只含已落账结果。即时 HTTP 拒绝按合同 §7.2 与 §8.2 逐项列出。
+// 新增 HTTP 错误码时要同步这张表。
 const WRITE_ERROR_KEYS = {
   ok: null,
   accepted: null,

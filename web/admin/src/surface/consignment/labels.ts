@@ -78,6 +78,7 @@ const DISPOSITION_KEYS = {
 } satisfies Record<ListingDisposition, string | null>;
 
 // 契约闭集只含已落账结果。下架的即时冲突来自合同 §7.2；其余拒绝走 Admin 通用提示。
+// 新增 HTTP 错误码时要同步这张表。
 const WRITE_ERROR_KEYS = {
   ok: null,
   accepted: null,
