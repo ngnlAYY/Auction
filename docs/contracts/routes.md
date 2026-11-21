@@ -382,6 +382,60 @@ Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当
 
 `PUT /api/v1/admin/mail-templates/{template_key}` 要求 Admin 会话与 CSRF，严格 JSON、96 KiB 上限、不接受查询参数。请求体 `{command_id, expected_revision, body}`：`body` 为字符串时保存该正文，为 `null` 时恢复内置默认正文；`expected_revision` 是读取到的 `revision`。命令以会话身份为 actor 写入模板修订账本并同事务追加审计（动作 `mail_template.set` / `mail_template.reset`，审计只记模板键与版本，不复制正文）：同 `command_id` 同参数重放返回原结果；参数不同或 `expected_revision` 过期为 409 `mail_template_conflict`；模板键不在闭集内为 404 `mail_template_not_found`；命令形状无效，或正文为空、首尾有空白、超过 64 KiB、含控制字符、使用未登记占位符、缺少必需占位符、不满足该模板的专属要求，为 422 `invalid_mail_template`；5 秒内未确认或账本报告结果未知为 503 `outcome_unknown`（只能用原命令 ID 与原参数重试）；存储不可用为 503 `storage_unavailable`。成功为 200，`data.template` 为修订后的模板状态；各角色约 5 秒内刷新生效，接口不证明 Public 或 Worker 已应用。修改只影响之后创建或渲染的通知，不改写已冻结或已发出的正文。
 
+## 一口价挂单
+
+表内路径相对于 `/api/v1`。前三期提供登记、解析、展示、本人管理与运营下架，正式制品的服务开关保持关闭。状态接口中的 `accepts_mail` 和 `purchasable` 均为 `false`。购买、寄入激活、成交查询、重列、重新核验与恢复接口在本期均走未知 API 的 404。
+
+### API
+
+| 方法与路径 | 身份和参数 | 开启时 | 关闭时 |
+| --- | --- | --- | --- |
+| `GET /consignment/status` | 匿名，无参数 | `200 ConsignmentStatus`。登记依赖不可用时 `registration_ready=false`，可登记模式与世界数组为空 | `200 enabled=false`，未就绪且两个数组为空，无须数据库 |
+| `GET /consignment/listings` | 匿名。可选 `world,mode,category,q,page,page_size` | `200 ListingPage<ListingSummary>`，合法空页同样成功 | 合法请求为 `404 consignment_disabled` |
+| `GET /consignment/listings/{listing_id}` | 匿名。路径挂单 UUID | `200 ListingDetail`。不存在、未公开、已碰撞、到期或卖家被拉黑均为 `404 listing_not_found` | 合法请求为 `404 consignment_disabled` |
+| `GET /me/consignment/listings` | 本人。可选 `world,mode,state,page,page_size` | `200 ListingPage<OwnedListing>`，按有效态筛选 | 仍可读本人历史，按停用后的有效态返回 |
+| `GET /me/consignment/listings/{listing_id}` | 本人。路径挂单 UUID | `200 OwnedListing`。非本人或不存在均为 `404 listing_not_found` | 仍可读本人历史，终态无可用操作 |
+| `GET /me/consignment/commands/{command_id}` | 原玩家。路径命令 UUID | `200 StoredCommandResult`，含首次业务状态码、业务码和回执。非本人或不存在均为 `404 command_not_found` | 同开启 |
+| `POST /consignment/listings` | Public 写守卫。正文 `command_id,mode,equipment_url,price,expected_fee_bps` | `202 CommandReceipt`，处置为 `registered`。资格不符为 `403 participant_ineligible`。`409 already_open`、`equipment_busy`、`history_unproven`、`history_owner_mismatch`、`history_alias_conflict`、`fee_changed`、`world_unavailable`。`429 registration_rate_limited` 或 `listing_limit_reached` | 原结果可重放。首次准入拒绝为 `404 consignment_disabled`，不占命令 ID |
+| `PATCH /consignment/listings/{listing_id}/price` | 本人及 Public 写守卫。路径挂单 UUID，正文 `command_id,expected_version,price` | `200 CommandReceipt`，处置为 `repriced` 或 `unchanged`。非本人或不存在为 `404 listing_not_found`。旧版本或非活动态分别为 `409 stale_version`、`409 listing_not_active` | 原结果可重放。首次对本人目标为 `404 consignment_disabled`，非本人或不存在仍为 `404 listing_not_found` |
+| `POST /consignment/listings/{listing_id}/withdraw` | 本人及 Public 写守卫。路径挂单 UUID，正文 `command_id,expected_version` | `200 CommandReceipt`，处置为 `closed`。非本人或不存在为 `404 listing_not_found`。旧版本或非活动态分别为 `409 stale_version`、`409 listing_not_active` | 原结果可重放。首次可在事务中收口尚未落库的停用清退并返回 `409 listing_not_active`，已落库终态的旧版本仍为 `409 stale_version`。非本人或不存在仍为 404 |
+| `GET /admin/consignment/listings` | Admin 会话。可选 `world,mode,state,seller_user_id,page,page_size` | `200 ListingPage<AdminListing>`，按有效态筛选 | 同开启，含终态及无快照记录 |
+| `GET /admin/consignment/listings/{listing_id}` | Admin 会话。路径挂单 UUID | `200 AdminListingDetail`，不存在为 `404 listing_not_found`。碰撞按 `detected_at DESC,lot_id DESC` 返回最近至多 50 条 | 同开启 |
+| `POST /admin/consignment/listings/{listing_id}/delist` | Admin 写守卫。路径挂单 UUID，正文 `command_id,expected_version,reason` | `200 CommandReceipt`，处置为 `closed`。不存在为 `404 listing_not_found`。旧版本或非活动态分别为 `409 stale_version`、`409 listing_not_active` | 原结果可重放。首次按有效关闭与版本规则拒绝，尚未落库的强制终止在事务中收口 |
+
+能力接口始终公告有效开关与配置费率 `fee_bps`。开启时，登记就绪读取失败或耗尽 1 秒预算仍返回 200，标记未就绪。外层请求预算先耗尽时返回 `504 timeout`。登记世界必须在准入列表内并处于启用、可用状态。第三方解析结果由本人视图给出安全原因，目录接口只报告本站读取结果。
+
+### 参数与错误优先级
+
+- 匿名读取先校验参数，再判断开关及读取端口。本人及 Admin 先过身份守卫，再校验参数。写请求先过写守卫，随后校验查询串、路径与正文，再交给用例。所有查询参数均为闭集。未知键、重复键、非法值，以及无查询参数的路由收到非空查询串，均为 `400 invalid_query`。路径挂单或命令 UUID 形状错误分别为 `400 invalid_listing_id`、`400 invalid_command_id`。挂单、命令、卖家 UUID 使用带连字符的小写非零格式。Admin 详情和下架还拒绝含百分号编码的路径。
+- `world` 取 `main` 或 `isekai`，`mode` 取 `direct` 或 `consigned`。本人及 Admin 的 `state` 匹配有效态，取 `resolving`、`displayed`、`awaiting_deposit`、`rejected`、`expired`、`closed`。Admin 的 `seller_user_id` 精确匹配。目录 `category` 为最多 128 UTF-8 字节的规范文本，精确匹配。`q` 为最多 80 个 Unicode 字符的规范单行文本，按数据库大小写折叠在名称和别名中查字面子串，`%`、`_` 按普通字符处理。解码后的 `category` 或 `q` 含 `://`、`/equip/`、`/equip?`、`key=` 任一片段时按 ASCII 不区分大小写拒绝。客户端同样拒绝，既不写地址栏，也不发出该请求。
+- 页码默认 1，页长默认 20，接受 `1..=200`，且 `(page−1)*page_size` 不超过 10000。Public 页面预设 10、20、50、100，自定义页长如 37 也有效。各列表按 `updated_at DESC,id DESC` 排序，行和 `total` 来自同一读快照，翻页取得新快照。合法越尾空页仍为 200，并返回实际总数。`total ≥ offset + 条数` 仅约束非空页。
+- 写入接受 4 KiB 以内的 `application/json`，字段闭集。超限为 `413 body_too_large`，媒体类型错误为 `415 unsupported_media_type`。畸形 JSON（含非法 Unicode 转义）、未知或重复字段、非正或非安全整数版本等为 `400 invalid_listing_request`，另按字段区分 `invalid_command_id`、`invalid_equipment_url`、`invalid_price`、`invalid_reason`。标价为 `1..=1000000000` 的 JSON 整数字面量，预期费率为 `0..=9999` 的 JSON 整数字面量。下架私有说明须为 1–256 UTF-8 字节的规范单行文本，并通过已知装备链接和凭据形态筛查。
+- 已挂载路径的其余方法返回 `405 method_not_allowed` 及 `Allow`。JSON GET 不接受 HEAD，HEAD 的 405 无正文。
+
+### 身份、重放与缓存
+
+- Public 私有读用 `auction_public_session` Cookie，写先经 mutation 限流与 Origin 守卫，再认证 Cookie。Solid 每次私有读写都发送 `x-auction-expected-user-id`。头无效为 `400 invalid_expected_user_id`，会话换号为 `409 session_changed`。Admin 读检查会话和 CSRF Cookie，写依次检查限流、Origin、`x-csrf-token` 与 Cookie 的匹配、会话。原守卫的 `401 unauthenticated`、`403 origin_forbidden`、`403 csrf_invalid`、带 `Retry-After` 的 `429 rate_limited` 和依赖故障 `503 storage_unavailable` 原样保留。
+- 写 actor 取自已认证会话。账本在寄售命令空间仲裁 `command_id`，先比较 actor、操作、目标与规范参数，再执行首次命令的开关、归属、资格、费率、版本与状态规则。相同请求跨停用仍重放首次业务状态码、业务码、数据与消息。相同 ID 异请求或不同 actor 为 `409 command_id_conflict`，不返回原回执。本人回执查询的外层 200 仅表示查到，须读取 `http_status` 与 `code` 确定首次业务结果。四个写命令将规范化的 `request_id` 用于审计关联，摘要与重放比较不包含请求号。
+- 有效请求缺读端口、账本、密钥或登记工作能力时返回 `503 consignment_unavailable`。关闭时匿名目录不访问存储，本人读、Admin 读及写命令重放仍需要各自的依赖。处理器返回的 `503 outcome_unknown` 与共享 HTTP 边界返回的 `504 timeout` 对写请求具有相同语义。客户端对可信拒绝白名单以外的写失败保留未决状态，要重试须使用原命令 ID、原目标及原参数。
+- 成功外壳为 `{code,message,data}`，200 为 `ok`，202 为 `accepted`。错误外壳为 `{code,message,data:null,request_id}`，重放时本次响应的关联号可变化。表内全部 API 响应使用 `Cache-Control: no-store`。它们由共享 `HttpBoundary` 补齐请求关联、安全头及 CDN 缓存策略。
+
+### 浏览器入口
+
+| 站点 | 路径 | Solid 页面 |
+| --- | --- | --- |
+| Public | `/consignment` | 装备挂单目录 |
+| Public | `/consignment/new` | 登记装备 |
+| Public | `/consignment/me` | 本人挂单列表 |
+| Public | `/consignment/me/{listing_id}` | 本人挂单详情 |
+| Public | `/consignment/listings/{listing_id}` | 公开挂单详情 |
+| Admin | `/consignment` | 运营挂单列表 |
+| Admin | `/consignment/listings/{listing_id}` | 运营挂单详情及允许的下架操作 |
+
+`listing_id` 必须是单个带连字符的小写非零 UUID 段。批准路径有内嵌资源时返回对应站点的 SPA 入口，缺资源返回 503，未知路径返回 404。`/api/…` 只提供 API 响应。首次设置不提供表内的页面或寄售 API。尾斜杠按既有约定规范化，见[浏览器页面](#浏览器页面)。
+
+服务开关不改变浏览器入口响应。挂单页面只有 Solid 版提供。Dioxus Public 按未匹配路径回到拍卖看板，Dioxus Admin 显示本站未匹配面板。Solid Public 按状态接口结果显示导航和登记能力，关闭时目录、登记和公开详情显示关闭状态，本人页面仍可在认证后直达。认证后的 Solid Admin 可直达列表和详情查询历史。
+
 ## 首次设置（auction-setup）
 
 只在首次设置服务中存在，需请求头 `x-setup-token`（启动时打印的一次性令牌），请求体上限 8 KiB。
@@ -475,4 +529,4 @@ Public/Admin/Worker 可在业务 listener、control socket 之外启用独立出
 | `/audit` | 审计日志。新生成的链接用含偏移的 RFC 3339 时刻保存 `from`、`to`，输入框按浏览器时区显示；旧链接中不带偏移的值沿用打开链接时的浏览器时区 |
 | `/status` | 服务说明 |
 
-带参数的路径段不得为空、`.`、`..`，不得含控制字符、`/`、`\` 或 `%`。
+带参数的路径段不得为空、`.`、`..`，不得含控制字符、`/`、`\` 或 `%`。Solid 专属的一口价挂单页面见[浏览器入口](#浏览器入口)。

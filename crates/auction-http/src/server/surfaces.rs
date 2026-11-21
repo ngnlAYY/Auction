@@ -233,7 +233,10 @@ fn public_feature_routes(
                 .connect(public_handlers::realtime::websocket)
                 .strict_methods("CONNECT, GET"),
         );
-    router.merge(routes.route_layer(middleware::from_fn(boundary::normalize_api_rejection)))
+    // 不变量 1、6、7：写入口保留寄售自身的守卫、严格解码和原命令仲裁。
+    public_handlers::consignment::mount(
+        router.merge(routes.route_layer(middleware::from_fn(boundary::normalize_api_rejection))),
+    )
 }
 
 /// 注册已冻结的 Admin 路径。
@@ -543,11 +546,13 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                     strict_json::enforce,
                 )),
         );
-    router.merge(
+    let router = router.merge(
         routes
             .route_layer(middleware::from_fn(response_cache::no_store))
             .route_layer(middleware::from_fn(boundary::normalize_api_rejection)),
-    )
+    );
+    // 不变量 1、6、8：只有正式 Admin 路由接入下架命令，并沿用既有会话与审计边界。
+    admin_handlers::consignment::mount(router)
 }
 
 #[cfg(test)]
@@ -562,6 +567,10 @@ mod tests {
         PublicLotListRequest, PublicLotPage, PublicLotReader, PublicMyBid, PublicMyBidsPage,
         PublicMyBidsRequest, PublicOwnedProxy, PublicProxyBid, PublicProxyCapabilities,
         PublicProxyTransition, PublicRealtimeAuctionStatus, WorldReader, WorldSnapshot,
+    };
+    use auction_application::consignment::{
+        AdminListingDetail, AdminListingQuery, AdminListingRead, AdminListingRecord,
+        ConsignmentFuture, ListingReadPage,
     };
     use auction_application::core::{ApplicationError, ApplicationFuture};
     use auction_application::forum::{EquipmentGroup, PublicForumReader, PublicForumThread};
@@ -581,11 +590,13 @@ mod tests {
     };
     use auction_contracts::ApiErrorResponse;
     use auction_domain::EquipmentId;
+    use auction_domain::consignment::FeeBps;
     use auction_time::{Duration, Timestamp};
     use axum::{
         Router,
         body::{Body, to_bytes},
-        http::{HeaderValue, Request, StatusCode, header},
+        extract::ConnectInfo,
+        http::{HeaderValue, Method, Request, StatusCode, header},
         response::Response,
     };
     use tower::ServiceExt;
@@ -595,12 +606,14 @@ mod tests {
         admin_router_with_web_script_policy, public_feature_routes, public_router,
         public_router_with_web_script_policy,
     };
-    use crate::WebScriptPolicy;
     use crate::mapping::encode_public_cursor;
     use crate::middleware::response_cache::SETTLED_CACHE_CONTROL;
     use crate::middleware::security::PublicHttpSecurity;
-    use crate::server::contract_fixtures::{AUCTION_ID, assert_http, response_json};
+    use crate::server::contract_fixtures::{
+        AUCTION_ID, admin_get, admin_request, admin_state, assert_http, response_json,
+    };
     use crate::state::{AdminApiState, PublicApiState};
+    use crate::{AdminConsignmentCapabilities, ConsignmentCapabilities, WebScriptPolicy};
 
     fn app() -> Router {
         let gate = PublicHttpSecurity::default().anonymous_read_gate();
@@ -625,6 +638,246 @@ mod tests {
         fn iter() -> impl Iterator<Item = Cow<'static, str>> {
             std::iter::empty()
         }
+    }
+
+    #[tokio::test]
+    async fn public_consignment_status_and_catalog_use_config_without_database() {
+        for (state, enabled, fee_bps, catalog_status, catalog_code) in [
+            (PublicApiState::default(), false, 500, StatusCode::NOT_FOUND, "consignment_disabled"),
+            (
+                PublicApiState::default().with_consignment(
+                    ConsignmentCapabilities::without_database(
+                        false,
+                        FeeBps::new(615).expect("费率"),
+                    ),
+                ),
+                false,
+                615,
+                StatusCode::NOT_FOUND,
+                "consignment_disabled",
+            ),
+            (
+                PublicApiState::default().with_consignment(
+                    ConsignmentCapabilities::without_database(
+                        true,
+                        FeeBps::new(735).expect("费率"),
+                    ),
+                ),
+                true,
+                735,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "consignment_unavailable",
+            ),
+        ] {
+            let app = public_router::<NoAssets>(
+                "fixture",
+                state.http_boundary(),
+                state.anonymous_read_gate(),
+            )
+            .with_state(state);
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/v1/consignment/status")
+                        .header("x-request-id", "fixture-consignment")
+                        .body(Body::empty())
+                        .expect("能力请求"),
+                )
+                .await
+                .expect("能力响应");
+            assert_eq!(response.headers()["x-request-id"], "fixture-consignment");
+            assert_eq!(
+                consignment_json(StatusCode::OK, response).await["data"],
+                serde_json::json!({
+                    "enabled": enabled,
+                    "registration_ready": false,
+                    "registration_modes": [],
+                    "registration_worlds": [],
+                    "accepts_mail": false,
+                    "purchasable": false,
+                    "fee_bps": fee_bps,
+                    "min_price": 1,
+                    "max_price": 1_000_000_000,
+                }),
+            );
+
+            for path in [
+                "/api/v1/consignment/listings",
+                "/api/v1/consignment/listings/0f8fad5b-d9cb-469f-a165-70867728950e",
+            ] {
+                let response = app
+                    .clone()
+                    .oneshot(Request::builder().uri(path).body(Body::empty()).expect("目录请求"))
+                    .await
+                    .expect("目录响应");
+                assert_eq!(consignment_json(catalog_status, response).await["code"], catalog_code);
+            }
+
+            let response = app
+                .oneshot(
+                    Request::builder().uri("/consignment").body(Body::empty()).expect("入口请求"),
+                )
+                .await
+                .expect("入口响应");
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "enabled={enabled}");
+        }
+    }
+
+    async fn consignment_json(status: StatusCode, response: Response) -> serde_json::Value {
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        assert_eq!(response.headers()["cdn-cache-control"], "no-store");
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
+        response_json(status, response).await
+    }
+
+    #[tokio::test]
+    async fn public_consignment_private_routes_require_ports_even_when_disabled() {
+        for enabled in [false, true] {
+            let state = public_state_with_session().with_consignment(
+                ConsignmentCapabilities::without_database(enabled, FeeBps::DEFAULT_CONSIGNED),
+            );
+            let app = public_router::<NoAssets>(
+                "fixture",
+                state.http_boundary(),
+                state.anonymous_read_gate(),
+            )
+            .with_state(state);
+            for (method, path, body) in [
+                (Method::GET, "/api/v1/me/consignment/listings", ""),
+                (
+                    Method::GET,
+                    "/api/v1/me/consignment/listings/0f8fad5b-d9cb-469f-a165-70867728950e",
+                    "",
+                ),
+                (
+                    Method::GET,
+                    "/api/v1/me/consignment/commands/0f8fad5b-d9cb-469f-a165-70867728950e",
+                    "",
+                ),
+                (
+                    Method::POST,
+                    "/api/v1/consignment/listings",
+                    r#"{"command_id":"0f8fad5b-d9cb-469f-a165-70867728950e","mode":"direct","equipment_url":"fixture-placeholder","price":1,"expected_fee_bps":0}"#,
+                ),
+                (
+                    Method::PATCH,
+                    "/api/v1/consignment/listings/0f8fad5b-d9cb-469f-a165-70867728950e/price",
+                    r#"{"command_id":"0f8fad5b-d9cb-469f-a165-70867728950e","expected_version":1,"price":1}"#,
+                ),
+                (
+                    Method::POST,
+                    "/api/v1/consignment/listings/0f8fad5b-d9cb-469f-a165-70867728950e/withdraw",
+                    r#"{"command_id":"0f8fad5b-d9cb-469f-a165-70867728950e","expected_version":1}"#,
+                ),
+            ] {
+                let mut request = Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header(header::COOKIE, "auction_public_session=fixture-placeholder")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body))
+                    .expect("本人请求");
+                request
+                    .extensions_mut()
+                    .insert(ConnectInfo(std::net::SocketAddr::from(([192, 0, 2, 21], 3000))));
+                let response = app.clone().oneshot(request).await.expect("本人响应");
+                assert_eq!(
+                    consignment_json(StatusCode::SERVICE_UNAVAILABLE, response).await["code"],
+                    "consignment_unavailable",
+                    "{path}, enabled={enabled}",
+                );
+            }
+        }
+    }
+
+    struct EmptyAdminConsignment;
+
+    impl AdminListingRead for EmptyAdminConsignment {
+        fn list_admin(
+            &self,
+            query: AdminListingQuery,
+        ) -> ConsignmentFuture<'_, ListingReadPage<AdminListingRecord>> {
+            Box::pin(async move {
+                Ok(ListingReadPage { items: Vec::new(), total: 0, window: query.listings.window })
+            })
+        }
+
+        fn admin_detail(
+            &self,
+            _listing_id: Uuid,
+        ) -> ConsignmentFuture<'_, Option<AdminListingDetail>> {
+            Box::pin(async { Ok(None) })
+        }
+    }
+
+    #[tokio::test]
+    async fn formal_admin_consignment_uses_injected_read_port_and_keeps_missing_ports_unavailable()
+    {
+        let path = "/api/v1/admin/consignment/listings";
+        let response = admin_get(admin_state(), path).await;
+        assert_eq!(
+            consignment_json(StatusCode::SERVICE_UNAVAILABLE, response).await["code"],
+            "consignment_unavailable",
+        );
+
+        let state = admin_state().with_consignment(AdminConsignmentCapabilities {
+            read: Some(Arc::new(EmptyAdminConsignment)),
+            ..AdminConsignmentCapabilities::default()
+        });
+        let response =
+            admin_get(state.clone(), "/api/v1/admin/consignment/listings?page=2&page_size=37")
+                .await;
+        assert_eq!(
+            consignment_json(StatusCode::OK, response).await["data"],
+            serde_json::json!({"items":[],"total":0,"page":2,"page_size":37}),
+        );
+
+        let response = admin_get(
+            state.clone(),
+            "/api/v1/admin/consignment/listings/0f8fad5b-d9cb-469f-a165-70867728950e",
+        )
+        .await;
+        assert_eq!(
+            consignment_json(StatusCode::NOT_FOUND, response).await["code"],
+            "listing_not_found"
+        );
+
+        let response = admin_request(
+            state,
+            Method::POST,
+            "/api/v1/admin/consignment/listings/0f8fad5b-d9cb-469f-a165-70867728950e/delist",
+            Body::from(r#"{"command_id":"0f8fad5b-d9cb-469f-a165-70867728950e","expected_version":1,"reason":"测试下架"}"#),
+        ).await;
+        assert_eq!(
+            consignment_json(StatusCode::SERVICE_UNAVAILABLE, response).await["code"],
+            "consignment_unavailable",
+        );
+    }
+
+    #[tokio::test]
+    async fn consignment_routes_are_not_exposed_on_the_other_surface() {
+        let public = PublicApiState::default();
+        let app = public_router::<NoAssets>(
+            "fixture",
+            public.http_boundary(),
+            public.anonymous_read_gate(),
+        )
+        .with_state(public);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/admin/consignment/listings")
+                    .header(header::ACCEPT, "text/html")
+                    .body(Body::empty())
+                    .expect("Public 请求"),
+            )
+            .await
+            .expect("Public 响应");
+        assert_eq!(consignment_json(StatusCode::NOT_FOUND, response).await["code"], "not_found");
+
+        let response = admin_get(admin_state(), "/api/v1/consignment/status").await;
+        assert_eq!(consignment_json(StatusCode::NOT_FOUND, response).await["code"], "not_found");
     }
 
     /// 只提供倒计时快照，用于验证 SVG 覆盖发生在通用脚本策略之后。
@@ -1116,10 +1369,8 @@ mod tests {
         }
     }
 
-    /// 只装配会话、不装配任何读取端口：通过参数校验的列表请求返回 503，被参数校验拒绝的返回
-    /// 400，因此 400 同时证明拒绝发生在读取端口之前。
-    async fn page_size_response(uri: &str) -> (StatusCode, Option<String>) {
-        let state = PublicApiState::new(
+    fn public_state_with_session() -> PublicApiState {
+        PublicApiState::new(
             None,
             None,
             None,
@@ -1135,7 +1386,13 @@ mod tests {
             None,
             Some(Arc::new(AnyCookieSession)),
             PublicHttpSecurity::default(),
-        );
+        )
+    }
+
+    /// 只装配会话、不装配任何读取端口：通过参数校验的列表请求返回 503，被参数校验拒绝的返回
+    /// 400，因此 400 同时证明拒绝发生在读取端口之前。
+    async fn page_size_response(uri: &str) -> (StatusCode, Option<String>) {
+        let state = public_state_with_session();
         let gate = PublicHttpSecurity::default().anonymous_read_gate();
         let response = public_feature_routes(Router::<PublicApiState>::new(), gate)
             .with_state(state)

@@ -2,7 +2,9 @@
 //! 这里与两个 Dioxus `Route` 枚举、Solid 实现的路由表（`web/*/src/surface/router/route.ts`）
 //! 共同冻结浏览器路径。新增或删除页面时必须同步修改对应枚举或路由表、本清单和
 //! `docs/contracts/routes.md`；未知路径不能自动获得 `index.html`。
-//! 只有一套实现提供的页面（如 Public 的 `/settings`）在另一套实现里落到未匹配路由，回到首页。
+//! 只有 Solid 提供的页面在 Rust 版触发各站的未匹配处理。
+
+use crate::query::parse_canonical_uuid;
 
 const PUBLIC_EXACT_ROUTES: &[&str] = &[
     "/",
@@ -14,6 +16,9 @@ const PUBLIC_EXACT_ROUTES: &[&str] = &[
     "/blacklist",
     "/compensation",
     "/compensation-pool",
+    "/consignment",
+    "/consignment/me",
+    "/consignment/new",
     "/forum",
     "/fulfillment",
     "/history",
@@ -32,6 +37,7 @@ const ADMIN_EXACT_ROUTES: &[&str] = &[
     "/auction",
     "/auctions",
     "/config",
+    "/consignment",
     "/cookies",
     "/credentials",
     "/dashboard",
@@ -58,10 +64,16 @@ pub(super) enum Surface {
 }
 
 pub(super) fn browser_route(surface: Surface, path: &str) -> bool {
+    if let Some(listing_id) = path.strip_prefix("/consignment/listings/") {
+        return parse_canonical_uuid(listing_id).is_some();
+    }
     match surface {
         Surface::Public => {
             PUBLIC_EXACT_ROUTES.contains(&path)
                 || path.strip_prefix("/lots/").is_some_and(valid_parameter)
+                || path
+                    .strip_prefix("/consignment/me/")
+                    .is_some_and(|listing_id| parse_canonical_uuid(listing_id).is_some())
         }
         Surface::Admin => {
             ADMIN_EXACT_ROUTES.contains(&path)
