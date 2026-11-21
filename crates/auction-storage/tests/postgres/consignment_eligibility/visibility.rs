@@ -4,12 +4,14 @@ use auction_domain::UserId;
 use auction_domain::consignment::ListingReason;
 use auction_time::{Duration, Timestamp};
 use sqlx::PgConnection;
+use sqlx::error::DatabaseError;
 use uuid::Uuid;
 
 use super::fixtures::{
     END, LATER, Listing, OTHER, SELLER, START, at, auction, batch, commit, equip, gear, lot, seed,
 };
 use super::production::accounts::{OwnerMatch, lock_seller_eligibility, match_current_owner};
+use super::production::lots::listing_collision;
 use super::production::occupancy::{
     effective_activity_count, hourly_registration_count, lock_equipment_occupants,
 };
@@ -187,6 +189,170 @@ async fn quotas_use_fixed_time_and_count_both_worlds() {
         0
     );
     commit(tx).await;
+}
+
+#[tokio::test]
+async fn reopened_service_hides_previous_epoch() {
+    let db = TestDatabase::create().await.expect("临时 PG18");
+    let owner = db.maintenance_store().await.expect("维护连接");
+    let runtime = db.store().await.expect("服务连接");
+    let pool = owner.postgres_pool();
+    seed(pool).await;
+    let listing = Listing::new(101, "42");
+    let mut tx = runtime.postgres_pool().begin().await.expect("原代次挂单事务");
+    listing.register(&mut tx).await;
+    listing.publish(&mut tx).await;
+    commit(tx).await;
+
+    let mut read = runtime.postgres_pool().acquire().await.expect("可见性读取");
+    let mut admin = pool.acquire().await.expect("服务开关连接");
+    let as_of = at(LATER);
+    assert_eq!(view(&mut read, listing.listing_id, as_of).await, (true, true, None));
+    batch(&mut admin, "UPDATE public.consignment_lookup_control SET admitting=false;").await;
+    assert_eq!(
+        view(&mut read, listing.listing_id, as_of).await,
+        rejected(ListingReason::ServiceDisabled)
+    );
+    batch(
+        &mut admin,
+        "UPDATE public.consignment_lookup_control SET admitting=true, enabled_epoch=2;",
+    )
+    .await;
+    assert_eq!(
+        view(&mut read, listing.listing_id, as_of).await,
+        rejected(ListingReason::ServiceDisabled)
+    );
+}
+
+#[tokio::test]
+async fn later_collision_preserves_persisted_terminal_reason() {
+    let db = TestDatabase::create().await.expect("临时 PG18");
+    let owner = db.maintenance_store().await.expect("维护连接");
+    let runtime = db.store().await.expect("服务连接");
+    let pool = owner.postgres_pool();
+    let service = runtime.postgres_pool();
+    seed(pool).await;
+    let listing = Listing::new(101, "42");
+    let mut tx = service.begin().await.expect("登记事务");
+    listing.register(&mut tx).await;
+    commit(tx).await;
+    let mut tx = service.begin().await.expect("取消事务");
+    listing.withdraw_resolving(&mut tx, LATER).await;
+    commit(tx).await;
+
+    let mut read = service.acquire().await.expect("终态读取");
+    assert_eq!(view(&mut read, listing.listing_id, at(LATER)).await, (false, false, None));
+    let mut writer = pool.begin().await.expect("后来提交的拍卖事务");
+    let equipment_id = equip(&mut writer, "main", "00042").await;
+    let auction_id = auction(&mut writer, "main", 1, "draft").await;
+    lot(&mut writer, Uuid::new_v4(), auction_id, equipment_id, 1, "pending", None).await;
+    commit(writer).await;
+    assert_eq!(
+        listing_collision(&mut read, listing.listing_id).await.expect("新 lot 在基线外"),
+        Some(true)
+    );
+    assert_eq!(view(&mut read, listing.listing_id, at(LATER)).await, (false, false, None));
+    let stored: (String, String, i64) = sqlx::query_as(
+        "SELECT state, reason_code, state_version FROM public.consignment_listings WHERE id=$1",
+    )
+    .bind(listing.listing_id)
+    .fetch_one(&mut *read)
+    .await
+    .expect("首次终结事实");
+    assert_eq!(stored, ("closed".into(), "seller_cancelled".into(), 2));
+}
+
+#[tokio::test]
+async fn withdrawn_registration_counts_only_towards_hourly_quota() {
+    let db = TestDatabase::create().await.expect("临时 PG18");
+    let owner = db.maintenance_store().await.expect("维护连接");
+    let runtime = db.store().await.expect("服务连接");
+    let service = runtime.postgres_pool();
+    seed(owner.postgres_pool()).await;
+    let listing = Listing { created: "2026-01-01T23:30:00Z", ..Listing::new(101, "42") };
+    let seller_id = UserId::from_uuid(SELLER);
+    let as_of = at(END);
+    let mut tx = service.begin().await.expect("登记事务");
+    listing.register(&mut tx).await;
+    commit(tx).await;
+
+    let mut tx = service.begin().await.expect("取消事务");
+    assert_eq!(hourly_registration_count(&mut tx, seller_id, as_of).await.expect("小时计数"), 1);
+    assert_eq!(effective_activity_count(&mut tx, seller_id, as_of).await.expect("活动计数"), 1);
+    listing.withdraw_resolving(&mut tx, "2026-01-01T23:45:00Z").await;
+    commit(tx).await;
+
+    let mut read = service.acquire().await.expect("读取取消后的额度");
+    assert_eq!(hourly_registration_count(&mut read, seller_id, as_of).await.expect("小时计数"), 1);
+    assert_eq!(effective_activity_count(&mut read, seller_id, as_of).await.expect("活动计数"), 0);
+}
+
+#[tokio::test]
+async fn seller_eligibility_locks_only_target_account() {
+    let db = TestDatabase::create().await.expect("临时 PG18");
+    let owner = db.maintenance_store().await.expect("维护连接");
+    let runtime = db.store().await.expect("服务连接");
+    let service = runtime.postgres_pool();
+    seed(owner.postgres_pool()).await;
+    let mut first =
+        service.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.expect("资格事务");
+    assert!(
+        lock_seller_eligibility(&mut first, UserId::from_uuid(SELLER))
+            .await
+            .expect("资格锁")
+            .is_some()
+    );
+
+    let mut second = service.begin().await.expect("并发资格事务");
+    let lock = "SELECT id FROM public.users WHERE id=$1 FOR UPDATE NOWAIT";
+    let other: Uuid = sqlx::query_scalar(lock)
+        .bind(OTHER)
+        .fetch_one(&mut *second)
+        .await
+        .expect("其他卖家行可加锁");
+    assert_eq!(other, OTHER);
+    let result = sqlx::query_scalar::<_, Uuid>(lock).bind(SELLER).fetch_one(&mut *second).await;
+    let error = result.expect_err("目标卖家行仍被第一个事务持锁");
+    assert_eq!(error.as_database_error().and_then(DatabaseError::code).as_deref(), Some("55P03"));
+    second.rollback().await.expect("回滚并发资格事务");
+    commit(first).await;
+}
+
+#[tokio::test]
+async fn equipment_occupancy_locks_only_target_eid() {
+    let db = TestDatabase::create().await.expect("临时 PG18");
+    let owner = db.maintenance_store().await.expect("维护连接");
+    let runtime = db.store().await.expect("服务连接");
+    let service = runtime.postgres_pool();
+    seed(owner.postgres_pool()).await;
+    let target = Listing::new(101, "42");
+    let unrelated = Listing::new(102, "43");
+    let mut tx = service.begin().await.expect("登记夹具事务");
+    target.register(&mut tx).await;
+    unrelated.register(&mut tx).await;
+    commit(tx).await;
+
+    let mut first =
+        service.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.expect("占用事务");
+    let rows = lock_equipment_occupants(&mut first, &gear("main", "42"), at(LATER))
+        .await
+        .expect("同件挂单锁");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].listing_id, target.listing_id);
+    let mut second = service.begin().await.expect("并发挂单事务");
+    let lock = "SELECT id FROM public.consignment_listings WHERE id=$1 FOR UPDATE NOWAIT";
+    let other: Uuid = sqlx::query_scalar(lock)
+        .bind(unrelated.listing_id)
+        .fetch_one(&mut *second)
+        .await
+        .expect("其他 EID 挂单行可加锁");
+    assert_eq!(other, unrelated.listing_id);
+    let result =
+        sqlx::query_scalar::<_, Uuid>(lock).bind(target.listing_id).fetch_one(&mut *second).await;
+    let error = result.expect_err("目标 EID 挂单行仍被第一个事务持锁");
+    assert_eq!(error.as_database_error().and_then(DatabaseError::code).as_deref(), Some("55P03"));
+    second.rollback().await.expect("回滚并发挂单事务");
+    commit(first).await;
 }
 
 #[tokio::test]

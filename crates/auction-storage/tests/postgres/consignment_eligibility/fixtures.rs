@@ -142,6 +142,25 @@ impl<'a> Listing<'a> {
             VALUES ('{listing_id}',2,'{command_id}','worker','published','resolving','{state}',101,'{LATER}');
         "#)).await;
     }
+
+    pub(super) async fn withdraw_resolving(&self, tx: &mut PgConnection, closed_at: &str) {
+        let Self { listing_id, seller, .. } = self;
+        let command_id = Uuid::new_v4();
+        batch(tx, &format!(r#"
+            UPDATE public.consignment_listings SET state='closed',state_version=2,
+                reason_code='seller_cancelled',updated_at='{closed_at}' WHERE id='{listing_id}';
+            INSERT INTO public.consignment_commands
+                (command_id,actor_kind,actor_ref,operation,request_target,request_digest,listing_id,
+                 result_status,result_code,result_body,created_at)
+            VALUES ('{command_id}','public_user','{seller}','withdraw','{listing_id}',
+                    decode(repeat('22',32),'hex'),'{listing_id}',200,'ok',
+                    '{{"command_id":"{command_id}","operation":"withdraw","listing_id":"{listing_id}",
+                       "listing_version":2,"state":"closed","disposition":"closed","price":101}}','{closed_at}');
+            INSERT INTO public.consignment_events
+                (listing_id,state_version,command_id,actor_kind,event_kind,from_state,to_state,reason_code,price,occurred_at)
+            VALUES ('{listing_id}',2,'{command_id}','public_user','closed','resolving','closed','seller_cancelled',101,'{closed_at}');
+        "#)).await;
+    }
 }
 
 pub(super) async fn equip(tx: &mut PgConnection, world: &str, eid: &str) -> Uuid {

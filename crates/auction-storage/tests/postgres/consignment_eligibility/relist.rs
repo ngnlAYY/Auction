@@ -1,12 +1,17 @@
 //! 验证恢复事务复用投稿时，新的 lot 仍立即成为碰撞。
 
 use auction_application::recovery::RecoveryResolutionStore;
+use auction_domain::UserId;
+use auction_domain::consignment::{ListingError, check_listing_history};
 use auction_time::{Duration, Timestamp};
 use uuid::Uuid;
 
 use super::fixtures::{
-    END, LATER, Listing, OTHER, START, auction, batch, commit, equip, lot, seed, submission,
+    END, LATER, Listing, OTHER, SELLER, START, auction, batch, commit, equip, gear, lot, seed,
+    submission,
 };
+use super::history::record_relisted_return;
+use super::production::history::read_listing_history;
 use super::production::lots::{
     insert_registration_baselines, listing_collision, unassociated_collision_lots,
 };
@@ -119,5 +124,33 @@ async fn recovery_relist_enters_difference_with_reused_submission() {
     assert_eq!(
         unassociated_collision_lots(&mut after, listing.listing_id).await.expect("重列碰撞"),
         [new_lot]
+    );
+
+    let identity = gear("main", "42");
+    let history = read_listing_history(&mut after, &identity).await.expect("仍在拍卖的重列历史");
+    assert_eq!(
+        check_listing_history(&identity, UserId::from_uuid(SELLER), &history.aliases),
+        Err(ListingError::EquipmentBusy)
+    );
+
+    let mut tx = pool.begin().await.expect("重列后流拍并领取返还");
+    batch(
+        &mut tx,
+        &format!(
+            r#"
+        DELETE FROM public.auction_intake_targets WHERE auction_id='{draft}';
+        UPDATE public.auctions SET status='settled' WHERE id='{draft}';
+        UPDATE public.lots SET status='unsold' WHERE id='{new_lot}';
+    "#
+        ),
+    )
+    .await;
+    record_relisted_return(&mut tx, draft, new_lot, equipment_id, submission_id).await;
+    commit(tx).await;
+
+    let history = read_listing_history(&mut after, &identity).await.expect("已返还的重列历史");
+    assert_eq!(
+        check_listing_history(&identity, UserId::from_uuid(SELLER), &history.aliases),
+        Err(ListingError::HistoryUnproven)
     );
 }

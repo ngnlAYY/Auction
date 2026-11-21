@@ -38,6 +38,9 @@ pub(crate) const HISTORY_SQL: &str = concat!(
                au.status AS auction_status, sub.seller AS seller_name, sub.received_at AS submitted_at,
                o.obligation_kind, o.recipient_user_id AS stable_recipient, o.recipient_game_identity,
                d.recipient AS delivery_recipient, f.proof_observed_at AS collected_at,
+               (a.status = 'sold' AND recovery.stage = 'completed'
+                   AND recovery.resolution IN ('reclaimed', 'equipment_recovered')
+                   AND recovery.relisted_lot_id IS NOT NULL) IS TRUE AS completed_relist,
                (o.world_id = e.world_id AND au.world_id = e.world_id
                    AND o.equipment_id = e.id AND o.submission_id IS NOT DISTINCT FROM a.submission_id
                    AND d.origin_kind = 'settlement' AND d.origin_id = o.id::text
@@ -62,12 +65,8 @@ pub(crate) const HISTORY_SQL: &str = concat!(
                            AND d.result_metadata->>'proof' IN ('sent_exact_payload_v1', 'sent_recovered_reference_v1')
                        )
                    )
-                   AND NOT EXISTS (
-                       -- 已撤销的成交不能用原买方投递证明所有权。
-                       SELECT 1 FROM public.settlement_recoveries recovery
-                       WHERE recovery.auction_id = a.auction_id AND recovery.lot_id = a.id
-                         AND recovery.resolution IS NOT NULL
-                   )
+                   -- 原成交的领取证明已失效。收回并重列后，即使后续 lot 已交割或返还，第一版也不以其替代原证明。
+                   AND recovery.resolution IS NULL
                    AND NOT EXISTS (
                        SELECT 1 FROM public.settlement_equipment_losses loss WHERE loss.delivery_id = d.id
                    )) IS TRUE AS collection_proof,
@@ -82,11 +81,7 @@ pub(crate) const HISTORY_SQL: &str = concat!(
                      AND (af.execution_state = 'manual_reconcile' OR ad.status IN ('sending', 'manual_reconcile'))
                ) AS unknown_dispatch,
                (
-                   EXISTS (
-                       SELECT 1 FROM public.settlement_recoveries recovery
-                       WHERE recovery.auction_id = a.auction_id AND recovery.lot_id = a.id
-                         AND recovery.stage <> 'completed'
-                   ) OR EXISTS (
+                   (recovery.stage <> 'completed') IS TRUE OR EXISTS (
                        SELECT 1 FROM public.settlement_obligations asset
                        JOIN public.settlement_return_cases rc ON rc.obligation_id = asset.id
                        WHERE asset.auction_id = a.auction_id AND asset.lot_id = a.id
@@ -100,6 +95,8 @@ pub(crate) const HISTORY_SQL: &str = concat!(
         LEFT JOIN public.lots a ON a.equipment_id = e.id
         LEFT JOIN public.auctions au ON au.id = a.auction_id
         LEFT JOIN public.auction_submissions sub ON sub.id = a.submission_id
+        LEFT JOIN public.settlement_recoveries recovery ON recovery.auction_id = a.auction_id
+                                                     AND recovery.lot_id = a.id
         LEFT JOIN public.settlement_obligations o
           ON o.auction_id = a.auction_id AND o.lot_id = a.id AND o.obligation_kind = CASE a.status
               WHEN 'sold' THEN CASE e.world_id WHEN 'main' THEN 'winner_equipment_cod'
@@ -112,7 +109,8 @@ pub(crate) const HISTORY_SQL: &str = concat!(
     ), names AS MATERIALIZED (
         SELECT seller_name AS name FROM lot_evidence WHERE seller_name IS NOT NULL
         UNION SELECT recipient_game_identity FROM lot_evidence WHERE recipient_game_identity IS NOT NULL
-        UNION SELECT delivery_recipient FROM lot_evidence WHERE delivery_recipient IS NOT NULL
+        UNION SELECT delivery_recipient FROM lot_evidence
+              WHERE stable_recipient IS NULL AND delivery_recipient IS NOT NULL
     ), identities AS MATERIALIZED (
         SELECT n.name, candidate.user_id FROM names n
         CROSS JOIN LATERAL (
@@ -135,14 +133,14 @@ pub(crate) const HISTORY_SQL: &str = concat!(
            le.lot_id, le.lot_status, le.winner_user_id, le.lot_created_at,
            le.submission_id, le.auction_status, le.submitted_at, le.collected_at,
            le.obligation_kind, le.matches_original, le.satisfied, le.delivery_succeeded,
-           le.unknown_dispatch, le.open_case, seller.user_id AS seller_user_id,
-           CASE WHEN le.stable_recipient IS NOT NULL THEN delivered.user_id
-                ELSE frozen.user_id END AS recipient_user_id,
-           (le.collection_proof AND CASE WHEN le.stable_recipient IS NOT NULL
-               THEN delivered.user_id IS NULL OR delivered.user_id = le.stable_recipient
-               ELSE lower(le.delivery_recipient) = lower(le.recipient_game_identity)
-                      OR delivered.user_id = frozen.user_id
-            END) IS TRUE AS matching_collection
+           le.unknown_dispatch, le.open_case, le.completed_relist, seller.user_id AS seller_user_id,
+           -- 已绑定的原投递及领取证明沿用义务冻结的 UUID，收件旧名可能已被其他账号使用。
+           COALESCE(le.stable_recipient, frozen.user_id) AS recipient_user_id,
+           (le.collection_proof AND (
+                le.stable_recipient IS NOT NULL
+                OR lower(le.delivery_recipient) = lower(le.recipient_game_identity)
+                OR delivered.user_id = frozen.user_id
+            )) IS TRUE AS matching_collection
     FROM lot_evidence le
     LEFT JOIN identities seller ON seller.name = le.seller_name
     LEFT JOIN identities frozen ON frozen.name = le.recipient_game_identity

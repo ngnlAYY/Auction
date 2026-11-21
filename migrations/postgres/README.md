@@ -49,7 +49,7 @@ VALUES (76, 'breaking');
 
 ## 索引
 
-当前 head 为 `000117`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。下表按版本递增，只列主题，不是逐条字段说明。
+当前 head 以表末项为准，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时更新一览和保留策略。下表按版本递增，只列主题，不是逐条字段说明。
 
 | 版本 | 主题 |
 | --- | --- |
@@ -170,3 +170,4 @@ VALUES (76, 'breaking');
 | 000115 | 结算退件补寄与资金返还：履约新增当前派发编号 `dispatch_no`（既有行为 1），只追加的派发历史 `settlement_fulfillment_dispatches`（`(义务, 派发编号)` 主键，补寄引用授权它的退件案件）与资金投递历史绑定 `settlement_funding_delivery_bindings`（分配指针换代后旧派发仍受资金保护）；`settlement_funding_returns` 增加入站/Take/来源唯一绑定（NOT VALID 只约束新行）并改为只追加、运行账号只授 `INSERT`；补登既有派发与绑定；旧程序按单指针定位资金，登记 breaking |
 | 000116 | `operations_alert_signals` 的 kind/scope/identity 闭集新增 `settlement_return_pending`（已绑定待处理的退件案件）与 `settlement_return_quarantined`（隔离或待重新核验的退件案件），沿用 `fulfillment` 来源与 `auction` scope；另新增 `settlement_return_take_unknown`（Take 结果未知的退件案件），scope 为结果未知的原因闭集（`assets_claimable`、`assets_unclaimable`、`assets_changed`、`mail_missing`、`receipt_unproven`、`session_changed`、`take_unverifiable`、`disposition_conflict`、`awaiting_observation`），每个原因一个信号；按未结案案件计数，不改变案件、义务、投递或资金；旧程序无法解析新 kind，登记 breaking |
 | 000117 | 一口价挂单基础：新增挂单、只追加命令/事件/快照/基线/碰撞、可退休登记信封、重放比较密钥及持久解析工作与许可；复合外键绑定当前快照，延迟约束保护首写基线和同版事件；新投影按列授权，解析单例初始化为关闭；兼容与恢复待真实 PG 验证，登记 breaking |
+| [寄售访问路径](000118_consignment_access_paths.up.sql) | 新增装备世界与规范编号表达式索引、lot 装备 ID 与 lot ID 索引，供寄售历史、碰撞与有效活动额度读取，登记 compatible |

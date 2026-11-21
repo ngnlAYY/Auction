@@ -1,4 +1,4 @@
-//! 用实测执行计划比较 PG18 基础 schema 与候选访问路径。
+//! 验证 PG18 在历史数据规模下使用寄售迁移提供的索引。
 
 use std::io::{Write, stdout};
 
@@ -15,7 +15,7 @@ fn explain(sql: &str) -> AssertSqlSafe<String> {
     AssertSqlSafe(format!("EXPLAIN (ANALYZE, BUFFERS) {sql}"))
 }
 
-async fn plans(cx: &mut PgConnection, listing_id: Uuid, label: &str) {
+async fn check_plans(cx: &mut PgConnection, listing_id: Uuid) {
     let samples = [
         (
             "collision",
@@ -53,14 +53,29 @@ async fn plans(cx: &mut PgConnection, listing_id: Uuid, label: &str) {
                 .expect("活动额度执行计划"),
         ),
     ];
+    let mut missing = Vec::new();
+    let mut buffers = Vec::new();
     for (name, rows) in samples {
-        assert!(rows.iter().any(|row| row.contains("Buffers:")), "计划缺少缓冲区计数");
-        // 直接输出脱敏执行计划，成功时也能从固定命令的中继结果取数。
+        let root_buffers = rows.iter().find(|row| row.contains("Buffers:"));
+        buffers.push((name, root_buffers.expect("计划缺少缓冲区计数").trim().to_owned()));
+        // 便于本地查看脱敏计划。断言失败另外附上根节点的缓冲页。
         let plan =
             rows.into_iter().filter(|row| !row.contains("never executed")).collect::<Vec<_>>();
-        writeln!(stdout().lock(), "\n2E PG18 {label} {name}\n{}", plan.join("\n"))
-            .expect("输出测试计划");
+        writeln!(stdout().lock(), "\n2E PG18 {name}\n{}", plan.join("\n")).expect("输出测试计划");
+        if name == "hourly" {
+            continue;
+        }
+        for index in ["equipment_consignment_eid_alias_idx", "lots_equipment_id_idx"] {
+            let used = plan.iter().any(|row| {
+                row.split_ascii_whitespace().any(|word| word == index)
+                    && (row.contains("Index Scan") || row.contains("Index Only Scan"))
+            });
+            if !used {
+                missing.push((name, index));
+            }
+        }
     }
+    assert!(missing.is_empty(), "未执行的寄售索引扫描：{missing:?}；缓冲页：{buffers:?}");
 }
 
 #[tokio::test]
@@ -104,7 +119,8 @@ async fn explain_access_paths() {
         ALTER TABLE public.consignment_listings ENABLE TRIGGER USER;
     "#)).await;
     commit(tx).await;
-    let listing = Listing::new(101, "42");
+    // 活动额度也要扫过这件有大量基线 lot 的装备。
+    let listing = Listing { created: "2026-01-01T22:00:00Z", ..Listing::new(101, "42") };
     let mut tx = pool.begin().await.expect("性能夹具基线");
     listing.register(&mut tx).await;
     assert_eq!(
@@ -125,17 +141,5 @@ async fn explain_access_paths() {
         .expect("测试服务器版本");
     assert!(pg_version.starts_with("18"));
     batch(&mut cx, "ANALYZE;").await;
-    plans(&mut cx, listing.listing_id, "schema").await;
-    batch(
-        &mut cx,
-        "
-        CREATE INDEX test_eid_alias ON public.equipment
-          (world_id, public.consignment_eid_alias(external_equipment_id));
-        CREATE INDEX test_lot_equipment ON public.lots (equipment_id,id);
-        ANALYZE public.equipment;
-        ANALYZE public.lots;
-    ",
-    )
-    .await;
-    plans(&mut cx, listing.listing_id, "candidate").await;
+    check_plans(&mut cx, listing.listing_id).await;
 }

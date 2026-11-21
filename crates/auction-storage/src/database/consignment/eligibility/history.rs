@@ -82,11 +82,15 @@ impl Alias {
         let latest_lot = self
             .lots
             .last()
-            .filter(|_| continuous)
+            .filter(|lot| continuous && !lot.completed_relist)
             .map(|lot| HistoryLotEvidence { handoff_from: handoff, ..lot.evidence });
         HistoryAliasEvidence {
             has_active_auction: self.lots.iter().any(Lot::active),
-            has_unsettled_transfer: self.lots.iter().any(|lot| lot.unsettled(identity)),
+            // 已收回并重列的原成交失去验权证明；派发未知和未结案件仍由下方的事实单独判断。
+            has_unsettled_transfer: self
+                .lots
+                .iter()
+                .any(|lot| !lot.completed_relist && lot.unsettled(identity)),
             has_unknown_dispatch: self.lots.iter().any(|lot| lot.unknown_dispatch),
             has_open_equipment_case: self.lots.iter().any(|lot| lot.open_case),
             has_conflicting_original_equipment: self.conflicting_original,
@@ -103,6 +107,7 @@ struct Lot {
     collected_at: Option<Timestamp>,
     unknown_dispatch: bool,
     open_case: bool,
+    completed_relist: bool,
 }
 
 impl Lot {
@@ -162,6 +167,7 @@ impl Lot {
             collected_at: row.try_get("collected_at")?,
             unknown_dispatch: row.try_get("unknown_dispatch")?,
             open_case: row.try_get("open_case")?,
+            completed_relist: row.try_get("completed_relist")?,
         })
     }
 

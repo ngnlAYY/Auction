@@ -9,7 +9,7 @@ use super::fixtures::{
     END, LATER, OTHER, SELLER, START, auction, batch, commit, equip, gear, lot, seed, submission,
 };
 use super::production::history::read_listing_history;
-use crate::support::TestDatabase;
+use crate::support::{TestDatabase, fixtures};
 
 async fn verdict(cx: &mut PgConnection, eid: &str, user: Uuid) -> Result<(), ListingError> {
     let identity = gear("main", eid);
@@ -70,6 +70,32 @@ impl ReturnEvidence {
         "#)).await;
         (obligation_id, delivery_id)
     }
+}
+
+pub(super) async fn record_relisted_return(
+    tx: &mut PgConnection,
+    auction_id: Uuid,
+    lot_id: Uuid,
+    equipment_id: Uuid,
+    submission_id: Uuid,
+) {
+    let proof = ReturnEvidence {
+        lot_id,
+        auction_id,
+        equipment_id,
+        submission_id,
+        kind: "unsold_return",
+        recipient: "FakeSeller",
+        collected: true,
+    };
+    let (obligation_id, delivery_id) = proof.record(tx).await;
+    batch(tx, &format!(r#"
+        UPDATE public.deliveries d SET completed_at=a.created_at + interval '1 hour'
+        FROM public.lots a WHERE d.id='{delivery_id}' AND a.id='{lot_id}';
+        UPDATE public.settlement_obligation_fulfillments f
+        SET completed_at=a.created_at + interval '2 hours',proof_observed_at=a.created_at + interval '2 hours'
+        FROM public.lots a WHERE f.obligation_id='{obligation_id}' AND a.id='{lot_id}';
+    "#)).await;
 }
 
 async fn record_return(
@@ -213,6 +239,195 @@ async fn domain_history_preserves_alias_disagreement_and_checks_delivery_binding
         );
     }
     assert_eq!(verdict(&mut read, "46", SELLER).await, Err(ListingError::HistoryAliasConflict));
+}
+
+#[tokio::test]
+async fn sold_history_uses_frozen_buyer_id_after_rename_and_name_reuse() {
+    let db = TestDatabase::create().await.expect("临时 PG18");
+    let owner = db.maintenance_store().await.expect("维护连接");
+    let runtime = db.store().await.expect("服务连接");
+    let pool = owner.postgres_pool();
+    seed(pool).await;
+    let mut tx = pool.begin().await.expect("成交夹具");
+    let settled = auction(&mut tx, "main", 1, "settled").await;
+    let sold = record_return(&mut tx, settled, "42", "FakeSeller", "unsold", true).await;
+    let (obligation_id, delivery_id) = sold.record(&mut tx).await;
+    batch(
+        &mut tx,
+        &format!(
+            r#"
+        UPDATE public.lots SET status='sold',leader_user_id='{OTHER}',current_price=50000,
+            effective_end_at='{LATER}' WHERE id='{}';
+        UPDATE public.settlement_obligations SET obligation_kind='winner_equipment_cod',
+            recipient_game_identity=NULL,recipient_user_id='{OTHER}',amount=50000
+            WHERE id='{obligation_id}';
+        UPDATE public.deliveries SET recipient='FakeOther' WHERE id='{delivery_id}';
+    "#,
+            sold.lot_id
+        ),
+    )
+    .await;
+    commit(tx).await;
+
+    let mut read = runtime.postgres_pool().acquire().await.expect("历史连接");
+    assert_eq!(verdict(&mut read, "42", OTHER).await, Ok(()), "买家改名前");
+    let mut admin = pool.acquire().await.expect("改名连接");
+    batch(
+        &mut admin,
+        &format!(
+            r#"
+        UPDATE public.users SET username='FakeRenamedBuyer' WHERE id='{OTHER}';
+        INSERT INTO public.user_renames(id,user_id,previous_username,next_username,actor,created_at)
+        VALUES (gen_random_uuid(),'{OTHER}','FakeOther','FakeRenamedBuyer','fake-actor','{END}');
+    "#
+        ),
+    )
+    .await;
+    assert_eq!(verdict(&mut read, "42", OTHER).await, Ok(()), "买家改名后");
+    let new_owner_of_name = Uuid::new_v4();
+    fixtures::seed_user(pool, new_owner_of_name, "FakeNewUser").await;
+    batch(
+        &mut admin,
+        &format!("UPDATE public.users SET username='FakeOther' WHERE id='{new_owner_of_name}';"),
+    )
+    .await;
+    assert_eq!(verdict(&mut read, "42", OTHER).await, Ok(()), "旧名复用后原买家仍通过");
+    assert_eq!(
+        verdict(&mut read, "42", new_owner_of_name).await,
+        Err(ListingError::HistoryOwnerMismatch)
+    );
+
+    batch(
+        &mut admin,
+        &format!(
+            "UPDATE public.deliveries SET external_reference='mooglemail:main:send:54321'
+         WHERE id='{delivery_id}';"
+        ),
+    )
+    .await;
+    assert_eq!(verdict(&mut read, "42", OTHER).await, Err(ListingError::EquipmentBusy));
+}
+
+#[tokio::test]
+async fn name_only_return_history_requires_unique_resolution() {
+    let db = TestDatabase::create().await.expect("临时 PG18");
+    let owner = db.maintenance_store().await.expect("维护连接");
+    let runtime = db.store().await.expect("服务连接");
+    let pool = owner.postgres_pool();
+    seed(pool).await;
+    let mut tx = pool.begin().await.expect("冻结游戏名夹具");
+    let settled = auction(&mut tx, "main", 1, "settled").await;
+    let returned = record_return(&mut tx, settled, "42", "FakeSeller", "unsold", true).await;
+    ReturnEvidence { recipient: "FakeOldSeller", ..returned }.record(&mut tx).await;
+    batch(
+        &mut tx,
+        &format!(
+            r#"
+        INSERT INTO public.user_renames(id,user_id,previous_username,next_username,actor,created_at)
+        VALUES (gen_random_uuid(),'{SELLER}','FakeOldSeller','FakeSeller','fake-actor','{END}');
+    "#
+        ),
+    )
+    .await;
+    commit(tx).await;
+
+    let mut read = runtime.postgres_pool().acquire().await.expect("历史连接");
+    assert_eq!(verdict(&mut read, "42", SELLER).await, Ok(()));
+    let new_owner_of_name = Uuid::new_v4();
+    fixtures::seed_user(pool, new_owner_of_name, "FakeOldSeller").await;
+    for candidate in [SELLER, new_owner_of_name] {
+        assert_eq!(verdict(&mut read, "42", candidate).await, Err(ListingError::HistoryUnproven));
+    }
+}
+
+#[tokio::test]
+async fn unknown_dispatch_blocks_otherwise_proven_history() {
+    let db = TestDatabase::create().await.expect("临时 PG18");
+    let owner = db.maintenance_store().await.expect("维护连接");
+    let runtime = db.store().await.expect("服务连接");
+    let pool = owner.postgres_pool();
+    seed(pool).await;
+    let mut tx = pool.begin().await.expect("已领取返还夹具");
+    let settled = auction(&mut tx, "main", 1, "settled").await;
+    let returned = record_return(&mut tx, settled, "42", "FakeSeller", "unsold", true).await;
+    returned.record(&mut tx).await;
+    commit(tx).await;
+    let mut read = runtime.postgres_pool().acquire().await.expect("历史连接");
+    assert_eq!(verdict(&mut read, "42", SELLER).await, Ok(()));
+
+    let mut tx = pool.begin().await.expect("独立派发责任夹具");
+    // 同 lot 的附加实物义务单独进入人工对账，保留流拍寄还的原证明。
+    let (obligation_id, delivery_id) =
+        ReturnEvidence { kind: "withdrawn_return", collected: false, ..returned }
+            .record(&mut tx)
+            .await;
+    batch(&mut tx, &format!(r#"
+        UPDATE public.deliveries SET status='manual_reconcile',failure_code='fake_unknown_dispatch',
+            external_reference=NULL,result_metadata='{{}}' WHERE id='{delivery_id}';
+        UPDATE public.settlement_obligation_fulfillments SET execution_state='manual_reconcile',
+            completed_at='{END}',last_error_code='fake_unknown_dispatch' WHERE obligation_id='{obligation_id}';
+    "#)).await;
+    commit(tx).await;
+
+    let identity = gear("main", "42");
+    let history = read_listing_history(&mut read, &identity).await.expect("派发证据读取");
+    let [alias] = history.aliases.as_slice() else { panic!("预期一条装备历史") };
+    assert!(alias.has_unknown_dispatch);
+    assert!(!alias.has_open_equipment_case);
+    assert_eq!(
+        check_listing_history(&identity, UserId::from_uuid(SELLER), &history.aliases),
+        Err(ListingError::EquipmentBusy)
+    );
+}
+
+#[tokio::test]
+async fn open_equipment_case_blocks_otherwise_proven_history() {
+    let db = TestDatabase::create().await.expect("临时 PG18");
+    let owner = db.maintenance_store().await.expect("维护连接");
+    let runtime = db.store().await.expect("服务连接");
+    let pool = owner.postgres_pool();
+    seed(pool).await;
+    let mut tx = pool.begin().await.expect("已领取返还夹具");
+    let settled = auction(&mut tx, "main", 1, "settled").await;
+    let (obligation_id, delivery_id) =
+        record_return(&mut tx, settled, "42", "FakeSeller", "unsold", true)
+            .await
+            .record(&mut tx)
+            .await;
+    commit(tx).await;
+    let mut read = runtime.postgres_pool().acquire().await.expect("历史连接");
+    assert_eq!(verdict(&mut read, "42", SELLER).await, Ok(()));
+
+    let mut tx = pool.begin().await.expect("独立实物案件夹具");
+    let return_mail_id = Uuid::new_v4();
+    batch(&mut tx, &format!(r#"
+        INSERT INTO public.inbound_mail
+            (id,mailbox_key,external_mail_id,world_id,mail_kind,content_digest,received_at,status,
+             decision_code,decision_metadata,processed_at,created_at)
+        VALUES ('{return_mail_id}','fake-mailbox','54321','main','delivery',
+                decode(repeat('11',32),'hex'),'{END}','accepted','settlement_recovery_returned',
+                '{{}}','{END}','{END}');
+        INSERT INTO public.settlement_return_evidence
+            (return_mail_id,match_state,reason_code,obligation_id,delivery_id,previous_execution_state,recorded_at)
+        VALUES ('{return_mail_id}','fulfillment_terminal','returned_assets_match',
+                '{obligation_id}','{delivery_id}','satisfied','{END}');
+        INSERT INTO public.settlement_return_cases
+            (return_mail_id,world_id,obligation_id,delivery_id,dispatch_no,status,reason_code,
+             resend_limit,created_at,updated_at)
+        VALUES ('{return_mail_id}','main','{obligation_id}','{delivery_id}',1,'awaiting_decision',
+                'returned_assets_match',3,'{END}','{END}');
+    "#)).await;
+    commit(tx).await;
+
+    let identity = gear("main", "42");
+    let history = read_listing_history(&mut read, &identity).await.expect("案件证据读取");
+    let [alias] = history.aliases.as_slice() else { panic!("预期一条装备历史") };
+    assert!(alias.has_open_equipment_case);
+    assert!(!alias.has_unknown_dispatch);
+    assert_eq!(
+        check_listing_history(&identity, UserId::from_uuid(SELLER), &history.aliases),
+        Err(ListingError::EquipmentBusy)
+    );
 }
 
 #[tokio::test]
