@@ -403,44 +403,48 @@ pub(super) async fn missing_fact_rejected(
     Ok(())
 }
 
-// 审计失败注入：postgres_audit_failure_rolls_back
-// 验证不变量 3、8：审计无法追加时，挂单、回执及事件都不能提交。
-pub(super) async fn audit_failure_rolls_back(
-    store: &DatabaseStore,
-    maintenance: &DatabaseStore,
-) -> Result<(), WriteError> {
-    let pool = maintenance.postgres_pool();
-    seed(maintenance).await?;
-    sqlx::raw_sql(
-        "CREATE FUNCTION public.consignment_fake_audit_failure() RETURNS trigger
-         LANGUAGE plpgsql AS $$BEGIN RAISE check_violation USING CONSTRAINT = 'fake_audit_guard'; END;$$;
-         CREATE TRIGGER consignment_fake_audit_failure BEFORE INSERT ON public.audit_records
-         FOR EACH ROW WHEN (NEW.action = 'consignment.register') EXECUTE FUNCTION public.consignment_fake_audit_failure()",
-    ).execute(pool).await?;
-    let metrics = store.audit_metrics_source();
-    let constraints = || {
-        metrics
-            .snapshot()
-            .failures
-            .into_iter()
-            .find(|failure| {
-                matches!(failure.kind, AuditFailureKind::ConstraintViolation)
-                    && matches!(failure.sqlstate_class, AuditSqlstateClass::Constraint)
-            })
-            .map_or(0, |failure| failure.count)
-    };
-    let before = constraints();
-    let result = capture_audit_failure(register(store, COMMAND, LISTING, SELLER, "42")).await;
-    assert_constraint(result, "fake_audit_guard");
-    assert!(constraints() > before, "审计约束失败计数应增加");
-    assert!(metrics.snapshot().readiness_blocked);
-    assert_eq!(counts(pool).await?, (0, 0, 0, 0));
-    sqlx::query("DROP TRIGGER consignment_fake_audit_failure ON public.audit_records")
-        .execute(pool)
-        .await?;
-    assert_eq!(register(store, COMMAND, LISTING, SELLER, "42").await?.status, 202);
-    assert_eq!(counts(pool).await?, (1, 1, 1, 1));
-    Ok(())
+impl DatabaseStore {
+    // 审计失败注入：postgres_audit_failure_rolls_back audit_failure_rolls_back
+    /// 验证不变量 3、8：审计无法追加时，挂单、回执及事件都不能提交。
+    #[doc(hidden)]
+    pub async fn audit_failure_rolls_back(&self, maintenance: &Self) -> Result<(), String> {
+        async {
+            let pool = maintenance.postgres_pool();
+            seed(maintenance).await?;
+            sqlx::raw_sql(
+                "CREATE FUNCTION public.consignment_fake_audit_failure() RETURNS trigger
+                 LANGUAGE plpgsql AS $$BEGIN RAISE check_violation USING CONSTRAINT = 'fake_audit_guard'; END;$$;
+                 CREATE TRIGGER consignment_fake_audit_failure BEFORE INSERT ON public.audit_records
+                 FOR EACH ROW WHEN (NEW.action = 'consignment.register') EXECUTE FUNCTION public.consignment_fake_audit_failure()",
+            ).execute(pool).await?;
+            let metrics = self.audit_metrics_source();
+            let constraints = || {
+                metrics
+                    .snapshot()
+                    .failures
+                    .into_iter()
+                    .find(|failure| {
+                        matches!(failure.kind, AuditFailureKind::ConstraintViolation)
+                            && matches!(failure.sqlstate_class, AuditSqlstateClass::Constraint)
+                    })
+                    .map_or(0, |failure| failure.count)
+            };
+            let before = constraints();
+            let result = capture_audit_failure(register(self, COMMAND, LISTING, SELLER, "42")).await;
+            assert_constraint(result, "fake_audit_guard");
+            assert!(constraints() > before, "审计约束失败计数应增加");
+            assert!(metrics.snapshot().readiness_blocked);
+            assert_eq!(counts(pool).await?, (0, 0, 0, 0));
+            sqlx::query("DROP TRIGGER consignment_fake_audit_failure ON public.audit_records")
+                .execute(pool)
+                .await?;
+            assert_eq!(register(self, COMMAND, LISTING, SELLER, "42").await?.status, 202);
+            assert_eq!(counts(pool).await?, (1, 1, 1, 1));
+            Ok::<(), WriteError>(())
+        }
+        .await
+        .map_err(|error| error.to_string())
+    }
 }
 
 async fn publish(

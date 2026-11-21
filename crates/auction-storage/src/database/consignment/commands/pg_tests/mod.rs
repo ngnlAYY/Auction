@@ -32,7 +32,6 @@ impl DatabaseStore {
             "compare_all_fields" => writes::compare_all_fields(self, maintenance).await,
             "atomic_combinations" => writes::atomic_combinations(self, maintenance).await,
             "missing_fact_rejected" => writes::missing_fact_rejected(self, maintenance).await,
-            "audit_failure_rolls_back" => writes::audit_failure_rolls_back(self, maintenance).await,
             "constraint_mapping" => writes::constraint_mapping(self, maintenance).await,
             "error_detail_absent" => diagnostics::verify(self).await,
             "commit_unknown_sqlstate" => diagnostics::commit_unknown_sqlstate(self).await,
