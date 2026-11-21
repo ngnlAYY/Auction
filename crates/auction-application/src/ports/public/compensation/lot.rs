@@ -131,9 +131,7 @@ impl PublicCompensationLotPage {
         })?;
         let reversal_count = self.entries.iter().filter(|entry| entry.reversal.is_some()).count();
         if self.total < 0
-            || self.offset > self.total
-            || entry_count > self.total - self.offset
-            || entry_count > self.limit
+            || entry_count > self.total.saturating_sub(self.offset).clamp(0, self.limit)
             || i64::try_from(reversal_count).map_err(|error| {
                 record_error(
                     DiagnosticLevel::Error,
