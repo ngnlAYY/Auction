@@ -1,6 +1,6 @@
 //! Worker 进程装配：加载角色配置、注入适配器、启动各 owner 运行时并处理优雅关闭。
 
-use std::{pin::Pin, sync::Arc};
+use std::{ops::AsyncFnOnce, pin::Pin, sync::Arc};
 
 use anyhow::Context;
 use auction_application::core::Clock;
@@ -52,18 +52,25 @@ type SettlementPorts = (
 /// 启动独立 Worker，沿用角色配置选择器。
 pub async fn run() -> anyhow::Result<()> {
     let config = AppConfig::load(Role::Worker).context("加载 Worker 配置失败")?;
-    run_config(config).await
+    run_config(config, run_configured_service).await
 }
 
 /// 从显式角色路径启动，供单文件 supervisor 派生的独立进程使用。
 pub async fn run_from_path(path: std::path::PathBuf) -> anyhow::Result<()> {
     let config =
         AppConfig::load_from_path(Role::Worker, path).context("加载显式指定的 Worker 配置失败")?;
-    run_config(config).await
+    run_config(config, run_configured_service).await
 }
 
-async fn run_config(config: AppConfig) -> anyhow::Result<()> {
+async fn run_config(
+    config: AppConfig,
+    start: impl AsyncFnOnce(AppConfig) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
     consignment_startup(config.consignment.enabled(), config.database_url().is_some())?;
+    start(config).await
+}
+
+async fn run_configured_service(config: AppConfig) -> anyhow::Result<()> {
     let mut signals = TerminationSignals::subscribe().context("订阅 Worker 终止信号失败")?;
     let tracing_config = tracing_config(&config.tracing);
     let telemetry = auction_observability::init_with_config(
@@ -218,9 +225,32 @@ fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
 
 #[cfg(test)]
 mod consignment_tests {
+    use std::cell::Cell;
+
     use auction_config::ConsignmentActivation;
 
-    use super::consignment_startup;
+    use super::{consignment_startup, run_config};
+    use crate::bootstrap::persistent::consignment_test_config;
+
+    #[tokio::test]
+    async fn run_config_checks_consignment_before_claiming_work() {
+        let claims = Cell::new(0);
+        let result = run_config(consignment_test_config(), async |_| {
+            claims.set(claims.get() + 1);
+            Ok(())
+        })
+        .await;
+        if cfg!(all(feature = "consignment-dev-preview", debug_assertions)) {
+            result.unwrap();
+            assert_eq!(claims.get(), 1);
+        } else {
+            assert_eq!(claims.get(), 0);
+            assert!(
+                format!("{:#}", result.unwrap_err())
+                    .contains("consignment-dev-preview 的本地调试构建")
+            );
+        }
+    }
 
     #[test]
     fn consignment_startup_requires_capable_artifact_and_database() {

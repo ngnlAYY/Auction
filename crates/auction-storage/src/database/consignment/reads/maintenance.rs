@@ -118,6 +118,7 @@ impl DatabaseStore {
                 (Some("deposit_expired"), _) => AutoCloseEvidence::DepositExpired(expires_at),
                 (Some("seller_ineligible" | "service_disabled"), _) => {
                     // 账号停用等事实没有端口要求的拉黑流水 ID。缺证据时保留有效关闭并推进游标。
+                    // 异常旧数据若已拉黑却没有登记后的拉黑流水，也不生成候选，可由 Admin 下架收口。
                     tracing::warn!("寄售补扫发现无法生成证据的强制关闭");
                     continue;
                 }

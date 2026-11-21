@@ -28,6 +28,14 @@ async fn persistent_runner_supervises_consignment_and_awaits_its_drain() {
     fixture.work.steps.lock().unwrap().extend([ClaimStep::Claim, ClaimStep::Claim]);
     fixture.equipment.gate.blocked.store(true, Ordering::Relaxed);
     fixture.work.abandon_gate.blocked.store(true, Ordering::Relaxed);
+    let candidates = [candidate(1), candidate(2)];
+    fixture.scans.pages.lock().unwrap().push_back(page(candidates.to_vec(), None));
+    fixture
+        .commands
+        .close
+        .lock()
+        .unwrap()
+        .extend(candidates.map(|_| Err(ConsignmentError::Unavailable)));
     let consignment = fixture.prepare(true, async { Ok(false) }).await.unwrap();
     let mut worker = worker(Arc::new(PausedClock::new(time(0))));
     let metrics = Arc::new(RecordingMetrics::default());
@@ -47,6 +55,15 @@ async fn persistent_runner_supervises_consignment_and_awaits_its_drain() {
     );
     assert!(
         metrics.iterations().contains(&(WorkerLoop::ConsignmentMaintenance, WorkerResult::Success))
+    );
+    assert_eq!(*fixture.commands.closed.lock().unwrap(), candidates);
+    assert_eq!(
+        metrics
+            .unpersisted()
+            .into_iter()
+            .filter(|(kind, _)| *kind == WorkerLoop::ConsignmentMaintenance)
+            .collect::<Vec<_>>(),
+        [(WorkerLoop::ConsignmentMaintenance, SafeErrorKind::CONSIGNMENT_AUTO_CLOSE_FAILED); 2],
     );
 
     stop.send(()).unwrap();

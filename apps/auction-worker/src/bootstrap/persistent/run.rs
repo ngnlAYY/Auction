@@ -20,10 +20,10 @@ use auction_application::settlement::{
     SettlementReturnWorkStore,
 };
 use auction_config::AppConfig;
-use auction_jobs::WorkerControlHandle;
+use auction_jobs::{WorkerControlHandle, consignment::ConsignmentWorker};
 use auction_observability::{
     HeartbeatHealthReader, HeartbeatPublisher, HeartbeatPublisherConfig, HeartbeatStore,
-    ProcessMetrics, ProcessRole, ServiceName, TracingHealthReader,
+    ProcessRole, ServiceName,
 };
 use auction_process::TaskGuard;
 use auction_storage::{
@@ -31,11 +31,11 @@ use auction_storage::{
     DatabaseSettlementCommands, DatabaseStore,
 };
 use auction_time::Timestamp;
-use uuid::Uuid;
 
-use super::profile::{configure_schedule_runtime, database_profile};
+use super::PersistentRuntime;
+use super::heartbeat;
+use super::profile::configure_schedule_runtime;
 use super::recovery::{asset_reconciliation_runtime, recovery_health_runtime, recovery_worlds};
-use super::{consignment, heartbeat};
 use crate::bootstrap::control::{
     WorkerRemoteReads, WorkerRuntimeTaskExit, abort_worker_task, bind_worker_control_server,
     join_worker_control_task, join_worker_task, spawn_external_heartbeat, spawn_heartbeat,
@@ -49,48 +49,24 @@ use crate::bootstrap::fulfillment::{
 use crate::bootstrap::hot::spawn_hot_config_watch;
 use crate::bootstrap::mail::configure_mail_poll;
 use crate::bootstrap::operations_alert::configure_operations_alert;
-use crate::bootstrap::skeleton::run_worker_skeleton;
-use crate::bootstrap::{SettlementPorts, ShutdownFuture, SystemClock};
+use crate::bootstrap::{SettlementPorts, SystemClock};
 
-pub(crate) async fn run_worker(
+/// 启动已完成寄售预检的持久化任务，并统一监管和排空。
+pub(super) async fn run_connected(
     config: &AppConfig,
-    tracing_health: Arc<dyn TracingHealthReader>,
-    metrics: Arc<ProcessMetrics>,
-    switches: auction_application::runtime_switches::RuntimeSwitches,
-    runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
-    write_lifecycle: auction_application::operations::ExternalWriteLifecycle,
-    shutdown: ShutdownFuture,
+    store: Arc<DatabaseStore>,
+    worker_id: String,
+    runtime: PersistentRuntime,
+    consignment: Option<ConsignmentWorker>,
 ) -> anyhow::Result<()> {
-    let Some(database_url) = config.database_url() else {
-        if config.worker.mooglemail.enabled
-            || config.worker.forum.enabled
-            || config.worker.operations_alert.notify_enabled()
-            || config.worker.operations_alert.webhook_enabled()
-        {
-            anyhow::bail!("启用外部 Worker 功能时必须配置 PostgreSQL database_url");
-        }
-        run_worker_skeleton(config, metrics, runtime_failure, shutdown).await?;
-        return Ok(());
-    };
-    // 审计失败按类别向共享影子框架记样本；进程级安装一次。
-    auction_storage::install_audit_shadow_recorder(metrics.shadow());
-    let store = Arc::new(
-        DatabaseStore::connect(database_url, database_profile(config)?)
-            .await
-            .context("连接 Worker 数据库失败")?
-            .with_database_recorder(metrics.database())
-            .with_runtime_switches(switches.clone())
-            .with_notification_recorder(metrics.notifications())
-            .with_shadow_recorder(metrics.shadow())
-            .with_public_base_url(config.worker.forum.public_base_url.clone())
-            .with_migration_compatibility_mode(config.readiness.migration_compatibility_mode)
-            .with_migration_readiness_recorder(metrics.migration_readiness())
-            .with_delivery_send_intervals(config.worker.mooglemail.send_intervals)
-            .context("配置投递发送间隔失败")?,
-    );
-    let worker_id = format!("auction-worker-{}", Uuid::new_v4());
-    // 不变量 2、5、6：先确认数据库已同步寄售代次，再启动持久任务或宣布 Worker 就绪。
-    let consignment = consignment::prepare(config, &store, &switches, &worker_id).await?;
+    let PersistentRuntime {
+        tracing_health,
+        metrics,
+        switches,
+        runtime_failure,
+        write_lifecycle,
+        shutdown,
+    } = runtime;
     let _runtime_switch_task = auction_process::TaskGuard::new(
         auction_jobs::start_runtime_switch_refresh(store.clone(), switches.clone()).await,
     );
