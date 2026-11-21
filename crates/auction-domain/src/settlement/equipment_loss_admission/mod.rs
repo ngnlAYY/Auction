@@ -343,10 +343,11 @@ impl EquipmentLossAdmission {
         };
 
         let delivery = &self.delivery;
+        // 付款履约的领取、派发与人工复核都会推进版本。处置事务围栏使用锁内当前版本。
         check(
             &mut blockers,
             self.payment_fulfillment.execution_state == "manual_reconcile"
-                && self.payment_fulfillment.state_version == 1
+                && self.payment_fulfillment.state_version > 0
                 && self.payment_fulfillment.delivery_id == Some(delivery.id)
                 && self.payment_fulfillment.prepare_command_id == Some(delivery.command_id)
                 && self.seller_fulfillment.execution_state == "pending"
