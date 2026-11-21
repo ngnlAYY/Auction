@@ -34,6 +34,8 @@ pub(super) struct ConsignmentPorts {
     maintenance: Arc<dyn ListingMaintenance>,
     commands: Arc<dyn ListingCommandStore>,
     work: Arc<dyn LookupWorkStore>,
+    #[cfg(test)]
+    missing_lookup_handle: Option<MissingLookupHandle>,
 }
 
 impl ConsignmentPorts {
@@ -46,6 +48,8 @@ impl ConsignmentPorts {
             work: Arc::new(
                 store.consignment_lookup(auto_close_command, lookup_reap_exhausted_identity),
             ),
+            #[cfg(test)]
+            missing_lookup_handle: None,
         }
     }
 }
@@ -115,8 +119,15 @@ fn lookup_runtime(
     let opener = Arc::new(EquipmentKeyOpener::new(Arc::clone(&keyring)));
     let settings = config.consignment;
     let lookup = make_lookup(settings.lookup_max_response_bytes())?;
-    let readiness =
-        InstalledLookupReadiness::new(ports.database.clone(), &opener, &keyring, &lookup);
+    // 探针只观察解析用例持有的实例，不能自己延长依赖的生命周期。
+    let handles = LookupHandles {
+        opener: Arc::downgrade(&opener),
+        keyring: Arc::downgrade(&keyring),
+        lookup: Arc::downgrade(&lookup),
+    };
+    #[cfg(test)]
+    let handles = handles.without(ports.missing_lookup_handle);
+    let readiness = InstalledLookupReadiness { database: ports.database.clone(), handles };
     // 不变量 5：预算交由领取事务计算数据库硬截止，经解析用例传给固定来源。
     let budget = ListingLookupBudget::new(
         settings.lookup_timeout_seconds(),
@@ -167,25 +178,34 @@ impl LookupDatabaseReadiness for DatabaseStore {
 
 struct InstalledLookupReadiness {
     database: Arc<dyn LookupDatabaseReadiness>,
+    handles: LookupHandles,
+}
+
+struct LookupHandles {
     opener: Weak<EquipmentKeyOpener>,
     keyring: Weak<Keyring>,
     lookup: Weak<dyn ListingEquipmentLookup>,
 }
 
-impl InstalledLookupReadiness {
-    fn new(
-        database: Arc<dyn LookupDatabaseReadiness>,
-        opener: &Arc<EquipmentKeyOpener>,
-        keyring: &Arc<Keyring>,
-        lookup: &Arc<dyn ListingEquipmentLookup>,
-    ) -> Self {
-        // 探针只观察解析用例持有的实例，不能自己延长依赖的生命周期。
-        Self {
-            database,
-            opener: Arc::downgrade(opener),
-            keyring: Arc::downgrade(keyring),
-            lookup: Arc::downgrade(lookup),
+#[cfg(test)]
+#[derive(Clone, Copy, Debug)]
+enum MissingLookupHandle {
+    Opener,
+    CurrentKeyring,
+    Lookup,
+}
+
+#[cfg(test)]
+impl LookupHandles {
+    fn without(mut self, missing: Option<MissingLookupHandle>) -> Self {
+        // 解析用例必须持有可调用的端口；装配时单独模拟探针缺少某一条引用。
+        match missing {
+            Some(MissingLookupHandle::Opener) => self.opener = Weak::new(),
+            Some(MissingLookupHandle::CurrentKeyring) => self.keyring = Weak::new(),
+            Some(MissingLookupHandle::Lookup) => self.lookup = Weak::<HvDataEquipmentReader>::new(),
+            None => {}
         }
+        self
     }
 }
 
@@ -205,12 +225,13 @@ impl ConsignmentReadinessProbe for InstalledLookupReadiness {
                         );
                     })
                     .is_ok(),
-                opener: self.opener.upgrade().is_some(),
+                opener: self.handles.opener.upgrade().is_some(),
                 current_keyring: self
+                    .handles
                     .keyring
                     .upgrade()
                     .is_some_and(|keys| keys.domain() == DataKeyDomain::Equipment),
-                lookup: self.lookup.upgrade().is_some(),
+                lookup: self.handles.lookup.upgrade().is_some(),
             })
         })
     }
@@ -226,7 +247,7 @@ mod tests {
     use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
     use std::pin::Pin;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex, Weak};
+    use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
     use auction_application::admin::EquipmentKeySealerPort;
@@ -235,11 +256,10 @@ mod tests {
         ConsignmentError, ConsignmentFuture, ListingAdmission, ListingAutoCloseEffect,
         ListingClosed, ListingCommandOutcome, ListingCommandStore, ListingEquipmentLookup,
         ListingEquipmentLookupError, ListingLookupClaim, ListingLookupEffect,
-        ListingLookupSnapshot, ListingMaintenance, ListingMaintenancePage,
-        ListingMaintenanceService, ListingPriceReceipt, ListingRegistered,
-        ListingRegistrationSecret, ListingWorkerReadiness, LookupAbandonment, LookupClaimRequest,
-        LookupDispatch, LookupFence, LookupLeaseUpdate, LookupPermitStatus, LookupWorkStore,
-        RegisterListingCommand, RegistrationReplayCrypto, RepriceListingCommand,
+        ListingLookupSnapshot, ListingMaintenance, ListingMaintenancePage, ListingPriceReceipt,
+        ListingRegistered, ListingRegistrationSecret, ListingWorkerReadiness, LookupAbandonment,
+        LookupClaimRequest, LookupDispatch, LookupFence, LookupLeaseUpdate, LookupPermitStatus,
+        LookupWorkStore, RegisterListingCommand, RegistrationReplayCrypto, RepriceListingCommand,
         WithdrawListingCommand,
     };
     use auction_application::core::{ApplicationFuture, RepositoryError, TransactionFuture};
@@ -250,7 +270,7 @@ mod tests {
     use auction_config::{AppConfig, DataKeyDomain, Role};
     use auction_domain::consignment::ListingEquipmentIdentity;
     use auction_domain::{EquipmentId, EquipmentKey};
-    use auction_integrations::{EquipmentKeyOpener, EquipmentKeySealer, Keyring};
+    use auction_integrations::{EquipmentKeySealer, HvDataConfigurationError, Keyring};
     use auction_jobs::consignment::{ConsignmentLoop, ConsignmentWorker};
     use auction_observability::WorkerResult;
     use auction_time::Timestamp;
@@ -260,7 +280,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        ConsignmentPorts, InstalledLookupReadiness, LookupDatabaseReadiness, lookup_runtime,
+        ConsignmentPorts, LookupDatabaseReadiness, MissingLookupHandle, hvdata_lookup,
         start_persistent,
     };
 
@@ -372,6 +392,19 @@ mod tests {
             .unwrap();
     }
 
+    #[test]
+    fn hvdata_lookup_rejects_invalid_response_limit() {
+        let config = consignment_test_config();
+        assert!(hvdata_lookup(config.consignment.lookup_max_response_bytes()).is_ok());
+        let result = hvdata_lookup(4095);
+        assert!(matches!(
+            result,
+            Err(error)
+                if error.downcast_ref::<HvDataConfigurationError>()
+                    == Some(&HvDataConfigurationError::ResponseLimit)
+        ));
+    }
+
     #[tokio::test(start_paused = true)]
     async fn persistent_heartbeat_checks_database_and_schema_before_each_renewal() {
         let fixture = Fixture::new();
@@ -404,45 +437,32 @@ mod tests {
     async fn persistent_heartbeat_requires_each_installed_lookup_handle() {
         let config = consignment_test_config();
         let switches = RuntimeSwitches::default();
-        let fixture = Fixture::new();
-        let keyring = Arc::new(test_keyring());
-        let opener = Arc::new(EquipmentKeyOpener::new(Arc::clone(&keyring)));
-        let lookup: Arc<dyn ListingEquipmentLookup> = fixture.source.clone();
-
-        for missing in ["opener", "current_keyring", "lookup"] {
-            let mut probe =
-                InstalledLookupReadiness::new(fixture.ports.clone(), &opener, &keyring, &lookup);
-            match missing {
-                "opener" => probe.opener = Weak::new(),
-                "current_keyring" => probe.keyring = Weak::new(),
-                "lookup" => {
-                    let absent: Arc<dyn ListingEquipmentLookup> = Arc::new(Source::default());
-                    probe.lookup = Arc::downgrade(&absent);
-                }
-                _ => unreachable!(),
-            }
-            let ports = fixture.assembly_ports();
-            let mut lookup =
-                lookup_runtime(&config, &ports, switches.clone(), "fixture-worker", |bytes| {
-                    fixture.make_lookup(bytes)
-                })
-                .unwrap();
-            lookup.readiness = Arc::new(probe);
+        for (missing, result, renewals) in [
+            (None, WorkerResult::Success, [1, 2]),
+            (Some(MissingLookupHandle::Opener), WorkerResult::Error, [0, 0]),
+            (Some(MissingLookupHandle::CurrentKeyring), WorkerResult::Error, [0, 0]),
+            (Some(MissingLookupHandle::Lookup), WorkerResult::Error, [0, 0]),
+        ] {
+            let mut fixture = Fixture::new();
+            fixture.missing_lookup_handle = missing;
             fixture.ports.sync_release.notify_one();
-            let worker = ConsignmentWorker::prepare(
-                true,
-                true,
-                ListingMaintenanceService::new(ports.maintenance, ports.commands),
-                Some(lookup),
-                async { panic!("开启时不应检查停用存量") },
-            )
-            .await
-            .unwrap()
-            .unwrap();
-            let mut running = Running::new(worker);
-            assert_eq!(running.next_heartbeat().await, WorkerResult::Error, "{missing}");
-            assert_eq!(fixture.ports.heartbeats.load(Ordering::Relaxed), 0, "{missing}");
-            running.finish().await;
+            fixture
+                .start(&config, &switches, async |worker| {
+                    let mut running = Running::new(worker.unwrap());
+                    for expected_renewals in renewals {
+                        assert_eq!(running.next_heartbeat().await, result, "{missing:?}");
+                        assert_eq!(
+                            fixture.ports.heartbeats.load(Ordering::Relaxed),
+                            expected_renewals,
+                            "{missing:?}"
+                        );
+                        advance(Duration::from_secs(10)).await;
+                    }
+                    running.finish().await;
+                    Ok(())
+                })
+                .await
+                .unwrap();
         }
     }
 
@@ -509,6 +529,7 @@ mod tests {
         ports: Arc<Ports>,
         source: Arc<Source>,
         maximum_bytes: Mutex<Option<usize>>,
+        missing_lookup_handle: Option<MissingLookupHandle>,
     }
 
     impl Fixture {
@@ -527,6 +548,7 @@ mod tests {
                 }),
                 source: Arc::new(Source::default()),
                 maximum_bytes: Mutex::new(None),
+                missing_lookup_handle: None,
             }
         }
 
@@ -536,6 +558,7 @@ mod tests {
                 maintenance: self.ports.clone(),
                 commands: self.ports.clone(),
                 work: self.ports.clone(),
+                missing_lookup_handle: self.missing_lookup_handle,
             }
         }
 
