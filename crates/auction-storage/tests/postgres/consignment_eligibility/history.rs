@@ -137,7 +137,7 @@ async fn record_return(
 }
 
 #[tokio::test]
-async fn domain_history_requires_matching_collection_and_stable_seller() {
+async fn postgres_domain_history_requires_matching_collection_and_stable_seller() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
@@ -188,7 +188,7 @@ async fn domain_history_requires_matching_collection_and_stable_seller() {
 }
 
 #[tokio::test]
-async fn domain_history_preserves_alias_disagreement_and_checks_delivery_binding() {
+async fn postgres_domain_history_preserves_alias_disagreement_and_checks_delivery_binding() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
@@ -242,7 +242,7 @@ async fn domain_history_preserves_alias_disagreement_and_checks_delivery_binding
 }
 
 #[tokio::test]
-async fn sold_history_uses_frozen_buyer_id_after_rename_and_name_reuse() {
+async fn postgres_sold_history_uses_frozen_buyer_id_after_rename_and_name_reuse() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
@@ -309,7 +309,7 @@ async fn sold_history_uses_frozen_buyer_id_after_rename_and_name_reuse() {
 }
 
 #[tokio::test]
-async fn name_only_return_history_requires_unique_resolution() {
+async fn postgres_name_only_return_history_requires_unique_resolution() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
@@ -341,7 +341,7 @@ async fn name_only_return_history_requires_unique_resolution() {
 }
 
 #[tokio::test]
-async fn unknown_dispatch_blocks_otherwise_proven_history() {
+async fn postgres_unknown_dispatch_blocks_otherwise_proven_history() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
@@ -381,7 +381,7 @@ async fn unknown_dispatch_blocks_otherwise_proven_history() {
 }
 
 #[tokio::test]
-async fn open_equipment_case_blocks_otherwise_proven_history() {
+async fn postgres_open_equipment_case_blocks_otherwise_proven_history() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
@@ -431,7 +431,7 @@ async fn open_equipment_case_blocks_otherwise_proven_history() {
 }
 
 #[tokio::test]
-async fn domain_history_follows_proven_alias_handoff() {
+async fn postgres_domain_history_follows_proven_alias_handoff() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");

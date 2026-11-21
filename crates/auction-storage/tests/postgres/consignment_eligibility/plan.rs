@@ -79,7 +79,7 @@ async fn check_plans(cx: &mut PgConnection, listing_id: Uuid) {
 }
 
 #[tokio::test]
-async fn explain_access_paths() {
+async fn postgres_explain_access_paths() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let pool = owner.postgres_pool();

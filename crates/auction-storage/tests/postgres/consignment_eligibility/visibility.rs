@@ -46,7 +46,7 @@ fn rejected(reason: ListingReason) -> (bool, bool, Option<String>) {
 }
 
 #[tokio::test]
-async fn visibility_uses_prioritized_forced_reasons_and_snapshot() {
+async fn postgres_visibility_uses_prioritized_forced_reasons_and_snapshot() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
@@ -150,7 +150,7 @@ async fn visibility_uses_prioritized_forced_reasons_and_snapshot() {
 }
 
 #[tokio::test]
-async fn quotas_use_fixed_time_and_count_both_worlds() {
+async fn postgres_quotas_use_fixed_time_and_count_both_worlds() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
@@ -192,7 +192,7 @@ async fn quotas_use_fixed_time_and_count_both_worlds() {
 }
 
 #[tokio::test]
-async fn reopened_service_hides_previous_epoch() {
+async fn postgres_reopened_service_hides_previous_epoch() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
@@ -225,7 +225,7 @@ async fn reopened_service_hides_previous_epoch() {
 }
 
 #[tokio::test]
-async fn later_collision_preserves_persisted_terminal_reason() {
+async fn postgres_later_collision_preserves_persisted_terminal_reason() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
@@ -263,7 +263,7 @@ async fn later_collision_preserves_persisted_terminal_reason() {
 }
 
 #[tokio::test]
-async fn withdrawn_registration_counts_only_towards_hourly_quota() {
+async fn postgres_withdrawn_registration_counts_only_towards_hourly_quota() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
@@ -288,7 +288,7 @@ async fn withdrawn_registration_counts_only_towards_hourly_quota() {
 }
 
 #[tokio::test]
-async fn seller_eligibility_locks_only_target_account() {
+async fn postgres_seller_eligibility_locks_only_target_account() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
@@ -319,7 +319,7 @@ async fn seller_eligibility_locks_only_target_account() {
 }
 
 #[tokio::test]
-async fn equipment_occupancy_locks_only_target_eid() {
+async fn postgres_equipment_occupancy_locks_only_target_eid() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
@@ -356,7 +356,7 @@ async fn equipment_occupancy_locks_only_target_eid() {
 }
 
 #[tokio::test]
-async fn same_equipment_occupancy_distinguishes_cleanup_and_cross_mode_duplicates() {
+async fn postgres_same_equipment_occupancy_distinguishes_cleanup_and_cross_mode_duplicates() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
@@ -404,7 +404,7 @@ async fn same_equipment_occupancy_distinguishes_cleanup_and_cross_mode_duplicate
 }
 
 #[tokio::test]
-async fn owner_cardinality_and_seller_history_are_independent() {
+async fn postgres_owner_cardinality_and_seller_history_are_independent() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
@@ -464,7 +464,7 @@ async fn owner_cardinality_and_seller_history_are_independent() {
 }
 
 #[tokio::test]
-async fn public_visibility_respects_commit_snapshots_and_snapshot_identity() {
+async fn postgres_public_visibility_respects_commit_snapshots_and_snapshot_identity() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");

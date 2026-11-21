@@ -18,7 +18,7 @@ use super::production::lots::{
 use crate::support::TestDatabase;
 
 #[tokio::test]
-async fn recovery_relist_enters_difference_with_reused_submission() {
+async fn postgres_recovery_relist_enters_difference_with_reused_submission() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");

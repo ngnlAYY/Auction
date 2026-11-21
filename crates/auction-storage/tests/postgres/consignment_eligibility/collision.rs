@@ -15,7 +15,7 @@ use super::production::lots::{
 use crate::support::TestDatabase;
 
 #[tokio::test]
-async fn alias_baseline_and_snapshot() {
+async fn postgres_alias_baseline_and_snapshot() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
@@ -94,7 +94,7 @@ async fn alias_baseline_and_snapshot() {
 }
 
 #[tokio::test]
-async fn collision_tracks_committed_lots_and_associates_only_observed_facts() {
+async fn postgres_collision_tracks_committed_lots_and_associates_only_observed_facts() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");

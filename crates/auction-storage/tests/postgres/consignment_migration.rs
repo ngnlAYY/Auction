@@ -277,7 +277,7 @@ async fn seed_old_lots(pool: &PgPool) {
 }
 
 #[tokio::test]
-async fn consignment_alias_uses_ascii_without_numeric_conversion() {
+async fn postgres_consignment_alias_uses_ascii_without_numeric_conversion() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let pool = runtime.postgres_pool();
@@ -313,7 +313,7 @@ async fn consignment_alias_uses_ascii_without_numeric_conversion() {
 }
 
 #[tokio::test]
-async fn consignment_listings_reject_bad_identity_amount_versions_and_state() {
+async fn postgres_consignment_listings_reject_bad_identity_amount_versions_and_state() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let pool = runtime.postgres_pool();
@@ -397,7 +397,7 @@ async fn consignment_listings_reject_bad_identity_amount_versions_and_state() {
 }
 
 #[tokio::test]
-async fn consignment_activity_and_publication_have_distinct_unique_slots() {
+async fn postgres_consignment_activity_and_publication_have_distinct_unique_slots() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let pool = runtime.postgres_pool();
@@ -444,7 +444,7 @@ async fn consignment_activity_and_publication_have_distinct_unique_slots() {
 }
 
 #[tokio::test]
-async fn consignment_snapshots_limit_fields_and_bind_listing_identity() {
+async fn postgres_consignment_snapshots_limit_fields_and_bind_listing_identity() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let pool = runtime.postgres_pool();
@@ -523,7 +523,7 @@ async fn consignment_snapshots_limit_fields_and_bind_listing_identity() {
 }
 
 #[tokio::test]
-async fn consignment_baselines_freeze_at_registration_and_lot_links_are_disjoint() {
+async fn postgres_consignment_baselines_freeze_at_registration_and_lot_links_are_disjoint() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let pool = runtime.postgres_pool();
@@ -572,7 +572,7 @@ async fn consignment_baselines_freeze_at_registration_and_lot_links_are_disjoint
 }
 
 #[tokio::test]
-async fn consignment_commands_and_events_require_the_final_same_version_facts() {
+async fn postgres_consignment_commands_and_events_require_the_final_same_version_facts() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let pool = runtime.postgres_pool();
@@ -637,7 +637,7 @@ async fn consignment_commands_and_events_require_the_final_same_version_facts() 
 }
 
 #[tokio::test]
-async fn consignment_envelopes_validate_shape_and_cannot_be_restored_after_retirement() {
+async fn postgres_consignment_envelopes_validate_shape_and_cannot_be_restored_after_retirement() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let pool = runtime.postgres_pool();
@@ -720,7 +720,7 @@ async fn consignment_envelopes_validate_shape_and_cannot_be_restored_after_retir
 }
 
 #[tokio::test]
-async fn consignment_work_and_global_permit_enforce_complete_durable_shapes() {
+async fn postgres_consignment_work_and_global_permit_enforce_complete_durable_shapes() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let owner = database.maintenance_store().await.expect("以维护账号连接");
@@ -964,7 +964,7 @@ async fn assert_table_permissions(pool: &PgPool) {
 }
 
 #[tokio::test]
-async fn consignment_runtime_acl_rebuild_preserves_only_the_declared_privileges() {
+async fn postgres_consignment_runtime_acl_rebuild_preserves_only_the_declared_privileges() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let owner = database.maintenance_store().await.expect("以维护账号连接");
@@ -981,7 +981,7 @@ async fn consignment_runtime_acl_rebuild_preserves_only_the_declared_privileges(
 }
 
 #[tokio::test]
-async fn consignment_history_rejects_owner_update_delete_and_truncate() {
+async fn postgres_consignment_history_rejects_owner_update_delete_and_truncate() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let owner = database.maintenance_store().await.expect("以维护账号连接");
@@ -1014,7 +1014,7 @@ async fn consignment_history_rejects_owner_update_delete_and_truncate() {
 }
 
 #[tokio::test]
-async fn consignment_optional_fields_and_update_timestamps_fail_closed() {
+async fn postgres_consignment_optional_fields_and_update_timestamps_fail_closed() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let owner = database.maintenance_store().await.expect("以维护账号连接");
@@ -1163,7 +1163,7 @@ async fn consignment_optional_fields_and_update_timestamps_fail_closed() {
 }
 
 #[tokio::test]
-async fn consignment_internal_receipts_preserve_safe_retry_and_collision_results() {
+async fn postgres_consignment_internal_receipts_preserve_safe_retry_and_collision_results() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let pool = runtime.postgres_pool();
@@ -1220,7 +1220,7 @@ async fn consignment_internal_receipts_preserve_safe_retry_and_collision_results
 }
 
 #[tokio::test]
-async fn consignment_registration_can_close_another_listing_for_the_same_equipment() {
+async fn postgres_consignment_registration_can_close_another_listing_for_the_same_equipment() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let pool = runtime.postgres_pool();
@@ -1265,7 +1265,7 @@ async fn assert_resolving_deadline(make_change: impl Fn(&str) -> String, snapsho
 }
 
 #[tokio::test]
-async fn consignment_publish_rejects_the_old_deadline_even_with_a_fresh_expiry() {
+async fn postgres_consignment_publish_rejects_the_old_deadline_even_with_a_fresh_expiry() {
     assert_resolving_deadline(
         |at| {
             publish(LISTING_1, SNAPSHOT_1, LOOKUP_1, "displayed")
@@ -1278,7 +1278,7 @@ async fn consignment_publish_rejects_the_old_deadline_even_with_a_fresh_expiry()
 }
 
 #[tokio::test]
-async fn consignment_reprice_rejects_the_old_deadline() {
+async fn postgres_consignment_reprice_rejects_the_old_deadline() {
     assert_resolving_deadline(
         |at| {
             format!(
@@ -1295,7 +1295,7 @@ async fn consignment_reprice_rejects_the_old_deadline() {
 }
 
 #[tokio::test]
-async fn consignment_withdraw_rejects_the_old_deadline() {
+async fn postgres_consignment_withdraw_rejects_the_old_deadline() {
     assert_resolving_deadline(
         |at| {
             format!(
@@ -1310,7 +1310,7 @@ async fn consignment_withdraw_rejects_the_old_deadline() {
 }
 
 #[tokio::test]
-async fn consignment_system_collision_can_close_after_the_deadline() {
+async fn postgres_consignment_system_collision_can_close_after_the_deadline() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let pool = runtime.postgres_pool();
@@ -1327,7 +1327,7 @@ async fn consignment_system_collision_can_close_after_the_deadline() {
 }
 
 #[tokio::test]
-async fn consignment_published_listings_expire_with_their_mode_reason() {
+async fn postgres_consignment_published_listings_expire_with_their_mode_reason() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let pool = runtime.postgres_pool();
@@ -1383,7 +1383,7 @@ async fn consignment_published_listings_expire_with_their_mode_reason() {
 }
 
 #[tokio::test]
-async fn consignment_price_and_fee_endpoints_are_inclusive() {
+async fn postgres_consignment_price_and_fee_endpoints_are_inclusive() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let pool = runtime.postgres_pool();
@@ -1440,7 +1440,7 @@ fn rejection_command(command_id: &str, operation: &str, status: u16, code: &str)
 }
 
 #[tokio::test]
-async fn consignment_failure_receipts_match_the_operation_status_matrix() {
+async fn postgres_consignment_failure_receipts_match_the_operation_status_matrix() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let pool = runtime.postgres_pool();
@@ -1484,7 +1484,7 @@ async fn consignment_failure_receipts_match_the_operation_status_matrix() {
 }
 
 #[tokio::test]
-async fn consignment_success_receipts_cannot_commit_without_their_event() {
+async fn postgres_consignment_success_receipts_cannot_commit_without_their_event() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let pool = runtime.postgres_pool();
@@ -1524,7 +1524,7 @@ async fn consignment_success_receipts_cannot_commit_without_their_event() {
 }
 
 #[tokio::test]
-async fn consignment_command_inserted_under_savepoint_fails_closed() {
+async fn postgres_consignment_command_inserted_under_savepoint_fails_closed() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
     let pool = runtime.postgres_pool();

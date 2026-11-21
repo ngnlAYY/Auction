@@ -289,7 +289,7 @@ fn assert_released(control: &Value) {
 }
 
 #[tokio::test]
-async fn enqueue_shape_and_duplicate() {
+async fn postgres_enqueue_shape_and_duplicate() {
     let fixture = Fixture::new().await;
     let listing_id = Uuid::from_u128(0x202);
     let work_id = Uuid::from_u128(0x302);
@@ -324,7 +324,7 @@ async fn enqueue_shape_and_duplicate() {
 }
 
 #[tokio::test]
-async fn cancel_queued_keeps_unrelated_and_terminal_rows() {
+async fn postgres_cancel_queued_keeps_unrelated_and_terminal_rows() {
     let fixture = Fixture::new().await;
     fixture.grant(OTHER_WORK, OTHER_FAKE_TOKEN, 1, 120.0).await;
     let control = fixture.control().await;
@@ -341,7 +341,7 @@ async fn cancel_queued_keeps_unrelated_and_terminal_rows() {
 }
 
 #[tokio::test]
-async fn cancel_leased_guards_in_flight_until_original_deadline() {
+async fn postgres_cancel_leased_guards_in_flight_until_original_deadline() {
     let fixture = Fixture::new().await;
     let (_, hard_deadline) = fixture.grant(WORK, FAKE_TOKEN, 1, 120.0).await;
     let before = fixture.control().await;
@@ -358,7 +358,7 @@ async fn cancel_leased_guards_in_flight_until_original_deadline() {
 }
 
 #[tokio::test]
-async fn cancel_expired_releases_only_matching_holder() {
+async fn postgres_cancel_expired_releases_only_matching_holder() {
     let fixture = Fixture::new().await;
     fixture.grant(WORK, FAKE_TOKEN, 2, -120.0).await;
     assert_eq!(fixture.cancel(LISTING).await, 1);
@@ -377,7 +377,7 @@ async fn cancel_expired_releases_only_matching_holder() {
 }
 
 #[tokio::test]
-async fn cancel_keeps_holder_with_same_work_and_fence_but_different_token() {
+async fn postgres_cancel_keeps_holder_with_same_work_and_fence_but_different_token() {
     let fixture = Fixture::new().await;
     fixture.grant(WORK, FAKE_TOKEN, 2, -120.0).await;
     sqlx::query("UPDATE public.consignment_lookup_control SET holder_token = $1 WHERE id = 1")
@@ -392,7 +392,7 @@ async fn cancel_keeps_holder_with_same_work_and_fence_but_different_token() {
 }
 
 #[tokio::test]
-async fn fence_identity_and_no_writes() {
+async fn postgres_fence_identity_and_no_writes() {
     let fixture = Fixture::new().await;
     fixture.grant(WORK, FAKE_TOKEN, 2, 120.0).await;
     let before = fixture.snapshot().await;
@@ -416,7 +416,7 @@ async fn fence_identity_and_no_writes() {
 }
 
 #[tokio::test]
-async fn fence_expires_at_equality_and_wall_clock_cas() {
+async fn postgres_fence_expires_at_equality_and_wall_clock_cas() {
     let fixture = Fixture::new().await;
     let (lease_until, _) = fixture.grant(WORK, FAKE_TOKEN, 2, -120.0).await;
     // 让工作到期时全局许可仍活，避免许可边界掩盖工作边界。
@@ -445,7 +445,7 @@ async fn fence_expires_at_equality_and_wall_clock_cas() {
 }
 
 #[tokio::test]
-async fn fence_check_rejects_work_lease_expired_during_transaction() {
+async fn postgres_fence_check_rejects_work_lease_expired_during_transaction() {
     let fixture = Fixture::new().await;
     fixture.grant(WORK, FAKE_TOKEN, 1, 120.0).await;
     let mut tx = fixture.lock().await;
@@ -468,7 +468,7 @@ async fn fence_check_rejects_work_lease_expired_during_transaction() {
 }
 
 #[tokio::test]
-async fn finish_cas_rejects_permit_expired_during_transaction() {
+async fn postgres_finish_cas_rejects_permit_expired_during_transaction() {
     let fixture = Fixture::new().await;
     fixture.grant(WORK, FAKE_TOKEN, 1, 120.0).await;
     let mut tx = fixture.lock().await;
@@ -496,7 +496,7 @@ async fn finish_cas_rejects_permit_expired_during_transaction() {
 }
 
 #[tokio::test]
-async fn fence_cannot_touch_newer_permit() {
+async fn postgres_fence_cannot_touch_newer_permit() {
     let fixture = Fixture::new().await;
     fixture.grant(WORK, FAKE_TOKEN, 1, 120.0).await;
     fixture.grant(OTHER_WORK, OTHER_FAKE_TOKEN, 1, 120.0).await;
@@ -512,7 +512,7 @@ async fn fence_cannot_touch_newer_permit() {
 }
 
 #[tokio::test]
-async fn retry_uses_five_delays_and_safe_reason() {
+async fn postgres_retry_uses_five_delays_and_safe_reason() {
     let fixture = Fixture::new().await;
     let reason = LookupTransientReason::SourceTimeout;
     for (attempt, seconds) in [(1, 30), (2, 120), (3, 600), (4, 1800), (5, 7200)] {
@@ -532,7 +532,7 @@ async fn retry_uses_five_delays_and_safe_reason() {
 }
 
 #[tokio::test]
-async fn done_clears_all_holder_fields_without_shortening_start_interval() {
+async fn postgres_done_clears_all_holder_fields_without_shortening_start_interval() {
     let fixture = Fixture::new().await;
     fixture.grant(WORK, FAKE_TOKEN, 1, 120.0).await;
     let start = fixture.control().await["next_allowed_at"].clone();
@@ -550,7 +550,7 @@ async fn done_clears_all_holder_fields_without_shortening_start_interval() {
 }
 
 #[tokio::test]
-async fn exhausted_clears_holder_and_never_requeues() {
+async fn postgres_exhausted_clears_holder_and_never_requeues() {
     let fixture = Fixture::new().await;
     fixture.grant(WORK, FAKE_TOKEN, 6, 120.0).await;
     let failure = Some((LookupTransientReason::SourceUnavailable, None));
@@ -590,7 +590,7 @@ async fn finish_rate_limit(
 }
 
 #[tokio::test]
-async fn cooldown_uses_backoff_over_short_or_missing_hint() {
+async fn postgres_cooldown_uses_backoff_over_short_or_missing_hint() {
     let fixture = Fixture::new().await;
     for hint in [Some(Duration::from_secs(1)), None] {
         let (work, permit) = finish_rate_limit(&fixture, 1, hint).await;
@@ -601,7 +601,7 @@ async fn cooldown_uses_backoff_over_short_or_missing_hint() {
 }
 
 #[tokio::test]
-async fn cooldown_accepts_hint_and_caps_at_six_hours() {
+async fn postgres_cooldown_accepts_hint_and_caps_at_six_hours() {
     let fixture = Fixture::new().await;
     for (hint, seconds) in [(Duration::from_secs(45), 45), (Duration::from_secs(86_400), 21_600)] {
         let (work, permit) = finish_rate_limit(&fixture, 1, Some(hint)).await;
@@ -612,7 +612,7 @@ async fn cooldown_accepts_hint_and_caps_at_six_hours() {
 }
 
 #[tokio::test]
-async fn cooldown_preserves_later_persisted_deadline() {
+async fn postgres_cooldown_preserves_later_persisted_deadline() {
     let fixture = Fixture::new().await;
     let later: Timestamp = sqlx::query_scalar(
         "UPDATE public.consignment_lookup_control
@@ -627,7 +627,7 @@ async fn cooldown_preserves_later_persisted_deadline() {
 }
 
 #[tokio::test]
-async fn exhausted_rate_limit_still_sets_cooldown() {
+async fn postgres_exhausted_rate_limit_still_sets_cooldown() {
     let fixture = Fixture::new().await;
     for (hint, hours) in
         [(None, 2), (Some(Duration::from_hours(1)), 2), (Some(Duration::from_hours(24)), 6)]
@@ -641,7 +641,7 @@ async fn exhausted_rate_limit_still_sets_cooldown() {
 }
 
 #[tokio::test]
-async fn admission_rejects_heartbeat_expired_during_transaction() {
+async fn postgres_admission_rejects_heartbeat_expired_during_transaction() {
     let fixture = Fixture::new().await;
     let mut tx = fixture.lock().await;
     let worker_ready_until: Timestamp = sqlx::query_scalar(
@@ -660,7 +660,7 @@ async fn admission_rejects_heartbeat_expired_during_transaction() {
 }
 
 #[tokio::test]
-async fn admission_is_unlocked_and_requires_fresh_enabled_heartbeat() {
+async fn postgres_admission_is_unlocked_and_requires_fresh_enabled_heartbeat() {
     let fixture = Fixture::new().await;
     let mut holder = fixture.lock().await;
     let mut reader = fixture.pool().begin().await.unwrap();
@@ -697,7 +697,7 @@ async fn admission_is_unlocked_and_requires_fresh_enabled_heartbeat() {
 }
 
 #[tokio::test]
-async fn control_lock_orders_two_transactions_before_work() {
+async fn postgres_control_lock_orders_two_transactions_before_work() {
     let fixture = Fixture::new().await;
     fixture.grant(WORK, FAKE_TOKEN, 1, 120.0).await;
     let mut owner = fixture.lock().await;
@@ -744,7 +744,7 @@ async fn control_lock_orders_two_transactions_before_work() {
 }
 
 #[tokio::test]
-async fn fence_checks_work_and_permit_credentials_independently() {
+async fn postgres_fence_checks_work_and_permit_credentials_independently() {
     let fixture = Fixture::new().await;
     for change in [
         "UPDATE public.consignment_lookup_work SET fence = 8 WHERE id = $1",
@@ -771,7 +771,7 @@ async fn fence_checks_work_and_permit_credentials_independently() {
 }
 
 #[tokio::test]
-async fn permit_deadline_is_independent_of_work_deadline() {
+async fn postgres_permit_deadline_is_independent_of_work_deadline() {
     let fixture = Fixture::new().await;
     fixture.grant(WORK, FAKE_TOKEN, 1, 120.0).await;
     let permit_until: Timestamp = sqlx::query_scalar(

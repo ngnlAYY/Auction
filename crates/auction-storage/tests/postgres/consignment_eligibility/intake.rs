@@ -30,7 +30,7 @@ fn fake_envelope() -> EquipmentKeyEnvelope {
 }
 
 #[tokio::test]
-async fn auction_mail_and_admin_writes_create_immediate_collision() {
+async fn postgres_auction_mail_and_admin_writes_create_immediate_collision() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");
     let runtime = db.store().await.expect("服务连接");
