@@ -8,12 +8,13 @@ use auction_application::consignment::{
 use auction_application::runtime_switches::{
     RuntimeSwitchCommand, RuntimeSwitchName, RuntimeSwitchOperation, RuntimeSwitchStore,
 };
+use auction_domain::equipment::EquipmentKeyEnvelope;
 use auction_time::{Duration as TimeDelta, Timestamp};
 use serde_json::json;
 use tokio::sync::Barrier;
 use uuid::Uuid;
 
-use super::fixture::{Fixture, LISTING, OTHER_WORK, SELLER, WORK, request};
+use super::fixture::{Fixture, LISTING, OTHER_WORK, REGISTERED_AAD, SELLER, WORK, request};
 
 #[tokio::test]
 async fn postgres_consignment_work_concurrent_claim() {
@@ -62,6 +63,25 @@ async fn postgres_consignment_work_concurrent_claim() {
 }
 
 #[tokio::test]
+async fn postgres_consignment_work_claim_returns_registered_aad_and_envelope() {
+    let fixture = Fixture::new().await;
+    fixture.db.sync_admission(true).await.unwrap();
+    let claim = fixture.claim(1).await.unwrap();
+    assert_eq!(claim.fence().listing_id(), LISTING);
+    let credential = claim.credential().unwrap();
+    assert_ne!(REGISTERED_AAD, LISTING);
+    assert_eq!(credential.aad_equipment_id().as_uuid(), REGISTERED_AAD);
+    let registered = EquipmentKeyEnvelope::new(
+        vec![0x33; 32],
+        vec![0x44; 12],
+        "fake-data-key".into(),
+        "ab".repeat(32),
+    )
+    .unwrap();
+    assert_eq!(credential.envelope(), &registered);
+}
+
+#[tokio::test]
 async fn postgres_consignment_work_interval_and_cooldown() {
     let fixture = Fixture::new().await;
     fixture.db.sync_admission(true).await.unwrap();
@@ -95,10 +115,10 @@ async fn postgres_consignment_work_pause_and_epoch_gates() {
     assert!(fixture.claim(2).await.is_none());
     assert_eq!(fixture.attempts().await, 0);
 
-    switch(&fixture, 0, true).await;
+    switch(&fixture, 0, true, None).await;
     assert!(fixture.claim(1).await.is_none());
     assert_eq!(fixture.attempts().await, 0);
-    switch(&fixture, 1, false).await;
+    switch(&fixture, 1, false, None).await;
     let claim = fixture.claim(1).await.unwrap();
     assert_eq!(claim.attempt(), 1);
     assert_eq!(
@@ -109,7 +129,7 @@ async fn postgres_consignment_work_pause_and_epoch_gates() {
         fixture.work().confirm_dispatch(&claim, true).await.unwrap(),
         LookupDispatch::Paused
     );
-    switch(&fixture, 2, true).await;
+    switch(&fixture, 2, true, None).await;
     assert_eq!(
         fixture.work().confirm_dispatch(&claim, false).await.unwrap(),
         LookupDispatch::Paused
@@ -128,6 +148,36 @@ async fn postgres_consignment_work_pause_and_epoch_gates() {
     .await
     .unwrap();
     assert_eq!(queued, ("queued".into(), 1, true));
+}
+
+#[tokio::test]
+async fn postgres_consignment_work_timed_pause_expires_without_a_new_event() {
+    let fixture = Fixture::new().await;
+    fixture.db.sync_admission(true).await.unwrap();
+    let expires: Timestamp = sqlx::query_scalar("SELECT clock_timestamp() + interval '3 seconds'")
+        .fetch_one(fixture.pool())
+        .await
+        .unwrap();
+    switch(&fixture, 0, true, Some(expires)).await;
+    let before = fixture.work_snapshot().await;
+    assert!(fixture.claim(1).await.is_none(), "暂停到期前不可领取");
+    assert!(before == fixture.work_snapshot().await);
+    assert!(
+        sqlx::query_scalar::<_, bool>("SELECT clock_timestamp() < $1")
+            .bind(expires)
+            .fetch_one(fixture.pool())
+            .await
+            .unwrap()
+    );
+
+    sqlx::query("SELECT pg_sleep_until($1)").bind(expires).execute(fixture.pool()).await.unwrap();
+    let claim = fixture.claim(1).await.expect("原暂停事实到期后可领取");
+    assert_eq!(claim.attempt(), 1);
+    assert_eq!(fixture.attempts().await, 1);
+    assert_eq!(
+        fixture.work().confirm_dispatch(&claim, false).await.unwrap(),
+        LookupDispatch::Allowed { deadline: claim.deadline() }
+    );
 }
 
 #[tokio::test]
@@ -283,7 +333,7 @@ async fn postgres_consignment_work_claim_increments_persisted_attempt() {
     assert_eq!(fixture.attempts().await, 5);
 }
 
-async fn switch(fixture: &Fixture, revision: i64, paused: bool) {
+async fn switch(fixture: &Fixture, revision: i64, paused: bool, expires_at: Option<Timestamp>) {
     fixture
         .db
         .write(RuntimeSwitchCommand {
@@ -296,7 +346,7 @@ async fn switch(fixture: &Fixture, revision: i64, paused: bool) {
                 RuntimeSwitchOperation::Clear
             },
             value: paused.then_some(json!(true)),
-            expires_at: None,
+            expires_at,
             expired_command_id: None,
             actor_id: "fake-operator".into(),
             operator_identity: None,

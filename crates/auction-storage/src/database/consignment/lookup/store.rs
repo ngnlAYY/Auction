@@ -90,6 +90,7 @@ impl LookupWorkStore for ConsignmentLookupStore {
         })
     }
 
+    /// 返回已确认回收的条数；候选查询失败返回错误，逐条失败记脱敏诊断后继续。
     fn reap_expired(&self) -> ConsignmentFuture<'_, u32> {
         Box::pin(async move {
             reclaim::reap_expired(&self.database, &self.commands)

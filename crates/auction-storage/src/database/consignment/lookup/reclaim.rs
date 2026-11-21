@@ -3,10 +3,10 @@
 use std::time::Duration;
 
 use auction_application::consignment::{
-    LookupAbandonment, LookupFence, LookupLeaseUpdate, LookupTransientReason,
+    ConsignmentError, LookupAbandonment, LookupFence, LookupLeaseUpdate, LookupTransientReason,
 };
 use auction_time::Timestamp;
-use sqlx::PgConnection;
+use sqlx::{FromRow, PgConnection};
 use uuid::Uuid;
 
 use super::admission::db_now;
@@ -16,10 +16,20 @@ use super::store::{ReapCommands, transact};
 use super::terminal;
 use super::work::{LookupFenceCheck, check_lookup_fence};
 use crate::database::DatabaseStore;
+use crate::database::backend::set_read_only_limits;
 use crate::database::consignment::commands::errors::WriteError;
 use crate::database::consignment::eligibility::predicates::listing_sql;
 
 const REAP_LIMIT: i64 = 16;
+
+#[derive(FromRow)]
+struct ReapCandidate {
+    work_id: Uuid,
+    listing_id: Uuid,
+    generation: i64,
+    fence: i64,
+    token: Uuid,
+}
 
 #[derive(Clone, Copy)]
 pub(super) enum ReclaimMode {
@@ -45,14 +55,46 @@ enum Reclaimed {
     Terminal(TerminalEvidence),
 }
 
+/// 候选查询超时视为依赖不可用。单条失败只记脱敏诊断，返回值只计已确认提交的回收。
 pub(super) async fn reap_expired(
     store: &DatabaseStore,
     commands: &ReapCommands,
 ) -> Result<u32, WriteError> {
+    let rows = candidates(store).await?;
+    let mut processed = 0;
+    for row in rows {
+        let fence = LookupFence::new(
+            row.work_id,
+            row.listing_id,
+            row.generation.cast_unsigned(),
+            row.fence,
+            row.token,
+        );
+        let result = match fence {
+            Ok(fence) => reclaim(store, commands, fence, ReclaimMode::Expired).await,
+            Err(error) => Err(error.into()),
+        };
+        match result {
+            Ok(true) => processed += 1,
+            Ok(false) => (),
+            Err(error) => {
+                tracing::warn!(work_id = %row.work_id, error = %error, "寄售解析租约回收失败");
+                if let Err(error) = defer_candidate(store, &row).await {
+                    tracing::warn!(work_id = %row.work_id, error = %error, "寄售解析租约回收排序更新失败");
+                }
+            }
+        }
+    }
+    Ok(processed)
+}
+
+async fn candidates(store: &DatabaseStore) -> Result<Vec<ReapCandidate>, WriteError> {
+    let mut tx = store.pool().begin_read_snapshot().await?;
+    set_read_only_limits(&mut tx).await.map_err(|(_setting, error)| WriteError::from(error))?;
     // 停用、碰撞和失资格由公平补扫清退。领取/自动清退可以在本查询与行锁之间推进工作。
-    let rows: Vec<(Uuid, Uuid, i64, i64, Uuid)> = sqlx::query_as(concat!(
+    let rows = sqlx::query_as(concat!(
         "WITH db_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
-         SELECT w.id, w.listing_id, w.generation, w.fence, w.token
+         SELECT w.id AS work_id, w.listing_id, w.generation, w.fence, w.token
          FROM public.consignment_lookup_work w JOIN public.consignment_listings l ON l.id = w.listing_id
          CROSS JOIN db_clock",
         listing_sql!(eligibility_joins),
@@ -60,20 +102,40 @@ pub(super) async fn reap_expired(
            AND ", listing_sql!(admitting_epoch),
         " AND ", listing_sql!(listing_seller_eligible),
         " AND NOT ", listing_sql!(collision),
-        " ORDER BY w.lease_until, w.id LIMIT $1",
+        " ORDER BY GREATEST(w.lease_until, w.updated_at), w.id LIMIT $1",
     ))
     .bind(REAP_LIMIT)
-    .fetch_all(store.pool())
+    .fetch_all(&mut *tx)
     .await?;
-    let mut processed = 0;
-    for (work_id, listing_id, generation, fence, token) in rows {
-        let fence =
-            LookupFence::new(work_id, listing_id, generation.cast_unsigned(), fence, token)?;
-        if reclaim(store, commands, fence, ReclaimMode::Expired).await? {
-            processed += 1;
-        }
-    }
-    Ok(processed)
+    tx.commit().await?;
+    Ok(rows)
+}
+
+async fn defer_candidate(
+    store: &DatabaseStore,
+    row: &ReapCandidate,
+) -> Result<(), ConsignmentError> {
+    // 不变量 5、6：回收失败后单独以原围栏记本次尝试的排序时刻，进程重启也能让出队首。
+    // 只更新排序所用的更新时间；状态迁移、计次与租约仍由回收事务提交。
+    transact(store, row, |conn, row| {
+        Box::pin(async move {
+            sqlx::query(
+                "WITH db_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+             UPDATE public.consignment_lookup_work SET updated_at = GREATEST(updated_at, at)
+             FROM db_clock WHERE id = $1 AND listing_id = $2 AND generation = $3
+               AND fence = $4 AND token = $5 AND state = 'leased' AND lease_until <= at",
+            )
+            .bind(row.work_id)
+            .bind(row.listing_id)
+            .bind(row.generation)
+            .bind(row.fence)
+            .bind(row.token)
+            .execute(conn)
+            .await?;
+            Ok(())
+        })
+    })
+    .await
 }
 
 pub(super) async fn abandon(

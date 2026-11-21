@@ -18,6 +18,8 @@ pub(super) const LISTING: Uuid = Uuid::from_u128(0x2f02);
 pub(super) const WORK: Uuid = Uuid::from_u128(0x2f03);
 pub(super) const OTHER_LISTING: Uuid = Uuid::from_u128(0x2f04);
 pub(super) const OTHER_WORK: Uuid = Uuid::from_u128(0x2f05);
+pub(super) const REGISTERED_AAD: Uuid = Uuid::from_u128(0x2f08);
+const OTHER_AAD: Uuid = Uuid::from_u128(0x2f09);
 const REPLAY_KEY: Uuid = Uuid::from_u128(0x2f06);
 const TEST_TOKEN: Uuid = Uuid::from_u128(0x2f07);
 
@@ -58,8 +60,10 @@ impl Fixture {
         .execute(&mut *tx)
         .await
         .unwrap();
-        for (listing, work, eid) in [(LISTING, WORK, "941"), (OTHER_LISTING, OTHER_WORK, "942")] {
-            seed_listing(&mut tx, listing, work, eid, created, expires).await;
+        for (listing, work, eid, aad) in
+            [(LISTING, WORK, "941", REGISTERED_AAD), (OTHER_LISTING, OTHER_WORK, "942", OTHER_AAD)]
+        {
+            seed_listing(&mut tx, listing, work, eid, aad, created, expires).await;
         }
         tx.commit().await.unwrap();
         Self { db, owner, _database: database }
@@ -138,6 +142,55 @@ impl Fixture {
         LookupFence::new(WORK, LISTING, 1, i64::from(attempt), TEST_TOKEN).unwrap()
     }
 
+    pub(super) async fn expire_other_lease(&self) {
+        sqlx::query(
+            "UPDATE public.consignment_lookup_work SET state = 'leased', lease_owner = 'fake-worker',
+                 token = $2, fence = 1, attempt_count = 1, next_attempt_at = NULL,
+                 network_deadline = statement_timestamp() - interval '6 seconds',
+                 lease_until = statement_timestamp() - interval '1 second' WHERE id = $1",
+        )
+        .bind(OTHER_WORK)
+        .bind(TEST_TOKEN)
+        .execute(self.pool())
+        .await
+        .unwrap();
+    }
+
+    pub(super) async fn seed_exhausted_backlog(&self) {
+        let mut tx = self.owner.postgres_pool().begin().await.unwrap();
+        let (created, expires) = sqlx::query_as(
+            "SELECT created_at, expires_at FROM public.consignment_listings WHERE id = $1",
+        )
+        .bind(LISTING)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+        for offset in 0..15 {
+            seed_listing(
+                &mut tx,
+                Uuid::from_u128(0x3000 + offset),
+                Uuid::from_u128(0x3100 + offset),
+                &(950 + offset).to_string(),
+                Uuid::from_u128(0x3200 + offset),
+                created,
+                expires,
+            )
+            .await;
+        }
+        sqlx::query(
+            "UPDATE public.consignment_lookup_work SET state = 'leased', lease_owner = 'fake-worker',
+                 token = $2, fence = 6, attempt_count = 6, next_attempt_at = NULL,
+                 network_deadline = statement_timestamp() - interval '15 seconds',
+                 lease_until = statement_timestamp() - interval '10 seconds' WHERE id <> $1",
+        )
+        .bind(OTHER_WORK)
+        .bind(TEST_TOKEN)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+    }
+
     pub(super) async fn attempts(&self) -> i64 {
         sqlx::query_scalar("SELECT sum(attempt_count)::bigint FROM public.consignment_lookup_work")
             .fetch_one(self.pool())
@@ -196,6 +249,7 @@ async fn seed_listing(
     listing: Uuid,
     work: Uuid,
     eid: &str,
+    aad: Uuid,
     created: Timestamp,
     expires: Timestamp,
 ) {
@@ -232,13 +286,14 @@ async fn seed_listing(
     .execute(&mut **tx)
     .await
     .unwrap();
+    let ciphertext_byte = if aad == REGISTERED_AAD { "33" } else { "55" };
     sqlx::query(
         "INSERT INTO public.consignment_registration_secrets
          (listing_id, aad_equipment_id, ciphertext, nonce, encryption_key_id, fingerprint, created_at, updated_at)
-         VALUES ($1, $2, decode(repeat('33', 32), 'hex'), decode(repeat('44', 12), 'hex'),
+         VALUES ($1, $2, decode(repeat($4, 32), 'hex'), decode(repeat('44', 12), 'hex'),
                  'fake-data-key', repeat('ab', 32), $3, $3)",
     )
-    .bind(listing).bind(Uuid::new_v4()).bind(created).execute(&mut **tx).await.unwrap();
+    .bind(listing).bind(aad).bind(created).bind(ciphertext_byte).execute(&mut **tx).await.unwrap();
     sqlx::query(
         "INSERT INTO public.consignment_lookup_work
          (id, listing_id, generation, state, attempt_count, fence, next_attempt_at, created_at, updated_at)
