@@ -156,7 +156,7 @@ impl Fixture {
         .unwrap();
     }
 
-    pub(super) async fn seed_exhausted_backlog(&self) {
+    pub(super) async fn seed_exhausted_backlog(&self, count: u128) {
         let mut tx = self.owner.postgres_pool().begin().await.unwrap();
         let (created, expires) = sqlx::query_as(
             "SELECT created_at, expires_at FROM public.consignment_listings WHERE id = $1",
@@ -165,7 +165,7 @@ impl Fixture {
         .fetch_one(&mut *tx)
         .await
         .unwrap();
-        for offset in 0..15 {
+        for offset in 1..count {
             seed_listing(
                 &mut tx,
                 Uuid::from_u128(0x3000 + offset),
@@ -178,10 +178,11 @@ impl Fixture {
             .await;
         }
         sqlx::query(
-            "UPDATE public.consignment_lookup_work SET state = 'leased', lease_owner = 'fake-worker',
+            "UPDATE public.consignment_lookup_work w SET state = 'leased', lease_owner = 'fake-worker',
                  token = $2, fence = 6, attempt_count = 6, next_attempt_at = NULL,
-                 network_deadline = statement_timestamp() - interval '15 seconds',
-                 lease_until = statement_timestamp() - interval '10 seconds' WHERE id <> $1",
+                 network_deadline = healthy.lease_until - interval '15 seconds',
+                 lease_until = healthy.lease_until - interval '10 seconds'
+             FROM public.consignment_lookup_work healthy WHERE healthy.id = $1 AND w.id <> $1",
         )
         .bind(OTHER_WORK)
         .bind(TEST_TOKEN)

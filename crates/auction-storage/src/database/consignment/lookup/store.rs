@@ -13,8 +13,10 @@ use auction_domain::CommandId;
 use auction_time::Timestamp;
 use futures_util::future::BoxFuture;
 use sqlx::PgConnection;
+use tokio::sync::Mutex;
 use tokio::time::error::Elapsed;
 
+use super::reclaim::ReapCursor;
 use super::{admission, claim, lease, reclaim};
 use crate::database::DatabaseStore;
 use crate::database::backend::{retry_conflicts, set_read_only_limits};
@@ -29,6 +31,8 @@ pub(super) struct ReapCommands {
 struct ConsignmentLookupStore {
     database: DatabaseStore,
     commands: ReapCommands,
+    // 不变量 5：游标只用于公平扫描，重启可从头开始。到期、租约与完成状态仍由数据库决定。
+    reap_cursor: Mutex<Option<ReapCursor>>,
 }
 
 impl DatabaseStore {
@@ -41,6 +45,7 @@ impl DatabaseStore {
         ConsignmentLookupStore {
             database: self.clone(),
             commands: ReapCommands { deadline, exhausted },
+            reap_cursor: Mutex::new(None),
         }
     }
 }
@@ -93,7 +98,8 @@ impl LookupWorkStore for ConsignmentLookupStore {
     /// 返回已确认回收的条数；候选查询失败返回错误，逐条失败记脱敏诊断后继续。
     fn reap_expired(&self) -> ConsignmentFuture<'_, u32> {
         Box::pin(async move {
-            reclaim::reap_expired(&self.database, &self.commands)
+            let mut cursor = self.reap_cursor.lock().await;
+            reclaim::reap_expired(&self.database, &self.commands, &mut cursor)
                 .await
                 .map_err(WriteError::into_application)
         })

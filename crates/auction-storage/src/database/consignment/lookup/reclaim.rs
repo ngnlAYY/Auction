@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use auction_application::consignment::{
-    ConsignmentError, LookupAbandonment, LookupFence, LookupLeaseUpdate, LookupTransientReason,
+    LookupAbandonment, LookupFence, LookupLeaseUpdate, LookupTransientReason,
 };
 use auction_time::Timestamp;
 use sqlx::{FromRow, PgConnection};
@@ -20,7 +20,10 @@ use crate::database::backend::set_read_only_limits;
 use crate::database::consignment::commands::errors::WriteError;
 use crate::database::consignment::eligibility::predicates::listing_sql;
 
-const REAP_LIMIT: i64 = 16;
+const REAP_LIMIT: u32 = 16;
+const REAP_SCAN_LIMIT: u32 = 2 * REAP_LIMIT;
+
+pub(super) type ReapCursor = (Timestamp, Uuid);
 
 #[derive(FromRow)]
 struct ReapCandidate {
@@ -29,6 +32,7 @@ struct ReapCandidate {
     generation: i64,
     fence: i64,
     token: Uuid,
+    lease_until: Timestamp,
 }
 
 #[derive(Clone, Copy)]
@@ -59,83 +63,85 @@ enum Reclaimed {
 pub(super) async fn reap_expired(
     store: &DatabaseStore,
     commands: &ReapCommands,
+    cursor: &mut Option<ReapCursor>,
 ) -> Result<u32, WriteError> {
-    let rows = candidates(store).await?;
+    let start = *cursor;
+    let mut wrapped = false;
+    let mut remaining = REAP_SCAN_LIMIT;
     let mut processed = 0;
-    for row in rows {
-        let fence = LookupFence::new(
-            row.work_id,
-            row.listing_id,
-            row.generation.cast_unsigned(),
-            row.fence,
-            row.token,
-        );
-        let result = match fence {
-            Ok(fence) => reclaim(store, commands, fence, ReclaimMode::Expired).await,
-            Err(error) => Err(error.into()),
-        };
-        match result {
-            Ok(true) => processed += 1,
-            Ok(false) => (),
-            Err(error) => {
-                tracing::warn!(work_id = %row.work_id, error = %error, "寄售解析租约回收失败");
-                if let Err(error) = defer_candidate(store, &row).await {
-                    tracing::warn!(work_id = %row.work_id, error = %error, "寄售解析租约回收排序更新失败");
+    while remaining > 0 && processed < REAP_LIMIT {
+        let limit = remaining.min(REAP_LIMIT - processed);
+        let through = if wrapped { start } else { None };
+        let rows = candidates(store, *cursor, through, limit).await?;
+        let at_end = rows.len() < limit as usize;
+        for row in rows {
+            *cursor = Some((row.lease_until, row.work_id));
+            remaining -= 1;
+            let fence = LookupFence::new(
+                row.work_id,
+                row.listing_id,
+                row.generation.cast_unsigned(),
+                row.fence,
+                row.token,
+            );
+            let result = match fence {
+                Ok(fence) => reclaim(store, commands, fence, ReclaimMode::Expired).await,
+                Err(error) => Err(error.into()),
+            };
+            match result {
+                Ok(true) => processed += 1,
+                Ok(false) => (),
+                Err(error) => {
+                    tracing::warn!(work_id = %row.work_id, error = %error, "寄售解析租约回收失败");
                 }
             }
+        }
+        if at_end {
+            if wrapped || start.is_none() {
+                break;
+            }
+            // 回绕只扫描本轮起点之前的区间，同一位置在一轮内只尝试一次。
+            *cursor = None;
+            wrapped = true;
         }
     }
     Ok(processed)
 }
 
-async fn candidates(store: &DatabaseStore) -> Result<Vec<ReapCandidate>, WriteError> {
-    let mut tx = store.pool().begin_read_snapshot().await?;
+async fn candidates(
+    store: &DatabaseStore,
+    after: Option<ReapCursor>,
+    through: Option<ReapCursor>,
+    limit: u32,
+) -> Result<Vec<ReapCandidate>, WriteError> {
+    let (after_lease, after_work) = after.unzip();
+    let (through_lease, through_work) = through.unzip();
+    let mut tx = store.pool().begin_with("BEGIN ISOLATION LEVEL READ COMMITTED").await?;
     set_read_only_limits(&mut tx).await.map_err(|(_setting, error)| WriteError::from(error))?;
-    // 停用、碰撞和失资格由公平补扫清退。领取/自动清退可以在本查询与行锁之间推进工作。
+    // 停用、碰撞和失资格由公平补扫清退。这里只短暂锁工作行，释放后由回收事务按原围栏复核。
     let rows = sqlx::query_as(concat!(
         "WITH db_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
-         SELECT w.id AS work_id, w.listing_id, w.generation, w.fence, w.token
+         SELECT w.id AS work_id, w.listing_id, w.generation, w.fence, w.token, w.lease_until
          FROM public.consignment_lookup_work w JOIN public.consignment_listings l ON l.id = w.listing_id
          CROSS JOIN db_clock",
         listing_sql!(eligibility_joins),
         "WHERE w.state = 'leased' AND w.lease_until <= at AND l.state = 'resolving'
+           AND (w.lease_until, w.id) > (COALESCE($1, '-infinity'::timestamptz), $2::uuid)
+           AND (w.lease_until, w.id) <= (COALESCE($3, 'infinity'::timestamptz), $4::uuid)
            AND ", listing_sql!(admitting_epoch),
         " AND ", listing_sql!(listing_seller_eligible),
         " AND NOT ", listing_sql!(collision),
-        " ORDER BY GREATEST(w.lease_until, w.updated_at), w.id LIMIT $1",
+        " ORDER BY w.lease_until, w.id LIMIT $5 FOR UPDATE OF w SKIP LOCKED",
     ))
-    .bind(REAP_LIMIT)
+    .bind(after_lease)
+    .bind(after_work)
+    .bind(through_lease)
+    .bind(through_work)
+    .bind(i64::from(limit))
     .fetch_all(&mut *tx)
     .await?;
     tx.commit().await?;
     Ok(rows)
-}
-
-async fn defer_candidate(
-    store: &DatabaseStore,
-    row: &ReapCandidate,
-) -> Result<(), ConsignmentError> {
-    // 不变量 5、6：回收失败后单独以原围栏记本次尝试的排序时刻，进程重启也能让出队首。
-    // 只更新排序所用的更新时间；状态迁移、计次与租约仍由回收事务提交。
-    transact(store, row, |conn, row| {
-        Box::pin(async move {
-            sqlx::query(
-                "WITH db_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
-             UPDATE public.consignment_lookup_work SET updated_at = GREATEST(updated_at, at)
-             FROM db_clock WHERE id = $1 AND listing_id = $2 AND generation = $3
-               AND fence = $4 AND token = $5 AND state = 'leased' AND lease_until <= at",
-            )
-            .bind(row.work_id)
-            .bind(row.listing_id)
-            .bind(row.generation)
-            .bind(row.fence)
-            .bind(row.token)
-            .execute(conn)
-            .await?;
-            Ok(())
-        })
-    })
-    .await
 }
 
 pub(super) async fn abandon(

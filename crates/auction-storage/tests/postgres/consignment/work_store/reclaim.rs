@@ -97,11 +97,9 @@ async fn postgres_consignment_work_reap_audit_failure_rolls_back() {
     fixture.db.sync_admission(true).await.unwrap();
     let fence = fixture.seed_lease(6, true).await;
     reject_reaper_audit(&fixture).await;
-    let before = reap_rollback_state(&fixture).await;
+    let before = fixture.work_snapshot().await;
     assert_eq!(fixture.work().reap_expired().await, Ok(0));
-    let after = reap_rollback_state(&fixture).await;
-    assert_eq!(before.0, after.0, "失败只允许更新回收排序时刻");
-    assert!(after.1 > before.1);
+    assert!(before == fixture.work_snapshot().await, "审计失败后所有工作行和许可都应保持原样");
     let untouched: bool = sqlx::query_scalar(
         "SELECT l.state_version = 1 AND l.state = 'resolving' AND s.retired_at IS NULL
              AND NOT EXISTS (SELECT 1 FROM public.consignment_commands WHERE command_id = $2)
@@ -115,18 +113,6 @@ async fn postgres_consignment_work_reap_audit_failure_rolls_back() {
         .await
         .unwrap();
     assert_eq!(fixture.work().reap_expired().await.unwrap(), 1);
-}
-
-async fn reap_rollback_state(fixture: &Fixture) -> (String, Timestamp) {
-    sqlx::query_as(
-        "SELECT md5(concat(to_jsonb(w) - 'updated_at',
-                    (SELECT to_jsonb(c) FROM public.consignment_lookup_control c))), w.updated_at
-         FROM public.consignment_lookup_work w WHERE w.id = $1",
-    )
-    .bind(WORK)
-    .fetch_one(fixture.pool())
-    .await
-    .unwrap()
 }
 
 #[tokio::test]
@@ -149,12 +135,87 @@ async fn postgres_consignment_work_reap_advances_past_full_page_of_failures() {
     let fixture = Fixture::new().await;
     fixture.db.sync_admission(true).await.unwrap();
     fixture.expire_other_lease().await;
-    fixture.seed_exhausted_backlog().await;
+    fixture.seed_exhausted_backlog(32).await;
     reject_reaper_audit(&fixture).await;
 
-    assert_eq!(fixture.work().reap_expired().await, Ok(0), "第一页的 16 条耗尽任务均失败");
-    assert_eq!(fixture.work().reap_expired().await, Ok(1), "重启后也须推进至后续任务");
+    let work = fixture.work();
+    assert_eq!(work.reap_expired().await, Ok(0), "首轮预算内的 32 条耗尽任务均失败");
+    assert_eq!(work.reap_expired().await, Ok(1), "下一轮从原游标继续，应回收后续任务");
     assert_requeued_after_failure(&fixture).await;
+}
+
+#[tokio::test]
+async fn postgres_consignment_work_reap_advances_past_locked_work_rows() {
+    let fixture = Fixture::new().await;
+    fixture.db.sync_admission(true).await.unwrap();
+    fixture.expire_other_lease().await;
+    fixture.seed_exhausted_backlog(16).await;
+    let mut lock = fixture.owner.postgres_pool().begin().await.unwrap();
+    let locked: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM public.consignment_lookup_work WHERE id <> $1 FOR UPDATE",
+    )
+    .bind(OTHER_WORK)
+    .fetch_all(&mut *lock)
+    .await
+    .unwrap();
+    assert_eq!(locked.len(), 16);
+
+    let work = fixture.work();
+    assert_healthy_lease_recovered(&fixture, &work).await;
+    lock.rollback().await.unwrap();
+    assert_backlog_recovered(&fixture, &work).await;
+}
+
+#[tokio::test]
+async fn postgres_consignment_work_reap_advances_past_rejected_work_updates() {
+    let fixture = Fixture::new().await;
+    fixture.db.sync_admission(true).await.unwrap();
+    fixture.expire_other_lease().await;
+    fixture.seed_exhausted_backlog(16).await;
+    sqlx::raw_sql(
+        "CREATE FUNCTION public.fake_reaper_work_reject() RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN RAISE EXCEPTION '测试工作更新失败' USING ERRCODE = '23514'; END;
+         $$;
+         CREATE TRIGGER fake_reaper_work_reject BEFORE UPDATE ON public.consignment_lookup_work
+             FOR EACH ROW WHEN (OLD.attempt_count = 6)
+             EXECUTE FUNCTION public.fake_reaper_work_reject()",
+    )
+    .execute(fixture.owner.postgres_pool())
+    .await
+    .unwrap();
+
+    let work = fixture.work();
+    assert_healthy_lease_recovered(&fixture, &work).await;
+    sqlx::query("DROP TRIGGER fake_reaper_work_reject ON public.consignment_lookup_work")
+        .execute(fixture.owner.postgres_pool())
+        .await
+        .unwrap();
+    assert_backlog_recovered(&fixture, &work).await;
+}
+
+async fn assert_healthy_lease_recovered(fixture: &Fixture, work: &impl LookupWorkStore) {
+    let mut recovered = work.reap_expired().await.unwrap();
+    if recovered == 0 {
+        recovered = work.reap_expired().await.unwrap();
+    }
+    assert_eq!(recovered, 1, "最早的 16 条无法回收时，健康租约须在至多两轮内回收");
+    assert_eq!(reap_work_states(fixture).await, (16, 1, 0));
+    assert_requeued_after_failure(fixture).await;
+}
+
+async fn assert_backlog_recovered(fixture: &Fixture, work: &impl LookupWorkStore) {
+    assert_eq!(work.reap_expired().await, Ok(16), "故障解除后可回收之前跳过的 16 条");
+    assert_eq!(reap_work_states(fixture).await, (0, 1, 16));
+}
+
+async fn reap_work_states(fixture: &Fixture) -> (i64, i64, i64) {
+    sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE state = 'leased'), count(*) FILTER (WHERE state = 'queued'),
+                count(*) FILTER (WHERE state = 'done') FROM public.consignment_lookup_work",
+    )
+    .fetch_one(fixture.pool())
+    .await
+    .unwrap()
 }
 
 async fn assert_requeued_after_failure(fixture: &Fixture) {
