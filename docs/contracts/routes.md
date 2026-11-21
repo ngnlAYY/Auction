@@ -148,6 +148,8 @@ Public/Admin 的 `/metrics` 默认拒绝任意来源携带 `Forwarded`、任何 
 | GET | `/api/v1/auctions/{auction_id}/forum` | — | 该场论坛主题的公开镜像 |
 | GET, HEAD | `/api/v1/auctions/{auction_id}/countdown/{timer}` | — | 论坛帖内嵌的倒计时 SVG 图片 |
 
+成交历史编号页的统计覆盖全部匹配记录。没有匹配时 `rows` 为空，`total`、`stats.count`、`stats.min`、`stats.max` 和 `stats.median` 均为 `0`，省略 `stats.median_exact`。页码超出末页时 `rows` 为空，仍返回匹配集合的总数与统计。
+
 ### 已结算场次摘要
 
 成功响应为 `200 ok`，`data` 固定含 `id`（规范小写 UUID 字符串）、`world`（目录的 `world_id`）、`sequence`（整数）及 `effective_end_at`（与目录一致的 RFC 3339 UTC 字符串）。有效结束时刻取状态为 `live`、`sold` 或 `unsold` 的 lot 中最晚的有效结束时刻，无值时固定返回 `null`。停用世界中的已结算场次仍可读。

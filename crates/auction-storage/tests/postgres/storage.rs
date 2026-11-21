@@ -7,7 +7,10 @@
 
 use std::assert_matches;
 
-use auction_application::auction::{PublicPriceHistoryReader, WorldReader};
+use auction_application::auction::{
+    PublicPriceHistoryListRequest, PublicPriceHistoryReader, PublicPriceHistorySort,
+    PublicPriceHistoryStats, WorldReader,
+};
 use auction_application::core::{ApplicationError, SessionError};
 use auction_application::public::{AdminSessionRecord, AdminSessionStore};
 use auction_storage::postgres_expected_migration_version;
@@ -546,6 +549,35 @@ async fn postgres_price_history_index_matches_owner_predicate() {
     use uuid::Uuid;
 
     let pool = store.postgres_pool();
+    let request = PublicPriceHistoryListRequest {
+        name_terms: Vec::new(),
+        world_id: None,
+        closed_from: None,
+        closed_before: None,
+        minimum_price: None,
+        maximum_price: None,
+        buyer: None,
+        seller: None,
+        sort: PublicPriceHistorySort::ClosedDesc,
+        limit: 25,
+        offset: 0,
+        cursor: None,
+    };
+    let empty_page =
+        store.list_public_price_history(request.clone()).await.expect("空库价格历史编号页");
+    assert!(empty_page.entries.is_empty());
+    assert_eq!(empty_page.total, Some(0));
+    assert_eq!(
+        empty_page.stats,
+        Some(PublicPriceHistoryStats {
+            count: 0,
+            minimum: 0,
+            maximum: 0,
+            median: 0,
+            median_exact: None,
+        }),
+    );
+
     let now = Timestamp::now();
     let closed_at = now - Duration::hours(1);
     let auction_id = Uuid::new_v4();
@@ -685,24 +717,40 @@ async fn postgres_price_history_index_matches_owner_predicate() {
     );
 
     // 比较真实非空成交集合：已成交 lot 可见，流拍 lot 不可见；关闭所有索引扫描后集合应相同。
-    let request = auction_application::auction::PublicPriceHistoryListRequest {
-        name_terms: Vec::new(),
-        world_id: None,
-        closed_from: None,
-        closed_before: None,
-        minimum_price: None,
-        maximum_price: None,
-        buyer: None,
-        seller: None,
-        sort: auction_application::auction::PublicPriceHistorySort::ClosedDesc,
-        limit: 25,
-        offset: 0,
-        cursor: None,
-    };
     let page = store.list_public_price_history(request.clone()).await.expect("价格历史编号页");
     let indexed_ids = page.entries.iter().map(|entry| entry.lot_id).collect::<Vec<_>>();
     assert_eq!(indexed_ids, vec![sold_lot_id], "应显示成交记录并排除流拍 lot");
     assert_eq!(page.total, Some(1));
+    assert_eq!(
+        page.stats,
+        Some(PublicPriceHistoryStats {
+            count: 1,
+            minimum: 500,
+            maximum: 500,
+            median: 500,
+            median_exact: Some("500".to_owned()),
+        }),
+    );
+
+    let filtered = store
+        .list_public_price_history(PublicPriceHistoryListRequest {
+            minimum_price: Some(501),
+            ..request.clone()
+        })
+        .await
+        .expect("无匹配成交记录的价格历史编号页");
+    assert_eq!(filtered, empty_page);
+
+    let past_end = store
+        .list_public_price_history(PublicPriceHistoryListRequest {
+            offset: request.limit,
+            ..request
+        })
+        .await
+        .expect("超出成交记录范围的价格历史编号页");
+    assert!(past_end.entries.is_empty());
+    assert_eq!(past_end.total, page.total);
+    assert_eq!(past_end.stats, page.stats);
 
     let mut transaction = pool.begin().await.expect("开启无索引扫描对照事务");
     sqlx::query("SET LOCAL enable_indexscan = off")

@@ -9,6 +9,7 @@
 //! - 资金化正向路径：两类付款都直接调用真实 `SettlementInternalFulfillmentStore::satisfy_collected`，
 //!   以合成凭据、匹配的运行代际、record_only 账户与早于发送的开户来源执行实收证明与资金入账
 //!   校验；同一证明重放不重复入账；错 MID、失效代际与晚于发送的开户来源都整体回滚；
+//! - 异世界内部交付核验实收或内部付款的同 UID 证明；仅有历史领取状态或不同 UID 均不能交付；
 //! - 全部场景都是当前生产形状：场次快照冻结默认结算策略 v2（hold_curve_v2），义务版本、结算
 //!   明细的 policy 标签与竞得装备 COD 载荷的 `pricing_mode` 按生产写入口径与之一致，资金准入
 //!   走 v2 价格变量校验，而不是缺标签时的 v1 兼容读路径；
@@ -32,7 +33,7 @@ use auction_application::operations::{
 };
 use auction_application::public::format_deadline;
 use auction_application::settlement::{
-    INTERNAL_EVIDENCE_PROTOCOL, InternalEvidencePurpose, MailAccountEvidenceBinding,
+    FundingError, INTERNAL_EVIDENCE_PROTOCOL, InternalEvidencePurpose, MailAccountEvidenceBinding,
     MailRuntimeBinding, SettlementFulfillmentClaim, SettlementFulfillmentProof,
     SettlementFulfillmentReconcileStatus, SettlementFulfillmentStore, SettlementInternalCommand,
     SettlementInternalCommitOutcome, SettlementInternalEvidenceSnapshot,
@@ -125,6 +126,7 @@ impl Payment {
 /// 一个付款场景的标识。
 struct CodCase {
     payment: Uuid,
+    handoff: Option<Uuid>,
     payout: Uuid,
     lot: Uuid,
     delivery: Uuid,
@@ -458,7 +460,7 @@ async fn seed_case_with_delivery(
     .execute(pool)
     .await
     .expect("写入付款期内的恢复记录");
-    CodCase { payment: payment_id, payout, lot, delivery, external_equipment_id }
+    CodCase { payment: payment_id, handoff, payout, lot, delivery, external_equipment_id }
 }
 
 /// 合成的同 session 邮件账号：active mail_cookie 凭据（main 范围、带预期玩家名），认证 UID 即
@@ -539,6 +541,42 @@ impl Funding {
         evidence
     }
 
+    fn equipment_evidence(
+        &self,
+        command: &SettlementInternalCommand,
+        uid: &str,
+    ) -> SettlementInternalEvidenceSnapshot {
+        let claim = &command.claim;
+        let mut evidence = self.evidence(
+            MAIL_GENERATION,
+            command.command_id,
+            InternalEvidencePurpose::SettlementClaim {
+                obligation_id: claim.obligation_id.as_uuid(),
+                claim_token: claim.claim_token,
+                claim_fencing: claim.claim_fencing,
+                state_version: claim.state_version,
+            },
+            None,
+        );
+        evidence.identity.authenticated_uid = uid.to_owned();
+        evidence.identity.world = claim.world;
+        evidence.identity.digest = evidence.identity.compute_digest();
+        let mut equipment = VerifiedMailEquipmentPresence {
+            binding: evidence.identity.clone(),
+            equipment_id: claim.equipment_id,
+            external_equipment_id: claim.external_equipment_id.clone(),
+            category: "weapon_1handed".to_owned(),
+            observed_at: evidence.observed_from,
+            digest: [0; 32],
+        };
+        equipment.binding.world = claim.equipment_world;
+        equipment.binding.digest = equipment.binding.compute_digest();
+        equipment.digest = equipment.compute_digest();
+        evidence.equipment = Some(equipment);
+        evidence.digest = evidence.compute_digest();
+        evidence
+    }
+
     /// 按真实 claim 绑定的实收证据：purpose 取 claim 的令牌、fencing 与状态版本，operation_id
     /// 即稳定实收命令 ID；Sent 观察给出 MID、收件人、canonical 主题与寄出时刻。
     fn collected_evidence(
@@ -576,15 +614,20 @@ impl Funding {
 /// 资金化前置：合成凭据、匹配的运行代际，以及与仅记账初始化写入形状相同的 record_only 账户和
 /// 开户来源（开户时没有既有责任，金额为 0）。开户来源的时刻就是资金来源边界。
 async fn seed_funding(pool: &PgPool) -> Funding {
+    seed_funding_in_scope(pool, "mooglemail:main").await
+}
+
+async fn seed_funding_in_scope(pool: &PgPool, scope: &str) -> Funding {
     let credential = stable_id(SEED, "credential");
     sqlx::query(
         "INSERT INTO public.credential_keys
             (id, credential_kind, scope, label, ciphertext, nonce, encryption_key_id, fingerprint,
              status, state_version, player_name)
-         VALUES ($1, 'mail_cookie', 'mooglemail:main', 'collection-cod', $2, $3, 'test-key',
-                 'collection-cod-credential', 'active', 1, $4)",
+         VALUES ($1, 'mail_cookie', $2, 'collection-cod', $3, $4, 'test-key',
+                 'collection-cod-credential', 'active', 1, $5)",
     )
     .bind(credential)
+    .bind(scope)
     .bind(vec![1_u8])
     .bind(vec![0_u8; 12])
     .bind(BOT_NAME)
@@ -762,7 +805,12 @@ fn grouping(fulfillment: &OperationsAlertFulfillmentSnapshot) -> [i64; 6] {
 
 /// 领取付款义务的履约（买家付款后的 Sent 领取阶段）。
 async fn claim_payment(store: &DatabaseStore, case: &CodCase) -> SettlementFulfillmentClaim {
-    let now = Timestamp::now();
+    claim_obligation(store, case.payment).await
+}
+
+async fn claim_obligation(store: &DatabaseStore, obligation: Uuid) -> SettlementFulfillmentClaim {
+    let now =
+        Timestamp::now().duration_trunc(Duration::microseconds(1)).expect("领取时间精确到微秒");
     SettlementFulfillmentStore::claim_due(
         store,
         "collection-cod-fulfillment".to_owned(),
@@ -773,8 +821,36 @@ async fn claim_payment(store: &DatabaseStore, case: &CodCase) -> SettlementFulfi
     .await
     .expect("领取到期履约")
     .into_iter()
-    .find(|claim| claim.obligation_id.as_uuid() == case.payment)
-    .expect("领取付款履约")
+    .find(|claim| claim.obligation_id.as_uuid() == obligation)
+    .expect("领取目标履约")
+}
+
+async fn internal_command(store: &DatabaseStore, obligation: Uuid) -> SettlementInternalCommand {
+    let claim = claim_obligation(store, obligation).await;
+    let recipient_version: i64 =
+        sqlx::query_scalar("SELECT state_version FROM public.users WHERE id = $1")
+            .bind(claim.recipient_user_id.expect("内部履约收件人"))
+            .fetch_one(store.postgres_pool())
+            .await
+            .expect("读取收件人版本");
+    let recipient_version = u64::try_from(recipient_version).expect("收件人版本必须为非负数");
+    SettlementInternalCommand::new(claim, Some(recipient_version), false)
+        .expect("构造稳定内部履约命令")
+}
+
+/// 模拟付款投递后赢家改绑至 bot，保留原投递的冻结收件人与实收证明。
+async fn rebind_winner_to_bot(pool: &PgPool, case: &CodCase) {
+    let changed = sqlx::query(
+        "UPDATE public.users
+         SET username = $2, state_version = state_version + 1, updated_at = now()
+         WHERE id = (SELECT recipient_user_id FROM public.settlement_obligations WHERE id = $1)",
+    )
+    .bind(case.payment)
+    .bind(BOT_NAME)
+    .execute(pool)
+    .await
+    .expect("改绑测试赢家");
+    assert_eq!(changed.rows_affected(), 1);
 }
 
 /// 买家付款后的 Sent 领取证明。生产按已发布的 Sent 证明格式计算摘要（应用层）；存储只要求
@@ -977,7 +1053,7 @@ async fn postgres_collection_cod_with_frozen_send_proof_waits_for_payment() {
         )
         .bind(match payment {
             Payment::EquipmentCod => case.payout,
-            Payment::CarrierCod => stable_id(SEED, "isekai-winner_equipment_handoff"),
+            Payment::CarrierCod => case.handoff.expect("异世界交付义务"),
         })
         .fetch_one(pool)
         .await
@@ -985,6 +1061,128 @@ async fn postgres_collection_cod_with_frozen_send_proof_waits_for_payment() {
         assert_eq!(unblocked, "ready", "{payment:?} 付款满足后解除直接依赖");
 
         pool.close().await;
+    }
+}
+
+/// 付款证明必须由原付款产生并绑定同 UID，内部交付才能满足并释放货款。
+#[tokio::test]
+async fn postgres_internal_isekai_handoff_requires_matching_payment_proof() {
+    #[derive(Debug)]
+    enum PaymentProof {
+        Internal,
+        Collected,
+        LegacyCollected,
+    }
+
+    let payment = Payment::CarrierCod;
+    for proof in [PaymentProof::Internal, PaymentProof::Collected, PaymentProof::LegacyCollected] {
+        let database = support::TestDatabase::create().await.expect("克隆模板库");
+        let store = database.store().await.expect("以运行账号连接");
+        let pool = store.postgres_pool();
+        let deadline = Timestamp::now() + Duration::days(1);
+        let (case, funding) = match proof {
+            PaymentProof::Internal => {
+                let case = seed_internal_case(pool, payment, deadline).await;
+                let funding = seed_funding_in_scope(pool, "mooglemail:shared").await;
+                let command = internal_command(&store, case.payment).await;
+                let evidence = funding.equipment_evidence(&command, FUNDING_UID);
+                assert_internal_commit(&store, &command, &evidence).await;
+                (case, funding)
+            }
+            PaymentProof::Collected => {
+                let case = seed_case(pool, payment, deadline).await;
+                let funding = seed_funding_in_scope(pool, "mooglemail:shared").await;
+                send_through_fence(&store, payment, &case, Some(&funding)).await;
+                let claim = claim_payment(&store, &case).await;
+                let command =
+                    SettlementInternalCommand::new(claim, None, true).expect("构造稳定实收命令");
+                let mid = payment.external_mail_id();
+                let evidence = funding.collected_evidence(MAIL_GENERATION, &command, payment, mid);
+                assert_eq!(fund_collected(&store, &command, &evidence, mid).await, "committed");
+                rebind_winner_to_bot(pool, &case).await;
+                (case, funding)
+            }
+            PaymentProof::LegacyCollected => {
+                let case = seed_case(pool, payment, deadline).await;
+                send_through_fence(&store, payment, &case, None).await;
+                assert_eq!(
+                    satisfy_by_legacy_entry(&store, &case).await.expect("历史领取满足付款义务"),
+                    SettlementFulfillmentReconcileStatus::Satisfied,
+                );
+                let funding = seed_funding_in_scope(pool, "mooglemail:shared").await;
+                rebind_winner_to_bot(pool, &case).await;
+                (case, funding)
+            }
+        };
+
+        let handoff = case.handoff.expect("异世界交付义务");
+        let command = internal_command(&store, handoff).await;
+        assert_eq!(command.claim.prerequisite_id, Some(SettlementId::from_uuid(case.payment)));
+        let legacy = matches!(proof, PaymentProof::LegacyCollected);
+        // 构造完整的库存证明。历史路径缺付款 UID，其余路径给出与原付款不同的 UID。
+        let uid = if legacy { FUNDING_UID } else { "7003" };
+        let evidence = funding.equipment_evidence(&command, uid);
+        let before = ledger_state(pool, &case).await;
+        let outcome =
+            SettlementInternalFulfillmentStore::satisfy_internal(&store, &command, &evidence).await;
+        match outcome {
+            Ok(SettlementInternalCommitOutcome::RolledBack(FundingError::Unproven)) => {}
+            Ok(SettlementInternalCommitOutcome::RolledBack(error)) | Err(error) => {
+                panic!("{proof:?} 缺少同 UID 付款证明应拒绝交付：{error:?}")
+            }
+            Ok(SettlementInternalCommitOutcome::Committed)
+            | Ok(SettlementInternalCommitOutcome::FundingDeferred) => {
+                panic!("{proof:?} 缺少同 UID 付款证明应整体回滚")
+            }
+        }
+        assert_eq!(ledger_state(pool, &case).await, before);
+        let pending: bool = sqlx::query_scalar(
+            "SELECT execution_state = 'pending' AND proof_digest IS NULL
+             FROM public.settlement_obligation_fulfillments WHERE obligation_id = $1",
+        )
+        .bind(handoff)
+        .fetch_one(pool)
+        .await
+        .expect("读取被拒绝的交付履约");
+        assert!(pending);
+
+        if !legacy {
+            let evidence = funding.equipment_evidence(&command, FUNDING_UID);
+            assert_internal_commit(&store, &command, &evidence).await;
+            let fulfilled: bool = sqlx::query_scalar(
+                "SELECT (f.execution_state = 'satisfied' AND f.proof_kind = 'bot_internal_v1'
+                    AND f.proof_reference = $2 AND f.proof_digest = $3 AND f.delivery_id IS NULL
+                    AND payout.business_state = 'ready') IS TRUE
+                 FROM public.settlement_obligation_fulfillments f
+                 JOIN public.settlement_obligations payout ON payout.id = $4
+                 WHERE f.obligation_id = $1",
+            )
+            .bind(handoff)
+            .bind(command.command_id.to_string())
+            .bind(evidence.digest.as_slice())
+            .bind(case.payout)
+            .fetch_one(pool)
+            .await
+            .expect("读取交付证明与货款状态");
+            assert!(fulfilled, "同 UID 的付款证明允许内部交付并释放货款");
+        }
+        pool.close().await;
+    }
+}
+
+async fn assert_internal_commit(
+    store: &DatabaseStore,
+    command: &SettlementInternalCommand,
+    evidence: &SettlementInternalEvidenceSnapshot,
+) {
+    match SettlementInternalFulfillmentStore::satisfy_internal(store, command, evidence).await {
+        Ok(SettlementInternalCommitOutcome::Committed) => {}
+        Ok(SettlementInternalCommitOutcome::FundingDeferred) => {
+            panic!("有效 record_only 证据不得延期")
+        }
+        Ok(SettlementInternalCommitOutcome::RolledBack(error)) | Err(error) => {
+            panic!("内部履约失败：{error:?}")
+        }
     }
 }
 
@@ -997,81 +1195,9 @@ async fn postgres_record_only_internal_purchase_uses_frozen_lot_sources() {
     let case =
         seed_internal_case(pool, Payment::EquipmentCod, Timestamp::now() + Duration::days(1)).await;
     let funding = seed_funding(pool).await;
-    let claimed_at =
-        Timestamp::now().duration_trunc(Duration::microseconds(1)).expect("领取时间精确到微秒");
-    let mut claims = SettlementFulfillmentStore::claim_due(
-        &store,
-        "internal-purchase-test-worker".to_owned(),
-        claimed_at,
-        claimed_at + Duration::minutes(5),
-        10,
-    )
-    .await
-    .expect("领取内部付款义务");
-    let claim = claims
-        .drain(..)
-        .find(|claim| claim.obligation_id.as_uuid() == case.payment)
-        .expect("领取目标 COD 义务");
-    let recipient_version: i64 =
-        sqlx::query_scalar("SELECT state_version FROM public.users WHERE id = $1")
-            .bind(claim.recipient_user_id.expect("付款收件人"))
-            .fetch_one(pool)
-            .await
-            .expect("读取收件人版本");
-    let recipient_version = u64::try_from(recipient_version).expect("收件人版本必须为非负数");
-    let command = SettlementInternalCommand::new(claim, Some(recipient_version), false)
-        .expect("构造稳定内部付款命令");
-    let observed = Timestamp::now()
-        .duration_trunc(Duration::microseconds(1))
-        .expect("领取后的观测时间精确到微秒");
-    let mut identity = MailAccountEvidenceBinding {
-        credential_id: funding.credential,
-        credential_version: 1,
-        runtime: MailRuntimeBinding { generation: MAIL_GENERATION },
-        authenticated_uid: FUNDING_UID.to_owned(),
-        player_name: command.claim.recipient.clone(),
-        world: SettlementWorld::Main,
-        observed_at: observed,
-        protocol_version: INTERNAL_EVIDENCE_PROTOCOL,
-        digest: [0; 32],
-    };
-    identity.digest = identity.compute_digest();
-    let mut equipment = VerifiedMailEquipmentPresence {
-        binding: identity.clone(),
-        equipment_id: command.claim.equipment_id,
-        external_equipment_id: command.claim.external_equipment_id.clone(),
-        category: "weapon_1handed".to_owned(),
-        observed_at: observed,
-        digest: [0; 32],
-    };
-    equipment.digest = equipment.compute_digest();
-    let mut evidence = SettlementInternalEvidenceSnapshot {
-        operation_id: command.command_id,
-        purpose: InternalEvidencePurpose::SettlementClaim {
-            obligation_id: command.claim.obligation_id.as_uuid(),
-            claim_token: command.claim.claim_token,
-            claim_fencing: command.claim.claim_fencing,
-            state_version: command.claim.state_version,
-        },
-        identity,
-        equipment: Some(equipment),
-        main_cash: None,
-        sent_collection: None,
-        observed_from: observed,
-        expires_at: observed + Duration::seconds(60),
-        digest: [0; 32],
-    };
-    evidence.digest = evidence.compute_digest();
-
-    match SettlementInternalFulfillmentStore::satisfy_internal(&store, &command, &evidence).await {
-        Ok(SettlementInternalCommitOutcome::Committed) => {}
-        Ok(SettlementInternalCommitOutcome::FundingDeferred) => {
-            panic!("有效 record_only 资金证据不得延期")
-        }
-        Ok(SettlementInternalCommitOutcome::RolledBack(error)) | Err(error) => {
-            panic!("内部付款资金化失败：{error:?}")
-        }
-    }
+    let command = internal_command(&store, case.payment).await;
+    let evidence = funding.equipment_evidence(&command, FUNDING_UID);
+    assert_internal_commit(&store, &command, &evidence).await;
 
     let (payment_amount, compensation_amount): (i64, i64) = sqlx::query_as(
         "SELECT buyer_amount, compensation_amount FROM public.lot_settlements WHERE lot_id = $1",
