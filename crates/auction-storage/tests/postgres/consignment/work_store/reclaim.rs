@@ -1,0 +1,449 @@
+//! 崩溃回收、原围栏 CAS、时间栅栏和原子终态。
+
+use std::time::Duration as WallDuration;
+
+use auction_application::consignment::{
+    AutoCloseCandidate, AutoCloseEvidence, ConsignmentError, ListingLookupClaim,
+    ListingMaintenance, LookupAbandonment, LookupDispatch, LookupFence, LookupLeaseUpdate,
+    LookupWorkStore,
+};
+use auction_application::core::RequestHash;
+use auction_domain::CommandId;
+use auction_time::{Duration, Timestamp};
+use tokio::sync::Barrier;
+use uuid::Uuid;
+
+use super::fixture::{Fixture, LISTING, OTHER_WORK, WORK, deadline_command, exhausted_command};
+
+#[tokio::test]
+async fn postgres_consignment_work_reap_backoff_and_sixth_attempt() {
+    let fixture = Fixture::new().await;
+    fixture.db.sync_admission(true).await.unwrap();
+    let work = fixture.work();
+    for (attempt, delay) in [(1_u8, 30), (2, 120), (3, 600), (4, 1800), (5, 7200)] {
+        fixture.due_now().await;
+        let claim = fixture.claim(1).await.unwrap();
+        assert_eq!(claim.fence().work_id(), WORK);
+        assert_eq!(claim.attempt(), attempt);
+        assert_eq!(claim.fence().fence(), i64::from(attempt));
+        assert_eq!(fixture.attempts().await, i64::from(attempt));
+        assert_eq!(work.reap_expired().await.unwrap(), 0, "未过期不可回收");
+        fixture.expire_lease(claim.fence()).await;
+        // 丢弃原领取并新装配一个 Worker 端口，只从数据库恢复。
+        drop(claim);
+        assert_eq!(fixture.work().reap_expired().await.unwrap(), 1);
+        assert_eq!(work.reap_expired().await.unwrap(), 0);
+        let (state, attempts, next_at, updated_at, reason, clear): (String, i16, Timestamp, Timestamp, String, bool) = sqlx::query_as(
+            "SELECT state, attempt_count, next_attempt_at, updated_at, last_reason,
+                 token IS NULL AND lease_owner IS NULL AND lease_until IS NULL AND network_deadline IS NULL
+             FROM public.consignment_lookup_work WHERE id = $1",
+        ).bind(WORK).fetch_one(fixture.pool()).await.unwrap();
+        assert_eq!(
+            (state.as_str(), attempts, reason.as_str()),
+            ("queued", i16::from(attempt), "source_timeout")
+        );
+        assert!(clear);
+        assert_eq!(next_at - updated_at, Duration::seconds(delay));
+    }
+    fixture.due_now().await;
+    let last = fixture.claim(1).await.unwrap();
+    assert_eq!(last.attempt(), 6);
+    fixture.expire_lease(last.fence()).await;
+    assert_eq!(work.reap_expired().await.unwrap(), 1);
+    assert_eq!(work.reap_expired().await.unwrap(), 0);
+    assert_terminal(
+        &fixture,
+        "rejected",
+        "lookup_exhausted",
+        "worker",
+        "apply_lookup",
+        exhausted_command(last.fence()),
+        6,
+    )
+    .await;
+    fixture.allow_now().await;
+    assert_eq!(fixture.claim(1).await.unwrap().fence().work_id(), OTHER_WORK);
+}
+
+#[tokio::test]
+async fn postgres_consignment_work_reap_total_deadline() {
+    let fixture = Fixture::deadline_seconds(-60.0).await;
+    fixture.db.sync_admission(true).await.unwrap();
+    assert!(fixture.claim(1).await.is_none());
+    fixture.seed_lease(6, true).await;
+    let work = fixture.work();
+    assert_eq!(work.reap_expired().await.unwrap(), 1);
+    assert_eq!(work.reap_expired().await.unwrap(), 0);
+    let cmd = deadline_command(AutoCloseCandidate {
+        listing_id: LISTING,
+        evidence: AutoCloseEvidence::LookupDeadline(fixture.expires().await),
+    });
+    assert_terminal(
+        &fixture,
+        "expired",
+        "lookup_deadline",
+        "system",
+        "auto_close",
+        (cmd.command_id, cmd.request_hash),
+        6,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn postgres_consignment_work_reap_audit_failure_rolls_back() {
+    let fixture = Fixture::new().await;
+    fixture.db.sync_admission(true).await.unwrap();
+    let fence = fixture.seed_lease(6, true).await;
+    sqlx::raw_sql(
+        "CREATE FUNCTION public.fake_reaper_audit_reject() RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN RAISE EXCEPTION '测试审计失败' USING ERRCODE = '23514'; END;
+         $$;
+         CREATE TRIGGER fake_reaper_audit_reject BEFORE INSERT ON public.audit_records
+             FOR EACH ROW WHEN (NEW.action = 'consignment.apply_lookup')
+             EXECUTE FUNCTION public.fake_reaper_audit_reject()",
+    )
+    .execute(fixture.owner.postgres_pool())
+    .await
+    .unwrap();
+    let before = fixture.work_snapshot().await;
+    assert_eq!(fixture.work().reap_expired().await, Err(ConsignmentError::Unavailable));
+    assert!(before == fixture.work_snapshot().await);
+    let untouched: bool = sqlx::query_scalar(
+        "SELECT l.state_version = 1 AND l.state = 'resolving' AND s.retired_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM public.consignment_commands WHERE command_id = $2)
+             AND NOT EXISTS (SELECT 1 FROM public.consignment_events WHERE listing_id = l.id AND state_version > 1)
+         FROM public.consignment_listings l JOIN public.consignment_registration_secrets s ON s.listing_id = l.id
+         WHERE l.id = $1",
+    ).bind(LISTING).bind(exhausted_command(fence).0.as_uuid()).fetch_one(fixture.pool()).await.unwrap();
+    assert!(untouched);
+    sqlx::query("DROP TRIGGER fake_reaper_audit_reject ON public.audit_records")
+        .execute(fixture.owner.postgres_pool())
+        .await
+        .unwrap();
+    assert_eq!(fixture.work().reap_expired().await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn postgres_consignment_work_stale_fences_are_read_only() {
+    let fixture = Fixture::new().await;
+    fixture.db.sync_admission(true).await.unwrap();
+    let work = fixture.work();
+    let older = fixture.claim(1).await.unwrap();
+    fixture.expire_lease(older.fence()).await;
+    assert_eq!(work.reap_expired().await.unwrap(), 1);
+    fixture.due_now().await;
+    let current = fixture.claim(1).await.unwrap();
+    assert_eq!(current.fence().work_id(), older.fence().work_id());
+    assert_eq!(current.fence().fence(), older.fence().fence() + 1);
+    let active = current.fence();
+    let before = fixture.work_snapshot().await;
+    for (listing_id, generation, fence, token) in [
+        (LISTING, 1, older.fence().fence(), active.token()),
+        (LISTING, 1, active.fence(), older.fence().token()),
+        (LISTING, 2, active.fence(), active.token()),
+        (Uuid::from_u128(0x2f10), 1, active.fence(), active.token()),
+    ] {
+        let stale = LookupFence::new(WORK, listing_id, generation, fence, token).unwrap();
+        let stale_claim = ListingLookupClaim::new(
+            stale,
+            current.identity().clone(),
+            1,
+            current.attempt(),
+            current.deadline(),
+            current.lease_until(),
+            current.credential().cloned(),
+        )
+        .unwrap();
+        assert_eq!(work.renew(stale).await.unwrap(), LookupLeaseUpdate::Lost);
+        assert_eq!(work.confirm_dispatch(&stale_claim, false).await.unwrap(), LookupDispatch::Lost);
+        for status in [
+            LookupAbandonment::NotSent,
+            LookupAbandonment::RequestFinished,
+            LookupAbandonment::MayBeInFlight,
+        ] {
+            assert_eq!(work.abandon(stale, status).await.unwrap(), LookupLeaseUpdate::Lost);
+        }
+        assert!(before == fixture.work_snapshot().await, "失效围栏不能写工作或许可");
+    }
+    assert_eq!(
+        work.confirm_dispatch(&current, false).await.unwrap(),
+        LookupDispatch::Allowed { deadline: current.deadline() }
+    );
+}
+
+#[tokio::test]
+async fn postgres_consignment_work_renew_rejects_another_permit_token() {
+    let fixture = Fixture::new().await;
+    fixture.db.sync_admission(true).await.unwrap();
+    let fence = fixture.seed_lease(1, false).await;
+    replace_permit_token(&fixture).await;
+    let before = fixture.work_snapshot().await;
+    assert_eq!(fixture.work().renew(fence).await.unwrap(), LookupLeaseUpdate::Lost);
+    assert!(before == fixture.work_snapshot().await);
+}
+
+#[tokio::test]
+async fn postgres_consignment_work_abandon_rejects_another_permit_token() {
+    let fixture = Fixture::new().await;
+    fixture.db.sync_admission(true).await.unwrap();
+    let fence = fixture.seed_lease(1, false).await;
+    replace_permit_token(&fixture).await;
+    let before = fixture.work_snapshot().await;
+    assert_eq!(
+        fixture.work().abandon(fence, LookupAbandonment::NotSent).await.unwrap(),
+        LookupLeaseUpdate::Lost
+    );
+    assert!(before == fixture.work_snapshot().await);
+}
+
+async fn replace_permit_token(fixture: &Fixture) {
+    sqlx::query("UPDATE public.consignment_lookup_control SET holder_token = $1 WHERE id = 1")
+        .bind(Uuid::new_v4())
+        .execute(fixture.pool())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn postgres_consignment_work_renew_preserves_network_deadline() {
+    let fixture = Fixture::new().await;
+    fixture.db.sync_admission(true).await.unwrap();
+    let claim = fixture.claim(1).await.unwrap();
+    let work = fixture.work();
+    sqlx::query(
+        "WITH changed AS (
+             UPDATE public.consignment_lookup_work SET lease_until = network_deadline + interval '1 second'
+             WHERE id = $1 RETURNING lease_until
+         )
+         UPDATE public.consignment_lookup_control c SET permit_until = changed.lease_until FROM changed WHERE c.id = 1",
+    ).bind(WORK).execute(fixture.pool()).await.unwrap();
+    let limit = claim.deadline() + Duration::seconds(5);
+    for _ in 0..2 {
+        assert_eq!(work.renew(claim.fence()).await.unwrap(), LookupLeaseUpdate::Applied(limit));
+        let persisted: (Timestamp, Timestamp) = sqlx::query_as(
+            "SELECT network_deadline, lease_until FROM public.consignment_lookup_work WHERE id = $1",
+        ).bind(WORK).fetch_one(fixture.pool()).await.unwrap();
+        assert_eq!(persisted, (claim.deadline(), limit));
+        assert_eq!(work.permit_status().await.unwrap().permit_until, Some(limit));
+    }
+    sqlx::query(
+        "UPDATE public.consignment_lookup_work SET network_deadline = statement_timestamp() - interval '1 millisecond'
+         WHERE id = $1",
+    ).bind(WORK).execute(fixture.pool()).await.unwrap();
+    assert_eq!(work.confirm_dispatch(&claim, false).await.unwrap(), LookupDispatch::Lost);
+    fixture.expire_lease(claim.fence()).await;
+    let before = fixture.work_snapshot().await;
+    assert_eq!(work.renew(claim.fence()).await.unwrap(), LookupLeaseUpdate::Lost);
+    assert_eq!(
+        work.abandon(claim.fence(), LookupAbandonment::NotSent).await.unwrap(),
+        LookupLeaseUpdate::Lost
+    );
+    assert!(before == fixture.work_snapshot().await);
+}
+
+#[tokio::test]
+async fn postgres_consignment_work_abandon_time_fence() {
+    let fixture = Fixture::new().await;
+    fixture.db.sync_admission(true).await.unwrap();
+    let work = fixture.work();
+    let first = fixture.claim(1).await.unwrap();
+    assert_eq!(
+        work.abandon(first.fence(), LookupAbandonment::MayBeInFlight).await.unwrap(),
+        LookupLeaseUpdate::Applied(())
+    );
+    assert_eq!(work.confirm_dispatch(&first, false).await.unwrap(), LookupDispatch::Lost);
+    fixture.allow_now().await;
+    assert_eq!(
+        work.permit_status().await.unwrap().permit_until,
+        Some(first.deadline() + Duration::seconds(5))
+    );
+    assert!(fixture.claim(1).await.is_none());
+    let snapshot = fixture.work_snapshot().await;
+    assert_eq!(
+        work.abandon(first.fence(), LookupAbandonment::NotSent).await.unwrap(),
+        LookupLeaseUpdate::Lost
+    );
+    assert!(snapshot == fixture.work_snapshot().await);
+    sqlx::query("UPDATE public.consignment_lookup_control SET permit_until = statement_timestamp() WHERE id = 1")
+        .execute(fixture.pool()).await.unwrap();
+    let second = fixture.claim(1).await.unwrap();
+    assert_eq!(second.fence().work_id(), OTHER_WORK);
+    assert_eq!(
+        work.abandon(second.fence(), LookupAbandonment::NotSent).await.unwrap(),
+        LookupLeaseUpdate::Applied(())
+    );
+    assert_eq!(work.permit_status().await.unwrap().permit_until, None);
+    assert_eq!(fixture.attempts().await, 2);
+}
+
+#[tokio::test]
+async fn postgres_consignment_work_reap_keeps_a_newer_permit() {
+    let fixture = Fixture::new().await;
+    fixture.db.sync_admission(true).await.unwrap();
+    let old = fixture.claim(1).await.unwrap();
+    fixture.expire_lease(old.fence()).await;
+    fixture.allow_now().await;
+    let newer = fixture.claim(1).await.unwrap();
+    assert_eq!(newer.fence().work_id(), OTHER_WORK);
+    let work = fixture.work();
+    let permit_revision = permit_row_revision(&fixture).await;
+    assert_eq!(work.reap_expired().await.unwrap(), 1);
+    assert_eq!(permit_row_revision(&fixture).await, permit_revision);
+    assert_eq!(work.permit_status().await.unwrap().permit_until, Some(newer.lease_until()));
+    assert_eq!(
+        work.confirm_dispatch(&newer, false).await.unwrap(),
+        LookupDispatch::Allowed { deadline: newer.deadline() }
+    );
+}
+
+async fn permit_row_revision(fixture: &Fixture) -> String {
+    sqlx::query_scalar("SELECT xmin::text FROM public.consignment_lookup_control WHERE id = 1")
+        .fetch_one(fixture.pool())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn postgres_consignment_work_reaper_refuses_replaced_candidate() {
+    let fixture = Fixture::new().await;
+    fixture.db.sync_admission(true).await.unwrap();
+    fixture.seed_lease(1, true).await;
+    let mut replacement = fixture.owner.postgres_pool().begin().await.unwrap();
+    sqlx::query("SELECT id FROM public.consignment_lookup_control WHERE id = 1 FOR UPDATE")
+        .fetch_one(&mut *replacement)
+        .await
+        .unwrap();
+    let backend: i32 =
+        sqlx::query_scalar("SELECT pg_backend_pid()").fetch_one(&mut *replacement).await.unwrap();
+    let work = fixture.work();
+    let reap = tokio::spawn(async move { work.reap_expired().await });
+    tokio::time::timeout(WallDuration::from_millis(800), async {
+        loop {
+            let waiting: bool = sqlx::query_scalar(
+                "SELECT EXISTS (
+                    SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))
+                )",
+            )
+            .bind(backend)
+            .fetch_one(fixture.owner.postgres_pool())
+            .await
+            .unwrap();
+            if waiting {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("回收已预读候选并等候许可行锁");
+    sqlx::query(
+        "WITH changed AS (
+             UPDATE public.consignment_lookup_work SET token = $2, fence = fence + 1
+             WHERE id = $1 RETURNING fence
+         )
+         UPDATE public.consignment_lookup_control c
+         SET holder_token = $2, holder_fence = changed.fence FROM changed WHERE c.id = 1",
+    )
+    .bind(WORK)
+    .bind(Uuid::new_v4())
+    .execute(&mut *replacement)
+    .await
+    .unwrap();
+    replacement.commit().await.unwrap();
+    assert_eq!(reap.await.unwrap().unwrap(), 0);
+    let state: String =
+        sqlx::query_scalar("SELECT state FROM public.consignment_lookup_work WHERE id = $1")
+            .bind(WORK)
+            .fetch_one(fixture.pool())
+            .await
+            .unwrap();
+    assert_eq!(state, "leased");
+    assert_eq!(fixture.work().reap_expired().await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn postgres_consignment_work_two_reapers_commit_one_terminal() {
+    let fixture = Fixture::new().await;
+    fixture.db.sync_admission(true).await.unwrap();
+    let fence = fixture.seed_lease(6, true).await;
+    let a = fixture.work();
+    let b = fixture.work();
+    let ready = Barrier::new(2);
+    let (first, second) = tokio::join!(
+        async {
+            ready.wait().await;
+            a.reap_expired().await.unwrap()
+        },
+        async {
+            ready.wait().await;
+            b.reap_expired().await.unwrap()
+        },
+    );
+    assert_eq!(first + second, 1);
+    assert_terminal(
+        &fixture,
+        "rejected",
+        "lookup_exhausted",
+        "worker",
+        "apply_lookup",
+        exhausted_command(fence),
+        6,
+    )
+    .await;
+}
+
+#[derive(sqlx::FromRow)]
+struct CommittedTerminal {
+    state: String,
+    reason_code: String,
+    state_version: i64,
+    work_state: String,
+    attempt_count: i16,
+    work_finished: bool,
+    secret_retired: bool,
+    matching_facts: bool,
+    actor_kind: String,
+    operation: String,
+    request_digest: Vec<u8>,
+}
+
+async fn assert_terminal(
+    fixture: &Fixture,
+    state: &str,
+    reason: &str,
+    actor: &str,
+    operation: &str,
+    identity: (CommandId, RequestHash),
+    attempt: i16,
+) {
+    let result = sqlx::query_as::<_, CommittedTerminal>(
+        "SELECT l.state, l.reason_code, l.state_version, w.state AS work_state, w.attempt_count,
+                w.lease_owner IS NULL AND w.token IS NULL AND w.lease_until IS NULL
+                    AND w.network_deadline IS NULL AND w.completed_at IS NOT NULL AS work_finished,
+                s.retired_at = l.updated_at AND s.ciphertext IS NULL AND s.nonce IS NULL
+                    AND s.encryption_key_id IS NULL AND s.fingerprint IS NULL AS secret_retired,
+                audit.request_id IS NULL AND audit.occurred_at = e.occurred_at
+                    AND audit.actor_type = e.actor_kind
+                    AND audit.action = 'consignment.' || c.operation AND audit.result = 'success'
+                    AND c.result_body->>'reason_code' = l.reason_code
+                    AND c.result_body->>'disposition' = e.event_kind AND e.to_state = l.state AS matching_facts,
+                e.actor_kind, c.operation, c.request_digest
+         FROM public.consignment_listings l
+         JOIN public.consignment_lookup_work w ON w.listing_id = l.id
+         JOIN public.consignment_registration_secrets s ON s.listing_id = l.id
+         JOIN public.consignment_events e ON e.listing_id = l.id AND e.state_version = l.state_version
+         JOIN public.consignment_commands c ON c.command_id = e.command_id
+         JOIN public.audit_records audit ON audit.metadata->>'command_id' = c.command_id::text
+         WHERE l.id = $1 AND c.command_id = $2",
+    ).bind(LISTING).bind(identity.0.as_uuid()).fetch_one(fixture.pool()).await.unwrap();
+    assert_eq!(result.state, state);
+    assert_eq!(result.reason_code, reason);
+    assert_eq!(result.state_version, 2);
+    assert_eq!(result.work_state, "done");
+    assert_eq!(result.attempt_count, attempt);
+    assert!(result.work_finished && result.secret_retired && result.matching_facts);
+    assert_eq!(result.actor_kind, actor);
+    assert_eq!(result.operation, operation);
+    assert_eq!(result.request_digest, identity.1.as_bytes());
+}
