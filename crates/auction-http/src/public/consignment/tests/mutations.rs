@@ -19,6 +19,8 @@ use crate::public::consignment::tests::fixtures::{
 use crate::server::contract_fixtures::{assert_wire, wire_fixture};
 
 const MEDIA_JSON: &str = "application/json";
+const FIRST_REQUEST_ID: &str = "P3A.First_1";
+const REPLAY_REQUEST_ID: &str = "P3A.Replay-2";
 
 #[derive(Clone, Copy, Debug)]
 enum Command {
@@ -89,9 +91,12 @@ async fn mutations_keep_first_response_on_same_request_replay_even_after_disable
     ] {
         let backend = Arc::new(Backend::default());
         let on = router(setup(true, &backend));
-        let first = command.send(&on).await;
+        let mut request = command.request();
+        request.headers_mut().insert("x-request-id", HeaderValue::from_static(FIRST_REQUEST_ID));
+        let first = send(&on, request).await;
         first.assert(status, code);
         assert_wire(fixture, &first.body);
+        assert_eq!(backend.take_request_ids(), vec![Some(FIRST_REQUEST_ID.to_owned())]);
 
         let seller = UserId::from_uuid(SELLER);
         let first_calls = backend.take_calls();
@@ -128,10 +133,15 @@ async fn mutations_keep_first_response_on_same_request_replay_even_after_disable
             ),
         }
         set_outcome(&backend, WriteOutcome::Replay);
-        let replay = command.send(&on).await;
-        replay.assert(status, code);
-        assert_eq!(replay.body, first.body);
-        assert_eq!(backend.take_calls(), first_calls);
+        for request_id in [FIRST_REQUEST_ID, REPLAY_REQUEST_ID] {
+            let mut request = command.request();
+            request.headers_mut().insert("x-request-id", HeaderValue::from_static(request_id));
+            let replay = send(&on, request).await;
+            replay.assert(status, code);
+            assert_eq!(replay.body, first.body);
+            assert_eq!(backend.take_calls(), first_calls);
+            assert_eq!(backend.take_request_ids(), vec![Some(request_id.to_owned())]);
+        }
 
         let mut off = setup(false, &backend);
         off.capabilities.registration_sealer_available = false;
@@ -308,6 +318,26 @@ async fn unchanged_and_closed_receipts_preserve_nullable_fields() {
 }
 
 #[tokio::test]
+async fn withdraw_rejects_a_receipt_for_another_listing() {
+    let backend = Arc::new(Backend::default());
+    set_outcome(&backend, WriteOutcome::WrongTarget);
+    for enabled in [true, false] {
+        let reply = Command::Withdraw.send(&router(setup(enabled, &backend))).await;
+        reply.assert(503, "outcome_unknown");
+        assert!(!reply.body.to_string().contains(&fixture_uuid(99).to_string()));
+        assert_eq!(
+            backend.take_calls(),
+            vec![Call::Withdraw(
+                UserId::from_uuid(SELLER),
+                CommandId::from_uuid(fixture_uuid(0x68)),
+                LISTING,
+                2,
+            )]
+        );
+    }
+}
+
+#[tokio::test]
 async fn mutation_guards_precede_query_path_body_and_all_consignment_ports() {
     for enabled in [false, true] {
         for command in COMMANDS {
@@ -428,6 +458,7 @@ async fn mutation_rejects_invalid_body_and_path_before_use_cases() {
                     "1000000001",
                     "1.0",
                     "1e2",
+                    "1e400",
                     r#""102""#,
                     "null",
                     "true",
@@ -483,6 +514,87 @@ async fn mutation_rejects_invalid_body_and_path_before_use_cases() {
         login(&mut req, SELLER);
         send(&app, req).await.assert(400, "invalid_equipment_url");
         assert_eq!(backend.take_calls(), vec![Call::ValidateUrl]);
+    }
+}
+
+#[tokio::test]
+async fn malformed_json_is_rejected_before_field_classification() {
+    let backend = Arc::new(Backend::default());
+    let app = router(setup(true, &backend));
+    let mut incorrect_codes = Vec::new();
+    for (case, raw) in [
+        ("截断命令 ID", br#"{"command_id":"0000"#.as_slice()),
+        ("截断装备链接", br#"{"equipment_url":"https://fixture.invalid"#),
+        ("标价缺冒号", br#"{"price" 15}"#),
+        ("标价指数截断", br#"{"price":15e}"#),
+        ("命令 ID 的转义无效", br#"{"command_id":"\x"}"#),
+        ("字段值错误后存在坏语法", br#"{"price":null,"mode":}"#),
+    ] {
+        let mut req = Command::Register.request();
+        *req.body_mut() = Body::from(raw);
+        let reply = send(&app, req).await;
+        assert_eq!(reply.status, 400, "{case}");
+        assert!(reply.body["data"].is_null());
+        if reply.body["code"] != "invalid_listing_request" {
+            incorrect_codes.push((case, reply.body["code"].clone()));
+        }
+        assert!(backend.take_calls().is_empty());
+    }
+    assert!(incorrect_codes.is_empty(), "语法错误分类不符：{incorrect_codes:?}");
+}
+
+#[tokio::test]
+async fn valid_price_and_fee_endpoints_reach_the_use_cases_unchanged() {
+    for (price, fee_bps) in [(1, 0_u16), (1_000_000_000, 9999)] {
+        let backend = Arc::new(Backend::default());
+        let mut state = setup(true, &backend);
+        let fee = FeeBps::new(i64::from(fee_bps)).expect("配置费率");
+        state.capabilities.fee_bps = fee;
+        state.capabilities.register = Some(register_service(&backend, true, fee));
+        let app = router(state);
+
+        let mut input = Command::Register.input();
+        input["price"] = Value::from(price);
+        input["expected_fee_bps"] = Value::from(fee_bps);
+        let mut req = Command::Register.request_with(LISTINGS, input.to_string());
+        login(&mut req, SELLER);
+        let reply = send(&app, req).await;
+        reply.assert(202, "accepted");
+        assert_eq!(reply.body["data"]["price"], price);
+        assert_eq!(
+            backend.take_calls(),
+            vec![
+                Call::ValidateUrl,
+                Call::Register(
+                    UserId::from_uuid(SELLER),
+                    CommandId::from_uuid(fixture_uuid(0x65)),
+                    ListingMode::Consigned,
+                    price,
+                    fee_bps,
+                    true,
+                    fee_bps,
+                ),
+            ]
+        );
+
+        let mut input = Command::Reprice.input();
+        input["price"] = Value::from(price);
+        let mut req = Command::Reprice.request_with(&Command::Reprice.uri(), input.to_string());
+        login(&mut req, SELLER);
+        let reply = send(&app, req).await;
+        reply.assert(200, "ok");
+        assert_eq!(reply.body["data"]["price"], price);
+        assert_eq!(
+            backend.take_calls(),
+            vec![Call::Reprice(
+                UserId::from_uuid(SELLER),
+                CommandId::from_uuid(fixture_uuid(0x66)),
+                LISTING,
+                1,
+                price,
+                true,
+            )]
+        );
     }
 }
 

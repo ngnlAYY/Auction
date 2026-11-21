@@ -1,5 +1,7 @@
 //! 匿名目录、本人历史及原命令回执的只读处理器。
 
+use std::time::Duration;
+
 use auction_application::consignment::{
     ConsignmentError, ListingBusinessRejection, ListingRegistrationAvailability, ListingWorlds,
 };
@@ -9,6 +11,7 @@ use auction_domain::{CommandId, UserId};
 use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, Uri};
+use tokio::time::timeout;
 
 use crate::public::consignment::input;
 use crate::public::consignment::mapping;
@@ -17,6 +20,7 @@ use crate::public::consignment::{ConsignmentCapabilities, ConsignmentState};
 
 const LISTING_NOT_FOUND: ConsignmentError =
     ConsignmentError::Business(ListingBusinessRejection::ListingNotFound);
+const REGISTRATION_AVAILABILITY_BUDGET: Duration = Duration::from_secs(1);
 
 /// 加载有效开关与当前登记就绪的两世界能力。
 pub(super) async fn status<S: ConsignmentState>(State(state): State<S>, uri: Uri) -> RouteResult {
@@ -52,14 +56,17 @@ async fn registration_worlds(capabilities: &ConsignmentCapabilities) -> ListingW
     if capabilities.enabled
         && let (Some(reader), Some(crypto)) =
             (&capabilities.public_read, &capabilities.replay_crypto)
-        && let Ok(ListingRegistrationAvailability::Ready(worlds)) =
-            reader.registration_availability(crypto.as_ref()).await
+        && let Ok(Ok(ListingRegistrationAvailability::Ready(worlds))) = timeout(
+            REGISTRATION_AVAILABILITY_BUDGET,
+            reader.registration_availability(crypto.as_ref()),
+        )
+        .await
         && capabilities.registration_sealer_available
         && capabilities.register.is_some()
     {
         return worlds;
     }
-    // 无可用世界或任一依赖缺失时不公告登记能力。配置开关仍独立可答。
+    // 就绪查询超时或无可用依赖时只公告配置，外层请求期限仍由 HTTP 边界负责。
     ListingWorlds::default()
 }
 

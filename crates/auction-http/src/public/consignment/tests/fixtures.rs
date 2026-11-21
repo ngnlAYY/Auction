@@ -1,5 +1,6 @@
 //! 处理器测试用的会话、寄售端口和离线请求夹具。
 
+use std::future::pending;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -103,10 +104,13 @@ pub(super) enum WriteOutcome {
 
 pub(super) struct Backend {
     pub(super) calls: Mutex<Vec<Call>>,
+    pub(super) request_ids: Mutex<Vec<Option<String>>>,
     pub(super) availability: Result<ListingRegistrationAvailability, ConsignmentError>,
+    pub(super) availability_stalls: bool,
     pub(super) public: Option<PublicListingDetail>,
     pub(super) owned: Option<OwnedListingRecord>,
     pub(super) command: Option<OwnedListingCommandReceipt>,
+    pub(super) return_wrong_command_id: bool,
     pub(super) read_error: Option<ConsignmentError>,
     pub(super) command_outcome: Mutex<WriteOutcome>,
     pub(super) page_total: Option<u64>,
@@ -117,13 +121,16 @@ impl Default for Backend {
     fn default() -> Self {
         Self {
             calls: Mutex::default(),
+            request_ids: Mutex::default(),
             availability: Ok(ListingRegistrationAvailability::Ready(ListingWorlds {
                 main: true,
                 isekai: true,
             })),
+            availability_stalls: false,
             public: None,
             owned: None,
             command: None,
+            return_wrong_command_id: false,
             read_error: None,
             command_outcome: Mutex::default(),
             page_total: None,
@@ -135,6 +142,10 @@ impl Default for Backend {
 impl Backend {
     pub(super) fn take_calls(&self) -> Vec<Call> {
         std::mem::take(&mut *self.calls.lock().expect("端口调用"))
+    }
+
+    pub(super) fn take_request_ids(&self) -> Vec<Option<String>> {
+        std::mem::take(&mut *self.request_ids.lock().expect("命令请求号"))
     }
 
     fn record(&self, call: Call) {
@@ -215,7 +226,11 @@ impl PublicListingRead for Backend {
         _crypto: &'a dyn RegistrationReplayCrypto,
     ) -> ConsignmentFuture<'a, ListingRegistrationAvailability> {
         self.record(Call::Availability);
-        Box::pin(async { self.availability })
+        if self.availability_stalls {
+            Box::pin(pending())
+        } else {
+            Box::pin(async { self.availability })
+        }
     }
 }
 
@@ -259,10 +274,10 @@ impl OwnedListingRead for Backend {
         command_id: CommandId,
     ) -> ConsignmentFuture<'_, Option<OwnedListingCommandReceipt>> {
         self.record(Call::OwnedCommand(seller, command_id));
-        self.read(
-            self.command
-                .filter(|record| seller.as_uuid() == SELLER && record.command_id == command_id),
-        )
+        self.read(self.command.filter(|record| {
+            seller.as_uuid() == SELLER
+                && (record.command_id == command_id || self.return_wrong_command_id)
+        }))
     }
 }
 
@@ -282,6 +297,7 @@ impl ListingCommandStore for Backend {
             command.policy.enabled,
             command.policy.consigned_fee_bps.value(),
         ));
+        self.request_ids.lock().expect("命令请求号").push(command.request_id);
         if matches!(self.outcome(), WriteOutcome::Accepted)
             && command.policy.enabled
             && command.input.expected_fee_bps
@@ -319,6 +335,7 @@ impl ListingCommandStore for Backend {
             command.price.value(),
             command.enabled,
         ));
+        self.request_ids.lock().expect("命令请求号").push(command.request_id);
         let outcome = self.outcome();
         let (version, disposition) = if matches!(outcome, WriteOutcome::Unchanged) {
             (target.expected_version, ListingPriceDisposition::Unchanged)
@@ -353,9 +370,15 @@ impl ListingCommandStore for Backend {
             target.listing_id,
             target.expected_version.value(),
         ));
-        let price =
-            (!matches!(self.outcome(), WriteOutcome::CloseWithoutPrice)).then(|| price(102));
-        self.decide(ListingClosed::new(target.listing_id, version(3), price), None)
+        self.request_ids.lock().expect("命令请求号").push(command.request_id);
+        let outcome = self.outcome();
+        let price = (!matches!(outcome, WriteOutcome::CloseWithoutPrice)).then(|| price(102));
+        let listing_id = if matches!(outcome, WriteOutcome::WrongTarget) {
+            fixture_uuid(99)
+        } else {
+            target.listing_id
+        };
+        self.decide(ListingClosed::new(listing_id, version(3), price), None)
     }
 
     fn apply_lookup(
@@ -588,9 +611,11 @@ pub(super) fn register_service(
 }
 
 pub(super) fn router(state: TestState) -> Router {
-    mount(Router::new())
-        .with_state(state)
-        .layer(middleware::from_fn_with_state(HttpBoundary::default(), enforce))
+    router_with_boundary(state, HttpBoundary::default())
+}
+
+pub(super) fn router_with_boundary(state: TestState, boundary: HttpBoundary) -> Router {
+    mount(Router::new()).with_state(state).layer(middleware::from_fn_with_state(boundary, enforce))
 }
 
 pub(super) fn get(uri: &str) -> Request<Body> {
@@ -642,9 +667,10 @@ impl Wire {
 
 pub(super) async fn send(app: &Router, request: Request<Body>) -> Wire {
     let head = request.method() == Method::HEAD;
+    let request_id = request.headers()["x-request-id"].clone();
     let (parts, body) = app.clone().oneshot(request).await.expect("HTTP 响应").into_parts();
     assert_eq!(parts.headers[header::CACHE_CONTROL], "no-store");
-    assert_eq!(parts.headers["x-request-id"], REQUEST_ID);
+    assert_eq!(parts.headers["x-request-id"], request_id);
     assert!(!parts.headers.contains_key(header::ETAG));
     assert!(
         parts.headers.values().all(|value| !value

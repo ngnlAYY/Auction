@@ -8,6 +8,7 @@ use auction_domain::CommandId;
 use axum::extract::rejection::PathRejection;
 use axum::extract::{ConnectInfo, Path, Request, State};
 
+use crate::middleware::boundary::request_id;
 use crate::public::consignment::ConsignmentState;
 use crate::public::consignment::input;
 use crate::public::consignment::mapping;
@@ -26,8 +27,8 @@ pub(super) async fn register<S: ConsignmentState>(
     let service = state.consignment().register.as_ref().ok_or(ConsignmentError::Unavailable)?;
     let command_id = CommandId::from_uuid(input.command_id);
 
-    // 不变量 1、6、7、10：只把原参数和认证身份交给用例；新开关、费率和密码能力
-    // 都不得挡住旧命令仲裁。原装备链接仅借用于本地校验，绝不记录。
+    // 不变量 1、6、7、10：把原参数和认证身份交给用例，关联号仅供审计。
+    // 新开关、费率和密码能力不得挡住旧命令仲裁，原装备链接不进入记录。
     let result = service
         .register(
             &identity,
@@ -38,6 +39,7 @@ pub(super) async fn register<S: ConsignmentState>(
                 price: input.price.get(),
                 expected_fee_bps: input.expected_fee_bps.get(),
             },
+            request_id(&parts.headers),
         )
         .await?;
     command(mapping::registered(command_id, result))
@@ -63,7 +65,14 @@ pub(super) async fn reprice<S: ConsignmentState>(
 
     // 不变量 1、2、6：即使关闭也进入用例，先仲裁并由仓储核对归属、状态和版本。
     let result = service
-        .reprice(&identity, command_id, listing_id, expected_version, input.price.get())
+        .reprice(
+            &identity,
+            command_id,
+            listing_id,
+            expected_version,
+            input.price.get(),
+            request_id(&parts.headers),
+        )
         .await?;
     if result.listing_id() != listing_id {
         return Err(ConsignmentError::OutcomeUnknown.into());
@@ -90,7 +99,9 @@ pub(super) async fn withdraw<S: ConsignmentState>(
     };
 
     // 不变量 1、3、5、8：在同一仓储决定里回放或清退，不在 HTTP 推导终态。
-    let result = service.withdraw(&identity, command_id, listing_id, expected_version).await?;
+    let result = service
+        .withdraw(&identity, command_id, listing_id, expected_version, request_id(&parts.headers))
+        .await?;
     if result.listing_id() != listing_id {
         return Err(ConsignmentError::OutcomeUnknown.into());
     }

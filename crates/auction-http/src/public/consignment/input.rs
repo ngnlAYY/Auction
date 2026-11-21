@@ -1,7 +1,10 @@
 //! Public 寄售查询、路径与写入正文的有界解码，不回显请求原文。
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::error::Error as _;
+use std::fmt;
+use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
@@ -15,7 +18,11 @@ use axum::extract::Path;
 use axum::extract::rejection::PathRejection;
 use axum::http::{HeaderMap, Uri};
 use http_body_util::LengthLimitError;
-use serde::de::DeserializeOwned;
+use serde::Deserializer;
+use serde::de::value::MapAccessDeserializer;
+use serde::de::{
+    DeserializeOwned, DeserializeSeed, IgnoredAny, IntoDeserializer, MapAccess, Visitor,
+};
 use uuid::Uuid;
 
 use crate::middleware::strict_json::application_json;
@@ -49,6 +56,14 @@ fn path_uuid(path: PathInput, error: ConsignmentError) -> Result<Uuid, Consignme
 
 pub(super) fn public_query(uri: &Uri) -> Result<PublicListingQuery, ConsignmentError> {
     let mut query = listing_query(uri, &["world", "mode", "category", "q", "page", "page_size"])?;
+    for key in ["category", "q"] {
+        if let Some(value) = query.get(key) {
+            let folded = value.to_ascii_lowercase();
+            if ["://", "/equip/", "/equip?", "key="].iter().any(|part| folded.contains(part)) {
+                return Err(ConsignmentError::InvalidQuery);
+            }
+        }
+    }
     Ok(PublicListingQuery {
         window: page_window(&query)?,
         world: enum_filter(&query, "world")?,
@@ -150,8 +165,6 @@ pub(super) async fn decode_write<T: DeserializeOwned>(
     if !application_json(headers) {
         return Err(RouteError::UnsupportedMediaType);
     }
-    // 旧版 decode_after_guard 把字段错误折叠成 invalid_json。共享媒体类型和有界读体，
-    // 此处保留严格 DTO 的固定字段分类；不记录正文及 serde 错误。
     let bytes = to_bytes(body, MAX_WRITE_BYTES).await.map_err(|error| {
         if error.source().is_some_and(<dyn std::error::Error>::is::<LengthLimitError>) {
             RouteError::BodyTooLarge
@@ -159,22 +172,72 @@ pub(super) async fn decode_write<T: DeserializeOwned>(
             ConsignmentError::InvalidListingRequest.into()
         }
     })?;
-    serde_json::from_slice(&bytes).map_err(|error| write_error(&error).into())
+    Ok(decode_write_json(&bytes)?)
 }
 
-fn write_error(error: &serde_json::Error) -> ConsignmentError {
-    if error.is_data() {
-        // 这些前缀由契约解码器生成。只识别固定分类，不转发任何错误文本。
-        let diagnostic = error.to_string();
-        if diagnostic.starts_with("command_id 字段") {
-            return ConsignmentError::InvalidCommandId;
-        }
-        if diagnostic.starts_with("equipment_url 字段") {
-            return ConsignmentError::InvalidEquipmentUrl;
-        }
-        if diagnostic.starts_with("price 字段") {
-            return ConsignmentError::InvalidPrice;
-        }
+fn decode_write_json<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, ConsignmentError> {
+    let invalid = ConsignmentError::InvalidListingRequest;
+    let field_error = Cell::new(invalid);
+    let mut json = serde_json::Deserializer::from_slice(bytes);
+    if let Ok(input) = json.deserialize_map(WriteObject::<T>(&field_error, PhantomData))
+        && json.end().is_ok()
+    {
+        return Ok(input);
     }
-    ConsignmentError::InvalidListingRequest
+    let field_error = field_error.get();
+    // DTO 会脱敏并包装字段值的解析错误。用 IgnoredAny 核对完整语法，保留溢出数字的
+    // 字段分类。严格 DTO 始终解码原始对象，继续拒绝重复字段。
+    if field_error != invalid
+        && let Ok(json) = std::str::from_utf8(bytes)
+        && serde_json::from_str::<IgnoredAny>(json).is_ok()
+    {
+        return Err(field_error);
+    }
+    Err(invalid)
+}
+
+struct WriteObject<'a, T>(&'a Cell<ConsignmentError>, PhantomData<T>);
+
+impl<'de, T: DeserializeOwned> Visitor<'de> for WriteObject<'_, T> {
+    type Value = T;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("寄售写入 JSON 对象")
+    }
+
+    fn visit_map<M: MapAccess<'de>>(self, map: M) -> Result<T, M::Error> {
+        T::deserialize(MapAccessDeserializer::new(WriteFields {
+            map,
+            current: ConsignmentError::InvalidListingRequest,
+            failure: self.0,
+        }))
+    }
+}
+
+struct WriteFields<'a, M> {
+    map: M,
+    current: ConsignmentError,
+    failure: &'a Cell<ConsignmentError>,
+}
+
+impl<'de, M: MapAccess<'de>> MapAccess<'de> for WriteFields<'_, M> {
+    type Error = M::Error;
+
+    fn next_key_seed<K: DeserializeSeed<'de>>(
+        &mut self,
+        seed: K,
+    ) -> Result<Option<K::Value>, M::Error> {
+        let Some(key) = self.map.next_key::<String>()? else { return Ok(None) };
+        self.current = match key.as_str() {
+            "command_id" => ConsignmentError::InvalidCommandId,
+            "equipment_url" => ConsignmentError::InvalidEquipmentUrl,
+            "price" => ConsignmentError::InvalidPrice,
+            _ => ConsignmentError::InvalidListingRequest,
+        };
+        seed.deserialize(key.into_deserializer()).map(Some)
+    }
+
+    fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value, M::Error> {
+        self.map.next_value_seed(seed).inspect_err(|_error| self.failure.set(self.current))
+    }
 }

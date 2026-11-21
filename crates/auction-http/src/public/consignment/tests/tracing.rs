@@ -86,6 +86,21 @@ async fn equipment_credential_is_absent_from_response_and_http_tracing() {
     send(&app, get(&format!("{LISTINGS}?unknown={encoded}"))).await.assert(400, "invalid_query");
     send(&app, get(&format!("{LISTINGS}/{FAKE_KEY}"))).await.assert(400, "invalid_listing_id");
 
+    backend.take_calls();
+    for app in [app, router(setup(false, &backend))] {
+        for key in ["q", "category"] {
+            for prefix in ["HtTpS://fixture.invalid/", "/EqUiP/", "/EqUiP?", "KeY="] {
+                let raw = format!("{prefix}{FAKE_KEY}");
+                let encoded: String =
+                    url::form_urlencoded::byte_serialize(raw.as_bytes()).collect();
+                send(&app, get(&format!("{LISTINGS}?{key}={encoded}")))
+                    .await
+                    .assert(400, "invalid_query");
+                assert!(backend.take_calls().is_empty());
+            }
+        }
+    }
+
     let logs = capture.0.lock().expect("HTTP 日志");
     assert!(
         logs.iter().any(|field| field.starts_with("request_id=")),

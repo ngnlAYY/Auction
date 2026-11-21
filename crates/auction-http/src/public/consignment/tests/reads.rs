@@ -1,15 +1,16 @@
 //! 寄售状态、公开目录与本人历史的路由级契约和校验顺序。
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use auction_application::consignment::{
-    ConsignmentError, ListingBusinessRejection, ListingEquipmentDetails, ListingEquipmentLabel,
-    ListingEquipmentLevel, ListingEquipmentStat, ListingEquipmentStatGroup, ListingLookupProgress,
-    ListingPageWindow, ListingRegistered, ListingRegistrationAvailability, ListingWorld,
-    ListingWorlds, LookupTransientReason, OwnedListingCommandReceipt, OwnedListingDecision,
-    OwnedListingRecord, PrivateListing, PrivateListingView, PrivateListingViewKind,
-    PublicListingDetail, PublicListingState, PublicListingSummary, SellerListingAction,
-    StoredListingDecision,
+    ConsignmentError, ListingBusinessRejection, ListingClosed, ListingEquipmentDetails,
+    ListingEquipmentLabel, ListingEquipmentLevel, ListingEquipmentStat, ListingEquipmentStatGroup,
+    ListingLookupProgress, ListingPageWindow, ListingPriceDisposition, ListingPriceReceipt,
+    ListingRegistered, ListingRegistrationAvailability, ListingWorld, ListingWorlds,
+    LookupTransientReason, OwnedListingCommandReceipt, OwnedListingDecision, OwnedListingRecord,
+    PrivateListing, PrivateListingView, PrivateListingViewKind, PublicListingDetail,
+    PublicListingState, PublicListingSummary, SellerListingAction, StoredListingDecision,
 };
 use auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER;
 use auction_domain::consignment::{
@@ -21,10 +22,11 @@ use axum::http::{HeaderValue, Method, header};
 use serde_json::Value;
 use tower::ServiceExt;
 
+use crate::middleware::boundary::HttpBoundary;
 use crate::public::consignment::tests::fixtures::{
     Backend, COMMANDS, Call, EXPIRED_COOKIE, FAKE_KEY, FAKE_LINK, LISTING, LISTINGS, OTHER_SELLER,
     OWNED, SELLER, STATUS, Session, configured, fixture_uuid, get, login, price, request, router,
-    send, setup, time, version,
+    router_with_boundary, send, setup, time, version,
 };
 use crate::public::consignment::{ConsignmentCapabilities, mount};
 use crate::server::contract_fixtures::{assert_wire, wire_fixture};
@@ -221,6 +223,35 @@ async fn status_is_anonymous_and_uses_only_enabled_dependencies() {
             usize::from(matches!(missing, "sealer" | "register"))
         );
     }
+}
+
+#[tokio::test]
+async fn status_reports_configured_fee_in_both_switch_states() {
+    let backend = Arc::new(Backend::default());
+    for enabled in [false, true] {
+        let mut state = setup(enabled, &backend);
+        state.capabilities.fee_bps = FeeBps::new(615).expect("配置费率");
+        let reply = send(&router(state), get(STATUS)).await;
+        reply.assert(200, "ok");
+        assert_eq!(reply.body["data"]["fee_bps"], 615);
+    }
+}
+
+#[tokio::test]
+async fn status_degrades_when_registration_availability_stalls() {
+    let backend = Arc::new(Backend { availability_stalls: true, ..Backend::default() });
+    // 给 Tokio 调度留余量。若路由的一秒预算失效，外层边界会先返回 504。
+    let boundary = HttpBoundary::new(Duration::from_millis(1250), &[], false).expect("请求边界");
+    let app = router_with_boundary(setup(true, &backend), boundary);
+    let reply = send(&app, get(STATUS)).await;
+    reply.assert(200, "ok");
+    assert_wire("public/consignment-status-unavailable", reply.body);
+    assert_eq!(backend.take_calls(), vec![Call::Availability]);
+
+    let boundary = HttpBoundary::new(Duration::from_millis(10), &[], false).expect("请求边界");
+    let app = router_with_boundary(setup(true, &backend), boundary);
+    send(&app, get(STATUS)).await.assert(504, "timeout");
+    assert_eq!(backend.take_calls(), vec![Call::Availability]);
 }
 
 #[tokio::test]
@@ -627,6 +658,84 @@ async fn stored_command_returns_the_original_status_under_get_200() {
                 vec![Call::OwnedCommand(UserId::from_uuid(SELLER), command_id)]
             );
         }
+    }
+}
+
+#[tokio::test]
+async fn stored_command_recovers_reprice_and_withdraw_in_both_switch_states() {
+    for (command_uuid, decision, fixture) in [
+        (
+            fixture_uuid(0x66),
+            OwnedListingDecision::Reprice(StoredListingDecision::Accepted(
+                ListingPriceReceipt::new(
+                    LISTING,
+                    version(2),
+                    ListingState::Resolving,
+                    price(102),
+                    ListingPriceDisposition::Repriced,
+                )
+                .expect("改价回执"),
+            )),
+            "public/consignment-reprice-receipt",
+        ),
+        (
+            fixture_uuid(0x68),
+            OwnedListingDecision::Withdraw(StoredListingDecision::Accepted(
+                ListingClosed::new(LISTING, version(3), Some(price(102))).expect("取消回执"),
+            )),
+            "public/consignment-withdraw-receipt",
+        ),
+    ] {
+        let command_id = CommandId::from_uuid(command_uuid);
+        let backend = Arc::new(Backend {
+            command: Some(OwnedListingCommandReceipt { command_id, decision }),
+            ..Backend::default()
+        });
+        for enabled in [true, false] {
+            let mut req = get(&format!("{COMMANDS}/{command_uuid}"));
+            login(&mut req, SELLER);
+            let reply = send(&router(setup(enabled, &backend)), req).await;
+            reply.assert(200, "ok");
+            assert_eq!(
+                reply.body["data"],
+                serde_json::json!({
+                    "http_status": 200,
+                    "code": "ok",
+                    "receipt": wire_fixture(fixture)["data"],
+                })
+            );
+            assert_eq!(
+                backend.take_calls(),
+                vec![Call::OwnedCommand(UserId::from_uuid(SELLER), command_id)]
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn stored_command_rejects_receipt_for_another_command_id() {
+    let command_uuid = fixture_uuid(0x65);
+    let other_command = fixture_uuid(0x66);
+    let backend = Arc::new(Backend {
+        command: Some(OwnedListingCommandReceipt {
+            command_id: CommandId::from_uuid(other_command),
+            decision: OwnedListingDecision::Register(StoredListingDecision::Accepted(
+                ListingRegistered::new(LISTING, price(101)).expect("登记回执"),
+            )),
+        }),
+        return_wrong_command_id: true,
+        ..Backend::default()
+    });
+    for enabled in [true, false] {
+        let mut req = get(&format!("{COMMANDS}/{command_uuid}"));
+        login(&mut req, SELLER);
+        let reply = send(&router(setup(enabled, &backend)), req).await;
+        reply.assert(503, "consignment_unavailable");
+        assert!(!reply.body.to_string().contains(&other_command.to_string()));
+        assert_eq!(
+            backend.take_calls(),
+            vec![Call::OwnedCommand(UserId::from_uuid(SELLER), CommandId::from_uuid(command_uuid))]
+        );
     }
 }
 
