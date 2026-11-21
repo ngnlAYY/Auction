@@ -26,6 +26,7 @@ use tokio::time::Instant;
 use url::Url;
 
 use super::super::dns::{DnsFixture, EquipmentDns, checked_addresses, public_address};
+use super::super::http::DECODE_CALLS;
 use super::super::{HvDataConfigurationError, HvDataEquipmentReader, equipment_client_builder};
 
 type LookupError = ListingEquipmentLookupError;
@@ -521,16 +522,20 @@ async fn hvdata_loopback_deadline_mid_body_stops_before_delayed_chunk() {
     verify_request(&source);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn hvdata_deadline_after_body_skips_decode() {
     let identity = ListingEquipmentIdentity::new("main", FIXTURE_EID).expect("测试编号");
     let key = EquipmentKey::new(FIXTURE_KEY).expect("测试凭证");
     let source = start(ResponseScript::json(StatusCode::OK, b"{".as_slice())).await;
     let reader = client(&source);
+    DECODE_CALLS.set(0);
     // 单独驱动 exchange，使已到期的请求也能读完正文，直接检查解码前的截止守卫。
     let late = reader.exchange(&identity, &key, Instant::now()).await;
-    let in_time = reader.exchange(&identity, &key, Instant::now() + Duration::from_secs(5)).await;
     verify_error(late, LookupError::SourceTimeout);
+    assert_eq!(DECODE_CALLS.get(), 0, "已逾期的正文不应进入解码");
+
+    let in_time = reader.exchange(&identity, &key, Instant::now() + Duration::from_secs(5)).await;
     verify_error(in_time, Reason::SourceSchemaInvalid.into());
+    assert_eq!(DECODE_CALLS.get(), 1, "未逾期的正文应进入解码一次");
     assert_eq!(source.requests().len(), 2);
 }

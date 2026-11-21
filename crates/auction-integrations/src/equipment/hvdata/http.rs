@@ -1,5 +1,7 @@
 //! 固定来源请求、状态分类及有界正文读取。
 
+#[cfg(test)]
+use std::cell::Cell;
 use std::time::{Duration, SystemTime};
 
 use auction_application::consignment::{
@@ -22,6 +24,11 @@ use super::snapshot::{known_not_found, known_rejected_request, snapshot};
 
 type Reason = LookupPermanentReason;
 type LookupError = ListingEquipmentLookupError;
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static DECODE_CALLS: Cell<usize> = const { Cell::new(0) };
+}
 
 impl HvDataEquipmentReader {
     pub(super) async fn exchange(
@@ -72,6 +79,8 @@ pub(super) fn decode_response(
     key: &EquipmentKey,
     observed_at: Timestamp,
 ) -> Result<ListingLookupSnapshot, LookupError> {
+    #[cfg(test)]
+    DECODE_CALLS.set(DECODE_CALLS.get() + 1);
     let object = parse_object(body)?;
     match status {
         StatusCode::OK => snapshot(&object, identity, key, observed_at),
