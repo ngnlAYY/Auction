@@ -12,5 +12,5 @@ storage:map_err(|_|) 276
 integrations:Err(_) 1
 integrations:map_err(|_|) 26
 apps:Err(_) 7
-apps:map_err(|_|) 23
+apps:map_err(|_|) 22
 service-apps:english_message 0
