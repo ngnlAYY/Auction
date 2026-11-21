@@ -2,6 +2,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod consignment;
+
 // 复用 postgres 的夹具；空库迁移入口和其他场景的种子由 postgres 目标使用。
 #[allow(dead_code)]
 mod support;

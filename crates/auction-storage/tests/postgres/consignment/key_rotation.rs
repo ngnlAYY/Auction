@@ -18,10 +18,12 @@ use auction_integrations::{DataKey, EquipmentKeyOpener, EquipmentKeySealer, Keyr
 use auction_storage::{
     RotatedKeyEnvelope, StoredKeyEnvelope, replace_key_envelope, scan_key_envelopes, stored_key_ids,
 };
-use serde_json::{Value, json};
+use auction_time::{Duration as TimeDelta, Timestamp};
+use serde_json::Value;
 use sqlx::{ConnectOptions, PgPool, Row};
 use uuid::Uuid;
 
+use super::registration_fixture::ResolvingRegistration;
 use crate::support::TestDatabase;
 use crate::support::fixtures;
 
@@ -33,7 +35,7 @@ const SHARED: Uuid = Uuid::from_u128(41);
 const SECOND: Uuid = Uuid::from_u128(42);
 const REGISTRATION_AAD: Uuid = Uuid::from_u128(81);
 const SELLER: Uuid = Uuid::from_u128(91);
-const COMMAND: Uuid = Uuid::from_u128(92);
+const COMMAND: Uuid = Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_005c);
 
 fn ring(current: &str, include_old: bool) -> Arc<Keyring> {
     let old = || Arc::new(DataKey::from_base64(OLD, OLD_MATERIAL).expect("假钥合法"));
@@ -103,48 +105,23 @@ async fn seed_registration(
 ) {
     fixtures::seed_user(pool, SELLER, "FakeRotationSeller").await;
     let mut tx = pool.begin().await.expect("登记事务");
-    sqlx::query(
-        "INSERT INTO public.consignment_listings
-         (id, seller_user_id, world_id, external_equipment_id, mode, state, price,
-          pricing_version, fee_bps, state_version, service_epoch, blacklist_count_at_register,
-          created_at, updated_at, expires_at)
-         VALUES ($1, $2, 'main', '73', 'direct', 'resolving', 101, 1, 0, 1, 1, 0,
-                 transaction_timestamp(), transaction_timestamp(), transaction_timestamp() + interval '24 hours')",
-    )
-    .bind(SHARED)
-    .bind(SELLER)
-    .execute(&mut *tx)
+    let created: Timestamp = sqlx::query_scalar("SELECT transaction_timestamp()")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap_or_else(|error| panic!("读取登记事务时刻失败：{error}"));
+    ResolvingRegistration {
+        listing_id: SHARED,
+        seller_user_id: SELLER,
+        eid: "73",
+        command_id: COMMAND,
+        replay_key_id: SHARED,
+        request_digest: mac.as_bytes(),
+        created,
+        expires: created + TimeDelta::hours(24),
+    }
+    .insert(&mut tx)
     .await
-    .expect("写入挂单");
-    sqlx::query(
-        "INSERT INTO public.consignment_commands
-         (command_id, actor_kind, actor_ref, operation, request_target, request_digest,
-          replay_key_id, listing_id, result_status, result_code, result_body, created_at)
-         VALUES ($1, 'public_user', $2, 'register', 'new', $3, $4, $4, 202, 'accepted',
-                 $5, transaction_timestamp())",
-    )
-    .bind(COMMAND)
-    .bind(SELLER.to_string())
-    .bind(mac.as_bytes().as_slice())
-    .bind(SHARED)
-    .bind(json!({
-        "command_id": COMMAND, "operation": "register", "listing_id": SHARED,
-        "listing_version": 1, "state": "resolving", "disposition": "registered", "price": 101,
-    }))
-    .execute(&mut *tx)
-    .await
-    .expect("写入登记账本");
-    sqlx::query(
-        "INSERT INTO public.consignment_events
-         (listing_id, state_version, command_id, actor_kind, event_kind, from_state,
-          to_state, reason_code, price, occurred_at)
-         VALUES ($1, 1, $2, 'public_user', 'registered', NULL, 'resolving', NULL, 101, transaction_timestamp())",
-    )
-    .bind(SHARED)
-    .bind(COMMAND)
-    .execute(&mut *tx)
-    .await
-    .expect("写入登记事实");
+    .unwrap_or_else(|error| panic!("写入密钥轮换的登记夹具失败：{error}"));
     sqlx::query(
         "INSERT INTO public.consignment_registration_secrets
          (listing_id, aad_equipment_id, ciphertext, nonce, encryption_key_id, fingerprint,

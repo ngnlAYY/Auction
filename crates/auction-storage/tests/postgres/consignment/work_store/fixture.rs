@@ -11,6 +11,7 @@ use auction_time::Timestamp;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
+use crate::consignment::registration_fixture::ResolvingRegistration;
 use crate::support::{TestDatabase, fixtures};
 
 pub(super) const SELLER: Uuid = Uuid::from_u128(0x2f01);
@@ -247,58 +248,58 @@ pub(super) fn exhausted_command(fence: LookupFence) -> (CommandId, RequestHash) 
 
 async fn seed_listing(
     tx: &mut Transaction<'_, Postgres>,
-    listing: Uuid,
-    work: Uuid,
+    listing_id: Uuid,
+    work_id: Uuid,
     eid: &str,
-    aad: Uuid,
+    aad_equipment_id: Uuid,
     created: Timestamp,
     expires: Timestamp,
 ) {
-    let command = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO public.consignment_listings
-         (id, seller_user_id, world_id, external_equipment_id, mode, state, price, pricing_version,
-          fee_bps, state_version, service_epoch, blacklist_count_at_register, created_at, updated_at, expires_at)
-         VALUES ($1, $2, 'main', $3, 'direct', 'resolving', 101, 1, 0, 1, 1, 0, $4, $4, $5)",
-    )
-    .bind(listing).bind(SELLER).bind(eid).bind(created).bind(expires)
-    .execute(&mut **tx).await.unwrap();
-    sqlx::query(
-        "INSERT INTO public.consignment_commands
-         (command_id, actor_kind, actor_ref, operation, request_target, request_digest,
-          replay_key_id, listing_id, result_status, result_code, result_body, created_at)
-         VALUES ($1, 'public_user', $2::uuid::text, 'register', 'new', decode(repeat('11', 32), 'hex'),
-                 $3, $4, 202, 'accepted',
-                 jsonb_build_object('command_id', $1::uuid, 'operation', 'register',
-                     'listing_id', $4::uuid, 'listing_version', 1, 'state', 'resolving',
-                     'disposition', 'registered', 'price', 101), $5)",
-    )
-    .bind(command).bind(SELLER).bind(REPLAY_KEY).bind(listing).bind(created)
-    .execute(&mut **tx).await.unwrap();
-    sqlx::query(
-        "INSERT INTO public.consignment_events
-         (listing_id, state_version, command_id, actor_kind, event_kind, from_state, to_state,
-          reason_code, price, occurred_at)
-         VALUES ($1, 1, $2, 'public_user', 'registered', NULL, 'resolving', NULL, 101, $3)",
-    )
-    .bind(listing)
-    .bind(command)
-    .bind(created)
-    .execute(&mut **tx)
+    ResolvingRegistration {
+        listing_id,
+        seller_user_id: SELLER,
+        eid,
+        command_id: Uuid::new_v4(),
+        replay_key_id: REPLAY_KEY,
+        request_digest: &[0x11; 32],
+        created,
+        expires,
+    }
+    .insert(tx)
     .await
-    .unwrap();
-    let ciphertext_byte = if aad == REGISTERED_AAD { "33" } else { "55" };
+    .unwrap_or_else(|error| panic!("写入解析工作的登记夹具失败：{error}"));
+    let ciphertext_byte = if aad_equipment_id == REGISTERED_AAD { "33" } else { "55" };
     sqlx::query(
         "INSERT INTO public.consignment_registration_secrets
          (listing_id, aad_equipment_id, ciphertext, nonce, encryption_key_id, fingerprint, created_at, updated_at)
          VALUES ($1, $2, decode(repeat($4, 32), 'hex'), decode(repeat('44', 12), 'hex'),
                  'fake-data-key', repeat('ab', 32), $3, $3)",
     )
-    .bind(listing).bind(aad).bind(created).bind(ciphertext_byte).execute(&mut **tx).await.unwrap();
+    .bind(listing_id).bind(aad_equipment_id).bind(created).bind(ciphertext_byte).execute(&mut **tx).await.unwrap();
     sqlx::query(
         "INSERT INTO public.consignment_lookup_work
          (id, listing_id, generation, state, attempt_count, fence, next_attempt_at, created_at, updated_at)
          VALUES ($1, $2, 1, 'queued', 0, 0, $3, $3, $3)",
     )
-    .bind(work).bind(listing).bind(created).execute(&mut **tx).await.unwrap();
+    .bind(work_id).bind(listing_id).bind(created).execute(&mut **tx).await.unwrap();
+}
+
+/// 验证失败的首条工作仍被租用，后续工作按首次退避重新排队。
+pub(super) async fn assert_requeued_after_failure(fixture: &Fixture) {
+    let (first_state, second_state, second_attempt, second_delay): (String, String, i16, bool) =
+        sqlx::query_as(
+            "SELECT first.state, second.state, second.attempt_count,
+                    second.next_attempt_at = second.updated_at + interval '30 seconds'
+             FROM public.consignment_lookup_work first CROSS JOIN public.consignment_lookup_work second
+             WHERE first.id = $1 AND second.id = $2",
+        )
+        .bind(WORK)
+        .bind(OTHER_WORK)
+        .fetch_one(fixture.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        (first_state.as_str(), second_state.as_str(), second_attempt, second_delay),
+        ("leased", "queued", 1, true)
+    );
 }

@@ -1,4 +1,4 @@
-//! 强制终止优先序、真实证据、碰撞差集与提交时故障。
+//! 强制终止优先序、真实证据、碰撞差集。
 
 use auction_application::admin::{
     RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON,
@@ -190,72 +190,6 @@ async fn postgres_forced_closure_reason_precedence_and_ownership_are_atomic() {
         f.store.auto_close(terminal).await.unwrap().into_result(),
         Ok(ListingAutoCloseEffect::Unchanged)
     );
-}
-
-#[tokio::test]
-async fn postgres_forced_close_and_user_rejection_roll_back_on_commit_or_audit_error() {
-    let f = Fixture::new().await;
-    let listing_id = new_id();
-    f.registered(listing_id, &gear("main", "456"), SELLER, ListingMode::Direct).await;
-    f.lot("456", 1).await;
-    sqlx::raw_sql(
-        "CREATE FUNCTION public.fake_consignment_failure() RETURNS trigger LANGUAGE plpgsql AS $$
-         BEGIN RAISE EXCEPTION '故意使测试事务失败'; END $$;
-         CREATE CONSTRAINT TRIGGER fake_consignment_commit_failure
-         AFTER INSERT ON public.consignment_events DEFERRABLE INITIALLY DEFERRED
-         FOR EACH ROW EXECUTE FUNCTION public.fake_consignment_failure();",
-    )
-    .execute(f.owner.postgres_pool())
-    .await
-    .unwrap();
-    let cmd_id = new_id();
-    let closure = withdraw(cmd_id, listing_id, SELLER, 1);
-    let before = f.persisted().await;
-    assert_eq!(f.store.withdraw(closure.clone()).await, Err(ConsignmentError::Unavailable));
-    assert!(f.persisted().await == before, "相关持久事实须保持一致");
-    sqlx::raw_sql(
-        "DROP TRIGGER fake_consignment_commit_failure ON public.consignment_events;
-         CREATE TRIGGER fake_consignment_audit_failure BEFORE INSERT ON public.audit_records
-         FOR EACH ROW EXECUTE FUNCTION public.fake_consignment_failure();",
-    )
-    .execute(f.owner.postgres_pool())
-    .await
-    .unwrap();
-    assert_eq!(f.store.withdraw(closure.clone()).await, Err(ConsignmentError::Unavailable));
-    assert!(f.persisted().await == before, "相关持久事实须保持一致");
-    assert_eq!(f.command_count(cmd_id).await, 0);
-
-    let unaffected_listing = new_id();
-    let unaffected_gear = gear("main", "457");
-    let fresh = || {
-        super::fixture::register(
-            new_id(),
-            unaffected_listing,
-            &unaffected_gear,
-            &f.key,
-            SELLER,
-            ListingMode::Direct,
-        )
-    };
-    assert_eq!(
-        f.store.register(fresh(), Some(&f.crypto), Some(&f.crypto)).await,
-        Err(ConsignmentError::Unavailable)
-    );
-    assert!(f.persisted().await == before, "相关持久事实须保持一致");
-    sqlx::query("DROP TRIGGER fake_consignment_audit_failure ON public.audit_records")
-        .execute(f.owner.postgres_pool())
-        .await
-        .unwrap();
-    assert_eq!(
-        f.store.withdraw(closure).await.unwrap().into_result(),
-        Err(Rejection::ListingNotActive.into())
-    );
-    assert_eq!(f.command_count(cmd_id).await, 1);
-    assert_eq!(
-        f.state(listing_id).await,
-        ("closed".into(), 2, Some("auction_lot_created".into()), false)
-    );
-    assert!(f.retired(listing_id).await);
 }
 
 #[tokio::test]

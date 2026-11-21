@@ -8,5 +8,6 @@ mod key_rotation;
 mod lookup;
 mod migration;
 mod reads;
+mod registration_fixture;
 mod work_store;
 mod writes;
