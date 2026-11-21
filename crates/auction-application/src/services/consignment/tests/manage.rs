@@ -16,7 +16,8 @@ use crate::ports::consignment::{
 };
 use crate::services::consignment::ManageListingService;
 use crate::services::consignment::tests::{
-    FAKE_URL, LISTING_ID, SELLER_ID, admin, command_id, price, run, seller, version,
+    FAKE_URL, INVALID_CLIENT_COMMAND_IDS, LISTING_ID, SELLER_ID, admin, command_id, price, run,
+    seller, version,
 };
 
 #[test]
@@ -73,7 +74,7 @@ fn reprice_and_withdraw_bind_the_same_authenticated_seller_but_distinct_operatio
         Ok(repriced)
     );
     assert_eq!(run(closed.reprice(&seller, command_id(), LISTING_ID, 2, 101, None)), Ok(repriced));
-    let new_command_id = CommandId::from_uuid(Uuid::from_u128(48));
+    let new_command_id = CommandId::from_uuid(Uuid::new_v4());
     assert_eq!(run(open.reprice(&seller, new_command_id, LISTING_ID, 3, 101, None)), Ok(unchanged));
     let [first, replay, without_request_id, same_price] =
         store.reprice.take_calls().try_into().unwrap();
@@ -192,6 +193,56 @@ fn delist_binds_authenticated_actor_and_validated_reason() {
     assert_eq!(first.listing_id, LISTING_ID);
     assert_eq!(first.expected_version, version(2));
     assert_ne!(first.request_hash, changed.request_hash);
+}
+
+#[test]
+fn manage_requires_v4_command_ids_before_store() {
+    let store = Arc::new(FakeListingCommands::default());
+    let service = ManageListingService::new(store.clone(), true);
+    let seller = seller();
+    let admin = admin();
+    let reprice = |id| run(service.reprice(&seller, id, LISTING_ID, 2, 101, None));
+    let withdraw = |id| run(service.withdraw(&seller, id, LISTING_ID, 2, None));
+    let delist =
+        |id| run(service.admin_delist(&admin, id, LISTING_ID, 2, "运营测试".to_owned(), None));
+    let repriced = ListingPriceReceipt::new(
+        LISTING_ID,
+        version(3),
+        ListingState::Resolving,
+        price(101),
+        ListingPriceDisposition::Repriced,
+    )
+    .unwrap();
+    let closed = ListingClosed::new(LISTING_ID, version(3), None).unwrap();
+    store.reprice.reply(Ok(ListingCommandOutcome::Accepted(repriced)));
+    store.withdraw.reply(Ok(ListingCommandOutcome::Accepted(closed)));
+    store.admin_delist.reply(Ok(ListingCommandOutcome::Accepted(closed)));
+
+    for uuid in INVALID_CLIENT_COMMAND_IDS {
+        let id = CommandId::from_uuid(uuid);
+        for (operation, error) in [
+            ("reprice", reprice(id).err()),
+            ("withdraw", withdraw(id).err()),
+            ("admin_delist", delist(id).err()),
+        ] {
+            assert_eq!(error, Some(ConsignmentError::InvalidCommandId), "{operation} {uuid}");
+            assert_eq!(
+                error.and_then(ConsignmentError::api_error),
+                Some((400, "invalid_command_id"))
+            );
+        }
+    }
+    assert!(store.reprice.take_calls().is_empty());
+    assert!(store.withdraw.take_calls().is_empty());
+    assert!(store.admin_delist.take_calls().is_empty());
+
+    let id = command_id();
+    assert_eq!(reprice(id), Ok(repriced));
+    assert_eq!(withdraw(id), Ok(closed));
+    assert_eq!(delist(id), Ok(closed));
+    assert_eq!(store.reprice.take_calls()[0].target.command_id, id);
+    assert_eq!(store.withdraw.take_calls()[0].target.command_id, id);
+    assert_eq!(store.admin_delist.take_calls()[0].command_id, id);
 }
 
 #[test]

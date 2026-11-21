@@ -11,12 +11,15 @@ const LISTING_2: &str = "20000000-0000-0000-0000-000000000002";
 const LISTING_3: &str = "20000000-0000-0000-0000-000000000003";
 const SNAPSHOT_1: &str = "30000000-0000-0000-0000-000000000001";
 const SNAPSHOT_2: &str = "30000000-0000-0000-0000-000000000002";
-const REGISTER_1: &str = "40000000-0000-0000-0000-000000000001";
-const REGISTER_2: &str = "40000000-0000-0000-0000-000000000002";
-const REGISTER_3: &str = "40000000-0000-0000-0000-000000000003";
-const LOOKUP_1: &str = "41000000-0000-0000-0000-000000000001";
-const LOOKUP_2: &str = "41000000-0000-0000-0000-000000000002";
-const WITHDRAW: &str = "42000000-0000-0000-0000-000000000001";
+const REGISTER_1: &str = "40000000-0000-4000-8000-000000000001";
+const REGISTER_2: &str = "40000000-0000-4000-8000-000000000002";
+const REGISTER_3: &str = "40000000-0000-4000-8000-000000000003";
+const LOOKUP_1: &str = "41000000-0000-5000-8000-000000000001";
+const LOOKUP_2: &str = "41000000-0000-5000-8000-000000000002";
+const WITHDRAW: &str = "42000000-0000-4000-8000-000000000001";
+const REPRICE: &str = "42000000-0000-4000-8000-000000000003";
+const CLOSE_1: &str = "44000000-0000-5000-8000-000000000001";
+const CLOSE_2: &str = "44000000-0000-5000-8000-000000000002";
 const WORK: &str = "50000000-0000-0000-0000-000000000001";
 const LOT_1: &str = "60000000-0000-0000-0000-000000000001";
 const LOT_2: &str = "60000000-0000-0000-0000-000000000002";
@@ -1338,7 +1341,7 @@ async fn postgres_consignment_published_listings_expire_with_their_mode_reason()
             REGISTER_1,
             SNAPSHOT_1,
             LOOKUP_1,
-            REGISTER_3,
+            CLOSE_1,
             "42",
             "direct",
             "displayed",
@@ -1349,7 +1352,7 @@ async fn postgres_consignment_published_listings_expire_with_their_mode_reason()
             REGISTER_2,
             SNAPSHOT_2,
             LOOKUP_2,
-            WITHDRAW,
+            CLOSE_2,
             "43",
             "consigned",
             "awaiting_deposit",
@@ -1445,6 +1448,38 @@ fn rejection_command(command_id: &str, operation: &str, status: u16, code: &str)
 }
 
 #[tokio::test]
+async fn postgres_consignment_command_uuid_versions_are_partitioned_by_actor() {
+    let database = TestDatabase::create().await.expect("克隆模板库");
+    let runtime = database.store().await.expect("以运行账号连接");
+    let pool = runtime.postgres_pool();
+    seed_users_and_key(pool).await;
+    succeeds(pool, &register(LISTING_1, USER_1, "main", "42", "direct", REGISTER_1)).await;
+    let admin = "42000000-0000-4000-8000-000000000002";
+    let close = format!(
+        "UPDATE public.consignment_listings SET state='expired', state_version=2, updated_at='{END}',
+                 reason_code='lookup_deadline' WHERE id='{LISTING_1}';"
+    ) + &transition(LISTING_1, CLOSE_1, "expired", "expired", "'lookup_deadline'");
+    for (command_id, sql, other_version) in [
+        (WITHDRAW, rejection_command(WITHDRAW, "withdraw", 404, "listing_not_found"), '5'),
+        (admin, rejection_command(admin, "admin_delist", 404, "listing_not_found"), '5'),
+        (LOOKUP_1, rejection_command(LOOKUP_1, "apply_lookup", 409, "listing_not_active"), '4'),
+        (CLOSE_1, close, '4'),
+    ] {
+        for version in ['1', other_version, '7'] {
+            let mut wrong_id = command_id.to_owned();
+            wrong_id.replace_range(14..15, &version.to_string());
+            check(pool, &sql.replace(command_id, &wrong_id), "consignment_command_uuid_version")
+                .await;
+        }
+        let mut wrong_variant = command_id.to_owned();
+        wrong_variant.replace_range(19..20, "0");
+        check(pool, &sql.replace(command_id, &wrong_variant), "consignment_command_uuid_version")
+            .await;
+        succeeds(pool, &sql).await;
+    }
+}
+
+#[tokio::test]
 async fn postgres_consignment_failure_receipts_match_the_operation_status_matrix() {
     let database = TestDatabase::create().await.expect("克隆模板库");
     let runtime = database.store().await.expect("以运行账号连接");
@@ -1479,7 +1514,9 @@ async fn postgres_consignment_failure_receipts_match_the_operation_status_matrix
                 .into_iter()
                 .enumerate()
         {
-            let command_id = format!("43000000-0000-0000-0000-{:012}", index * 6 + actor_index + 1);
+            let version = if matches!(operation, "apply_lookup" | "auto_close") { 5 } else { 4 };
+            let command_id =
+                format!("43000000-0000-{version}000-8000-{:012}", index * 6 + actor_index + 1);
             let receipt = rejection_command(&command_id, operation, *status, code);
             if allowed.contains(&operation) {
                 succeeds(pool, &receipt).await;
@@ -1512,7 +1549,14 @@ async fn postgres_consignment_success_receipts_cannot_commit_without_their_event
         ("expired", "expired", "'lookup_deadline'"),
         ("closed", "closed", "'auction_lot_created'"),
     ] {
-        let transition = transition(LISTING_1, LOOKUP_1, state, kind, reason);
+        let command_id = if kind == "repriced" {
+            REPRICE
+        } else if reason == "'seller_cancelled'" {
+            WITHDRAW
+        } else {
+            LOOKUP_1
+        };
+        let transition = transition(LISTING_1, command_id, state, kind, reason);
         let (receipt, _) =
             transition.split_once("INSERT INTO public.consignment_events").expect("分离命令和事件");
         check(pool, receipt, "consignment_command_version_event").await;
@@ -1520,7 +1564,6 @@ async fn postgres_consignment_success_receipts_cannot_commit_without_their_event
             succeeds(
                 pool,
                 &receipt
-                    .replace(LOOKUP_1, WITHDRAW)
                     .replace("\"repriced\"", "\"unchanged\"")
                     .replace("\"listing_version\":2", "\"listing_version\":1"),
             )

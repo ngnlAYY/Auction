@@ -12,7 +12,9 @@ use auction_time::{Duration as TimeDelta, Timestamp};
 use sqlx::{AssertSqlSafe, PgConnection, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
-use super::fixture::{Fixture, OTHER, SELLER, apply, gear, new_id, observation, register};
+use super::fixture::{
+    Fixture, OTHER, SELLER, apply, gear, new_id, new_internal_command_id, observation, register,
+};
 use crate::support::fixtures::{policy_snapshot, seed_user, wait_for_condition};
 
 #[tokio::test]
@@ -71,7 +73,7 @@ async fn postgres_history_verified_alias_freezes_baselines_for_both_modes_and_is
         }
         f.store
             .apply_lookup(apply(
-                new_id(),
+                new_internal_command_id(),
                 fence,
                 observation(&equipment, &f.key, "FakeWriteSeller", true),
                 1,
@@ -206,7 +208,12 @@ async fn postgres_history_lot_committed_after_registration_snapshot_remains_outs
     let fence = f.grant(listing_id, work_id, 1, 30).await;
     let applied = f
         .store
-        .apply_lookup(apply(new_id(), fence, observation(&g, &f.key, "FakeWriteSeller", true), 1))
+        .apply_lookup(apply(
+            new_internal_command_id(),
+            fence,
+            observation(&g, &f.key, "FakeWriteSeller", true),
+            1,
+        ))
         .await
         .unwrap()
         .into_result();

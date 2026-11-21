@@ -45,8 +45,8 @@ impl Fixture {
             .execute(&mut *tx)
             .await
             .unwrap();
-            seed_listing(&mut tx, LISTING, "1001", Uuid::from_u128(0x600)).await;
-            seed_listing(&mut tx, OTHER_LISTING, "1002", Uuid::from_u128(0x601)).await;
+            seed_listing(&mut tx, LISTING, "1001").await;
+            seed_listing(&mut tx, OTHER_LISTING, "1002").await;
             tx.commit().await.unwrap();
         }
         let store = db.store().await.expect("连接测试运行账号");
@@ -181,19 +181,15 @@ fn registered_at() -> Timestamp {
     "2000-01-01T00:00:00Z".parse().unwrap()
 }
 
-async fn seed_listing(
-    tx: &mut Transaction<'_, Postgres>,
-    listing_id: Uuid,
-    eid: &str,
-    command_id: Uuid,
-) {
+async fn seed_listing(tx: &mut Transaction<'_, Postgres>, listing_id: Uuid, eid: &str) {
     let at = registered_at();
+    let command_id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO public.consignment_listings
             (id, seller_user_id, world_id, external_equipment_id, mode, state, price,
              pricing_version, fee_bps, state_version, service_epoch, blacklist_count_at_register,
-             created_at, updated_at, expires_at)
-         VALUES ($1, $2, 'main', $3, 'direct', 'resolving', 101, 1, 0, 1, 1, 0, $4, $4, $5)",
+             blacklist_baseline_ids, created_at, updated_at, expires_at)
+         VALUES ($1, $2, 'main', $3, 'direct', 'resolving', 101, 1, 0, 1, 1, 0, ARRAY[]::uuid[], $4, $4, $5)",
     )
     .bind(listing_id)
     .bind(SELLER)
@@ -294,7 +290,7 @@ async fn postgres_enqueue_shape_and_duplicate() {
     let listing_id = Uuid::from_u128(0x202);
     let work_id = Uuid::from_u128(0x302);
     let mut tx = fixture.lock().await;
-    seed_listing(&mut tx, listing_id, "1003", Uuid::from_u128(0x602)).await;
+    seed_listing(&mut tx, listing_id, "1003").await;
     DatabaseStore::test_lookup_enqueue(&mut tx, listing_id, work_id, registered_at())
         .await
         .unwrap();

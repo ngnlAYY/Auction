@@ -10,13 +10,13 @@ use crate::ports::admin::EquipmentKeySealerPort;
 use crate::ports::consignment::{
     ConsignmentError, ListingCommandStore, ListingEquipmentReference, ListingEquipmentUrlValidator,
     ListingRegistered, ListingRegistrationPolicy, RegisterListingCommand, RegistrationInput,
-    RegistrationReplayCrypto, validate_listing_request_id,
+    RegistrationReplayCrypto, validate_listing_client_command_id, validate_listing_request_id,
 };
 use crate::ports::public::PublicSessionIdentity;
 
 /// 经 HTTP 严格解码的登记输入。原 URL 仅在本次请求内借用。
 pub struct RegisterListingInput<'a> {
-    /// 客户端原命令身份。
+    /// 客户端原命令身份，须为 UUIDv4。
     pub command_id: CommandId,
     /// 经请求解码的闭集模式。
     pub mode: ListingMode,
@@ -72,9 +72,7 @@ impl RegisterListingService {
     ) -> Result<ListingRegistered, ConsignmentError> {
         let ListingEquipmentReference { identity, key } =
             self.validator.validate(input.equipment_url)?;
-        if input.command_id.is_nil() {
-            return Err(ConsignmentError::InvalidCommandId);
-        }
+        validate_listing_client_command_id(input.command_id)?;
         if seller.user_id.is_nil() {
             return Err(ConsignmentError::InvalidListingRequest);
         }

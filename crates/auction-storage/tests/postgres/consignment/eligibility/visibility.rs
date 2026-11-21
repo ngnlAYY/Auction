@@ -111,12 +111,13 @@ async fn postgres_visibility_uses_prioritized_forced_reasons_and_snapshot() {
         view(&mut read, displayed.listing_id, now).await,
         rejected(ListingReason::SellerIneligible)
     );
+    let blacklist_fact = Uuid::new_v4();
     batch(
         &mut admin,
         &format!(
             "UPDATE public.user_blacklist SET revoked_at='{LATER}' WHERE user_id='{SELLER}';
          INSERT INTO public.user_blacklist_history(id,user_id,public_reason,actor,blacklisted_at)
-         VALUES (gen_random_uuid(),'{SELLER}','Fake reason','fake-actor','{START}');"
+         VALUES ('{blacklist_fact}','{SELLER}','Fake reason','fake-actor','{START}');"
         ),
     )
     .await;
@@ -140,7 +141,8 @@ async fn postgres_visibility_uses_prioritized_forced_reasons_and_snapshot() {
         rejected(ListingReason::AuctionLotCreated)
     );
 
-    let after_unblacklist = Listing { blacklist_count: 1, ..Listing::new(105, "46") };
+    let after_unblacklist =
+        Listing { blacklist_baseline_ids: &[blacklist_fact], ..Listing::new(105, "46") };
     batch(&mut admin, "UPDATE public.consignment_lookup_control SET admitting=true;").await;
     let mut tx = service.begin().await.expect("解禁后新挂单");
     after_unblacklist.register(&mut tx).await;
@@ -170,7 +172,12 @@ async fn postgres_quotas_use_fixed_time_and_count_both_worlds() {
         Listing { created: "2026-01-02T00:00:00.000001Z", epoch: 2, ..Listing::new(105, "105") },
         Listing::new(106, "106"),
         Listing { epoch: 2, created: LATER, ..Listing::new(107, "107") },
-        Listing { blacklist_count: 1, created: LATER, ..Listing::new(108, "108") },
+        // 造一个与当前历史计数不同的基线，验证它不纳入有效活动额度。
+        Listing {
+            blacklist_baseline_ids: &[Uuid::new_v4()],
+            created: LATER,
+            ..Listing::new(108, "108")
+        },
     ] {
         entry.register(&mut tx).await;
     }

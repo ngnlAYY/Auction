@@ -15,7 +15,8 @@ use auction_time::{Duration as TimeDelta, Timestamp};
 use uuid::Uuid;
 
 use super::fixture::{
-    Fixture, OTHER, SELLER, apply, gear, new_id, observation, reprice, time_delta, withdraw,
+    Fixture, OTHER, SELLER, apply, gear, new_id, new_internal_command_id, observation, reprice,
+    time_delta, withdraw,
 };
 
 #[tokio::test]
@@ -32,7 +33,7 @@ async fn postgres_apply_lookup_replays_after_reprice_withdraw_and_lease_changes(
         .unwrap()
         .into_result()
         .unwrap();
-    let cmd_id = new_id();
+    let cmd_id = new_internal_command_id();
     let cmd =
         |variant| apply(cmd_id, fence, observation(&g, &f.key, "fakewriteseller", true), variant);
     let published = f.store.apply_lookup(cmd(1)).await.unwrap().into_result().unwrap();
@@ -106,7 +107,12 @@ async fn postgres_apply_lookup_permanent_and_private_safe_snapshot_branches() {
         let work_id = f.registered(listing_id, &g, SELLER, ListingMode::Direct).await;
         let fence = f.grant(listing_id, work_id, 1, 30).await;
         f.store
-            .apply_lookup(apply(new_id(), fence, LookupObservation::Failed(error), 1))
+            .apply_lookup(apply(
+                new_internal_command_id(),
+                fence,
+                LookupObservation::Failed(error),
+                1,
+            ))
             .await
             .unwrap()
             .into_result()
@@ -145,7 +151,7 @@ async fn postgres_apply_lookup_permanent_and_private_safe_snapshot_branches() {
         };
         f.store
             .apply_lookup(apply(
-                new_id(),
+                new_internal_command_id(),
                 fence,
                 observation(&g, &f.key, actual_owner, tradeable),
                 1,
@@ -179,11 +185,11 @@ async fn postgres_apply_lookup_first_qualified_publication_wins_equipment() {
     // 全局只能有一条活许可。让第一条提交的发布和第二条原始观察跨提交边界竞争。
     let f1 = f.grant(first, first_work, 1, 30).await;
     let f2 = LookupFence::new(second_work, second, 1, 1, new_id()).unwrap();
-    let command = new_id();
+    let command = new_internal_command_id();
     let blocker = f.block_control().await;
     let (a, b, ()) = tokio::join!(
         f.store.apply_lookup(apply(
-            new_id(),
+            new_internal_command_id(),
             f1,
             observation(&g, &f.key, "FakeWriteSeller", true),
             1
@@ -223,7 +229,7 @@ async fn postgres_apply_lookup_lost_fence_leaves_all_rows_and_next_permit_untouc
     let listing_id = new_id();
     let work_id = f.registered(listing_id, &g, SELLER, ListingMode::Direct).await;
     let good = f.grant(listing_id, work_id, 1, 30).await;
-    let cmd_id = new_id();
+    let cmd_id = new_internal_command_id();
     let observe = || {
         LookupObservation::Failed(ListingEquipmentLookupError::SourceRateLimited(Some(
             LookupRetryAfter::new(Duration::from_secs(3600)),
@@ -293,7 +299,7 @@ async fn postgres_apply_lookup_retries_six_times_and_caps_429_cooldown() {
             ))),
             _ => panic!("固定夹具计次"),
         };
-        let cmd_id = new_id();
+        let cmd_id = new_internal_command_id();
         let cmd = || apply(cmd_id, fence, LookupObservation::Failed(error), 1);
         let effect = f.store.apply_lookup(cmd()).await.unwrap().into_result().unwrap();
         let (state, last, next, at, holder, cooldown): (String, String, Option<Timestamp>, Timestamp, Option<Uuid>, Option<Timestamp>) =
@@ -358,7 +364,7 @@ async fn postgres_apply_lookup_final_cas_rolls_back_snapshot_when_lease_expires_
     .unwrap();
     let fence = f.grant(listing_id, work_id, 1, 2).await;
     let original = f.persisted().await;
-    let cmd_id = new_id();
+    let cmd_id = new_internal_command_id();
     let result = f
         .store
         .apply_lookup(apply(cmd_id, fence, observation(&g, &f.key, "FakeWriteSeller", true), 1))
@@ -376,7 +382,12 @@ async fn postgres_apply_lookup_final_cas_rolls_back_snapshot_when_lease_expires_
     let fresh = f.grant(listing_id, work_id, 2, 30).await;
     let applied = f
         .store
-        .apply_lookup(apply(new_id(), fresh, observation(&g, &f.key, "FakeWriteSeller", true), 1))
+        .apply_lookup(apply(
+            new_internal_command_id(),
+            fresh,
+            observation(&g, &f.key, "FakeWriteSeller", true),
+            1,
+        ))
         .await
         .unwrap()
         .into_result()
@@ -398,7 +409,12 @@ async fn postgres_apply_lookup_uses_publication_time_and_mode_specific_configure
         let listing_id = new_id();
         let work_id = f.registered(listing_id, &g, SELLER, mode).await;
         let fence = f.grant(listing_id, work_id, 1, 30).await;
-        let mut cmd = apply(new_id(), fence, observation(&g, &f.key, "FakeWriteSeller", true), 1);
+        let mut cmd = apply(
+            new_internal_command_id(),
+            fence,
+            observation(&g, &f.key, "FakeWriteSeller", true),
+            1,
+        );
         cmd.publication_ttls = ListingPublicationTtls::new(37, 9).unwrap();
         let published = f.store.apply_lookup(cmd).await.unwrap().into_result().unwrap();
         let (published_at, expires_at, event_at): (Timestamp, Timestamp, Timestamp) = sqlx::query_as(
@@ -444,7 +460,7 @@ async fn postgres_apply_lookup_cannot_publish_when_snapshot_write_crosses_listin
         .unwrap();
     tx.commit().await.unwrap();
 
-    let cmd_id = new_id();
+    let cmd_id = new_internal_command_id();
     let received = f
         .store
         .apply_lookup(apply(cmd_id, fence, observation(&g, &f.key, "FakeWriteSeller", true), 1))

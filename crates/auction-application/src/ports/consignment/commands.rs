@@ -8,7 +8,7 @@ use auction_domain::consignment::{
 use auction_domain::consignment::{ListingSnapshot, ListingState, ListingVersion};
 use auction_domain::{CommandId, EquipmentId, EquipmentKey, LotId, UserId, valid_text};
 use auction_time::Timestamp;
-use uuid::Uuid;
+use uuid::{Uuid, Variant, Version};
 
 use crate::ports::admin::EquipmentKeySealerPort;
 use crate::ports::consignment::equipment::{
@@ -88,7 +88,7 @@ pub struct ListingRegistrationPolicy {
 /// 登记命令及首次执行候选 ID。重放必须比较固定目标 `new`。
 #[derive(Debug)]
 pub struct RegisterListingCommand<'a> {
-    /// 整个寄售账本内唯一的命令 ID。
+    /// 玩家提供的 UUIDv4，与 Worker 和系统派生的 UUIDv5 分属不同命名空间。
     pub command_id: CommandId,
     /// 从当前会话取得的卖家。
     pub seller_user_id: UserId,
@@ -112,7 +112,7 @@ pub struct RegisterListingCommand<'a> {
 /// 已认证卖家对现有挂单发出的版本化命令目标。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SellerListingTarget {
-    /// 整个寄售账本内唯一的命令 ID。
+    /// 玩家提供的 UUIDv4，与 Worker 和系统派生的 UUIDv5 分属不同命名空间。
     pub command_id: CommandId,
     /// 唯一授权读取该命令或触碰目标的会话用户。
     pub seller_user_id: UserId,
@@ -148,6 +148,18 @@ pub struct WithdrawListingCommand {
     /// 仅用于审计关联，不参与摘要、MAC 或重放比较，重放保留首次审计关联号。
     /// 关联标识，不是秘密，会进入日志与审计；不得把业务输入写进它。
     pub request_id: Option<String>,
+}
+
+/// 校验玩家或 Admin 的命令 ID，保留 Worker 与系统的 UUIDv5 命名空间。
+pub(crate) fn validate_listing_client_command_id(
+    command_id: CommandId,
+) -> Result<(), ConsignmentError> {
+    // 不变量 1、6：客户端不能占用后台派生的命令 ID，阻断解析或强制清退的提交。
+    let uuid = command_id.as_uuid();
+    if uuid.get_variant() != Variant::RFC4122 || uuid.get_version() != Some(Version::Random) {
+        return Err(ConsignmentError::InvalidCommandId);
+    }
+    Ok(())
 }
 
 /// 与 HTTP 边界的请求号规则一致，允许 1–64 字节的 ASCII 字母、数字和 `-_.`。
@@ -216,7 +228,7 @@ pub struct AdminDelistListingCommand {
     pub admin_actor: String,
     /// 目标、预期版本和私有说明的规范摘要。不记录说明原文到诊断。
     pub request_hash: RequestHash,
-    /// 整个寄售账本内唯一的命令 ID。
+    /// Admin 提供的 UUIDv4，与 Worker 和系统派生的 UUIDv5 分属不同命名空间。
     pub command_id: CommandId,
     /// 仅用于审计关联，不参与摘要、MAC 或重放比较，重放保留首次审计关联号。
     /// 关联标识，不是秘密，会进入日志与审计；不得把业务输入写进它。
@@ -260,7 +272,7 @@ pub struct AutoCloseCandidate {
 pub struct AutoCloseListingCommand {
     /// 目标与清退证据的规范摘要。
     pub request_hash: RequestHash,
-    /// 按规范证据派生的稳定命令 ID。
+    /// 应用层按规范证据派生的稳定 UUIDv5，防止玩家或 Admin 抢占清退命令 ID。
     pub command_id: CommandId,
     /// 目标及证据。
     pub candidate: AutoCloseCandidate,
@@ -271,7 +283,7 @@ pub struct AutoCloseListingCommand {
 pub struct ApplyListingLookupCommand {
     /// 目标、工作围栏及规范观察的摘要，不含采集时刻。
     pub request_hash: RequestHash,
-    /// 由 `(work_id,generation,fence,"result")` 稳定派生。
+    /// 应用层按工作 ID 和围栏稳定派生的 UUIDv5，防止玩家或 Admin 抢占解析命令 ID。
     pub command_id: CommandId,
     /// 领取时提交的工作身份和租约凭证。
     pub fence: LookupFence,

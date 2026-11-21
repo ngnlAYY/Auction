@@ -71,7 +71,7 @@ pub(super) struct Listing<'a> {
     pub(super) created: &'a str,
     pub(super) expires: &'a str,
     pub(super) epoch: i64,
-    pub(super) blacklist_count: i64,
+    pub(super) blacklist_baseline_ids: &'a [Uuid],
 }
 
 impl<'a> Listing<'a> {
@@ -85,22 +85,36 @@ impl<'a> Listing<'a> {
             created: START,
             expires: END,
             epoch: 1,
-            blacklist_count: 0,
+            blacklist_baseline_ids: &[],
         }
     }
 
     pub(super) async fn register(&self, tx: &mut PgConnection) {
-        let Self { listing_id, seller, world, eid, mode, created, epoch, blacklist_count, .. } =
-            self;
+        let Self {
+            listing_id,
+            seller,
+            world,
+            eid,
+            mode,
+            created,
+            epoch,
+            blacklist_baseline_ids,
+            ..
+        } = self;
+        let blacklist_count = blacklist_baseline_ids.len();
+        let blacklist_ids =
+            blacklist_baseline_ids.iter().map(Uuid::to_string).collect::<Vec<_>>().join(",");
         let deadline: Timestamp = at(created) + auction_time::Duration::hours(24);
         let command_id = Uuid::new_v4();
         let fee = if *mode == "direct" { 0 } else { 500 };
         batch(tx, &format!(r#"
             INSERT INTO public.consignment_listings
                 (id,seller_user_id,world_id,external_equipment_id,mode,state,price,pricing_version,
-                 fee_bps,state_version,service_epoch,blacklist_count_at_register,created_at,updated_at,expires_at)
+                 fee_bps,state_version,service_epoch,blacklist_count_at_register,blacklist_baseline_ids,
+                 created_at,updated_at,expires_at)
             VALUES ('{listing_id}','{seller}','{world}','{eid}','{mode}','resolving',101,1,
-                    {fee},1,{epoch},{blacklist_count},'{created}','{created}','{deadline}');
+                    {fee},1,{epoch},{blacklist_count},'{{{blacklist_ids}}}'::uuid[],
+                    '{created}','{created}','{deadline}');
             INSERT INTO public.consignment_commands
                 (command_id,actor_kind,actor_ref,operation,request_target,request_digest,replay_key_id,
                  listing_id,result_status,result_code,result_body,created_at)
@@ -118,7 +132,7 @@ impl<'a> Listing<'a> {
     pub(super) async fn publish(&self, tx: &mut PgConnection) {
         let Self { listing_id, world, eid, mode, expires, .. } = self;
         let snapshot_id = Uuid::new_v4();
-        let command_id = Uuid::new_v4();
+        let command_id = Uuid::new_v5(listing_id, b"fixture-lookup");
         let state = if *mode == "direct" { "displayed" } else { "awaiting_deposit" };
         batch(tx, &format!(r#"
             INSERT INTO public.consignment_snapshots

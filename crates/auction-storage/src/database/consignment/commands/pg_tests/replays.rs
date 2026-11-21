@@ -11,8 +11,8 @@ use auction_domain::consignment::{
 use uuid::Uuid;
 
 use super::fixture::{
-    COMMAND, KEY, LISTING, SELLER, counts, equipment, insert_key, later, register,
-    registration_proof, seed, time,
+    COMMAND, KEY, LISTING, SELLER, client_command_id, counts, equipment, insert_key, later,
+    register, registration_proof, seed, time,
 };
 use crate::database::DatabaseStore;
 use crate::database::consignment::commands::errors::WriteError;
@@ -23,7 +23,8 @@ use crate::database::consignment::commands::ledger::{
 use crate::database::consignment::commands::session::{LockKeys, with_command_transaction};
 use crate::database::consignment::listings::projection::lock_listings;
 
-const OPERATION_COMMAND: Uuid = Uuid::from_u128(555);
+const OPERATION_COMMAND: Uuid = client_command_id(555);
+const INTERNAL_OPERATION_COMMAND: Uuid = uuid::uuid!("00000000-0000-5000-8000-000000000555");
 const ADMIN_REASON: &str = "测试私有下架说明";
 
 pub(super) async fn registration_replays_with_old_key(
@@ -83,6 +84,15 @@ enum Operation<'a> {
 }
 
 impl Operation<'_> {
+    fn command_id(self) -> Uuid {
+        match self {
+            Self::Reschedule(_) | Self::AutoClose(_) => INTERNAL_OPERATION_COMMAND,
+            Self::Withdraw(_) | Self::AdminDelist(_) | Self::AdminDelistWithoutReason => {
+                OPERATION_COMMAND
+            }
+        }
+    }
+
     fn header(self) -> (Actor<'static>, ListingOperation) {
         match self {
             Self::Withdraw(_) => (Actor::PublicUser(SELLER), ListingOperation::Withdraw),
@@ -101,7 +111,7 @@ async fn execute(
     request_hash: RequestHash,
 ) -> Result<StoredReceipt, WriteError> {
     let keys = LockKeys {
-        command_id: OPERATION_COMMAND,
+        command_id: operation.command_id(),
         sellers: &[SELLER],
         equipment: &[equipment("42")],
     };
@@ -194,7 +204,7 @@ async fn verify_replay(
         ),
         "变更后的上游摘要不能得到原回执"
     );
-    assert_eq!(original.body["command_id"], OPERATION_COMMAND.to_string());
+    assert_eq!(original.body["command_id"], operation.command_id().to_string());
     assert_eq!(original.body["operation"], operation.header().1.as_str());
     assert_eq!((original.status, original.code.as_str()), (200, "ok"));
     Ok(original)

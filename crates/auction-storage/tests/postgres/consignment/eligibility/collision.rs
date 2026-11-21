@@ -171,7 +171,7 @@ async fn postgres_collision_tracks_committed_lots_and_associates_only_observed_f
             .await
             .expect("未见的 lot")
     );
-    let close_command = Uuid::new_v4();
+    let close_command = Uuid::new_v5(&listing_id, b"fixture-auto-close");
     batch(&mut closing, &format!(r#"
         UPDATE public.consignment_listings SET state='closed',state_version=2,
                reason_code='auction_lot_created',updated_at='{LATER}' WHERE id='{listing_id}';

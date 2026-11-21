@@ -24,8 +24,13 @@ use crate::database::consignment::listings::projection::{ListingLockIdentity, Ne
 pub(super) const SELLER: Uuid = Uuid::from_u128(101);
 pub(super) const OTHER_SELLER: Uuid = Uuid::from_u128(102);
 pub(super) const KEY: Uuid = Uuid::from_u128(201);
-pub(super) const COMMAND: Uuid = Uuid::from_u128(301);
+pub(super) const COMMAND: Uuid = client_command_id(301);
 pub(super) const LISTING: Uuid = Uuid::from_u128(401);
+
+pub(super) const fn client_command_id(marker: u128) -> Uuid {
+    let base = uuid::uuid!("00000000-0000-4000-8000-000000000000");
+    Uuid::from_u128(base.as_u128() | marker)
+}
 
 pub(super) fn equipment(eid: &str) -> ListingEquipmentIdentity {
     ListingEquipmentIdentity::new("main", eid).unwrap_or_else(|error| panic!("夹具身份：{error}"))

@@ -7,7 +7,7 @@ use auction_application::admin::{
 use auction_application::consignment::{
     AutoCloseEvidence, ConsignmentError, ListingAutoCloseEffect,
     ListingBusinessRejection as Rejection, ListingCommandOutcome, ListingCommandRejection,
-    ListingCommandStore, ResolveListingService, StoredListingDecision,
+    ListingCommandStore, ListingPriceDisposition, ResolveListingService, StoredListingDecision,
 };
 use auction_domain::consignment::{ListingMode, ListingReason, ListingVersion};
 use auction_domain::{CommandId, LotId, SettlementId};
@@ -15,8 +15,8 @@ use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::fixture::{
-    Fixture, OTHER, SELLER, apply, auto, digest, expire_listing, gear, new_id, observation,
-    reprice, withdraw,
+    Fixture, OTHER, SELLER, apply, auto, digest, expire_listing, gear, new_id,
+    new_internal_command_id, observation, reprice, withdraw,
 };
 
 #[tokio::test]
@@ -25,7 +25,7 @@ async fn postgres_auto_close_rechecks_evidence_then_records_collision_set_and_on
     let g = gear("main", "451");
     let listing_id = new_id();
     f.registered(listing_id, &g, SELLER, ListingMode::Direct).await;
-    let first_id = new_id();
+    let first_id = new_internal_command_id();
     let first_lot = new_id();
     let close = auto(
         first_id,
@@ -79,7 +79,7 @@ async fn postgres_auto_close_rechecks_evidence_then_records_collision_set_and_on
 
     let observed = f.lot("0000451", 3).await;
     let unseen = f.lot("00000451", 4).await;
-    let append_id = new_id();
+    let append_id = new_internal_command_id();
     let append = auto(
         append_id,
         listing_id,
@@ -106,7 +106,7 @@ async fn postgres_auto_close_rechecks_evidence_then_records_collision_set_and_on
         ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(accepted))
     );
     let associated = auto(
-        new_id(),
+        new_internal_command_id(),
         listing_id,
         AutoCloseEvidence::AuctionLotCreated(LotId::from_uuid(second_lot)),
     );
@@ -184,7 +184,8 @@ async fn postgres_forced_closure_reason_precedence_and_ownership_are_atomic() {
     .await
     .unwrap();
     assert_eq!(coupled, collision);
-    let terminal = auto(new_id(), listings[1], AutoCloseEvidence::SellerIneligible(fact));
+    let terminal =
+        auto(new_internal_command_id(), listings[1], AutoCloseEvidence::SellerIneligible(fact));
     assert_eq!(
         f.store.auto_close(terminal).await.unwrap().into_result(),
         Ok(ListingAutoCloseEffect::Unchanged)
@@ -263,12 +264,14 @@ async fn postgres_auto_close_competes_with_withdraw_and_matches_frozen_deadline(
     let listing_id = new_id();
     f.registered(listing_id, &gear("main", "458"), SELLER, ListingMode::Consigned).await;
     let frozen = expire_listing(&f, listing_id).await;
-    let wrong = auto(new_id(), listing_id, AutoCloseEvidence::DisplayExpired(frozen));
+    let wrong =
+        auto(new_internal_command_id(), listing_id, AutoCloseEvidence::DisplayExpired(frozen));
     assert_eq!(
         f.store.auto_close(wrong).await.unwrap().into_result(),
         Err(ConsignmentError::ConditionNotMet)
     );
-    let right = auto(new_id(), listing_id, AutoCloseEvidence::LookupDeadline(frozen));
+    let right =
+        auto(new_internal_command_id(), listing_id, AutoCloseEvidence::LookupDeadline(frozen));
     let cancel = withdraw(new_id(), listing_id, SELLER, 1);
     let blocker = f.block_control().await;
     let (a, b, ()) = tokio::join!(
@@ -317,7 +320,7 @@ async fn postgres_lookup_cannot_publish_over_collision_or_disabled_epoch() {
             .unwrap();
             (AutoCloseEvidence::ServiceDisabled(2), None)
         };
-        let cmd = new_id();
+        let cmd = new_internal_command_id();
         let input =
             || apply(cmd, fence, observation(&equipment, &f.key, "FakeWriteSeller", true), 1);
         assert_eq!(
@@ -408,6 +411,61 @@ async fn postgres_lookup_cannot_publish_over_collision_or_disabled_epoch() {
 }
 
 #[tokio::test]
+async fn postgres_forced_close_commits_after_many_player_v4_commands() {
+    let f = Fixture::new().await;
+    let listing_id = new_id();
+    let equipment = gear("main", "469");
+    let work_id = f.registered(listing_id, &equipment, SELLER, ListingMode::Direct).await;
+    for _ in 0..64 {
+        let receipt = f
+            .store
+            .reprice(reprice(new_id(), listing_id, SELLER, 1, 101))
+            .await
+            .unwrap()
+            .into_result()
+            .unwrap();
+        assert_eq!(receipt.disposition, ListingPriceDisposition::Unchanged);
+    }
+    let player_commands: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.consignment_commands
+         WHERE listing_id=$1 AND actor_kind='public_user' AND pg_catalog.uuid_extract_version(command_id)=4",
+    ).bind(listing_id).fetch_one(f.pool()).await.unwrap();
+    assert_eq!(player_commands, 65);
+
+    let fence = f.grant(listing_id, work_id, 1, 30).await;
+    let lot_id = f.lot(equipment.external_equipment_id(), 1).await;
+    let command = apply(
+        new_internal_command_id(),
+        fence,
+        observation(&equipment, &f.key, "FakeWriteSeller", true),
+        1,
+    );
+    assert_eq!(
+        f.store.apply_lookup(command).await.unwrap(),
+        ListingCommandOutcome::Rejected(ListingCommandRejection::Recorded(
+            Rejection::ListingNotActive
+        ))
+    );
+    assert_eq!(
+        f.state(listing_id).await,
+        ("closed".into(), 2, Some("auction_lot_created".into()), false)
+    );
+    assert!(f.retired(listing_id).await);
+    let system_fact: (i16, Uuid) = sqlx::query_as(
+        "SELECT pg_catalog.uuid_extract_version(c.command_id), x.lot_id
+         FROM public.consignment_commands c JOIN public.consignment_events e USING (command_id)
+         JOIN public.consignment_listing_auction_conflicts x USING (command_id)
+         WHERE c.listing_id=$1 AND c.actor_kind='system' AND c.operation='auto_close'
+           AND e.event_kind='closed'",
+    )
+    .bind(listing_id)
+    .fetch_one(f.pool())
+    .await
+    .unwrap();
+    assert_eq!(system_fact, (5, lot_id));
+}
+
+#[tokio::test]
 async fn postgres_auto_close_revalidates_stale_epoch_and_seller_history_evidence() {
     let f = Fixture::new().await;
     let seller_listing = new_id();
@@ -420,7 +478,7 @@ async fn postgres_auto_close_revalidates_stale_epoch_and_seller_history_evidence
         .execute(f.owner.postgres_pool())
         .await
         .unwrap();
-    let unknown_id = new_id();
+    let unknown_id = new_internal_command_id();
     let wrong_fact =
         auto(unknown_id, seller_listing, AutoCloseEvidence::SellerIneligible(new_id()));
     assert_eq!(
@@ -428,7 +486,8 @@ async fn postgres_auto_close_revalidates_stale_epoch_and_seller_history_evidence
         Err(ConsignmentError::ConditionNotMet)
     );
     assert_eq!(f.command_count(unknown_id).await, 0);
-    let blacklist = auto(new_id(), seller_listing, AutoCloseEvidence::SellerIneligible(fact));
+    let blacklist =
+        auto(new_internal_command_id(), seller_listing, AutoCloseEvidence::SellerIneligible(fact));
     assert!(matches!(f.store.auto_close(blacklist).await.unwrap().into_result(),
         Ok(ListingAutoCloseEffect::Terminated(snapshot)) if snapshot.reason == Some(ListingReason::SellerIneligible)));
     assert!(f.retired(seller_listing).await);
@@ -438,18 +497,21 @@ async fn postgres_auto_close_revalidates_stale_epoch_and_seller_history_evidence
         .execute(f.pool())
         .await
         .unwrap();
-    let wrong_epoch = auto(new_id(), old_epoch_listing, AutoCloseEvidence::ServiceDisabled(1));
+    let wrong_epoch =
+        auto(new_internal_command_id(), old_epoch_listing, AutoCloseEvidence::ServiceDisabled(1));
     assert_eq!(
         f.store.auto_close(wrong_epoch).await.unwrap().into_result(),
         Err(ConsignmentError::ConditionNotMet)
     );
-    let right_epoch = auto(new_id(), old_epoch_listing, AutoCloseEvidence::ServiceDisabled(2));
+    let right_epoch =
+        auto(new_internal_command_id(), old_epoch_listing, AutoCloseEvidence::ServiceDisabled(2));
     assert!(matches!(f.store.auto_close(right_epoch).await.unwrap().into_result(),
         Ok(ListingAutoCloseEffect::Terminated(snapshot)) if snapshot.reason == Some(ListingReason::ServiceDisabled)));
     assert!(f.retired(old_epoch_listing).await);
     let current = new_id();
     f.registered(current, &gear("isekai", "469"), OTHER, ListingMode::Consigned).await;
-    let current_epoch = auto(new_id(), current, AutoCloseEvidence::ServiceDisabled(2));
+    let current_epoch =
+        auto(new_internal_command_id(), current, AutoCloseEvidence::ServiceDisabled(2));
     assert_eq!(
         f.store.auto_close(current_epoch).await.unwrap().into_result(),
         Err(ConsignmentError::ConditionNotMet)
@@ -517,7 +579,7 @@ async fn postgres_auto_close_uses_registration_blacklist_baseline_not_business_t
 
     let before = f.persisted().await;
     for invalid_fact in [new_id(), other_seller_fact, old_fact] {
-        let cmd_id = new_id();
+        let cmd_id = new_internal_command_id();
         let command = auto(cmd_id, listing_id, AutoCloseEvidence::SellerIneligible(invalid_fact));
         assert_eq!(
             f.store.auto_close(command).await.unwrap().into_result(),
@@ -526,7 +588,8 @@ async fn postgres_auto_close_uses_registration_blacklist_baseline_not_business_t
         assert_eq!(f.command_count(cmd_id).await, 0);
     }
     assert_eq!(f.persisted().await, before);
-    let command = auto(new_id(), listing_id, AutoCloseEvidence::SellerIneligible(fact));
+    let command =
+        auto(new_internal_command_id(), listing_id, AutoCloseEvidence::SellerIneligible(fact));
     assert!(matches!(f.store.auto_close(command).await.unwrap().into_result(),
         Ok(ListingAutoCloseEffect::Terminated(listing)) if listing.reason == Some(ListingReason::SellerIneligible)));
     assert_eq!(

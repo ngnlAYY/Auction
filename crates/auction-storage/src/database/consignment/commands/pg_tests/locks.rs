@@ -13,7 +13,8 @@ use tokio::time::timeout;
 use uuid::Uuid;
 
 use super::fixture::{
-    COMMAND, LISTING, OTHER_SELLER, SELLER, counts, equipment, later, price, register, seed,
+    COMMAND, LISTING, OTHER_SELLER, SELLER, client_command_id, counts, equipment, later, price,
+    register, seed,
 };
 use crate::database::DatabaseStore;
 use crate::database::consignment::commands::errors::WriteError;
@@ -111,11 +112,11 @@ async fn race_one_command(
     other_target: Uuid,
 ) -> Result<(StoredReceipt, Result<(bool, StoredReceipt), WriteError>), WriteError> {
     seed(maintenance).await?;
-    register(store, Uuid::from_u128(801), LISTING, SELLER, "42").await?;
+    register(store, client_command_id(801), LISTING, SELLER, "42").await?;
     let (other_seller, other_eid) = if other_target == LISTING {
         (SELLER, "42")
     } else {
-        register(store, Uuid::from_u128(802), other_target, OTHER_SELLER, "43").await?;
+        register(store, client_command_id(802), other_target, OTHER_SELLER, "43").await?;
         (OTHER_SELLER, "43")
     };
     let first_store = store.clone();

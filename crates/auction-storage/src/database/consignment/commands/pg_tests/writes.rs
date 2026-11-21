@@ -15,8 +15,8 @@ use uuid::Uuid;
 
 use super::diagnostics::capture_audit_failure;
 use super::fixture::{
-    COMMAND, KEY, LISTING, OTHER_SELLER, SELLER, counts, equipment, insert_key, later, price,
-    register, registration_proof, reject, seed, start, time,
+    COMMAND, KEY, LISTING, OTHER_SELLER, SELLER, client_command_id, counts, equipment, insert_key,
+    later, price, register, registration_proof, reject, seed, start, time,
 };
 use crate::database::DatabaseStore;
 use crate::database::consignment::commands::errors::WriteError;
@@ -68,7 +68,7 @@ pub(super) async fn retry_policy(
             3,
         ),
     ] {
-        let command_id = Uuid::from_u128(1000 + offset);
+        let command_id = client_command_id(1000 + offset);
         let attempts = AtomicUsize::new(0);
         let proof = RequestHash::new([55; 32]);
         let result =
@@ -193,7 +193,7 @@ pub(super) async fn compare_all_fields(
             unexpected_replays.push(field);
         }
     }
-    let repriced = manage(store, Uuid::from_u128(555), 125, false).await?;
+    let repriced = manage(store, client_command_id(555), 125, false).await?;
     assert_eq!(repriced.body["price"], 125);
     assert_eq!(repriced.body["listing_version"], 2);
     assert_eq!(register(store, COMMAND, Uuid::from_u128(888), SELLER, "42").await?, original);
@@ -201,7 +201,7 @@ pub(super) async fn compare_all_fields(
     assert_eq!(original.body["price"], 101);
     assert_eq!(original.body["listing_version"], 1);
 
-    let repriced_id = Uuid::from_u128(555);
+    let repriced_id = client_command_id(555);
     let different_hash = RequestHash::new([126; 32]);
     if !is_conflict(
         with_command_transaction(store, command_keys(repriced_id), &(), |_, tx| {
@@ -325,12 +325,12 @@ pub(super) async fn atomic_combinations(
     assert_eq!(register(store, COMMAND, LISTING, SELLER, "42").await?.status, 202);
     assert_eq!(counts(pool).await?, (1, 1, 1, 1));
 
-    let unchanged = manage(store, Uuid::from_u128(555), 101, false).await?;
+    let unchanged = manage(store, client_command_id(555), 101, false).await?;
     assert_eq!(unchanged.body["disposition"], "unchanged");
     assert_eq!(unchanged.body["listing_version"], 1);
     assert_eq!(counts(pool).await?, (1, 2, 1, 2));
 
-    let closing_command = Uuid::from_u128(556);
+    let closing_command = client_command_id(556);
     let refused = manage(store, closing_command, 125, true).await?;
     assert_eq!((refused.status, refused.code.as_str()), (409, "listing_not_active"));
     assert_eq!(counts(pool).await?, (1, 3, 2, 4));
@@ -359,7 +359,7 @@ pub(super) async fn atomic_combinations(
     );
 
     assert_eq!(
-        register(store, Uuid::from_u128(557), Uuid::from_u128(558), SELLER, "42").await?.status,
+        register(store, client_command_id(557), Uuid::from_u128(558), SELLER, "42").await?.status,
         202
     );
     Ok(())
@@ -381,7 +381,7 @@ pub(super) async fn missing_fact_rejected(
     assert_constraint(result, "consignment_listing_version_event");
 
     let evidence = AtomicUsize::new(0);
-    let result = with_command_transaction(store, command_keys(Uuid::from_u128(12346)), &evidence, |evidence, tx| {
+    let result = with_command_transaction(store, command_keys(client_command_id(12346)), &evidence, |evidence, tx| {
         Box::pin(async move {
             sqlx::query(
                 "INSERT INTO public.consignment_commands
@@ -446,7 +446,7 @@ async fn publish(
     seller: Uuid,
     listing_id: Uuid,
 ) -> Result<StoredReceipt, WriteError> {
-    let command_id = Uuid::new_v4();
+    let command_id = Uuid::new_v5(&listing_id, b"fixture-lookup");
     let snapshot_id = Uuid::new_v4();
     let identity = equipment("42");
     with_command_transaction(
@@ -492,8 +492,8 @@ pub(super) async fn constraint_mapping(
     let duplicate_id = Uuid::from_u128(402);
     register(store, COMMAND, LISTING, SELLER, "42").await?;
     let seller_conflict =
-        business(register(store, Uuid::from_u128(302), duplicate_id, SELLER, "42").await);
-    register(store, Uuid::from_u128(302), duplicate_id, OTHER_SELLER, "42").await?;
+        business(register(store, client_command_id(302), duplicate_id, SELLER, "42").await);
+    register(store, client_command_id(302), duplicate_id, OTHER_SELLER, "42").await?;
     assert_eq!(publish(store, SELLER, LISTING).await?.body["disposition"], "published");
     let equipment_conflict = business(publish(store, OTHER_SELLER, duplicate_id).await);
     assert_eq!(counts(maintenance.postgres_pool()).await?, (2, 3, 3, 3));

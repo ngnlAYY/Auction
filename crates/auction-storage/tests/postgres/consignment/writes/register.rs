@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use super::fixture::{
     Crypto, FAKE_KEY, Fixture, OTHER, OTHER_FAKE_KEY, SELLER, apply, expire_listing, gear, new_id,
-    observation, register, withdraw,
+    new_internal_command_id, observation, register, withdraw,
 };
 
 #[tokio::test]
@@ -309,7 +309,12 @@ async fn postgres_register_published_occupancy_beats_limits_and_world_gate() {
     let work_id = f.registered(listing_id, &g, SELLER, ListingMode::Direct).await;
     let fence = f.grant(listing_id, work_id, 1, 30).await;
     f.store
-        .apply_lookup(apply(new_id(), fence, observation(&g, &f.key, "FakeWriteSeller", true), 1))
+        .apply_lookup(apply(
+            new_internal_command_id(),
+            fence,
+            observation(&g, &f.key, "FakeWriteSeller", true),
+            1,
+        ))
         .await
         .unwrap()
         .into_result()

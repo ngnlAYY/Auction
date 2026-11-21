@@ -98,6 +98,7 @@
 - 模式为 `direct` / `consigned`，世界为 `main` / `isekai`。标价为 1–1000000000 Credits，计价版本为 1，费率为 0–9999 bps，`direct` 固定为 0。活动态为 `resolving`、`displayed`、`awaiting_deposit`，同卖家、世界与装备在活动态最多一条。任何卖家在同世界与装备上最多占用一个已核验名额，适用于后两个状态。两个部分唯一索引仅以持久状态为谓词。
 - 解析中无快照，展示仅接受非寄售，待寄仅接受寄售，两种发布态均须有快照。拒挂按原因区分能否保留待核观察。关闭与过期保留已见快照和截止，已终结的行禁止继续迁移。业务事务同提交写回执、挂单版本、事件以及 `audit_records`。审计关联命令、actor、动作、挂单及安全处置。玩家与 Admin 写命令只在首次审计保存 `request_id`，重放沿用原回执和审计。已仲裁的确定性拒绝也写回执与拒绝审计，无版本变化时不新增挂单事件。解析重排记录工作事实。审计与快照只写安全事实，登记请求的原始装备链接、装备 key、来源响应原文及领取 token 不进入回执、快照或审计。运营下架说明属于私有审计，由应用过滤后提交。应用映射数据库错误时只读取 SQLSTATE 与约束名，不记录也不转发 PostgreSQL 的 `DETAIL`。
 - 比较本次写入的 `updated_at` 与旧 `expires_at`，恰好相等即到期，发布、改价与主动关闭均被拒。允许按旧状态到期，拍卖碰撞、卖家失格与服务停用等优先的系统强制关闭仍可写入。
+- 寄售写命令按 UUID 版本划分命名空间。玩家（`public_user`）与 Admin（`admin`）只接受 UUIDv4，应用拒绝其他版本并返回 `400 invalid_command_id`，无需调用命令仓储。Worker（`worker`）的解析提交与系统（`system`）的清退使用应用层按挂单或工作身份及规范输入派生的 UUIDv5。数据库按 actor 检查版本，防止客户端占用解析或清退命令的 ID，导致后台提交回滚。
 - 寄售命令、挂单、事件与基线必须在同一个顶层事务内写入，不得使用保存点。登记、改价生效、关闭、解析发布、拒挂及到期等新增挂单版本的成功回执，须匹配本事务事件的命令、挂单、版本及种类。`unchanged`、确定拒绝、仅解析重排和仅追加碰撞关联不要求挂单版本事件。`lease_lost` 是迟到解析提交的围栏结果，不进入命令账本。活围栏遇到强制终止时，系统 `auto_close` 的事件与 Worker `apply_lookup` 的 `409 listing_not_active` 拒绝同提交。拒绝回执只带挂单 ID，版本、状态与标价均为空。
 - `consignment_eid_alias(text)` 对全串 ASCII 数字去前导零，全零或非法输入返回 NULL。按世界与规范 EID 匹配 lot，比较留在文本域。基线和碰撞对同一挂单互斥。目录、计数、本人有效状态、发布与清退用同一个基线差集检测已提交 lot。新读快照看到差集时立即隐藏，不等写侧收口；流拍不恢复旧挂单。`equipment_consignment_eid_alias_idx` 支持按世界和规范 EID 查装备，`lots_equipment_id_idx` 支持按装备查 lot，两者服务于历史读取、碰撞和有效活动额度查询。
 - 登记事务持有卖家锁，从同一快照冻结该卖家的 `blacklist_baseline_ids` 与历史计数。数组不含 NULL 元素，元素个数等于计数，登记后由状态触发器冻结，运行账号无列级更新授权。独立清退要求拉黑事实归属本单卖家，且事实 ID 不在该数组中。业务时刻与 UUID 大小均不代表提交顺序。
@@ -155,6 +156,7 @@
 | `consignment_command_request_digest` | 规范化请求摘要为 32 字节 |
 | `consignment_command_created_at` | 创建时刻有限 |
 | `consignment_command_actor` | actor 类型、标识与操作匹配 |
+| `consignment_command_uuid_version` | 玩家与 Admin 命令使用 UUIDv4，Worker 与系统命令使用 UUIDv5 |
 | `consignment_command_target` | 请求目标、重放密钥与挂单外键符合操作和结果 |
 | `consignment_command_result_code` | 操作、状态码与结果码组合符合闭集 |
 | `consignment_command_receipt` | 安全 JSON 回执字段及其值与命令匹配 |

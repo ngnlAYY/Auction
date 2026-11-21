@@ -367,6 +367,10 @@ pub(super) fn new_id() -> Uuid {
     Uuid::new_v4()
 }
 
+pub(super) fn new_internal_command_id() -> Uuid {
+    Uuid::new_v5(&Uuid::NAMESPACE_OID, new_id().as_bytes())
+}
+
 pub(super) fn gear(world: &str, eid: &str) -> ListingEquipmentIdentity {
     ListingEquipmentIdentity::new(world, eid).unwrap()
 }

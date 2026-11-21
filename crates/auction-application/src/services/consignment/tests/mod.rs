@@ -18,6 +18,12 @@ mod resolve;
 const LISTING_ID: Uuid = Uuid::from_u128(42);
 const WORK_ID: Uuid = Uuid::from_u128(43);
 const SELLER_ID: Uuid = Uuid::from_u128(44);
+const INVALID_CLIENT_COMMAND_IDS: [Uuid; 4] = [
+    uuid::uuid!("00000000-0000-1000-8000-000000000045"),
+    uuid::uuid!("00000000-0000-5000-8000-000000000045"),
+    uuid::uuid!("00000000-0000-7000-8000-000000000045"),
+    uuid::uuid!("00000000-0000-4000-0000-000000000045"),
+];
 
 const FAKE_KEY: &str = "face00face";
 const FAKE_URL: &str = "https://example.invalid/equip/42/face00face";
@@ -34,7 +40,7 @@ fn run<T>(future: impl Future<Output = T>) -> T {
 }
 
 fn command_id() -> CommandId {
-    CommandId::from_uuid(Uuid::from_u128(45))
+    CommandId::from_uuid(uuid::uuid!("00000000-0000-4000-8000-000000000045"))
 }
 
 fn time(second: i64) -> Timestamp {

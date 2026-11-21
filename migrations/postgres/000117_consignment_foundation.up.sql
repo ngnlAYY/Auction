@@ -362,6 +362,16 @@ CREATE TABLE public.consignment_commands (
             WHEN 'system' THEN operation = 'auto_close' AND public.consignment_valid_text(actor_ref, 256)
         END
     ) IS TRUE),
+    -- 不变量 1、6：玩家和 Admin 不能占用 Worker 或系统派生的 UUIDv5。
+    CONSTRAINT consignment_command_uuid_version CHECK ((
+        pg_catalog.uuid_extract_version(command_id) =
+        CASE actor_kind
+            WHEN 'public_user' THEN 4
+            WHEN 'admin' THEN 4
+            WHEN 'worker' THEN 5
+            WHEN 'system' THEN 5
+        END
+    ) IS TRUE),
     CONSTRAINT consignment_command_target CHECK (
         (operation = 'register' AND request_target = 'new' AND replay_key_id IS NOT NULL
             AND (result_status = 202) = (listing_id IS NOT NULL))

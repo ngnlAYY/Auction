@@ -10,7 +10,8 @@ use crate::errors::{ApplicationError, SessionError};
 use crate::ports::consignment::{
     AdminDelistListingCommand, ConsignmentError, ListingClosed, ListingCommandStore,
     ListingDelistReason, ListingOperation, ListingPriceReceipt, RepriceListingCommand,
-    SellerListingTarget, WithdrawListingCommand, validate_listing_request_id,
+    SellerListingTarget, WithdrawListingCommand, validate_listing_client_command_id,
+    validate_listing_request_id,
 };
 use crate::ports::public::{AdminSessionIdentity, PublicSessionIdentity};
 use crate::services::consignment::encoding::ListingCommandEncoding;
@@ -153,9 +154,7 @@ fn validate_target(
     listing_id: Uuid,
     expected_version: u64,
 ) -> Result<ListingVersion, ConsignmentError> {
-    if command_id.is_nil() {
-        return Err(ConsignmentError::InvalidCommandId);
-    }
+    validate_listing_client_command_id(command_id)?;
     if listing_id.is_nil() {
         return Err(ConsignmentError::InvalidListingId);
     }

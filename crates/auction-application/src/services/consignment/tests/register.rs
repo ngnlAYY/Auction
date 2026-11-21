@@ -21,7 +21,8 @@ use crate::ports::consignment::{
     WithdrawListingCommand,
 };
 use crate::services::consignment::tests::{
-    FAKE_KEY, FAKE_URL, LISTING_ID, SELLER_ID, command_id, identity, price, run, seller,
+    FAKE_KEY, FAKE_URL, INVALID_CLIENT_COMMAND_IDS, LISTING_ID, SELLER_ID, command_id, identity,
+    price, run, seller,
 };
 use crate::services::consignment::{RegisterListingInput, RegisterListingService};
 
@@ -182,7 +183,7 @@ fn register_preserves_request_id_and_mac_input_across_replay() {
         (ListingMode::Direct, 0, None, ListingCommandOutcome::Accepted(receipt)),
     ] {
         let command_id = if mode == ListingMode::Direct {
-            CommandId::from_uuid(Uuid::from_u128(90))
+            CommandId::from_uuid(Uuid::new_v4())
         } else {
             command_id()
         };
@@ -211,6 +212,31 @@ fn register_preserves_request_id_and_mac_input_across_replay() {
     }
     assert_eq!(fixture.equipment.url.take_calls().len(), 4);
     assert_eq!(fixture.uuid_calls.load(Ordering::Relaxed), 16);
+}
+
+#[test]
+fn register_requires_v4_command_id_before_store() {
+    let fixture = RegistrationFixture::new();
+    let service = fixture.service(true, true);
+    let receipt = ListingRegistered::new(LISTING_ID, price(101)).unwrap();
+    fixture.store.0.register.reply(Ok(ListingCommandOutcome::Accepted(receipt)));
+    for uuid in INVALID_CLIENT_COMMAND_IDS {
+        fixture.url_ok();
+        let result = run(service.register(
+            &seller(),
+            RegisterListingInput { command_id: CommandId::from_uuid(uuid), ..input() },
+            None,
+        ));
+        assert_eq!(result, Err(ConsignmentError::InvalidCommandId), "{uuid}");
+        assert_eq!(result.unwrap_err().api_error(), Some((400, "invalid_command_id")));
+    }
+    assert!(fixture.store.0.register.take_calls().is_empty());
+    assert_eq!(fixture.uuid_calls.load(Ordering::Relaxed), 0);
+
+    fixture.url_ok();
+    assert_eq!(run(service.register(&seller(), input(), None)), Ok(receipt));
+    let [call] = fixture.store.0.register.take_calls().try_into().unwrap();
+    assert_eq!(call.command_id, command_id());
 }
 
 #[test]
@@ -341,8 +367,8 @@ fn check_registration_arbitration(
     assert_eq!(fixture.store.0.register.take_calls().len(), 1);
 
     for (policy, fresh_id, fresh_result) in [
-        (policy(true), Uuid::from_u128(91), Ok(receipt)),
-        (changed_policy, Uuid::from_u128(92), Err(first_rejection)),
+        (policy(true), Uuid::new_v4(), Ok(receipt)),
+        (changed_policy, Uuid::new_v4(), Err(first_rejection)),
     ] {
         let service = fixture.service_with(policy, true, true, true);
         let fresh = RegisterListingInput { command_id: CommandId::from_uuid(fresh_id), ..input() };
