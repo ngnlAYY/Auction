@@ -1,0 +1,65 @@
+/* Solid 本人挂单与登记使用账户页面版式；Dioxus 沿用现有首页。 */
+
+.public-consignment-account,
+.public-consignment-account__detail,
+.public-consignment-account__rows,
+.public-consignment-account__form,
+.public-consignment-account__form fieldset {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.public-consignment-account__row,
+.public-consignment-account__pending,
+.public-consignment-account__filters,
+.public-consignment-account__form fieldset {
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--color-surface);
+}
+
+.public-consignment-account__rows {
+  padding: 0;
+  list-style: none;
+}
+
+.public-consignment-account__row,
+.public-consignment-account__facts,
+.public-consignment-account__filters,
+.public-consignment-account__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-4);
+}
+
+.public-consignment-account__form fieldset {
+  margin: 0;
+}
+
+.public-consignment-account__form label,
+.public-consignment-account__filters label {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.public-consignment-account__form button {
+  justify-self: start;
+}
+
+.public-consignment-account__form input,
+.public-consignment-account__form select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.public-consignment-account__facts dt {
+  color: var(--color-text-muted);
+}
+
+.public-consignment-account__facts dd {
+  margin: 0;
+}
