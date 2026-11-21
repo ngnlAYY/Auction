@@ -393,7 +393,7 @@ mod tests {
 
     use super::{list_bid_log, list_price_history};
     use crate::middleware::security::PublicHttpSecurity;
-    use crate::server::contract_fixtures::{assert_http, assert_wire};
+    use crate::server::contract_fixtures::{assert_http, assert_wire, response_json};
     use crate::state::PublicApiState;
 
     const AUCTION_ID: Uuid = Uuid::from_u128(0x0190_f2b4_1c2d_4e5f_8a6b_7c8d_9e0f_1a2b);
@@ -589,6 +589,23 @@ mod tests {
             request: PublicPriceHistoryListRequest,
         ) -> ApplicationFuture<'_, PublicPriceHistoryPage> {
             Box::pin(async move {
+                if request.minimum_price == Some(2_002) {
+                    return Ok(PublicPriceHistoryPage {
+                        entries: Vec::new(),
+                        total: Some(0),
+                        stats: Some(PublicPriceHistoryStats {
+                            count: 0,
+                            minimum: 0,
+                            maximum: 0,
+                            median: 0,
+                            median_exact: None,
+                        }),
+                        limit: request.limit,
+                        offset: request.offset,
+                        next_cursor: None,
+                        has_more: false,
+                    });
+                }
                 let at = Timestamp::from_timestamp(1_763_124_640, 110_000_000).expect("成交时刻");
                 let row = PublicPriceHistoryEntry {
                     lot_id: LOT_ID,
@@ -692,5 +709,23 @@ mod tests {
             .expect("成交历史");
             assert_http(&format!("public/{name}"), StatusCode::OK, response).await;
         }
+
+        let response = list_price_history(
+            axum::extract::State(state),
+            "/api/v1/price-history?min_price=2002".parse().expect("无匹配成交历史 URI"),
+        )
+        .await
+        .expect("无匹配成交历史");
+        let body = response_json(StatusCode::OK, response).await;
+        assert_eq!(
+            body["data"],
+            json!({
+                "rows": [],
+                "stats": {"count": 0, "min": 0, "max": 0, "median": 0},
+                "page": 1,
+                "page_size": 50,
+                "total": 0,
+            }),
+        );
     }
 }

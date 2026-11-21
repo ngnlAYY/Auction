@@ -244,6 +244,7 @@ pub(super) async fn validate(
                              OR (command.action='collected'
                                  AND fulfillment.proof_kind='mooglemail_sent_collected'
                                  AND fulfillment.proof_reference=command.evidence->'sent'->>'external_mail_id')
+                         )
                    )"#,
             )
             .bind(claim.prerequisite_id.map(auction_domain::SettlementId::as_uuid))
