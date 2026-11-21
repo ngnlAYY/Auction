@@ -1,0 +1,380 @@
+// 公开目录的能力门、筛选、分页、列表卡片和错误状态测试。
+
+import { expect, test } from "bun:test";
+import { createComponent } from "solid-js";
+
+import {
+  controlEvent,
+  DOMText,
+  failure,
+  fakeClock,
+  fakeFetch,
+  LISTING_A,
+  LISTING_B,
+  LISTINGS_PATH,
+  mountConsignment,
+  pageResponse,
+  response,
+  STATUS_PATH,
+  settle,
+  status,
+  summary,
+} from "./read-fixture.test";
+import { loadCatalog } from "./render-fixture.test";
+
+test.each([
+  ["关闭", () => response(status(false)), "The fixed-price listing service is disabled", 0, false],
+  ["开启可登记", () => response(status(true)), "Fake Oak Staff", 1, true],
+  ["开启暂不可登记", () => response(status(true, false)), "Fake Oak Staff", 1, false],
+  [
+    "查询失败",
+    () => failure(503, "consignment_unavailable"),
+    "The fixed-price listing service is temporarily unavailable",
+    0,
+    false,
+  ],
+] as const)(
+  "%s时按能力渲染并决定是否读取目录",
+  async (_, statusReply, text, count, canRegister) => {
+    const { ConsignmentCatalog } = await loadCatalog();
+    const pending = Promise.withResolvers<Response>();
+    let retry = false;
+    const transport = fakeFetch(({ url }) =>
+      url.pathname === STATUS_PATH
+        ? retry
+          ? response(status(true))
+          : pending.promise
+        : pageResponse(url, [summary()]),
+    );
+    const page = await mountConsignment(
+      "/consignment",
+      () => createComponent(ConsignmentCatalog, {}),
+      true,
+    );
+    try {
+      await settle();
+      expect(page.text()).toContain("Loading");
+      expect(transport.requests.map(({ url }) => url.pathname)).toEqual([STATUS_PATH]);
+      pending.resolve(statusReply());
+      await settle();
+      expect(page.text()).toContain(text);
+      expect(transport.requests.filter(({ url }) => url.pathname === LISTINGS_PATH)).toHaveLength(
+        count,
+      );
+      expect(page.find((node) => node.attributes.href === "/consignment/new") !== null).toBe(
+        canRegister,
+      );
+      expect(page.find((node) => node.attributes.href === "/consignment/me") !== null).toBe(
+        count === 1,
+      );
+      if (text.includes("temporarily unavailable")) {
+        retry = true;
+        controlEvent(
+          page.find((node) => node.tag === "button" && DOMText(node) === "Retry"),
+          "onClick",
+        );
+        await settle();
+        expect(page.text()).toContain("Fake Oak Staff");
+      }
+    } finally {
+      page.dispose();
+      transport.restore();
+    }
+  },
+);
+
+test("筛选四项由地址恢复、写回和后退，保留拍卖查询与片段", async () => {
+  const { ConsignmentCatalog } = await loadCatalog();
+  const transport = fakeFetch(({ url }) =>
+    url.pathname === STATUS_PATH ? response(status(true)) : pageResponse(url, []),
+  );
+  const page = await mountConsignment(
+    "/consignment?world=main&type=staff&bid_page=5&proxy_page=4&page_size=50&consignment_world=isekai&consignment_mode=consigned&consignment_category=Shield&consignment_q=a%25_%E5%89%91&consignment_page=2#kept",
+    () => createComponent(ConsignmentCatalog, {}),
+  );
+  const input = (name: string) => page.find((node) => node.attributes.name === name);
+  try {
+    await settle();
+    expect(transport.requests[1]?.url.search).toBe(
+      "?world=isekai&mode=consigned&category=Shield&q=a%25_%E5%89%91&page=2&page_size=20",
+    );
+    expect(input("world")?.attributes.value).toBe("isekai");
+    expect(input("mode")?.attributes.value).toBe("consigned");
+    expect(input("category")?.attributes.value).toBe("Shield");
+    expect(input("q")?.attributes.value).toBe("a%_剑");
+    expect(page.find((node) => node.attributes.href === "/consignment/me")).toBeNull();
+
+    controlEvent(input("world"), "onChange", "main");
+    controlEvent(input("mode"), "onChange", "direct");
+    controlEvent(input("category"), "onInput", "Staff");
+    controlEvent(input("q"), "onInput", "oak + %");
+    expect(transport.requests).toHaveLength(2);
+    controlEvent(
+      page.find((node) => node.attributes.class === "public-consignment-filters"),
+      "onSubmit",
+    );
+    await settle();
+    expect(transport.requests[2]?.url.search).toBe(
+      "?world=main&mode=direct&category=Staff&q=oak+%2B+%25&page=1&page_size=20",
+    );
+    expect(Object.fromEntries(page.location.searchParams)).toEqual({
+      world: "main",
+      type: "staff",
+      bid_page: "5",
+      proxy_page: "4",
+      page_size: "50",
+      consignment_world: "main",
+      consignment_mode: "direct",
+      consignment_category: "Staff",
+      consignment_q: "oak + %",
+    });
+    expect(page.location.hash).toBe("#kept");
+    page.back();
+    await settle();
+    expect(input("mode")?.attributes.value).toBe("consigned");
+    expect(input("q")?.attributes.value).toBe("a%_剑");
+    expect(transport.requests.at(-1)?.url.search).toBe(transport.requests[1]?.url.search);
+  } finally {
+    page.dispose();
+    transport.restore();
+  }
+});
+
+test("预设、自定义 37、翻页与非法页长只操作寄售分页", async () => {
+  const { ConsignmentCatalog } = await loadCatalog();
+  const transport = fakeFetch(({ url }) =>
+    url.pathname === STATUS_PATH ? response(status(true)) : pageResponse(url, [summary()], 117),
+  );
+  const page = await mountConsignment("/consignment?bid_page=8&proxy_page=6", () =>
+    createComponent(ConsignmentCatalog, {}),
+  );
+  const input = (name: string) => page.find((node) => node.attributes.name === name);
+  const custom = () => page.find((node) => node.attributes.class === "ui-pager__custom");
+  try {
+    await settle();
+    for (const size of [10, 20, 50, 100]) {
+      expect(
+        page.find((node) => node.tag === "option" && node.attributes.value === String(size)),
+      ).not.toBeNull();
+    }
+    controlEvent(input("page_size"), "onChange", "50");
+    await settle();
+    expect(page.location.searchParams.get("consignment_page_size")).toBe("50");
+    expect(transport.requests.at(-1)?.url.search).toBe("?page=1&page_size=50");
+
+    controlEvent(input("custom_page_size"), "onInput", "201");
+    controlEvent(custom(), "onSubmit");
+    await settle();
+    expect(transport.requests).toHaveLength(3);
+    expect(input("custom_page_size")?.attributes["aria-invalid"]).toBe("true");
+
+    controlEvent(input("custom_page_size"), "onInput", "37");
+    controlEvent(custom(), "onSubmit");
+    await settle();
+    expect(transport.requests.at(-1)?.url.search).toBe("?page=1&page_size=37");
+    expect(page.location.searchParams.get("consignment_page_size")).toBe("37");
+    expect(input("custom_page_size")?.attributes.value).toBe("37");
+
+    controlEvent(
+      page.find((node) => node.tag === "button" && node.attributes["aria-label"] === "Next"),
+      "onClick",
+    );
+    await settle();
+    expect(page.location.searchParams.get("consignment_page")).toBe("2");
+    expect(transport.requests.at(-1)?.url.search).toBe("?page=2&page_size=37");
+    expect(page.location.searchParams.get("bid_page")).toBe("8");
+    expect(page.location.searchParams.get("proxy_page")).toBe("6");
+    expect(page.location.searchParams.has("page_size")).toBe(false);
+    expect(page.location.searchParams.has("movement_page_size")).toBe(false);
+  } finally {
+    page.dispose();
+    transport.restore();
+  }
+});
+
+test("非寄售与待寄卡片使用不同告知且待寄没有交易控件", async () => {
+  const { ConsignmentCatalog } = await loadCatalog();
+  const transport = fakeFetch(({ url }) =>
+    url.pathname === STATUS_PATH
+      ? response(status(true))
+      : pageResponse(url, [summary(), summary(LISTING_B)]),
+  );
+  const page = await mountConsignment("/consignment", () =>
+    createComponent(ConsignmentCatalog, {}),
+  );
+  try {
+    await settle();
+    const direct = page.find(
+      (node) => node.tag === "article" && DOMText(node).includes("Fake Oak Staff"),
+    );
+    const deposit = page.find(
+      (node) => node.tag === "article" && DOMText(node).includes("Fake Iron Shield"),
+    );
+    expect(DOMText(direct)).toContain("1,234c");
+    expect(DOMText(direct)).toContain("Fake Seller");
+    expect(DOMText(direct)).toContain("Contact the seller in game");
+    expect(DOMText(direct)).not.toContain("does not yet hold");
+    expect(DOMText(deposit)).toContain("does not yet hold the equipment");
+    expect(DOMText(deposit)).not.toContain("Contact the seller");
+    const href = (listingId: string) => `/consignment/listings/${listingId}`;
+    expect(page.find((node) => node.attributes.href === href(LISTING_A))).not.toBeNull();
+    expect(page.find((node) => node.attributes.href === href(LISTING_B))).not.toBeNull();
+    expect(
+      page.find(
+        (node) =>
+          node.tag === "article" &&
+          DOMText(node).includes("Fake Iron Shield") &&
+          node.nodes.some((region) => findTransactionControl(region(), href(LISTING_B))),
+      ),
+    ).toBeNull();
+  } finally {
+    page.dispose();
+    transport.restore();
+  }
+});
+
+function findTransactionControl(region: unknown, detailsHref: string): boolean {
+  if (Array.isArray(region))
+    return region.some((node) => findTransactionControl(node, detailsHref));
+  if (typeof region === "function") return findTransactionControl(region(), detailsHref);
+  if (region === null || typeof region !== "object" || !("tag" in region)) return false;
+  if (region.tag === "button" || region.tag === "form") return true;
+  if (
+    region.tag === "a" &&
+    "attributes" in region &&
+    region.attributes !== null &&
+    typeof region.attributes === "object" &&
+    "href" in region.attributes
+  ) {
+    return region.attributes.href !== detailsHref;
+  }
+  return (
+    "nodes" in region &&
+    Array.isArray(region.nodes) &&
+    region.nodes.some((node) => findTransactionControl(node, detailsHref))
+  );
+}
+
+test("服务返回合法空页时保留页码和空态", async () => {
+  const { ConsignmentCatalog } = await loadCatalog();
+  const transport = fakeFetch(({ url }) =>
+    url.pathname === STATUS_PATH ? response(status(true)) : pageResponse(url, [], 1),
+  );
+  const page = await mountConsignment("/consignment?consignment_page=3", () =>
+    createComponent(ConsignmentCatalog, {}),
+  );
+  try {
+    await settle();
+    expect(page.text()).toContain("No listings match the selected filters");
+    expect(page.location.searchParams.get("consignment_page")).toBe("3");
+    expect(transport.requests).toHaveLength(2);
+    expect(page.find((node) => node.tag === "article")).toBeNull();
+  } finally {
+    page.dispose();
+    transport.restore();
+  }
+});
+
+test.each([
+  ["invalid_query", () => failure(400, "invalid_query"), "Try widening your filters"],
+  [
+    "503",
+    () => failure(503, "consignment_unavailable"),
+    "The fixed-price listing service is temporarily unavailable",
+  ],
+  [
+    "transport",
+    () => {
+      throw new Error("fake network failure");
+    },
+    "Network connection failed",
+  ],
+] as const)("目录错误 %s 安全展示且响应恢复后可继续读取", async (_, reply, message) => {
+  const { ConsignmentCatalog } = await loadCatalog();
+  let resolved = false;
+  const transport = fakeFetch(({ url }) => {
+    if (url.pathname === STATUS_PATH) return response(status(true));
+    return resolved ? pageResponse(url, [summary()]) : reply();
+  });
+  const page = await mountConsignment("/consignment", () =>
+    createComponent(ConsignmentCatalog, {}),
+  );
+  try {
+    await settle();
+    expect(page.text()).toContain(message);
+    expect(page.text()).not.toContain("fake server message");
+    expect(page.text()).not.toContain("fake network failure");
+    expect(page.text()).not.toContain("No listings match");
+    resolved = true;
+    const button = page.find(
+      (node) => node.tag === "button" && ["Retry", "Clear"].includes(DOMText(node)),
+    );
+    controlEvent(button, "onClick");
+    await settle();
+    expect(page.text()).toContain("Fake Oak Staff");
+  } finally {
+    page.dispose();
+    transport.restore();
+  }
+});
+
+test("可见目录重读后撤下旧卡片，退出取消可见轮询", async () => {
+  const { ConsignmentCatalog } = await loadCatalog();
+  let reads = 0;
+  const transport = fakeFetch(({ url }) => {
+    if (url.pathname === STATUS_PATH) return response(status(true));
+    reads += 1;
+    return pageResponse(url, reads === 1 ? [summary()] : []);
+  });
+  const clock = fakeClock();
+  const page = await mountConsignment("/consignment", () =>
+    createComponent(ConsignmentCatalog, {}),
+  );
+  try {
+    await settle();
+    expect(page.text()).toContain("Fake Oak Staff");
+    await clock.advance(30_000);
+    expect(page.text()).not.toContain("Fake Oak Staff");
+    expect(page.text()).toContain("No listings match the selected filters");
+    expect(reads).toBe(2);
+    page.focus();
+    await settle();
+    expect(reads).toBe(3);
+    expect(clock.activeIn(30_000)).toBe(1);
+    page.dispose();
+    expect(clock.activeIn(30_000)).toBe(0);
+    await clock.advance(30_000);
+    expect(reads).toBe(3);
+  } finally {
+    page.dispose();
+    clock.restore();
+    transport.restore();
+  }
+});
+
+test("非法书签不读取目录，清除筛选后才发起默认查询", async () => {
+  const { ConsignmentCatalog } = await loadCatalog();
+  const transport = fakeFetch(({ url }) =>
+    url.pathname === STATUS_PATH ? response(status(true)) : pageResponse(url, [summary()]),
+  );
+  const page = await mountConsignment(
+    "/consignment?consignment_world=main&consignment_world=isekai&page_size=50",
+    () => createComponent(ConsignmentCatalog, {}),
+  );
+  try {
+    await settle();
+    expect(transport.requests.map(({ url }) => url.pathname)).toEqual([STATUS_PATH]);
+    expect(page.text()).toContain("Try widening your filters");
+    controlEvent(
+      page.find((node) => node.tag === "button" && DOMText(node) === "Clear"),
+      "onClick",
+    );
+    await settle();
+    expect(transport.requests[1]?.url.search).toBe("?page=1&page_size=20");
+    expect(page.location.search).toBe("?page_size=50");
+    expect(page.text()).toContain("Fake Oak Staff");
+  } finally {
+    page.dispose();
+    transport.restore();
+  }
+});

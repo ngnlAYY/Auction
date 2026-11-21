@@ -1,0 +1,104 @@
+/* 公开寄售目录、筛选及装备详情，沿用公共端的站点颜色、面板和响应式间距。 */
+
+.public-consignment-catalog,
+.public-consignment-detail {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.public-consignment-catalog__actions,
+.public-consignment-detail__header,
+.public-consignment-listing__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-4);
+}
+
+.public-consignment-catalog__actions:empty {
+  display: none;
+}
+
+.public-consignment-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--color-surface);
+}
+
+.public-consignment-filters label {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.public-consignment-filters input,
+.public-consignment-filters select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.public-consignment-filters p {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.public-consignment-catalog__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+@media (min-width: 60rem) {
+  .public-consignment-catalog__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.public-consignment-listing {
+  min-width: 0;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--color-surface);
+  overflow-wrap: break-word;
+}
+
+.public-consignment-listing__header {
+  justify-content: space-between;
+}
+
+.public-consignment-listing__header h2,
+.public-consignment-listing__notice {
+  margin: 0;
+}
+
+.public-consignment-listing__equipment,
+.public-consignment-listing__facts {
+  margin-block: var(--space-2);
+}
+
+.public-consignment-listing__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-4);
+}
+
+.public-consignment-listing__facts dt,
+.public-consignment-listing__notice {
+  color: var(--color-text-muted);
+}
+
+.public-consignment-listing__facts dd {
+  margin: 0;
+}
+
+.public-consignment-listing__stat-group {
+  border-block-start: var(--border-width) solid var(--color-border);
+  padding-block: var(--space-2);
+}

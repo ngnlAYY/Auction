@@ -6,8 +6,10 @@ import type { RouteMatch } from "@auction/web-shared/router";
 import { Link } from "@auction/web-shared/router";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
+import { Show } from "solid-js";
 
 import { useCountdownDisplay } from "../catalog/presentation";
+import { consignmentEnabled, useConsignmentCapability } from "../consignment/capability";
 
 /** 顶部 ticker 的倒计时；秒级节拍只订阅在这个叶子组件。
  * 到点后的文案由调用方按倒计时含义给出（截止是“落锤中…”，开拍是“即将开拍…”）。
@@ -89,6 +91,7 @@ export function ConsoleSidebar(props: {
   onToggle: () => void;
   onNavigate: () => void;
 }): JSX.Element {
+  const consignment = useConsignmentCapability();
   const homeActive = () => {
     const route = props.currentRoute;
     return (
@@ -132,6 +135,15 @@ export function ConsoleSidebar(props: {
         </div>
         <div class="console-nav__group">
           <div class="console-nav__head">{t("console-nav-market")}</div>
+          <Show when={consignmentEnabled(consignment())}>
+            <ConsoleNavLink
+              href="/consignment"
+              icon="package"
+              label={t("consignment-nav")}
+              active={is("ConsignmentCatalog") || is("ConsignmentDetail")}
+              onNavigate={() => props.onNavigate()}
+            />
+          </Show>
           <ConsoleNavLink
             href={props.scopedHref("/auctions")}
             icon="clock"
