@@ -7,5 +7,6 @@ mod eligibility;
 mod key_rotation;
 mod lookup;
 mod migration;
+mod reads;
 mod work_store;
 mod writes;

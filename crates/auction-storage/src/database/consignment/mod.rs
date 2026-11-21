@@ -5,3 +5,4 @@ pub(crate) mod commands;
 pub(super) mod eligibility;
 pub(crate) mod listings;
 pub(crate) mod lookup;
+mod reads;
