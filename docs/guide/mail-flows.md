@@ -19,6 +19,7 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 | 主题 | 处理 |
 | --- | --- |
 | `auction` | 拍卖投稿 |
+| `consign` | 寄售整封寄件，见[寄售寄件来信](#寄售寄件来信) |
 | `register` | 注册或找回登录 key |
 | `rebind` | 改名后换绑账号 |
 | `rekey` | 轮换登录 key 并注销全部会话 |
@@ -53,6 +54,20 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 - 金额可写纯数字、`k`（千）或 `m`（百万）后缀，后缀形式允许小数（如 `1.5m`），也允许千位逗号（`1,500,000`）；结果必须为正整数。
 - 逐件指令可以夹在说明文字中、可跨行；`#` 开头（或空白后的 `#`）是注释。统一指令与逐件指令不能混用，同一件不能重复指定，链接对应的装备必须在附件中。
 - 统一指令前后可保留普通说明、网页复制的 Attachment 清单与分隔线；这些内容不会计入指令字段。但重复、混合或畸形的明确 `start` 仍会整封拒绝，例如 `start:200k`、`start=200k`。未逐件指定的附件保留默认价。
+
+## 寄售寄件来信
+
+寄售卖家先在本人寄件指引页签发预约码 `C1-<43 字符 base64url>`，再给 Bot 发主题 `consign` 的邮件，正文只逐行写预约码。预约码只在本人页面内存中出现，不写回执、审计或日志；对方转发、复制或泄露预约码都可能被他人使用。每封最多 20 件、2048 字节，不接受自由文本、空行或重复码；发件人游戏名必须与预约的登记卖家一致。
+
+寄售候选在既有拍卖路由全部无法归属后才进入寄售自己的事务；候选门控、旧批次提交与游标推进顺序见[docs/architecture.md#寄售来信](../architecture.md#寄售来信)。
+
+1. **读取与首次决定**：寄售事务写认证观察、原信键 K、安全派生事实与首决。首决为 `accepted`、`return_decided`、`archived_empty` 或 `quarantined`，每封原信只写一次；已持久接受的重试恢复原决定，不因远端页面变化改判。整封接受、退回与空信的判定以[一口价挂单的业务规则](../business-rules.md#一口价挂单)为准；当前取得与退回能力未签收，维护者提供真实脱敏样本并签收前，需要 Take/Return 的整封在首决时即隔离（`take_unproven`/`return_unproven`），由运营处理，现状见[Worker 装配](../../apps/auction-worker/README.md#一口价挂单)。
+2. **隔离与重检**：无法安全证明身份、资产数量、编号、别名、附件或回执形状的邮件进入隔离，保留原观察、责任、重读键与零资产外写。首次隔离同事务追加系统 `recheck_quarantine` 命令与 queued 重检工作；重检只读原信，状态为 `queued`/`leased`/`done`/`cancelled`。解除时转为接受、退回、归档，或交还原 owner；没有强制解除入口。
+3. **交还旧 owner**：退款、货款、流拍或撤拍退回交回原拍卖退件案件，恢复记录的付款或交付退件交回原恢复流程；零资产动作、兼容 `inbound_mail` 补写与两支的判定见[docs/guide/settlement.md#隔离邮件交还原-owner](settlement.md#隔离邮件交还原-owner)。
+4. **外写起写一次与人工核对**：Take/Return 走专用投递，通用投递路径按 `consignment_disposition` 来源排除，不会领取或重发。每个处置工作最多取得一次持久起写许可；领取或退回只有在原信身份、资产与回执逐项匹配时才记为 `take_proven`/`return_proven`。进入远端写入后结果未知时转人工核对，只由原证据会话里的观察或既有系统证明收口，不自动重发，也不接受操作者声明。当前能力未签收（签收条件见第 1 步），需要 Take/Return 的整封在第 1 步即隔离，不会产生处置工作；签收后才进入本步。
+5. **软关闭后的续办**：寄售关闭只停止新登记、签约与首次接受；已经决定的 Take/Return、已领取的工作、隔离重检与存量交接继续。Worker 在关闭但仍有存量时仍运行处置与重检循环，启动条件见[Worker 装配](../../apps/auction-worker/README.md#一口价挂单)。数据库结构见[docs/contracts/database.md#收件代管与处置表迁移-000134](../contracts/database.md#收件代管与处置表迁移-000134)，旧 owner 的结算语义见[docs/guide/settlement.md#隔离邮件交还原-owner](settlement.md#隔离邮件交还原-owner)。
+
+季前撤回通知与季末关闭由同一 Worker 季任务循环驱动；通知规则、冻结界与关闭范围见[一口价挂单的业务规则](../business-rules.md#一口价挂单)。
 
 ## 注册与换绑
 
@@ -114,10 +129,10 @@ Admin “结算退件”页（`/settlement-returns`）按案件列出全部退�
 - 出队顺序固定为：运维告警 → 账号类回信（登录 key、注册与换绑结果）→ 按 lot 有效截止从早到晚的出价被超提醒 → 其他邮件；同类别按创建顺序。顺序只决定先后，不改变发送类别间隔、冻结载荷或任何结果。
 - 客户端请求门按容量 1、不允许突发执行配置的请求间隔；业务写入优先于只读轮询，连续 3 次写入后必须把下一个令牌给排队中的后台请求（低优先级保底）。MoogleMail 与论坛客户端共用同一套请求门实现，优先级只决定先后，不改变请求间隔与写入未知语义。装备页读取不经请求门，但与同一账号的邮件请求共用在途锁与账号忙熔断：不与邮件请求同时发出，熔断窗口内不读取。读取与写入被预算或取消放弃时，尚在排队的不再发出，已发出的照样走完并持有在途锁到远端回应或该次请求的 HTTP 预算结束，紧接的请求不与之重叠；被放弃的写入结果未知，只做人工对账或页面证明，不重发（细节见[crates/auction-integrations/README.md#关键行为](../../crates/auction-integrations/README.md#关键行为)）。长列表扫描按段释放成员关系锁：段间若有详情读取推进成员关系，本轮扫描放弃并按新状态重扫，不缓存半份列表。
 - 出价被超提醒的有效期只到该 lot 的有效截止（含软截止延长）：截止后尚未开始发送的提醒在发送围栏前按预检退役，记为未发送失败（`lot_watch_invalidated`），不发送也不补发；论坛私信队列同样在截止后退役（`suppressed`/`source_invalid`）。已经进入发送围栏的提醒不改写结果，未知时只做人工对账。
-- 收件人异常分两类收口：非结算零资产通知（未携带 Credits、CoD 或装备）在远端明确报告收件人不存在时直接失败关闭，写入终态审计（`recipient_not_found`），不进人工对账，也不保留退信 `mid`；带资产的投递仍按退信流程转人工取回。领取前还会核对提醒收件人是否仍是该用户当前游戏名：玩家改名后尚未开始发送的提醒按预检退役（`recipient_renamed`），不重发、不补发，也不改写冻结载荷。卖方汇总与换季提醒的冻结收件人认三种改名来源：Admin 改名（未撤回）、`rebind` 换绑改名（含大小写修正）与论坛身份同步改名；冻结名仍是某个当前用户的名称（含改回原名）时不退役。
+- 收件人异常分两类收口：非结算零资产通知（未携带 Credits、CoD 或装备）在远端明确报告收件人不存在时直接失败关闭，写入终态审计（`recipient_not_found`），不进人工对账，也不保留退信 `mid`；带资产的投递仍按退信流程转人工取回。领取前还会核对提醒收件人是否仍是该用户当前游戏名：玩家改名后尚未开始发送的提醒按预检退役（`recipient_renamed`），不重发、不补发，也不改写冻结载荷。卖方汇总、换季提醒与寄售季前通知的冻结收件人认三种改名来源：Admin 改名（未撤回）、`rebind` 换绑改名（含大小写修正）与论坛身份同步改名；冻结名仍是某个当前用户的名称（含改回原名）时不退役。
 - 正文模板保存在数据库，在 Admin 参数页的“MoogleMail 模板”里逐个定制或恢复默认（见[ops/config/README.md#出站通知模板数据库](../../ops/config/README.md#出站通知模板数据库)）；没有改过的模板使用程序内置的默认正文。模板只能使用规定的占位符（如 `{login_key}`、`{amount}`、`{reference}`），非法正文在保存时被拒绝。出价被超提醒（`lot_watch`、`lot_watch_pm`）带有 `{item_name}`、`{lot_code}`、`{amount}` 与可选的行级占位符 `{deadline_line}`、`{lot_url_line}`（PM 另有 `{notification_id}`，且模板必须保留 `Notification: {notification_id}.` 一句以绑定发送证明）；正文在创建通知时渲染并冻结进投递载荷，摘要/私信摘要绑定该冻结正文，之后修改模板只影响新通知。刷新、生效与读取失败时的规则见[docs/contracts/database.md#出站通知模板](../contracts/database.md#出站通知模板)。
 - 同一时刻只有一个 Worker 持有邮件 Cookie 的运行时所有权；对同一账号的远端写入串行执行。
-- **发送分类开关**：runtime `[operations.mail.send_classes]` 把出站邮件分成六类并可分别关闭：账号回信（`account_reply`）、投稿回信（`intake_reply`）、结算通知（`settlement_notice`）、出价被超提醒（`outbid_reminder`）、玩家汇总与换季提醒（`player_summary`）、运维告警的 MoogleMail 通知（`operations_alert`）。开关在 Worker 领取投递时生效：关闭类的投递保留在 outbox、暂不领取，重新开启后按正常调度补发仍有效的通知；已过有效期的提醒由既有预检退役。关闭只暂停通知，不改变已提交的命令、履约义务、审计与告警台记录；结算/履约动作邮件（COD 交付、货款、退款等）与资产退回不受任何开关影响。部署配置 `[worker.mooglemail.send_classes]` 提供同一组默认值，runtime 接管 `mail` 组后以其为准。
+- **发送分类开关**：runtime `[operations.mail.send_classes]` 把出站邮件分成六类并可分别关闭：账号回信（`account_reply`）、投稿回信（`intake_reply`）、结算通知（`settlement_notice`）、出价被超提醒（`outbid_reminder`）、玩家汇总与换季提醒（`player_summary`）、运维告警的 MoogleMail 通知（`operations_alert`）。开关在 Worker 领取投递时生效：关闭类的投递保留在 outbox、暂不领取，重新开启后按正常调度补发仍有效的通知；已过有效期的提醒由既有预检退役。关闭只暂停通知，不改变已提交的命令、履约义务、审计与告警台记录；结算/履约动作邮件（COD 交付、货款、退款等）与资产退回不受任何开关影响。寄售季前通知（`consignment_notice`）也不受任何分类开关控制。部署配置 `[worker.mooglemail.send_classes]` 提供同一组默认值，runtime 接管 `mail` 组后以其为准。
 
 ## 通知目录
 
@@ -146,6 +161,7 @@ Admin “结算退件”页（`/settlement-returns`）按案件列出全部退�
 | `auction_submission_receipt` | 拍卖投稿被接受（`accepted`）；整封投稿按原邮件合并为一封 | 发件人游戏名 | MM | intake | `deliveries` outbox / delivery 循环 | 原场次已开拍或撤场（auction 状态离开 `draft`/`preview`）时在 sending 围栏前退役（`auction_notice_invalidated`，原因 `auction_opened`）；正文超出 16 KiB 或投稿事实缺失时不创建 | 收件人、场次序号、每个 lot 的代码、装备名与起拍价；正文在创建时冻结 |
 | `auction_seller_summary` | 场次结算完成后，按卖方汇总该场全部成交与流拍 lot；每场每卖方一封 | 投稿时冻结的卖方游戏名 | MM（固定 main） | settlement | `deliveries` outbox / delivery 循环 | 冻结收件人已改名时在 sending 围栏前退役（`recipient_renamed`）；正文超出 16 KiB 时不创建；历史场次不回填 | 收件人、场次世界与期号、每个 lot 的代码、装备名与最终成交价、成交/流拍计数与合计；正文在创建时冻结 |
 | `isekai_season_reminder` | 已冻结赛季边界前 7 天内，收件人仍有未完成的 isekai 结算义务（`pending`/`prepared`/`enqueued`） | 义务收件人（游戏名或已登记用户名） | MM | settlement | `deliveries` outbox / delivery 循环 | 到达冻结赛季边界（`season_notice_invalidated`，原因 `season_boundary_passed`）、义务全部满足（原因 `season_reminder_resolved`）或收件人已改名时在 sending 围栏前退役；没有冻结边界时不创建 | 收件人、冻结赛季边界、未完成义务的 lot 代码、装备名、金额与种类；正文在创建时冻结 |
+| `consignment_season_notice` | 冻结季窗到达预停点后，该季窗内仍非终态且尚无 `preclose_withdrawal` 通知的每个 position（含预停后新取得的代管件） | 卖家在 isekai 的角色名 | MM（固定 isekai） | settlement（不受任何分类开关控制） | `deliveries` outbox / delivery 循环 | 冻结收件人已改名时在 sending 围栏前退役（`recipient_renamed`）；外部结果未知时转人工对账，不自动重发 | 收件人、冻结季末 UTC、正文（撤回入口说明）；不含预约码、装备 key 或任何凭据 |
 | `user_assets_rejected` | 账号类主题（`register`/`rebind`/`rekey`）携带资产 | 发件人游戏名 | MM | account | `deliveries` outbox / delivery 循环 | 发件人 24 小时说明信上限（抑制）；资产照常退回 | 收件人、主题、退回邮件身份；正文无占位符 |
 | `settlement_winner_equipment_cod` | 结算产生竞得装备 COD 义务并准备发送 | 买家游戏名 | MM | settlement（含装备时为 equipment） | `deliveries` outbox / delivery 循环 | 义务被取消或前置未满足（不进围栏）；未领取 COD 超过付款期限转恢复流程 | 收件人、义务 ID、装备 ID 与名称、COD 金额、结算明细、冻结付款期限；占位符 `{item_name}`、`{amount}`、`{reference}`、`{price_breakdown}`、`{payment_deadline}` |
 | `settlement_payment_carrier` | 异世界竞得者需向 main 支付 1 Credit 载体 | 买家游戏名 | MM | settlement | `deliveries` outbox / delivery 循环 | 前置义务未完成；COD 未领取超过期限转恢复 | 收件人、义务 ID、装备名、Credits 与 COD、冻结付款期限；占位符 `{item_name}`、`{amount}`、`{reference}`、`{payment_deadline}` |

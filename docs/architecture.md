@@ -72,9 +72,11 @@ auction-domain（纯领域规则）
 
 ### 一口价挂单
 
-`auction-domain::consignment` 定义挂单状态、定价与资格规则。`auction-application::consignment` 拥有命令、读模型、解析及补扫用例。PostgreSQL 适配器持久化挂单、租约、准入、事件及审计，并以既有拍卖 lot 的提交事实判断碰撞。`auction-integrations` 提供固定装备来源和开封器。Public 与 Admin 经 HTTP 适配器访问各自的读写端口。见[数据库契约](contracts/database.md#一口价挂单)和[HTTP 路由契约](contracts/routes.md#一口价挂单)。
+`auction-domain::consignment` 定义挂单状态、定价、资格、收件与代管规则。`auction-application::consignment` 拥有命令、读模型、解析、整封收件、处置与补扫用例。PostgreSQL 适配器由 `auction-storage` 的 `consignment`（挂单、解析工作与许可）与 `consignment/deposit`（预约、整封接受、实物占用、代管 position、处置与交接）拥有，`mail/originals` 拥有原信 K、观察与派生事实、隔离与重检、终局槽、起写与证明；既有拍卖 lot 的提交事实用于碰撞与实物准入判断。`auction-integrations` 提供固定装备来源、开封器、寄售原信读取与 Take/Return 回执解析。Public 与 Admin 经 HTTP 适配器访问各自的读写端口。见[数据库契约](contracts/database.md#一口价挂单)和[HTTP 路由契约](contracts/routes.md#一口价挂单)。
 
-Worker 在启动时同步停用代次。任务调度分为受暂停和持久许可约束的解析循环、在本地重新取证并清退的维护循环。开启时，独立的数据库心跳为玩家登记提供 Worker 就绪证明。见[Worker 装配](../apps/auction-worker/README.md#一口价挂单)。
+Public、Admin 与 Worker 三个装配根都装配 `DepositRepository` 与 `DepositCommandService`：用 Credential 域密钥环构造预约码加解密，按 `[consignment]` 的费率、预约有效期（`reservation_ttl_hours`）与每人开放额度构造 `DepositSettings`。配置了数据库且寄售激活时，Public 与 Admin 缺少当前 Credential 数据密钥即拒绝启动；未配置数据库的骨架模式不要求，v2 能力返回不可用。Worker 仅在同时具备 MoogleMail 读取器与 Credential 数据密钥时装配收件与处置服务；有寄售存量而缺任一项即启动失败。未激活时保留空端口。Public 提供 v2 状态、本人寄件指引、预约签发与代管件撤回；Admin 提供隔离详情、重检、解除隔离、运营止售与解除；Worker 提供收件、处置、重检与就绪心跳。见[寄售服务配置](../ops/config/README.md#寄售服务)。
+
+Worker 在启动时先同步停用代次。任务调度分为受暂停和持久许可约束的解析循环、在本地重新取证并清退的维护循环，以及第 4 期的两条寄售循环：处置维护（Take/Return）与隔离重检。寄售关闭但仍有存量时两条循环照常启动；是否启动、`has_consignment_work` 的检查范围与收件就绪心跳的节拍和续期见[Worker 装配](../apps/auction-worker/README.md#一口价挂单)。
 
 ### 共享 helper 归属
 
@@ -152,6 +154,19 @@ Public relay 轮询事件 → WebSocket 推送 → 各浏览器重读受影响�
 履约：义务 → outbox 邮件（COD / 交付 / 货款）→ Sent 证据 → 满足 → 解除后续义务
 恢复：付款超时提醒、退件重寄、上限后退回卖家并拉黑
 ```
+
+### 寄售来信
+
+```text
+MoogleMail 收件轮询 → 候选先跑既有拍卖路由（投稿/账号/结算退件）
+  → 旧路由全部无法归属后才交给寄售收件
+  → 寄售自己的 deposit 事务：写观察/派生事实、首次决定、预约消费、逐件 item、
+    实物占用与 position，推进游标并释放租约
+```
+
+寄售候选不占用旧入站批次事务。批次在候选之前还有旧信时先按原路径提交旧批次，候选留到下一轮；候选失败时游标停在候选之前。既有拍卖的直达处理不以原信 K 映射成功为前提，行为不变。见[docs/guide/mail-flows.md#寄售寄件来信](guide/mail-flows.md#寄售寄件来信)。
+
+候选分流还要通过收件就绪门控：寄售已激活、该世界的 `consignment_mail_readiness.detail_ready=true`、`valid_until` 未过，且引用的 `mail_evidence_sessions` 仍存在。门控读取失败按关闭处理，候选不交给寄售，旧路径照常运行。
 
 ## 配置模型
 

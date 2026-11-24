@@ -86,7 +86,7 @@
 
 ### 寄售服务
 
-三角色从同一份 `common.toml` 读取 `[consignment]`，整节和各字段均可省略。更改这节须用同一份配置重启各角色。加载时严格校验类型、数值和未知键，错误不回显配置原文。回退到尚未支持本节的制品时，须使用旧制品可加载的原配置。
+三角色从同一份 `common.toml` 读取 `[consignment]`，整节和各字段均可省略。更改这节须用同一份配置重启各角色。加载时严格校验类型、数值和未知键，**关闭时也校验每个字段**，错误不回显配置原文。回退到尚未支持本节的制品时，须使用旧制品可加载的原配置。
 
 | 字段 | 默认值 | 范围与作用 |
 | --- | --- | --- |
@@ -94,6 +94,8 @@
 | `fee_bps` | `500` | 整数 0–9999，新寄售登记的手续费率，单位为基点（500 为 5%）；非寄售固定为零 |
 | `display_ttl_days` | `30` | 整数 1–90 天，非寄售挂单首次展示时冻结 |
 | `deposit_ttl_days` | `7` | 整数 1–30 天，寄售挂单进入待寄时冻结 |
+| `reservation_ttl_hours` | `24` | 整数 1–168 小时，寄件预约的最长有效期；签发时仍取待寄截止与季末的更早者 |
+| `isekai_preclose_days` | `3` | 整数 1–90 天，isekai 换季前停止新预约与购买并通知的提前本地日历日数；参与冻结季窗的日历版本 |
 | `max_open_per_user` | `20` | 整数 1–100，每位卖家跨世界的有效活动挂单上限 |
 | `registrations_per_hour` | `10` | 整数 1–100，以数据库时刻计算每位卖家过去一小时的已接受登记数，窗口左开右闭 |
 | `lookup_timeout_seconds` | `10` | 整数 1–30 秒，一次解析的端到端预算，底层更紧的限制继续生效 |
@@ -160,7 +162,7 @@ Admin 配置 runtime 时，listener、HTTP 安全、会话、`metrics.enabled` �
 | `[worker.control]` | Worker control：开关、socket 组（组名或数字 GID）、`allowed_peer_uids`/`gids`（至少一项）、运行目录与路径；Admin 的手工装备读取与邮件 Cookie 在线校验都经它交给 Worker 执行（邮件校验另需 Worker 启用 MoogleMail 并配置 `credential_data_key`），Worker 不可用时 Admin 只报暂不可用 |
 | `[worker.forum]` | 论坛同步：开关、凭据 scope、origin、板块、轮询、页数上限、间隔与租约 |
 | `[worker.mooglemail]` | 邮件：开关、邮箱与世界、默认起拍价、请求边界、收件与维护 cron、观察间隔、每日完整校验、白名单、回信预算、`keyenv_file`（本地联调） |
-| `[worker.mooglemail.send_intervals]` · `[send_classes]` · `[diagnostics]` · `[equipment_filter]` | 各类出站邮件最小间隔；六类通知开关（默认全 true，runtime `mail` 组接管后以 runtime 为准）；诊断归档；投稿过滤 |
+| `[worker.mooglemail.send_intervals]` · `[send_classes]` · `[diagnostics]` · `[equipment_filter]` | 各类出站邮件最小间隔；六类通知开关（默认全 true，runtime `mail` 组接管后以 runtime 为准；寄售季前通知不受任何分类开关控制）；诊断归档；投稿过滤 |
 | `[worker.operations_alert]` | 告警：`scan_enabled`（true）、`notify_enabled`（false）、`webhook_enabled`（false）、收件人与世界、阈值（含长期未领取阈值 `fulfillment_collection_overdue_age_seconds`，默认 259200 秒即 72 小时，范围 1–2592000；Admin runtime `[operations.alerts]` 有同名字段）；旧 `enabled` 只是兼容别名 |
 
 各循环预算按其工作方式分别校验（fulfillment/recovery 单项超时 < 租约；delivery 依靠续租可跨初始租约（只读准备与单次外部发送各用一份 `request_timeout_seconds`，交给 transport 的是准备请求截止而非租约截止）；MoogleMail 另校验读取/处理/整批预算），不能统一按“请求超时 < 租约”配置。启用外部功能的依赖：MoogleMail 需凭据来源、`user_login_data_key` 与 `equipment_data_key`；论坛需 `ehentai_cookie` 或 `credential_data_key`，以及 `equipment_data_key`（装备密钥只在 Worker 启动时检查，`config check` 不拦截）；告警扫描只需数据库，通知/Webhook 各有开关与地址要求。webhook 模板须产生 JSON 对象（支持 `{kind}/{scope}/{source}/{count}/{age_seconds}`），创建时冻结并携带冻结的 `Idempotency-Key`；连接建立前的失败（DNS、TCP、TLS 握手）确定未发出，按重试间隔自动补发，请求写出后的失败结果未知，转人工核对、不自动重发。

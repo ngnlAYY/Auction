@@ -104,7 +104,34 @@
 - `consignment_eid_alias(text)` 对全串 ASCII 数字去前导零，全零或非法输入返回 NULL。按世界与规范 EID 匹配 lot，比较留在文本域。基线和碰撞对同一挂单互斥。目录、计数、本人有效状态、发布与清退用同一个基线差集检测已提交 lot。新读快照看到差集时立即隐藏，不等写侧收口；流拍不恢复旧挂单。`equipment_consignment_eid_alias_idx` 支持按世界和规范 EID 查装备，`lots_equipment_id_idx` 支持按装备查 lot，两者服务于历史读取、碰撞和有效活动额度查询。
 - 登记事务持有卖家锁，从同一快照冻结该卖家的 `blacklist_baseline_ids` 与历史计数。数组不含 NULL 元素，元素个数等于计数，登记后由状态触发器冻结，运行账号无列级更新授权。独立清退要求拉黑事实归属本单卖家，且事实 ID 不在该数组中。业务时刻与 UUID 大小均不代表提交顺序。
 - 公开读取还要求准入代次匹配、当前时刻早于截止、卖家有效且无生效黑名单、拉黑历史计数等于登记值，并使用属于本单的当前快照。补扫逐单重读证据，按挂单 ID 分页并回绕；游标只决定扫描起点。解析领取与全局许可由同一事务更新，取消可保留在途许可的时间栅栏。
-- `consignment_history` 永久保留六张挂单及事实表，`consignment_key_material` 永久保留两张凭证表并按敏感备份制度管理，工作和许可归 `ephemeral_current_projections`。保留策略不授权删除，凭证退休按列清空。
+- `consignment_history` 永久保留全部挂单、解析与收件代管历史事实，`consignment_key_material` 永久保留登记、重放、预约与证据信封四张凭证表并按敏感备份制度管理，工作和许可归 `ephemeral_current_projections`。保留策略不授权删除，凭证退休按列清空。
+
+#### 收件、代管与处置表（迁移 000134）
+
+迁移 `000134` 新增 29 张表。分族：`mail_provenance` 为认证会话、原信 K、观察、首次决定、隔离、终局与解除；`consignment_history` 为季窗与季通知、预约、逐件接受、实物、代管 position/代/事件/控制与交接；`settlement_compensation_recovery` 为交给恢复流程的接管以及处置 work/attempt/起写/证明；`mail_evidence_envelopes` 与 `consignment_reservation_secrets` 归 `consignment_key_material`；`consignment_mail_readiness` 与 `mail_quarantine_rechecks` 归 `ephemeral_current_projections`。既有 `equipment`、`lots`、`inbound_mail` 的结构、旧键与旧解码不变，不新增 UID、不回填。
+
+| 表族 | 表 | 职责与关键约束 |
+| --- | --- | --- |
+| 证据会话与收件就绪 | `mail_evidence_sessions`、`consignment_mail_readiness` | 会话绑定当前 active 的 `mail_cookie` 凭据（种类、作用域、版本）与运行代次；每个世界一行就绪，`valid_until > checked_at`，记录允许发件人、校验器版本与 detail/take/return 能力。 |
+| 原信 K、观察与派生事实 | `mail_originals`、`mail_original_links`、`mail_envelope_observations`、`mail_observation_conflicts` | 原信键为 `(bot_uid, world_id, external_mid)`；链接按 `(mailbox_key, external_mid)` 唯一并同时绑定旧 `inbound_mail` 与认证观察；观察按远端观察 ID 唯一，冲突只追加。`derived_facts` 只保存安全闭集事实（含 `legacy_*`、逐件 `world/tradeable/history_ok`）。 |
+| 首次决定 | `mail_initial_decisions` | 每封原信最多一条首决，种类为 `accepted`/`return_decided`/`archived_empty`/`quarantined`；隔离决定必须有隔离 ID。 |
+| 隔离与重检 | `mail_quarantines`、`mail_quarantine_rechecks` | 隔离按原信唯一，状态 `active`/`released`，原因与重读定位为安全闭集；重检按 `(隔离, 请求版本)` 至多一条 queued/leased 工作，状态 `queued`/`leased`/`done`/`cancelled`，租约、围栏与完成时间形状匹配。 |
+| 终局槽与解除 | `mail_final_dispositions`、`mail_quarantine_releases` | 每封原信一个终局槽，种类为 `accepted`/`return_decided`/`archived_empty`/`acquire_return`/`auction_return_case`/`auction_recovery_return`；解除按隔离唯一，版本与终局种类匹配，旧 owner 两支分别绑定原退件案件或恢复接管，互斥。 |
+| 处置工作、起写与证明 | `mail_disposition_work`、`mail_disposition_attempts`、`mail_disposition_write_starts`、`mail_disposition_proofs` | 每个终局/季通知至多一个工作（Take/Return/Send）；尝试按投递与 fence 唯一；每工作至多一次起写许可；证明按 `(工作, 资产腿)` 只为 `take_proven`/`return_proven` 建唯一槽，`evidence_quarantined` 可追加。 |
+| 预约与逐件接受 | `consignment_deposit_reservations`、`consignment_reservation_secrets`、`consignment_deposit_items` | 每个挂单至多一个 active 预约；令牌摘要唯一，状态 `active`/`retired`/`consumed`；密文信封退休时同一次更新清空四列。每封接受信的每个 item 逐件绑定原信 K、预约、卖家、listing 版本与实物，`(decision, ordinal/canonical_eid)` 与预约均唯一。 |
+| 实物身份与强占用 | `consignment_custody_assets`、`consignment_equipment_claims` | 实物按 `(world, canonical_eid, season)` 唯一并绑定首次观察；强占用行按 `(world, canonical_eid)` 唯一，持有人只能是预约或 position 之一，revision 随事实推进。 |
+| 代管位置与控制 | `consignment_custody_positions`、`consignment_disposition_generations`、`consignment_custody_events`、`consignment_custody_controls` | position 有八种状态，每个 item 一项；处置代按 position 与代次唯一，第 4 期只允许首代且非 `withdrawal_only`；事件按 position 版本唯一并约束状态迁移；控制只追加，每 position 至多一个 active `withdrawal_intent`。 |
+| 交接历史 | `consignment_equipment_handoffs`、`settlement_recovery_return_handoffs` | 交接按装备身份绑定实物与季（`season_id` 为空时由触发器核对），来源恰为 lot 或 position 之一；交给恢复流程的接管按原信与退件邮件唯一，绑定恢复记录与付款/交付义务。 |
+| 季窗与季通知 | `consignment_season_windows`、`consignment_season_notices` | 季窗只用于 isekai，`start < end` 且 `admission_cutoff < end`，季前天数 1–90；`(world_id, season_id)` 唯一，首次冻结后不因日历版本或预停天数变化改写（不变量 10）。季通知按 `(position, seller, kind)` 唯一；Worker 在预停点后逐 position 排队，并为每份通知在同一事务建立 `mail_disposition_work(action='send')` 与 `deliveries` 一行。 |
+
+- 寄售处置投递的载荷还要求受保护 `mail_key`，其 world/MID 必须等于投递的 world/external_mail_id。
+- 隔离首次写入时同事务追加系统 `recheck_quarantine` 命令（应用层派生的 UUIDv5）与 queued 重检工作；`legacy_subject` 只在同一条 `derived_facts` 里已有非空 `legacy_obligation_id` 时允许出现，交还旧 owner 时按 `legacy_obligation_id`、`legacy_subject` 与旧字段集补写。
+- `auction_return_case` 的回执不另存 `obligation_id`：读取方经 `mail_quarantine_releases.case_return_mail_id`（以及同一 `return_mail_id` 的 `case_evidence_id`）回查原退件证据的 `obligation_id`，该值可为空；`mail_quarantine_releases` 表结构不变。旧拍卖直达路径不要求 K 映射成功，见[邮件流程](../guide/mail-flows.md#寄售寄件来信)。
+- 交还旧 owner 时在同一事务补写兼容 `inbound_mail`、`mail_original_links` 与旧 `mail_commands` 完成事实；同键冲突失败关闭、不覆盖历史行，列与唯一键见[邮件来源](#邮件来源)，交接语义见[隔离邮件交还原 owner](../guide/settlement.md#隔离邮件交还原-owner)。
+- `mail_envelope_observations.manifest` 逐项可带页面显示名 `name`（不超过 256 字节），4D1 按该显示名配对系统 marker；`reread_locator` 只保存邮箱键等重读定位，不编码观察事实。
+- `consignment_listings` 的状态闭集扩展为 D9 §1.2 的全部持久态与 `held_off_market` 七种原因；第 4 期守卫允许 `awaiting_deposit→deposit_accepted`、`deposit_accepted→available/held_off_market/withdrawal_pending`、`available→held_off_market/repriced/withdrawal_pending`、`held_off_market→withdrawal_pending` 及 `held_off_market→held_off_market` 的 review 同态增版，`sale_pending` 与新增关闭原因由触发器拒绝。取得后的 `withdrawal_pending` 边只接受 `apply_mail_proof` 回执同时列出该件的 `listing_changes` 与 `custody_changes`（`held_reason` 为空）。旧 `resolving/displayed/awaiting_deposit` 的截止、快照与价格规则保持。`consignment_commands` 增加 `schema_version`（1/2）与类型化目标列；v1 的 actor/target/status/receipt 分支原样保留，v2 只接受第 4 期操作与命名回执形状。000134 的 10 个命令外键为 `DEFERRABLE INITIALLY DEFERRED`，允许逐件业务事实先于 `DepositWriter::finish` 写入、提交时统一校验。`consignment_events` 增加 `(command_id,listing_id,state_version)` 关联键。
+- `mail_evidence_sessions` 只接受当前 active 的 `mail_cookie` 凭据；隔离观察的 `quarantine_version` 在写入时对齐当前隔离投影，历史观察不因后续版本抬升失效；`mail_quarantine_releases.kind` 与终局 kind 同名以服务复合 FK，wire 的 `decision_kind`（`accept`/`return`/`archive_empty`）由应用层映射。
+- 整封接受的结构由 `DEFERRABLE INITIALLY DEFERRED` 触发 `c4_final_disposition_envelope_guard` 在提交前校验：原条数＝规范 EID 数＝消费预约数＝item 数＝新 position 数，逐项同 K/卖家/listing 版本事件/强占用且恰一个 Take；Return 恰一个，空信零工作，旧 owner 交接恰一个相容 owner 且零寄售资产工作。业务判定以[一口价挂单](../business-rules.md#一口价挂单)为准。`acquire_return` 保留协议值，但第 4 期任何成功行都以 `c4_acquire_return_intake_required` 拒绝。`lots` 的插入与装备身份变更触发 `c4_lots_equipment_guard`，对同一 `(world_id, canonical_eid)` 条件写 `consignment_equipment_claims`；强占用时拒绝，空闲行推进 revision。`c4_claim_transition_fact` 在提交前核对持有人变化：取得预约须有同事务同物 active 预约，预约换 position 须有同事务 item/position 与 consumed 预约，释放须有同事务 retired/consumed 预约或 position 终止代管事件及证明；无事实的换主或清空以 `c4_claim_transition_fact_ck` 失败。`consignment_equipment_handoffs` 的资产 FK 绑定非空 `(equipment_id,world_id,canonical_eid)`，季由 `c4_handoff_edge_asset_season` 核对，避免 `MATCH SIMPLE` 在 `season_id` 为空时跳过整条引用。
 
 #### 寄售约束名
 
@@ -252,7 +279,7 @@
 | `settlement_return_verifications` | 未绑定退件只读重新核验读到的完整证据（迁移 `000114`，只追加）：以写入它的案件推进版本为键，记录与入站证据同一严格模型的证据对象、判定（分类与原因码）、唯一绑定的原派发与观察时刻；读不到原退件时不写。改绑时案件引用它，其余结论只留作核验历史 |
 | `settlement_return_takes` | 精确领回证明的消费事实（迁移 `000114`，只追加）：案件、Take 投递、原派发投递与（世界, MID）各唯一，记录领回的资产与证明摘要；资金返还、代管责任与对账位置都以它为准，只消费一次 |
 | `settlement_fulfillment_dispatches` | 结算义务派发历史（迁移 `000115`，只追加）：`(义务, 派发编号)` 主键、投递唯一；首寄 `authorized_by` 为空，补寄必须引用授权它的退件案件（每案至多一次）。履约准备事务登记本次派发；迁移补登既有的首寄 |
-| `deliveries` | 出站邮件 outbox：来源、收件人、负载、状态（prepared → pending → claimed → sending → succeeded / failed / manual_reconcile）、租约与 fencing；`payload` 仍是唯一真相，热键 `world`/`operation`/`template` 由迁移 `000094` 提升为只读生成列 `payload_world`/`payload_operation`/`payload_template`（`GENERATED ALWAYS … STORED`，写入方不能也不得直接赋值）。发送类别由 `public.delivery_send_category(origin, payload)` 判定；迁移 `000098` 修复 082 漏回的 `rekey_key`/`rekey_result`，两者仍属 `account` 类别，并重建表达式索引；Admin 列表的 Rust 类别投影由 PostgreSQL 用例对全部模板与来源逐一和该函数比对。通知载荷的模板约束只由 `auction-application` 的 `MailNotificationTemplate::binding` 定义，见[crates/auction-application/README.md#会话与开关](../../crates/auction-application/README.md#会话与开关)的“通知投递约束”条目；普通（非结算）投递的来源 × 操作组合、规范 UUID、附件装备 ID 与 `external_mail_id` 由同一 crate 的 `MailDeliveryShape` 统一判定，入队、发送前解码与资产冲突排除口径一致，见[docs/guide/mail-flows.md#普通投递载荷口径](../guide/mail-flows.md#普通投递载荷口径)。这些口径由写入方保证，表上只以 CHECK 约束 `origin_kind` 闭集与 `payload` 为 JSON 对象。迁移 `000114` 在闭集中加入只做 Take 的受限来源 `settlement_return_action`（`origin_id` 为 `settlement_return:<案件 ID>`，收件人字段匹配系统发件人 `MoogleMail`），它与入站邮件和恢复动作对同一邮件的领取/退回在 world 行锁下互斥，失败与未知不解除 |
+| `deliveries` | 出站邮件 outbox：来源、收件人、负载、状态（prepared → pending → claimed → sending → succeeded / failed / manual_reconcile）、租约与 fencing；`payload` 仍是唯一真相，热键 `world`/`operation`/`template` 由迁移 `000094` 提升为只读生成列 `payload_world`/`payload_operation`/`payload_template`（`GENERATED ALWAYS … STORED`，写入方不能也不得直接赋值）。发送类别由 `public.delivery_send_category(origin, payload)` 判定；迁移 `000098` 修复 082 漏回的 `rekey_key`/`rekey_result`，两者仍属 `account` 类别，并重建表达式索引；Admin 列表的 Rust 类别投影由 PostgreSQL 用例对全部模板与来源逐一和该函数比对。通知载荷的模板约束只由 `auction-application` 的 `MailNotificationTemplate::binding` 定义，见[crates/auction-application/README.md#会话与开关](../../crates/auction-application/README.md#会话与开关)的“通知投递约束”条目；普通（非结算）投递的来源 × 操作组合、规范 UUID、附件装备 ID 与 `external_mail_id` 由同一 crate 的 `MailDeliveryShape` 统一判定，入队、发送前解码与资产冲突排除口径一致，见[docs/guide/mail-flows.md#普通投递载荷口径](../guide/mail-flows.md#普通投递载荷口径)。这些口径由写入方保证，表上只以 CHECK 约束 `origin_kind` 闭集与 `payload` 为 JSON 对象。迁移 `000114` 在闭集中加入只做 Take 的受限来源 `settlement_return_action`（`origin_id` 为 `settlement_return:<案件 ID>`，收件人字段匹配系统发件人 `MoogleMail`），它与入站邮件和恢复动作对同一邮件的领取/退回在 world 行锁下互斥，失败与未知不解除。迁移 `000134` 另加入 `consignment_disposition`（只做 Take/Return，载荷 `schema_version=2`；领取、sending 围栏、租约释放、过期回收与邮箱巡检等通用投递路径按来源排除它，Take/Return 只由寄售专用链在一次性起写许可下执行）与 `consignment_notice`（通用 Send，载荷 `schema_version=1`、`template=consignment_season_notice`、world 固定 `isekai`，附件、Credits 与 COD 均为零；`origin_id` 为 `consignment_notice:<通知 ID>`，`external_mail_id` 为 `consignment-notice:<通知 ID>`，发送类别 `settlement`） |
 | `delivery_send_attempts`、`delivery_sent_bindings`、`delivery_take_attempts` | 发送/收取尝试的摘要与远端邮件 ID 绑定（只追加），用于结果未知时的对账 |
 | `delivery_sent_confirmations` | Admin 与正式 CLI 的人工 Sent 观察命令、请求摘要、接受项、原 owner 快照与结果；只追加，按当前 delivery/fence 和 world/MID 唯一 |
 | `delivery_send_cadence`、`delivery_admin_commands` | 同类邮件发送节奏；Admin 投递操作账本 |
@@ -303,7 +330,7 @@ Admin 判失败后的 `sent_reference_sighting` 补采复用人工 Sent 准入�
 
 | 表 | 内容 |
 | --- | --- |
-| `inbound_mail` | 每封已处理入站邮件的种类、内容摘要、决定与安全元数据（邮箱 + 邮件 ID 唯一） |
+| `inbound_mail` | 每封已处理入站邮件的种类、内容摘要、决定与安全元数据（邮箱 + 邮件 ID 唯一）。隔离邮件交还原拍卖 owner 时按旧公式与旧字段集补写兼容行并关联 `mail_original_links`；列值、逐字段核对与不覆盖历史行的口径见[隔离邮件交还原 owner](../guide/settlement.md#隔离邮件交还原-owner) |
 | `mail_commands`、`mail_admin_commands` | 邮件业务命令与 Admin 邮件操作账本 |
 | `mail_poll_state` | 各邮箱的轮询游标、暂停状态与租约；`cursor_value` 是 Inbox 的唯一权威游标 |
 | `mail_scan_checkpoints` | 按凭据、凭据版本、世界与 endpoint origin 保存 Sent / Read Mail 的最高 MID、水位时间与最近完整校验时间；迁移 `000101` 增加最近一次完整枚举的 Sent 页数、观察时间与当时生效的页数上限（仅服务远端页数告警，不参与发送证明）。只服务增量前缀，不是发送、已读、领取或完成证明，作用域不匹配或损坏时回退完整扫描（迁移 `000083`） |
@@ -388,6 +415,16 @@ owner/superuser 时以明确错误终止，不放宽授权。`ALTER DEFAULT PRIV
 | `consignment_replay_keys` | `write_current`、`wrapped_key`、`nonce`、`encryption_key_id`、`updated_at` |
 | `consignment_lookup_work` | 工作状态、计次、围栏、下次解析时间、租约字段与 `network_deadline`、最后安全原因、完成时间、更新时间 |
 | `consignment_lookup_control` | 除主键外的全部列 |
+| `consignment_mail_readiness` | 会话、epoch、策略摘要、allowlist、能力布尔、时效与 `version` |
+| `mail_evidence_envelopes` | 密文、nonce、密钥标识、指纹、`updated_at`、`retired_at` |
+| `mail_quarantines` | `version`、`state`、`updated_at` |
+| `mail_quarantine_rechecks` | 状态、可用时刻、租约、围栏、计次与完成时间 |
+| `consignment_deposit_reservations` | `state`、`last_command_id`、`retired_at`、`reason` |
+| `consignment_reservation_secrets` | 密文、nonce、密钥标识、指纹、`updated_at`、`retired_at` |
+| `consignment_equipment_claims` | `revision`、`reservation_id`、`position_id`、`changed_at`、`last_fact_id` |
+| `consignment_custody_positions` | `state`、`version`、`current_generation`、`updated_at` |
+
+迁移 `000134` 新增的其余 21 张表都是只追加事实，运行账号只有 `SELECT`、`INSERT`；全部新表都没有 `DELETE`、`TRUNCATE`、整表 `UPDATE`、`REFERENCES` 或 `TRIGGER`。授权入口每次执行都会先收回自身与前驱 `apply_auction_runtime_privileges_000132()` 的 PUBLIC/非 owner `EXECUTE`，再继承 000132 的守卫并重授本期矩阵。
 
 ## 变更规则
 
