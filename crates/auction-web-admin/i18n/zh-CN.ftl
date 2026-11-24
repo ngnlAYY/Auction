@@ -2150,3 +2150,77 @@ admin-error-settlement-return-resend-limit = 已达本案补寄上限，不能�
 admin-error-settlement-return-obligation-ineligible = 原义务已不可补寄（成交已撤销、已满足或终结、退回的不是当前派发、种类归恢复流程，或历史现金没有资金分配）；只能代管或留箱。
 admin-error-settlement-return-send-unresolved = 原派发的发送结果仍未知（资金分配尚未记为已支出）。须先经 Sent 自动恢复或人工 Sent 证明收口原发送，才能领回、补寄或留箱。
 admin-error-settlement-return-observation-required = 再次领回需要最近一次原 Take 会话观察证明原冻结资产完整仍在且可领取。请刷新案件并等待邮箱维护复核。
+
+# 一口价挂单 · 管理
+consignment-admin-title = 一口价挂单管理
+consignment-seller-id = 卖家编号
+consignment-stored-state = 已记录状态
+consignment-effective-state = 当前有效状态
+consignment-collisions = 关联拍卖 lot
+consignment-truncated = 仅显示最近 50 条
+consignment-delist = 下架
+consignment-delist-reason = 下架原因
+consignment-delist-confirm = 确认下架这条挂单？
+consignment-reason-required = 请填写下架原因
+
+# 一口价挂单 · 字段
+consignment-mode = 挂单模式
+consignment-direct = 非寄售
+consignment-consigned = 寄售
+consignment-world = 世界
+consignment-eid = 装备编号
+consignment-price = 标价（Credits）
+consignment-seller = 卖家
+consignment-expires = 有效期至
+
+# 一口价挂单 · 操作与进度
+consignment-attempts = 已尝试次数
+consignment-next-attempt = 下次解析时间
+consignment-paused = 外部读取已暂停
+
+# 一口价挂单 · 视图
+consignment-resolving = 解析中
+consignment-lookup-failed = 解析失败
+consignment-ineligible = 已解析，不可挂单
+consignment-displayed = 已展示
+consignment-awaiting-deposit = 等待寄来装备
+consignment-expired = 已过期
+consignment-closed = 已关闭
+
+# 一口价挂单 · 资格原因
+consignment-not-tradeable = 装备不可交易
+consignment-owner-missing = 来源未提供有效持有人
+consignment-owner-mismatch = 装备当前持有人与登记账号不符
+consignment-history-owner-mismatch = 本站最后已证持有人与登记人不符，第一版不接受平台外转手的装备。
+consignment-history-alias-conflict = 本站同件装备的历史记录互相矛盾
+consignment-history-unproven = 本站尚无足够的交付或返还证明
+consignment-equipment-busy = 装备已有挂单或尚有拍卖责任
+
+# 一口价挂单 · 解析原因
+consignment-equipment-not-found = 未找到装备或读取 key 不正确
+consignment-source-request-rejected = 装备来源拒绝了请求
+consignment-source-http-invalid = 装备来源返回了不支持的响应
+consignment-source-schema-invalid = 装备信息格式无效
+consignment-source-shape-unconfirmed = 装备来源返回了尚未确认的字段格式
+consignment-source-identity-mismatch = 来源返回的装备标识与请求不符
+consignment-source-too-large = 装备信息超出读取上限
+consignment-source-unavailable = 暂时无法连接装备来源
+consignment-source-timeout = 读取装备超时
+consignment-source-rate-limited = 装备来源正在限流
+consignment-lookup-exhausted = 解析尝试次数已用完
+consignment-credential-unavailable = 装备读取凭证暂不可用
+
+# 一口价挂单 · 关闭原因
+consignment-auction-lot-created = 装备已进入拍卖；经确认取回后可重新登记。
+consignment-seller-ineligible = 卖家当前不具备挂单资格
+consignment-service-disabled = 服务停用，登记已关闭
+consignment-seller-cancelled = 卖家已取消挂单
+consignment-admin-delisted = 管理员已下架
+consignment-lookup-deadline = 解析期限已到
+consignment-display-expired = 展示期限已到
+consignment-deposit-expired = 待寄期限已到
+
+# 一口价挂单 · 写拒绝
+consignment-stale-version = 挂单已变化，请刷新后确认
+consignment-listing-not-active = 挂单已停止接受操作
+consignment-command-conflict = 此命令编号已用于不同请求

@@ -2149,3 +2149,77 @@ admin-error-settlement-return-resend-limit = 이 건의 재발송 한도에 도�
 admin-error-settlement-return-obligation-ineligible = 원래 의무는 더 이상 재발송할 수 없습니다(거래 취소, 이미 충족되었거나 종료, 반송된 것이 현재 발송이 아님, 종류가 복구 흐름 담당, 또는 과거 현금에 자금 배정이 없음). 보관하거나 메일함에 남기는 것만 가능합니다.
 admin-error-settlement-return-send-unresolved = 원래 발송의 결과가 아직 알 수 없습니다(자금 배정이 아직 지출로 기록되지 않음). 회수, 재발송 또는 메일함 보관 전에 Sent 자동 복구나 수동 Sent 증명으로 원래 발송을 확정하세요.
 admin-error-settlement-return-observation-required = 다시 회수하려면 원래 Take 세션의 최근 관찰이 동결 자산이 온전히 남아 수령 가능함을 보여야 합니다. 사건을 새로 고치고 메일 유지보수 확인을 기다리세요.
+
+# 一口价挂单 · 管理
+consignment-admin-title = 정가 판매 관리
+consignment-seller-id = 판매자 ID
+consignment-stored-state = 저장된 상태
+consignment-effective-state = 현재 유효 상태
+consignment-collisions = 관련 경매 품목
+consignment-truncated = 최근 50건만 표시합니다.
+consignment-delist = 판매 게시 내리기
+consignment-delist-reason = 게시를 내린 사유
+consignment-delist-confirm = 이 판매 게시를 내릴까요?
+consignment-reason-required = 게시를 내리는 사유를 입력해 주세요.
+
+# 一口价挂单 · 字段
+consignment-mode = 판매 방식
+consignment-direct = 직접 거래
+consignment-consigned = 위탁 판매
+consignment-world = 월드
+consignment-eid = 장비 ID
+consignment-price = 판매가 (Credits)
+consignment-seller = 판매자
+consignment-expires = 유효 기한
+
+# 一口价挂单 · 操作与进度
+consignment-attempts = 시도 횟수
+consignment-next-attempt = 다음 분석 시각
+consignment-paused = 외부 조회 일시 중지
+
+# 一口价挂单 · 视图
+consignment-resolving = 분석 중
+consignment-lookup-failed = 분석 실패
+consignment-ineligible = 분석 완료, 판매 등록 불가
+consignment-displayed = 게시됨
+consignment-awaiting-deposit = 장비 도착 대기 중
+consignment-expired = 만료됨
+consignment-closed = 종료됨
+
+# 一口价挂单 · 资格原因
+consignment-not-tradeable = 이 장비는 거래할 수 없습니다.
+consignment-owner-missing = 정보 출처에서 유효한 소유자 정보를 제공하지 않았습니다.
+consignment-owner-mismatch = 현재 장비 소유자가 등록 계정과 일치하지 않습니다.
+consignment-history-owner-mismatch = 이 사이트에서 마지막으로 확인된 소유자가 등록자와 다릅니다. 첫 버전에서는 사이트 밖에서 양도된 장비를 받지 않습니다.
+consignment-history-alias-conflict = 이 사이트에 있는 동일 장비의 이력 기록이 서로 일치하지 않습니다.
+consignment-history-unproven = 이 사이트에 인도 또는 반환을 확인할 증명이 아직 충분하지 않습니다.
+consignment-equipment-busy = 이미 판매에 등록되었거나 경매 의무가 남아 있는 장비입니다.
+
+# 一口价挂单 · 解析原因
+consignment-equipment-not-found = 장비를 찾을 수 없거나 읽기용 key가 올바르지 않습니다.
+consignment-source-request-rejected = 장비 정보 출처에서 요청을 거부했습니다.
+consignment-source-http-invalid = 장비 정보 출처에서 지원하지 않는 응답을 반환했습니다.
+consignment-source-schema-invalid = 장비 정보 형식이 올바르지 않습니다.
+consignment-source-shape-unconfirmed = 장비 정보 출처에서 아직 확인되지 않은 필드 형식을 반환했습니다.
+consignment-source-identity-mismatch = 출처에서 반환한 장비 식별 정보가 요청과 일치하지 않습니다.
+consignment-source-too-large = 장비 정보가 읽기 한도를 초과했습니다.
+consignment-source-unavailable = 장비 정보 출처에 일시적으로 연결할 수 없습니다.
+consignment-source-timeout = 장비 정보 조회 시간이 초과되었습니다.
+consignment-source-rate-limited = 장비 정보 출처에서 요청 빈도를 제한하고 있습니다.
+consignment-lookup-exhausted = 분석 시도 횟수를 모두 사용했습니다.
+consignment-credential-unavailable = 장비를 읽는 데 필요한 인증 정보를 일시적으로 사용할 수 없습니다.
+
+# 一口价挂单 · 关闭原因
+consignment-auction-lot-created = 장비가 경매에 등록되었습니다. 반환이 확인되면 다시 등록할 수 있습니다.
+consignment-seller-ineligible = 판매자는 현재 장비를 등록할 자격이 없습니다.
+consignment-service-disabled = 서비스가 꺼져 등록이 종료되었습니다.
+consignment-seller-cancelled = 판매자가 판매를 취소했습니다.
+consignment-admin-delisted = 관리자가 판매 게시를 내렸습니다.
+consignment-lookup-deadline = 분석 기한이 지났습니다.
+consignment-display-expired = 게시 기간이 끝났습니다.
+consignment-deposit-expired = 장비 발송 기한이 지났습니다.
+
+# 一口价挂单 · 写拒绝
+consignment-stale-version = 판매 정보가 변경되었습니다. 새로고침한 후 확인해 주세요.
+consignment-listing-not-active = 이 판매에는 더 이상 작업을 수행할 수 없습니다.
+consignment-command-conflict = 이 명령 ID는 이미 다른 요청에 사용되었습니다.

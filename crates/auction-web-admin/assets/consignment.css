@@ -1,0 +1,64 @@
+/* Solid Admin 挂单管理页的筛选、快照、关联 lot 与说明表单。 */
+
+@layer surface {
+  .admin-consignment-filters,
+  .admin-consignment-detail__header,
+  .admin-consignment-collisions__item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2) var(--space-3);
+  }
+
+  .admin-consignment-list,
+  .admin-consignment-detail,
+  .admin-consignment-progress,
+  .admin-consignment-actions__form {
+    display: grid;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .admin-consignment-filters__seller {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2);
+  }
+
+  .admin-consignment-filters__seller input {
+    min-width: 0;
+  }
+
+  .admin-consignment-list__table,
+  .admin-consignment-detail__record,
+  .admin-consignment-equipment,
+  .admin-consignment-collisions__item {
+    overflow-wrap: break-word;
+  }
+
+  @supports (overflow-wrap: anywhere) {
+    .admin-consignment-list__table,
+    .admin-consignment-detail__record,
+    .admin-consignment-equipment,
+    .admin-consignment-collisions__item {
+      overflow-wrap: anywhere;
+    }
+  }
+
+  .admin-consignment-progress {
+    color: var(--color-text-muted);
+    font-size: var(--admin-text-note);
+  }
+
+  .admin-consignment-equipment__group + .admin-consignment-equipment__group {
+    margin-block-start: var(--space-3);
+  }
+
+  .admin-consignment-collisions__list {
+    display: grid;
+    gap: var(--space-2);
+    padding-inline-start: 0;
+    list-style: none;
+  }
+}

@@ -186,7 +186,13 @@ export function sendPreparedJsonWrite(
     timeoutMillis,
     (failure) => failure,
     (response) => {
-      const decoded = decodeResponseFailure(response, signal, host);
+      // 寄售错误契约要求 data 为 null，其他形态不能解除未决命令（不变量 1、6）。
+      const decoded = decodeResponseFailure(
+        response,
+        signal,
+        host,
+        endpoint === "consignment-delist",
+      );
       if (decoded === null) {
         return writeOutcomeUnknown("network_error");
       }

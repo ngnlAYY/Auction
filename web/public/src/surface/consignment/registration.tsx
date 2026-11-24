@@ -1,0 +1,262 @@
+// Solid Public 装备登记页，能力受限时只展示说明。
+
+import type { ConsignmentStatus, ListingMode } from "@auction/contracts/dto/public/consignment";
+import { createCell } from "@auction/web-shared/reactive/cell";
+import { Link, useRouter } from "@auction/web-shared/router";
+import { AsyncState } from "@auction/web-shared/ui/components/async-state";
+import { t } from "@auction/web-shared/ui/i18n";
+import type { JSX } from "@solidjs/web";
+import { For, Match, onCleanup, Show, Switch } from "solid-js";
+
+import type { ConsignmentPrivateError } from "../../api/consignment-private";
+import { type ConsignmentCapability, useConsignmentCapability } from "./capability";
+import { consignmentWorldLabel } from "./filters";
+import { listingModeKey } from "./labels";
+import { useConsignmentPending } from "./pending";
+import { PendingCommand } from "./pending-view";
+import {
+  consignmentErrorMessage,
+  FeeQuote,
+  ownedConsignmentHref,
+  PrivateConsignmentPage,
+} from "./private-page";
+import { useConsignmentRefresh } from "./refresh";
+import {
+  estimatedQuote,
+  listingPrice,
+  registrationEquipment,
+  registrationFee,
+} from "./registration-input";
+
+/** 登记页入口，链接草稿由当前已确认身份的表单独占。 */
+export function RegistrationForm(): JSX.Element {
+  return (
+    <PrivateConsignmentPage title={t("consignment-new")}>
+      {(_userId, canUse) => <Registration canUse={canUse} />}
+    </PrivateConsignmentPage>
+  );
+}
+
+function Registration(props: { readonly canUse: () => boolean }): JSX.Element {
+  const router = useRouter();
+  const capability = useConsignmentCapability();
+  const feeRejected = createCell<ConsignmentCapability | undefined>(undefined);
+  const checkingFee = () => feeRejected() !== undefined && feeRejected() === capability();
+  const status = () => {
+    const value = capability();
+    return value?.kind === "ready" && !checkingFee() ? value.status : null;
+  };
+  const mode = createCell<ListingMode | null>(null);
+  const url = createCell("");
+  const price = createCell("");
+  const error = createCell<ConsignmentPrivateError | null>(null);
+  let input: HTMLInputElement | null = null;
+  const clearUrl = () => {
+    url.set("");
+    if (input !== null) input.value = "";
+  };
+  onCleanup(clearUrl);
+
+  const pending = useConsignmentPending(props.canUse, (result) => {
+    if (result.ok) {
+      if (result.value.listing_id !== null)
+        router.push(ownedConsignmentHref(result.value.listing_id));
+      return;
+    }
+    error.set(result.error);
+    if (result.error.code === "fee_changed") {
+      feeRejected.set(capability());
+      capability.refresh();
+    }
+  });
+  useConsignmentRefresh(() => false, capability.refresh);
+
+  const equipment = () => registrationEquipment(url());
+  const amount = () => listingPrice(price(), status()?.min_price, status()?.max_price);
+  const readyMode = () => {
+    const selected = mode();
+    return selected !== null && status()?.registration_modes.includes(selected) ? selected : null;
+  };
+  const quote = () => {
+    const current = status();
+    const selected = readyMode();
+    const value = amount();
+    return current === null || selected === null || value === null
+      ? null
+      : estimatedQuote(value, registrationFee(selected, current));
+  };
+  const availableWorld = () => {
+    const world = equipment()?.world_id;
+    return world !== undefined && status()?.registration_worlds.includes(world) === true;
+  };
+  const canSubmit = () =>
+    props.canUse() &&
+    !pending.blocked() &&
+    readyMode() !== null &&
+    availableWorld() &&
+    amount() !== null;
+
+  return (
+    <>
+      <Link href="/consignment/me">{t("consignment-mine")}</Link>
+      <CapabilityNotice capability={capability()} refresh={capability.refresh} />
+      <PendingCommand
+        pending={pending}
+        canUse={props.canUse()}
+        registration
+        canRetryRegistration={status() !== null}
+      />
+      <Show when={error()}>
+        {(failure) => <p role="alert">{consignmentErrorMessage(failure())}</p>}
+      </Show>
+      <Show when={status()} keyed={false}>
+        {(current) => (
+          <form
+            class="public-consignment-account__form"
+            autocomplete="off"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const snapshot = status();
+              const selected = readyMode();
+              const identity = equipment();
+              const value = amount();
+              if (
+                !canSubmit() ||
+                snapshot === null ||
+                selected === null ||
+                identity === null ||
+                value === null
+              )
+                return;
+              // 不变量 1、6、7、10：冻结本次确认的身份、金额和费率，链接不进入恢复记录。
+              error.set(null);
+              if (
+                pending.submit(
+                  {
+                    operation: "register",
+                    ...identity,
+                    mode: selected,
+                    price: value,
+                    expected_fee_bps: registrationFee(selected, snapshot),
+                  },
+                  url.peek(),
+                )
+              )
+                clearUrl();
+            }}
+          >
+            <fieldset disabled={pending.blocked() || !props.canUse()}>
+              <ModeChoice status={current()} mode={readyMode()} onChange={mode.set} />
+              <label>
+                {t("consignment-equipment-url")}
+                <input
+                  type="password"
+                  autocomplete="off"
+                  spellcheck={false}
+                  ref={(element) => {
+                    input = element;
+                  }}
+                  value={url()}
+                  onInput={(event) => url.set(event.currentTarget.value)}
+                />
+              </label>
+              <Show
+                when={equipment()}
+                fallback={
+                  <Show when={url() !== ""}>
+                    <p role="alert">{t("consignment-invalid-equipment-url")}</p>
+                  </Show>
+                }
+              >
+                {(identity) => (
+                  <p>
+                    {t("consignment-world")} {consignmentWorldLabel(identity().world_id)}
+                    {" · "}
+                    {t("consignment-eid")} {identity().eid}
+                  </p>
+                )}
+              </Show>
+              <Show when={equipment() !== null && !availableWorld()}>
+                <p role="alert">{t("consignment-world-unavailable")}</p>
+              </Show>
+              <label>
+                {t("consignment-price")}
+                <input
+                  inputmode="numeric"
+                  value={price()}
+                  onInput={(event) => price.set(event.currentTarget.value)}
+                />
+              </label>
+              <Show when={price() !== "" && amount() === null}>
+                <p role="alert">{t("consignment-invalid-price")}</p>
+              </Show>
+              <Show when={quote()}>
+                {(value) => <FeeQuote fee={value().fee} net={value().net} />}
+              </Show>
+              <p>{t("consignment-source-disclosure")}</p>
+              <button type="submit" disabled={!canSubmit()}>
+                {t("consignment-submit")}
+              </button>
+            </fieldset>
+          </form>
+        )}
+      </Show>
+      <Show when={checkingFee()}>
+        <AsyncState kind="loading" title={t("data-loading")} detail="" />
+      </Show>
+    </>
+  );
+}
+
+function ModeChoice(props: {
+  readonly status: ConsignmentStatus;
+  readonly mode: ListingMode | null;
+  readonly onChange: (mode: ListingMode | null) => void;
+}): JSX.Element {
+  return (
+    <label>
+      {t("consignment-mode")}
+      <select
+        value={props.mode ?? ""}
+        onChange={(event) => {
+          const mode = props.status.registration_modes.find(
+            (choice) => choice === event.currentTarget.value,
+          );
+          props.onChange(mode ?? null);
+        }}
+      >
+        <option value="" disabled>
+          {t("consignment-mode")}
+        </option>
+        <For each={props.status.registration_modes} keyed={false}>
+          {(mode) => <option value={mode()}>{t(listingModeKey(mode()))}</option>}
+        </For>
+      </select>
+    </label>
+  );
+}
+
+function CapabilityNotice(props: {
+  readonly capability: ConsignmentCapability | undefined;
+  readonly refresh: () => void;
+}): JSX.Element {
+  return (
+    <Switch>
+      <Match when={props.capability === undefined}>
+        <AsyncState kind="loading" title={t("data-loading")} detail="" />
+      </Match>
+      <Match when={props.capability?.kind === "disabled"}>
+        <AsyncState kind="empty" title={t("consignment-disabled")} detail="" />
+      </Match>
+      <Match when={props.capability?.kind === "failed" || props.capability?.kind === "read-only"}>
+        <AsyncState
+          kind="error"
+          title={t("consignment-unavailable")}
+          detail=""
+          retryLabel={t("data-retry")}
+          onRetry={props.refresh}
+        />
+      </Match>
+    </Switch>
+  );
+}

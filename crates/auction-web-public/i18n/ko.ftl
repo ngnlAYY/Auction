@@ -653,3 +653,103 @@ stale-build-notice = 새 버전이 배포되었습니다. 이 페이지를 새�
 stale-build-refresh = 페이지 새로 고침
 
 language-switch-failed = 선택한 언어를 불러오지 못했습니다. 현재 언어를 유지합니다.
+
+# 一口价挂单 · 导航与标题
+consignment-nav = 정가 판매
+consignment-catalog = 장비 판매 목록
+consignment-new = 장비 등록
+consignment-mine = 내 판매 목록
+consignment-detail = 판매 상세
+consignment-empty = 조건에 맞는 판매 항목이 없습니다.
+
+# 一口价挂单 · 字段
+consignment-mode = 판매 방식
+consignment-direct = 직접 거래
+consignment-consigned = 위탁 판매
+consignment-world = 월드
+consignment-equipment-url = 장비 링크
+consignment-eid = 장비 ID
+consignment-price = 판매가 (Credits)
+consignment-seller = 판매자
+consignment-fee = 예상 수수료
+consignment-net = 판매자 예상 수령액
+consignment-expires = 유효 기한
+consignment-category = 장비 분류
+consignment-search = 장비 이름 검색
+consignment-source-time = 장비 정보 수집 시각
+consignment-state-filter = 판매 상태
+
+# 一口价挂单 · 告知
+consignment-direct-notice = 장비는 판매자가 가지고 있습니다. 게임 내에서 판매자에게 연락하세요. 이 사이트는 대금을 받거나 거래를 보증하지 않습니다.
+consignment-deposit-notice = 장비 도착을 기다리는 중입니다. 아직 이 사이트가 장비를 보관하고 있지 않습니다.
+consignment-mail-unavailable = 현재 환경에서는 위탁 판매 메일을 받지 않습니다. 장비를 보내지 마세요.
+consignment-source-disclosure = 서버는 장비와 소유자를 확인하기 위해 월드, 장비 ID, 읽기용 key를 hvdata.gisadan.dev에 전송합니다.
+
+# 一口价挂单 · 操作与进度
+consignment-submit = 등록 제출
+consignment-reprice = 판매가 변경
+consignment-withdraw = 판매 취소
+consignment-withdraw-confirm = 이 판매를 취소할까요?
+consignment-register-again = 다시 등록
+consignment-attempts = 시도 횟수
+consignment-next-attempt = 다음 분석 시각
+consignment-paused = 외부 조회 일시 중지
+consignment-pending = 이전 제출 결과를 확인하는 중
+consignment-reenter-url = 같은 명령을 재시도하려면 처음 입력한 장비 링크를 다시 입력하세요.
+
+# 一口价挂单 · 视图
+consignment-resolving = 분석 중
+consignment-lookup-failed = 분석 실패
+consignment-ineligible = 분석 완료, 판매 등록 불가
+consignment-displayed = 게시됨
+consignment-awaiting-deposit = 장비 도착 대기 중
+consignment-expired = 만료됨
+consignment-closed = 종료됨
+consignment-disabled = 정가 판매 서비스가 꺼져 있습니다.
+consignment-unavailable = 정가 판매 서비스를 일시적으로 사용할 수 없습니다.
+consignment-not-found = 판매 항목이 없거나 더 이상 게시되지 않습니다.
+
+# 一口价挂单 · 资格原因
+consignment-not-tradeable = 이 장비는 거래할 수 없습니다.
+consignment-owner-missing = 정보 출처에서 유효한 소유자 정보를 제공하지 않았습니다.
+consignment-owner-mismatch = 현재 장비 소유자가 등록 계정과 일치하지 않습니다.
+consignment-history-owner-mismatch = 이 사이트에서 마지막으로 확인된 소유자가 등록자와 다릅니다. 첫 버전에서는 사이트 밖에서 양도된 장비를 받지 않습니다.
+consignment-history-alias-conflict = 이 사이트에 있는 동일 장비의 이력 기록이 서로 일치하지 않습니다.
+consignment-history-unproven = 이 사이트에 인도 또는 반환을 확인할 증명이 아직 충분하지 않습니다.
+consignment-equipment-busy = 이미 판매에 등록되었거나 경매 의무가 남아 있는 장비입니다.
+
+# 一口价挂单 · 解析原因
+consignment-equipment-not-found = 장비를 찾을 수 없거나 읽기용 key가 올바르지 않습니다.
+consignment-source-request-rejected = 장비 정보 출처에서 요청을 거부했습니다.
+consignment-source-http-invalid = 장비 정보 출처에서 지원하지 않는 응답을 반환했습니다.
+consignment-source-schema-invalid = 장비 정보 형식이 올바르지 않습니다.
+consignment-source-shape-unconfirmed = 장비 정보 출처에서 아직 확인되지 않은 필드 형식을 반환했습니다.
+consignment-source-identity-mismatch = 출처에서 반환한 장비 식별 정보가 요청과 일치하지 않습니다.
+consignment-source-too-large = 장비 정보가 읽기 한도를 초과했습니다.
+consignment-source-unavailable = 장비 정보 출처에 일시적으로 연결할 수 없습니다.
+consignment-source-timeout = 장비 정보 조회 시간이 초과되었습니다.
+consignment-source-rate-limited = 장비 정보 출처에서 요청 빈도를 제한하고 있습니다.
+consignment-lookup-exhausted = 분석 시도 횟수를 모두 사용했습니다.
+consignment-credential-unavailable = 장비를 읽는 데 필요한 인증 정보를 일시적으로 사용할 수 없습니다.
+
+# 一口价挂单 · 关闭原因
+consignment-auction-lot-created = 장비가 경매에 등록되었습니다. 반환이 확인되면 다시 등록할 수 있습니다.
+consignment-seller-ineligible = 판매자는 현재 장비를 등록할 자격이 없습니다.
+consignment-service-disabled = 서비스가 꺼져 등록이 종료되었습니다.
+consignment-seller-cancelled = 판매자가 판매를 취소했습니다.
+consignment-admin-delisted = 관리자가 판매 게시를 내렸습니다.
+consignment-lookup-deadline = 분석 기한이 지났습니다.
+consignment-display-expired = 게시 기간이 끝났습니다.
+consignment-deposit-expired = 장비 발송 기한이 지났습니다.
+
+# 一口价挂单 · 写拒绝
+consignment-already-open = 이 장비에 대한 활성 등록이 이미 있습니다.
+consignment-fee-changed = 수수료율이 변경되었습니다. 다시 확인해 주세요.
+consignment-stale-version = 판매 정보가 변경되었습니다. 새로고침한 후 확인해 주세요.
+consignment-listing-not-active = 이 판매에는 더 이상 작업을 수행할 수 없습니다.
+consignment-command-conflict = 이 명령 ID는 이미 다른 요청에 사용되었습니다.
+consignment-registration-rate-limited = 시간당 등록 횟수 한도에 도달했습니다.
+consignment-listing-limit-reached = 진행 중인 판매 수가 한도에 도달했습니다.
+consignment-invalid-price = 유효한 정수 판매가를 입력해 주세요.
+consignment-invalid-equipment-url = 장비 ID가 0으로 시작하지 않고 부호가 없는 양의 십진 정수인 장비 링크를 입력해 주세요.
+consignment-world-unavailable = 이 월드에서는 현재 새 등록을 받지 않습니다.

@@ -10,7 +10,7 @@ const ADMIN_WRITE_ENDPOINTS = Object.freeze([
 ] as const);
 
 /** 实际业务写请求所属的端点类别。 */
-export type AdminWriteEndpoint = (typeof ADMIN_WRITE_ENDPOINTS)[number];
+export type AdminWriteEndpoint = (typeof ADMIN_WRITE_ENDPOINTS)[number] | "consignment-delist";
 
 function adminWriteEndpointIsVersionedMutation(endpoint: AdminWriteEndpoint): boolean {
   // 这些端点的 state_conflict 只来自冻结版本的递增围栏；运行配置可已有持久化意图。
@@ -165,6 +165,29 @@ const REJECTION_RULES = new Map(
   ),
 );
 
+// 寄售仅由 Solid 提供，裁定单独维护，不进入跨栈样本。
+const CONSIGNMENT_DELIST_REJECTIONS = new Map<string, { status: number; scope: Rejection }>([
+  ["invalid_reason", { status: 400, scope: "this_attempt" }],
+  ["listing_not_found", { status: 404, scope: "replay_checked" }],
+  ["stale_version", { status: 409, scope: "replay_checked" }],
+  ["listing_not_active", { status: 409, scope: "replay_checked" }],
+  ["command_id_conflict", { status: 409, scope: "replay_checked" }],
+]);
+
+function consignmentDelistRejection(
+  code: string,
+): { status: number; scope: Rejection } | undefined {
+  switch (code) {
+    case "unauthenticated":
+    case "origin_forbidden":
+    case "csrf_invalid":
+    case "rate_limited":
+      return REJECTION_RULES.get(code);
+    default:
+      return CONSIGNMENT_DELIST_REJECTIONS.get(code);
+  }
+}
+
 /** 供共用样本的完整性测试枚举，不参与裁定。 */
 export function writeRejectionCatalog(): {
   readonly endpoints: readonly AdminWriteEndpoint[];
@@ -190,6 +213,9 @@ function isVersionConflict(endpoint: AdminWriteEndpoint | null, code: string): b
 
 /** 状态与协议码吻合后，判断拒绝覆盖的尝试范围。 */
 export function rejectionScope(endpoint: AdminWriteEndpoint | null, code: string): Rejection {
+  if (endpoint === "consignment-delist") {
+    return consignmentDelistRejection(code)?.scope ?? "this_attempt";
+  }
   return isVersionConflict(endpoint, code)
     ? "replay_checked"
     : (REJECTION_RULES.get(code)?.scope ?? "this_attempt");
@@ -197,5 +223,8 @@ export function rejectionScope(endpoint: AdminWriteEndpoint | null, code: string
 
 /** 返回该端点和协议码能够证明拒绝时的 HTTP 状态。 */
 export function rejectionStatus(endpoint: AdminWriteEndpoint | null, code: string): number | null {
+  if (endpoint === "consignment-delist") {
+    return consignmentDelistRejection(code)?.status ?? null;
+  }
   return isVersionConflict(endpoint, code) ? 409 : (REJECTION_RULES.get(code)?.status ?? null);
 }

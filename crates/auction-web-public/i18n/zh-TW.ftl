@@ -653,3 +653,103 @@ stale-build-notice = 站點已更新。請重新整理此頁面以載入新版�
 stale-build-refresh = 重新整理頁面
 
 language-switch-failed = 所選語言載入失敗，已保持目前語言。
+
+# 一口价挂单 · 导航与标题
+consignment-nav = 一口價掛單
+consignment-catalog = 裝備掛單
+consignment-new = 登記裝備
+consignment-mine = 我的掛單
+consignment-detail = 掛單詳情
+consignment-empty = 沒有符合條件的掛單
+
+# 一口价挂单 · 字段
+consignment-mode = 掛單模式
+consignment-direct = 非寄售
+consignment-consigned = 寄售
+consignment-world = 世界
+consignment-equipment-url = 裝備連結
+consignment-eid = 裝備編號
+consignment-price = 標價（Credits）
+consignment-seller = 賣家
+consignment-fee = 預計手續費
+consignment-net = 賣家預計實收
+consignment-expires = 有效期限
+consignment-category = 裝備分類
+consignment-search = 搜尋裝備名稱
+consignment-source-time = 裝備資料擷取時間
+consignment-state-filter = 掛單狀態
+
+# 一口价挂单 · 告知
+consignment-direct-notice = 裝備由賣家持有，請在遊戲內聯絡賣家。本站不收款、不擔保。
+consignment-deposit-notice = 等候寄來裝備，本站尚未代管。
+consignment-mail-unavailable = 目前環境不接收寄售郵件，請勿寄送裝備。
+consignment-source-disclosure = 伺服器會將世界、裝備編號與讀取 key 傳送至 hvdata.gisadan.dev，以核對裝備與持有人。
+
+# 一口价挂单 · 操作与进度
+consignment-submit = 送出登記
+consignment-reprice = 變更標價
+consignment-withdraw = 取消掛單
+consignment-withdraw-confirm = 確定取消這筆掛單？
+consignment-register-again = 重新登記
+consignment-attempts = 已嘗試次數
+consignment-next-attempt = 下次解析時間
+consignment-paused = 外部讀取已暫停
+consignment-pending = 正在核對上次送出的結果
+consignment-reenter-url = 請重新輸入原裝備連結，使用原命令重試。
+
+# 一口价挂单 · 视图
+consignment-resolving = 解析中
+consignment-lookup-failed = 解析失敗
+consignment-ineligible = 已解析，無法掛單
+consignment-displayed = 已展示
+consignment-awaiting-deposit = 等候寄來裝備
+consignment-expired = 已過期
+consignment-closed = 已關閉
+consignment-disabled = 一口價服務已關閉
+consignment-unavailable = 一口價服務暫時無法使用
+consignment-not-found = 掛單不存在或已停止展示
+
+# 一口价挂单 · 资格原因
+consignment-not-tradeable = 裝備無法交易
+consignment-owner-missing = 來源未提供有效的持有人
+consignment-owner-mismatch = 裝備目前的持有人與登記帳號不符
+consignment-history-owner-mismatch = 本站最後確認的持有人與登記人不符，第一版不接受在本站以外轉手的裝備。
+consignment-history-alias-conflict = 本站同一件裝備的歷史紀錄互相矛盾
+consignment-history-unproven = 本站尚無足夠的交付或退還證明
+consignment-equipment-busy = 裝備已有掛單或仍有未結的拍賣履約
+
+# 一口价挂单 · 解析原因
+consignment-equipment-not-found = 找不到裝備或讀取 key 不正確
+consignment-source-request-rejected = 裝備來源拒絕了請求
+consignment-source-http-invalid = 裝備來源傳回不支援的回應
+consignment-source-schema-invalid = 裝備資料格式無效
+consignment-source-shape-unconfirmed = 裝備來源傳回尚未確認的欄位格式
+consignment-source-identity-mismatch = 來源傳回的裝備識別資料與請求不符
+consignment-source-too-large = 裝備資料超出讀取上限
+consignment-source-unavailable = 暫時無法連線至裝備來源
+consignment-source-timeout = 讀取裝備逾時
+consignment-source-rate-limited = 裝備來源目前限制請求頻率
+consignment-lookup-exhausted = 解析嘗試次數已用完
+consignment-credential-unavailable = 裝備讀取憑據暫時無法使用
+
+# 一口价挂单 · 关闭原因
+consignment-auction-lot-created = 裝備已進入拍賣；確認取回後可重新登記。
+consignment-seller-ineligible = 賣家目前不具備掛單資格
+consignment-service-disabled = 服務停用，登記已關閉
+consignment-seller-cancelled = 賣家已取消掛單
+consignment-admin-delisted = 管理員已下架
+consignment-lookup-deadline = 解析期限已到
+consignment-display-expired = 展示期限已到
+consignment-deposit-expired = 寄送裝備的期限已到
+
+# 一口价挂单 · 写拒绝
+consignment-already-open = 這件裝備已有您尚未結束的登記
+consignment-fee-changed = 費率已變更，請重新確認
+consignment-stale-version = 掛單已變更，請重新整理後確認
+consignment-listing-not-active = 掛單已停止接受操作
+consignment-command-conflict = 此命令編號已用於不同的請求
+consignment-registration-rate-limited = 已達每小時登記次數上限
+consignment-listing-limit-reached = 已達有效掛單數量上限
+consignment-invalid-price = 請輸入有效的整數標價
+consignment-invalid-equipment-url = 請輸入含規範正十進位編號的裝備連結
+consignment-world-unavailable = 此世界暫不接受新登記

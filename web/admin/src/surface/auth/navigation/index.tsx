@@ -74,6 +74,7 @@ type AdminNavName =
   | "Dashboard"
   | "Alerts"
   | "Auctions"
+  | "Consignment"
   | "Deliveries"
   | "Settlement"
   | "SettlementReturns"
@@ -96,6 +97,8 @@ function navTarget(route: RouteMatch): string | null {
   switch (route.name) {
     case "AuctionLots":
       return "Auctions";
+    case "ConsignmentListing":
+      return "Consignment";
     case "DeliveryDetail":
       return "Deliveries";
     case "SettlementReturnDetail":
@@ -197,6 +200,14 @@ export function NavigationLinks(props: { readonly currentRoute: RouteMatch }): J
           to="Auctions"
           icon="gavel"
           label={t("nav-auctions")}
+          currentRoute={props.currentRoute}
+          count={0}
+        />
+        {/* Admin 会话和当前状态读取未提供寄售开关，认证后的历史入口保持可用。 */}
+        <NavigationLink
+          to="Consignment"
+          icon="file"
+          label={t("consignment-admin-title")}
           currentRoute={props.currentRoute}
           count={0}
         />

@@ -7,6 +7,7 @@ import type { JSX } from "@solidjs/web";
 import { Show, useContext } from "solid-js";
 
 import { PublicSessionResourceContext } from "..";
+import { consignmentEnabled, useConsignmentCapability } from "../consignment/capability";
 import { LOGIN_ROUTE_HREF } from "../session/login-return";
 
 /** 导航目标与首页查询动作只维护一份；Solid 版的世界范围由外壳传入的链接生成器统一携带。 */
@@ -18,6 +19,7 @@ export function NavigationLinks(props: {
   onHome: () => void;
 }): JSX.Element {
   const session = useContext(PublicSessionResourceContext);
+  const consignment = useConsignmentCapability();
   const authenticated = () => {
     const result = session();
     return result?.ok === true && result.value?.authenticated === true;
@@ -36,6 +38,14 @@ export function NavigationLinks(props: {
       >
         {t("nav-auctions")}
       </Link>
+      <Show when={consignmentEnabled(consignment())}>
+        <Link
+          href="/consignment"
+          aria-current={isCurrent("ConsignmentCatalog", "ConsignmentDetail") ? "page" : "false"}
+        >
+          {t("consignment-nav")}
+        </Link>
+      </Show>
       <Link
         href={props.scopedHref("/bidlog")}
         aria-current={isCurrent("BidLog") ? "page" : "false"}
