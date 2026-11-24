@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use auction_domain::consignment::ListingEquipmentIdentity;
 use auction_domain::{CommandId, EquipmentId};
 use uuid::Uuid;
 
@@ -17,8 +18,10 @@ use crate::ports::admin::{
     AdminIntakeWrite, EquipmentKeySealerPort, admin_intake_aggregate_id,
 };
 use crate::ports::core::ApplicationFuture;
+use crate::ports::core::competition::canonical_equipment_lock_identity;
 use crate::ports::core::{
-    Clock, CompetitionTransaction, StoredCommand, TransactionPolicy, TransactionRunner,
+    Clock, CompetitionTransaction, CompetitionTransactionError, StoredCommand, TransactionPolicy,
+    TransactionRunner,
 };
 
 pub struct AdminIntakeService<R, S, K, C> {
@@ -92,6 +95,20 @@ where
         let lot_id = Uuid::new_v4();
         let source_reference = format!("{}:{}", snapshot.adapter, snapshot.external_equipment_id);
         let key_envelope = self.sealer.seal(equipment_id, &snapshot.key)?;
+        // 不变量 2：Admin 建 lot 与寄售强占用共用同一实物锁；原文 EID 先按数据库别名规则
+        // 规范化，无法构造身份的旧值不取锁并保持原有录入行为。
+        let equipment_identities =
+            canonical_equipment_lock_identity(&command.world_id, &snapshot.external_equipment_id)
+                .into_iter()
+                .collect::<Vec<_>>();
+        // 维护者 2026-11-23 决定：只有该实物此刻已有寄售预约或 position 持有才取实物租约。
+        // 无持有时保持既有 `run` 路径；预判之后才签发的预约由事务内强占用检查、Serializable
+        // 与 lot 守卫兜底。无法构造规范身份的件不查询、不取锁。
+        let equipment_held = if equipment_identities.is_empty() {
+            false
+        } else {
+            self.equipment_held(&equipment_identities).await?
+        };
         snapshot.clear_secret();
         let write = AdminIntakeWrite {
             command_id: command.command_id,
@@ -124,46 +141,74 @@ where
         let world_id = command.world_id;
         let result = self
             .repository
-            .run(TransactionPolicy::serializable(), move |transaction| {
-                let write = write.clone();
-                let actor_id = actor_id.clone();
-                let request_id = request_id.clone();
-                let world_id = world_id.clone();
-                Box::pin(async move {
-                    if let Some(stored) = transaction.find_command(command_id).await? {
-                        return replay_result(
-                            stored,
-                            "admin_auction_intake_item",
-                            aggregate_id,
-                            request_hash,
-                        );
-                    }
+            .run_with_equipment_gate(
+                equipment_held,
+                &equipment_identities,
+                TransactionPolicy::serializable(),
+                move |transaction| {
+                    let write = write.clone();
+                    let actor_id = actor_id.clone();
+                    let request_id = request_id.clone();
+                    let world_id = world_id.clone();
+                    Box::pin(async move {
+                        if let Some(stored) = transaction.find_command(command_id).await? {
+                            return replay_result(
+                                stored,
+                                "admin_auction_intake_item",
+                                aggregate_id,
+                                request_hash,
+                            );
+                        }
 
-                    let result = transaction.add_admin_intake(write).await?;
-                    result.validate().map_err(|error| {
-                        record_error(
-                            DiagnosticLevel::Warn,
-                            error.diagnostic_kind(),
-                            "admin_intake",
-                            "validate_owner_result",
-                            DiagnosticContext::default(),
-                        );
-                        AdminIntakeError::StoredResultCorrupt
-                    })?;
-                    transaction
-                        .append_admin_intake_record(AdminIntakeRecord {
-                            command_id,
-                            world_id,
-                            actor_id,
-                            request_id,
-                            result: result.clone(),
-                        })
-                        .await?;
-                    Ok(result)
+                        let result = transaction.add_admin_intake(write).await?;
+                        result.validate().map_err(|error| {
+                            record_error(
+                                DiagnosticLevel::Warn,
+                                error.diagnostic_kind(),
+                                "admin_intake",
+                                "validate_owner_result",
+                                DiagnosticContext::default(),
+                            );
+                            AdminIntakeError::StoredResultCorrupt
+                        })?;
+                        transaction
+                            .append_admin_intake_record(AdminIntakeRecord {
+                                command_id,
+                                world_id,
+                                actor_id,
+                                request_id,
+                                result: result.clone(),
+                            })
+                            .await?;
+                        Ok(result)
+                    })
+                },
+            )
+            .await;
+        // 既有 Admin 录入用“装备已存在”统一表达实物冲突；寄售强占用不新增 HTTP 错误码或译文，
+        // 因此在这里映射到同一个既有拒绝，由 HTTP 边界保持 409 equipment_conflict。
+        let result = match result {
+            Err(ApplicationError::CompetitionTransaction(
+                CompetitionTransactionError::EquipmentHeld,
+            )) => Err(CompetitionTransactionError::AdminIntakeEquipmentConflict.into()),
+            other => other,
+        }?;
+        Ok(result)
+    }
+
+    async fn equipment_held(
+        &self,
+        equipment: &[ListingEquipmentIdentity],
+    ) -> Result<bool, ApplicationError> {
+        let equipment = equipment.to_vec();
+        self.repository
+            .run(TransactionPolicy::read_committed(), move |transaction| {
+                let equipment = equipment.clone();
+                Box::pin(async move {
+                    transaction.any_equipment_held(&equipment).await.map_err(ApplicationError::from)
                 })
             })
-            .await?;
-        Ok(result)
+            .await
     }
 
     async fn find_replay(

@@ -33,8 +33,13 @@ impl MailDeliveryOrigin {
                 matches!(operation, MailDeliveryOperation::Send | MailDeliveryOperation::Take)
             }
             Self::SettlementReturnAction => matches!(operation, MailDeliveryOperation::Take),
-            Self::OperationsAlert | Self::LotWatch | Self::SellerSummary | Self::SeasonReminder => {
-                matches!(operation, MailDeliveryOperation::Send)
+            Self::OperationsAlert
+            | Self::LotWatch
+            | Self::SellerSummary
+            | Self::SeasonReminder
+            | Self::ConsignmentNotice => matches!(operation, MailDeliveryOperation::Send),
+            Self::ConsignmentDisposition => {
+                matches!(operation, MailDeliveryOperation::Take | MailDeliveryOperation::Return)
             }
         }
     }
@@ -132,6 +137,14 @@ impl MailDeliveryShape<'_> {
                 | MailDeliveryOrigin::SettlementReturnAction,
                 MailDeliveryOperation::Take,
             ) => self.attachment_ids.windows(2).all(|pair| pair[0] < pair[1]),
+            (MailDeliveryOrigin::ConsignmentDisposition, MailDeliveryOperation::Take) => {
+                // 第 4 期整封接受禁止含 Credits / COD 的寄件，Take 不会遇到现金；现金回执
+                // 金额核对在第 6 期现金腿出现时补。这里仍要求两者为零，避免未来形状被静默放行。
+                self.credits == 0 && self.cod == 0 && !self.attachment_ids.is_empty()
+            }
+            (MailDeliveryOrigin::ConsignmentDisposition, MailDeliveryOperation::Return) => {
+                !self.attachment_ids.is_empty()
+            }
             // 组合闭集之外的退回与领取已在 `check` 开头拒绝；这里同样失败关闭，不放行资产。
             _ => false,
         }
@@ -197,6 +210,20 @@ impl MailDeliveryShape<'_> {
             MailDeliveryOrigin::SeasonReminder => {
                 self.origin_id.starts_with("season_reminder:")
                     && valid_season_reminder_mail_id(self.external_mail_id)
+            }
+            MailDeliveryOrigin::ConsignmentNotice => {
+                let Some(notice_id) = self.origin_id.strip_prefix("consignment_notice:") else {
+                    return false;
+                };
+                canonical_uuid(notice_id)
+                    && self.external_mail_id == format!("consignment-notice:{notice_id}")
+            }
+            MailDeliveryOrigin::ConsignmentDisposition => {
+                let mut parts = self.origin_id.split(':');
+                parts.next() == Some("consignment")
+                    && parts.next().is_some_and(canonical_uuid)
+                    && parts.next().is_some_and(canonical_uuid)
+                    && parts.next().is_none()
             }
         }
     }
@@ -275,6 +302,9 @@ mod tests {
                 (MailDeliveryOrigin::LotWatch, MailDeliveryOperation::Send),
                 (MailDeliveryOrigin::SellerSummary, MailDeliveryOperation::Send),
                 (MailDeliveryOrigin::SeasonReminder, MailDeliveryOperation::Send),
+                (MailDeliveryOrigin::ConsignmentDisposition, MailDeliveryOperation::Return),
+                (MailDeliveryOrigin::ConsignmentDisposition, MailDeliveryOperation::Take),
+                (MailDeliveryOrigin::ConsignmentNotice, MailDeliveryOperation::Send),
             ]
         );
         for origin in MailDeliveryOrigin::ALL {
@@ -283,7 +313,8 @@ mod tests {
         for operation in operations {
             assert_eq!(MailDeliveryOperation::from_name(operation.as_str()), Some(operation));
         }
-        for unknown in ["", "settlement", "MAIL_INTAKE", "mail_intake "] {
+        assert_eq!(MailDeliveryOrigin::ConsignmentDisposition.as_str(), "consignment_disposition");
+        for unknown in ["", "settlement", "MAIL_INTAKE", "mail_intake ", "consignment_deposit"] {
             assert_eq!(MailDeliveryOrigin::from_name(unknown), None, "{unknown}");
         }
         for unknown in ["", "Send", "forward"] {

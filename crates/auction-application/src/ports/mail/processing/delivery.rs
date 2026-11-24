@@ -49,6 +49,10 @@ closed_names! {
         SellerSummary => "seller_summary",
         /// 换季前 isekai 领取与交付提醒；边界取自已冻结的赛季身份。
         SeasonReminder => "season_reminder",
+        /// 寄售处置的一次性 Take/Return；载荷必须携带原信键、冻结清单与 Return 证明。
+        ConsignmentDisposition => "consignment_disposition",
+        /// 寄售季前撤回通知；正文冻结季末时刻，只走通用 Send 投递。
+        ConsignmentNotice => "consignment_notice",
     }
 }
 
@@ -72,6 +76,8 @@ closed_names! {
         AuctionSellerSummary => "auction_seller_summary",
         /// 换季前 isekai 领取与交付提醒：正文绑定已冻结的赛季边界。
         IsekaiSeasonReminder => "isekai_season_reminder",
+        /// 寄售季前撤回通知：正文绑定冻结季窗，提示卖家在季末前从寄售页面撤回。
+        ConsignmentSeasonNotice => "consignment_season_notice",
         UserAssetsRejected => "user_assets_rejected",
         RegisterKey => "register_key",
         RegisterResult => "register_result",
@@ -122,6 +128,14 @@ impl MailNotificationTemplate {
                 ..MailNotificationBinding::plain(
                     MailDeliveryOrigin::SeasonReminder,
                     &["season_end"],
+                )
+            },
+            Self::ConsignmentSeasonNotice => MailNotificationBinding {
+                body: MailNotificationField::Required,
+                world: Some("isekai"),
+                ..MailNotificationBinding::plain(
+                    MailDeliveryOrigin::ConsignmentNotice,
+                    &["season_preclose"],
                 )
             },
             Self::UserAssetsRejected => MailNotificationBinding::plain(

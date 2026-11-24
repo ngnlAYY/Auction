@@ -50,6 +50,10 @@ impl DiagnosticError for ApplicationError {
             Self::CompetitionTransaction(CompetitionTransactionError::QueueWaitTimeout) => {
                 SafeErrorKind::COMPETITION_QUEUE_TIMEOUT
             }
+            // 与出价排队同义：实物锁在预算内未取得，不重试事务，客户端可原样重试。
+            Self::CompetitionTransaction(CompetitionTransactionError::EquipmentLockUnavailable) => {
+                SafeErrorKind::COMPETITION_QUEUE_TIMEOUT
+            }
             Self::CompetitionTransaction(CompetitionTransactionError::Conflict)
             | Self::SettlementTransaction(SettlementTransactionError::Conflict)
             | Self::AdminRulesTransaction(AdminRulesTransactionError::Conflict)
@@ -62,6 +66,7 @@ impl DiagnosticError for ApplicationError {
                 | CompetitionTransactionError::IntakeClosed
                 | CompetitionTransactionError::AdminIntakeSellerBlacklisted
                 | CompetitionTransactionError::AdminIntakeEquipmentConflict
+                | CompetitionTransactionError::EquipmentHeld
                 | CompetitionTransactionError::StaleState
                 | CompetitionTransactionError::InvalidState
                 | CompetitionTransactionError::BidderIneligible
@@ -193,6 +198,16 @@ mod tests {
                 ApplicationError::from(CompetitionTransactionError::QueueWaitTimeout),
                 SafeErrorKind::COMPETITION_QUEUE_TIMEOUT,
                 "competition_queue_timeout",
+            ),
+            (
+                ApplicationError::from(CompetitionTransactionError::EquipmentLockUnavailable),
+                SafeErrorKind::COMPETITION_QUEUE_TIMEOUT,
+                "competition_queue_timeout",
+            ),
+            (
+                ApplicationError::from(CompetitionTransactionError::EquipmentHeld),
+                SafeErrorKind::COMPETITION_REJECTED,
+                "competition_rejected",
             ),
             (
                 ApplicationError::from(PlayerNotificationError::Unavailable),

@@ -121,4 +121,16 @@ where
             crate::ports::mail::MailProcessingAttempt { result, pending_equipment_diagnostic }
         })
     }
+
+    fn route(
+        &self,
+        message: MailMessage,
+        consignment_candidate: bool,
+    ) -> crate::ports::mail::MailRoutingFuture<'_> {
+        Box::pin(async move {
+            let mut pending_equipment_diagnostic = None;
+            self.route_message(message, consignment_candidate, &mut pending_equipment_diagnostic)
+                .await
+        })
+    }
 }

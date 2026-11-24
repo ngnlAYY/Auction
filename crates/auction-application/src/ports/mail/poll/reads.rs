@@ -17,6 +17,10 @@ pub struct MailPollReadSummary {
     pub sender: String,
     pub subject: String,
     pub received_at: Timestamp,
+    /// 列表页声明的世界标记；旧版登记的行为空，恢复时须按门控决定是否允许继续。
+    pub list_world_marker: Option<String>,
+    /// 列表页原始分钟文本；旧版登记的行为空。
+    pub received_minute_raw: Option<String>,
 }
 
 impl MailPollReadSummary {
@@ -29,6 +33,12 @@ impl MailPollReadSummary {
             && self.subject == self.subject.trim()
             && !self.subject.chars().any(char::is_control)
             && self.received_at.timestamp_nanos_opt().is_some()
+            && self
+                .list_world_marker
+                .as_deref()
+                .is_none_or(|marker| matches!(marker, "main" | "isekai"))
+            && self.received_minute_raw.as_deref().is_none_or(|minute| valid_text(minute, 64))
+            && (self.received_minute_raw.is_some() || self.list_world_marker.is_none())
     }
 }
 
@@ -41,6 +51,8 @@ impl fmt::Debug for MailPollReadSummary {
             .field("sender", &"[REDACTED]")
             .field("subject", &"[REDACTED]")
             .field("received_at", &self.received_at)
+            .field("list_world_marker", &self.list_world_marker)
+            .field("has_received_minute_raw", &self.received_minute_raw.is_some())
             .finish()
     }
 }

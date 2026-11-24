@@ -38,6 +38,7 @@
 | `RealtimeRelay` / 会话服务 | 持久事件转发到 WebSocket Hub；Public/Admin 会话签发与校验 |
 | Admin 系列服务 | 凭据、用户、规则、runtime 配置、录入、世界与排期命令；通用前置条件在 `services/admin/envelope.rs` 的 `valid_command_envelope` |
 | `SettlementEquipmentLossPort` / `DeliverySentConfirmationPort` | 人工装备损失与人工 Sent 的 preview/confirm；冻结命令、身份与时窗，契约见[docs/contracts/database.md#结算资金恢复与投递](../../docs/contracts/database.md#结算资金恢复与投递) |
+| `DepositCommandService` / `DispositionMaintenanceService` / `QuarantineRecheckService` | 寄售 v2 收件：预约、撤回、运营止售、隔离解除与整封决定；Take/Return 处置维护与隔离重检。端口与状态见[docs/architecture.md#一口价挂单](../../docs/architecture.md#一口价挂单)与[docs/contracts/database.md#一口价挂单](../../docs/contracts/database.md#一口价挂单) |
 
 ## 横切约定
 

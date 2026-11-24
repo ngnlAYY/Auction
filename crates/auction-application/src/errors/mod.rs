@@ -187,6 +187,7 @@ impl ApplicationError {
                 CompetitionTransactionError::Failed(_)
                 | CompetitionTransactionError::SerializationConflict
                 | CompetitionTransactionError::QueueWaitTimeout
+                | CompetitionTransactionError::EquipmentLockUnavailable
                 | CompetitionTransactionError::CommandLedger(CommandLedgerError::Storage) => {
                     Retryable
                 }
@@ -196,6 +197,7 @@ impl ApplicationError {
                 | CompetitionTransactionError::IntakeClosed
                 | CompetitionTransactionError::AdminIntakeSellerBlacklisted
                 | CompetitionTransactionError::AdminIntakeEquipmentConflict
+                | CompetitionTransactionError::EquipmentHeld
                 | CompetitionTransactionError::StaleState
                 | CompetitionTransactionError::InvalidState
                 | CompetitionTransactionError::BidderIneligible
