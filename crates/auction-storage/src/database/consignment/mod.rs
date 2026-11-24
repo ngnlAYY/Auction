@@ -2,6 +2,8 @@
 //! 资格与可见性谓词、解析工作与全局许可、读取。各子模块的职责见其模块文档。
 
 pub(crate) mod commands;
+pub(crate) mod custody;
+pub(crate) mod deposit;
 pub(super) mod eligibility;
 pub(crate) mod listings;
 pub(crate) mod lookup;

@@ -90,6 +90,7 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 | 结算与资金 | [settlement](src/database/settlement)（现金账本、履约、调度、报表、策略、目录、补偿冲正与结算退件案件：案件投影、命令/事件/领回事实、持久 Take、补寄授权与资金返还，见[docs/guide/mail-flows.md#结算退件](../../docs/guide/mail-flows.md#结算退件)） |
 | 投递与恢复 | [delivery](src/database/delivery)（outbox、发送围栏、处置事实、装备损失、人工 Sent）、[recovery](src/database/recovery) |
 | 邮件与论坛 | [mail](src/database/mail)（轮询、入站、检查点、邮箱维护与通知事实）、[forum](src/database/forum)、[lot_watch](src/database/lot_watch) |
+| 寄售收件与代管 | [consignment](src/database/consignment)（挂单、解析工作与许可）、[consignment/deposit](src/database/consignment/deposit)（预约、整封接受、实物占用、position、处置与交接）、[mail/originals](src/database/mail/originals)（原信 K、观察与派生事实、隔离与重检、终局、起写/证明与交还旧 owner 的兼容行）；表族见[docs/contracts/database.md#一口价挂单](../../docs/contracts/database.md#一口价挂单) |
 | 实时与运维 | [realtime](src/database/realtime)（公开回放、竞价事件提交后补号；非竞价事件的同事务取号、写入与共用负载只经 `append.rs`，Admin 重放副本除外）、[operations](src/database/operations)（告警、资产对账、一致性巡检、SLI、审计与进程健康、运行时开关、通知模板修订） |
 | 运维数据库 | [maintenance](src/database/maintenance)（初始化、最小权限、重建、恢复预检、密钥轮换、部署证据、停机窗口与保留清理） |
 
@@ -119,4 +120,4 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 
 ## 数据密钥重加密读取面
 
-[crates/auction-storage/src/database/maintenance/key_rotation.rs](src/database/maintenance/key_rotation.rs) 只为 `auction-cli keys` 提供按域分页扫描、以旧 key ID 作 CAS 条件替换信封、列出各域 key ID 数量并追加 `system.data_key_reencrypt` 审计；不接触明文、密钥材料或指纹。
+[crates/auction-storage/src/database/maintenance/key_rotation/mod.rs](src/database/maintenance/key_rotation/mod.rs) 只为 `auction-cli keys` 提供按域分页扫描、以旧 key ID 作 CAS 条件替换信封、列出各域 key ID 数量并追加 `system.data_key_reencrypt` 审计；不接触明文、密钥材料或指纹。

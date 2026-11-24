@@ -122,7 +122,7 @@ pub(super) async fn retire_receipts(
 
 /// 卖方汇总与换季提醒在 sending 围栏前复核冻结收件人与冻结赛季边界。
 ///
-/// 卖方汇总只按收件人改名退役；换季提醒在边界已过、义务全部完成或收件人改名时退役。
+/// 卖方汇总与寄售季前通知只按收件人改名退役；换季提醒在边界已过、义务全部完成或收件人改名时退役。
 /// 冻结载荷、结算结果与义务状态都不改写。
 pub(super) async fn retire_player_notifications(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
@@ -135,7 +135,7 @@ pub(super) async fn retire_player_notifications(
             SELECT deliveries.id FROM public.deliveries AS deliveries
             WHERE deliveries.status IN ('pending', 'claimed')
               AND deliveries.sending_at IS NULL
-              AND deliveries.origin_kind IN ('seller_summary', 'season_reminder')
+              AND deliveries.origin_kind IN ('seller_summary', 'season_reminder', 'consignment_notice')
               AND "#,
         recipient_renamed_fact!(),
         r#"

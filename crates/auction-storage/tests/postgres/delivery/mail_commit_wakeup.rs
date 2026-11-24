@@ -200,6 +200,8 @@ async fn postgres_mail_subject_redaction_preserves_staged_identity() {
             sender: "Player".to_owned(),
             subject: raw.to_owned(),
             received_at: now,
+            list_world_marker: None,
+            received_minute_raw: None,
         };
         if mid == "9005" {
             // 模拟旧 Worker 已登记的原主题；升级后同一身份照常核验并消费。

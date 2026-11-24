@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use auction_application::consignment::{ConsignmentError, ListingBusinessRejection};
 use auction_domain::consignment::{
-    FeeBps, ListingEquipmentIdentity, ListingPrice, ListingReason, ListingSnapshot, ListingVersion,
-    UnknownListingReason,
+    FeeBps, HeldOffMarketReason, ListingEquipmentIdentity, ListingPrice, ListingReason,
+    ListingSnapshot, ListingState, ListingVersion,
 };
 use auction_time::Timestamp;
 use sqlx::postgres::PgRow;
@@ -67,21 +67,33 @@ impl LockedListing {
         let state: &str = row.try_get("state")?;
         let mode: &str = row.try_get("mode")?;
         let reason: Option<&str> = row.try_get("reason_code")?;
+        let state = state.parse().map_err(invalid_projection)?;
+        // `held_off_market` 的 reason_code 属于独立的 HeldOffMarketReason 闭集；挂单投影
+        // 的终态原因只承载 rejected/expired/closed，不能把止售原因误解析为终态原因。
+        let terminal_reason = match state {
+            ListingState::HeldOffMarket => {
+                reason.map(HeldOffMarketReason::parse).transpose()?;
+                None
+            }
+            state if !state.is_active() => reason.map(ListingReason::parse).transpose()?,
+            _ if reason.is_some() => {
+                return Err(WriteError::invariant("consignment_listing_reason"));
+            }
+            _ => None,
+        };
         Ok(Self {
             listing_id: row.try_get("id")?,
             identity: ListingLockIdentity::from_row(&row)?,
             snapshot: ListingSnapshot {
                 mode: mode.parse().map_err(invalid_projection)?,
-                state: state.parse().map_err(invalid_projection)?,
+                state,
                 state_version: ListingVersion::new(
                     row.try_get::<i64, _>("state_version")?.cast_unsigned(),
                 )
                 .map_err(invalid_projection)?,
                 price: ListingPrice::new(row.try_get("price")?).map_err(invalid_projection)?,
                 expires_at: row.try_get("expires_at")?,
-                reason: reason.map(ListingReason::parse).transpose().map_err(
-                    |UnknownListingReason| WriteError::invariant("consignment_listing_reason"),
-                )?,
+                reason: terminal_reason,
             },
             current_snapshot_id: row.try_get("current_snapshot_id")?,
             fee_bps: FeeBps::new(i64::from(row.try_get::<i16, _>("fee_bps")?))

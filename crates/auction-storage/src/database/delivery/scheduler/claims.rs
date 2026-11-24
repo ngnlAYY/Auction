@@ -79,6 +79,8 @@ pub(super) async fn claim_postgres(
     // 关闭类对应的来源/模板模式；与 runtime `operations.mail.send_classes` 同一闭集。
     let (suppressed_origins, suppressed_templates) =
         exclusions.suppressed_classes.suppressed_delivery_patterns();
+    // 通用领取不碰寄售处置投递：其 Take/Return 只由寄售专用链在一次性起写许可下执行，
+    // 结果未知只转人工核对（不变量 4）。
     let rows = sqlx::query(concat!(
         r#"WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
            SELECT id, command_id, request_digest, origin_kind, origin_id,
@@ -113,6 +115,8 @@ pub(super) async fn claim_postgres(
                  )
              AND "#,
         delivery_completion_gate!("(SELECT at FROM sql_clock)"),
+        " AND ",
+        delivery_generic_origin_guard!(),
         r#"
              AND NOT EXISTS (
                  SELECT 1
@@ -248,7 +252,9 @@ pub(super) async fn claim_postgres(
                        )
                  )
                  AND "#,
-            delivery_completion_gate!("(SELECT at FROM sql_clock)")
+            delivery_completion_gate!("(SELECT at FROM sql_clock)"),
+            " AND ",
+            delivery_generic_origin_guard!()
         ))
         .bind(delivery_id)
         .bind(lease_token)

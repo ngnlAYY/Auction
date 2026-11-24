@@ -36,11 +36,12 @@ pub(crate) use recovery_closure::{
     equipment_recovered_closure_sql, recovered_handoff_sent_proof_sql,
     recovery_closed_fulfillment_sql, recovery_disposed_delivery_sql,
 };
+mod return_case_intake;
 mod returns;
-pub(crate) use returns::{
-    consume_return_postgres, hold_for_manual_reconcile, lock_obligation,
-    system_settlement_return_source,
+pub(crate) use return_case_intake::{
+    consume_return_for_mail_in_tx, hold_for_manual_reconcile, lock_obligation,
 };
+pub(crate) use returns::{consume_return_postgres, system_settlement_return_source};
 mod sent_lookup;
 
 use self::claims::postgres::claim_postgres;

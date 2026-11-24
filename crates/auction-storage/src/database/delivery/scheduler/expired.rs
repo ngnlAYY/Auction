@@ -18,11 +18,15 @@ pub(super) async fn reconcile(
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<(), auction_application::core::RepositoryError> {
     // 候选读取不持业务锁；每条短事务内重新锁定并核验有效期。
-    let candidates = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM public.deliveries WHERE status='sending'
+    // 寄售处置投递的过期由寄售专用链按原起写事实核对，不能被通用回收改成人工对账
+    // （不变量 4：结果未知只转人工核对，绝不自动重发；起写许可只发一次）。
+    let candidates = sqlx::query_scalar::<_, Uuid>(concat!(
+        "SELECT id FROM public.deliveries AS deliveries WHERE status='sending'
          AND lease_expires_at+($2::bigint*interval '1 microsecond')<=$1
-         ORDER BY lease_expires_at,id LIMIT $3",
-    )
+         AND ",
+        delivery_generic_origin_guard!(),
+        " ORDER BY lease_expires_at,id LIMIT $3"
+    ))
     .bind(now)
     .bind(grace_micros)
     .bind(EXPIRED_SENDING_RECONCILE_LIMIT)
@@ -57,9 +61,11 @@ async fn expire_one(
         .fetch_optional(&mut *tx)
         .await?;
     // 过期只改变本次结果与 CAS fence，不能重置自动维护的跨尝试重排预算。
-    let row=sqlx::query(
+    // 同一来源排除在锁内 UPDATE 再执行一次：候选扫描与逐条回收之间可能有新行或旧 Worker
+    // 推进 fence（不变量 4，寄售 owner 的起写许可只发一次）。
+    let row=sqlx::query(concat!(
         "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
-         UPDATE public.deliveries SET status='manual_reconcile',lease_token=NULL,lease_expires_at=NULL,
+         UPDATE public.deliveries AS deliveries SET status='manual_reconcile',lease_token=NULL,lease_expires_at=NULL,
          completed_at=$2,external_reference=NULL,failure_code='lease_expired_outcome_unknown',
          result_metadata='{\"outcome_unknown\":true,\"reason\":\"sending_lease_expired\"}'::jsonb
              || CASE WHEN result_metadata ? 'sweep_retries'
@@ -69,8 +75,10 @@ async fn expire_one(
          WHERE id=$1 AND status='sending'
          AND lease_expires_at+($3::bigint*interval '1 microsecond')<=$2
          AND lease_expires_at+($3::bigint*interval '1 microsecond')<=(SELECT at FROM sql_clock)
-         RETURNING command_id,fencing_version,attempt_count,payload,created_at,origin_kind",
-    ).bind(id).bind(now).bind(grace_micros).fetch_optional(&mut *tx).await?;
+         AND ",
+        delivery_generic_origin_guard!(),
+        " RETURNING command_id,fencing_version,attempt_count,payload,created_at,origin_kind"
+    )).bind(id).bind(now).bind(grace_micros).fetch_optional(&mut *tx).await?;
     if let Some(row) = row {
         if let Some(account) = account {
             funding::finish_funded_delivery(

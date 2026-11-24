@@ -1,17 +1,20 @@
 //! 全局命令账本、首写能力与安全回放。
 
 use auction_application::consignment::{
-    ConsignmentError, ListingCredentialError, ListingOperation, RegistrationRequestMac,
-    WrappedRegistrationReplayKey,
+    ConsignmentError, DepositActor, DepositOperation, ListingCredentialError, ListingOperation,
+    RegistrationRequestMac, WrappedRegistrationReplayKey,
 };
 use auction_application::core::RequestHash;
+use auction_domain::consignment::OriginalMailKey;
 use serde_json::Value;
 use sqlx::{PgConnection, Row};
+use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 use crate::database::consignment::commands::errors::WriteError;
 use crate::database::consignment::commands::facts::PendingEvent;
-use crate::database::consignment::commands::session::CommandTransaction;
+use crate::database::consignment::commands::session::{CommandTransaction, DepositTransaction};
+use crate::database::consignment::commands::writer_v2::DepositWriter;
 
 /// 仅由受信会话或本地装配提供的演员身份。Worker 应使用固定服务身份。
 #[derive(Clone, Copy)]
@@ -60,6 +63,104 @@ impl Target {
         match self {
             Self::New => "new".into(),
             Self::Listing(listing_id) => listing_id.to_string(),
+        }
+    }
+}
+
+/// v2 命令的类型化目标；与 `000134` 的 `target_kind` 列逐项对应。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DepositTarget {
+    /// 挂单目标。
+    Listing(Uuid),
+    /// 预约目标。
+    Reservation(Uuid),
+    /// 隔离目标。
+    Quarantine(Uuid),
+    /// 最终决定目标。
+    FinalDecision(Uuid),
+    /// 原起写 attempt 目标。
+    OriginalAttempt(Uuid),
+    /// 稳定原信键 K。
+    MailKey(OriginalMailKey),
+    /// 冻结季目标。
+    Season {
+        /// 季身份文本。
+        season_id: String,
+        /// 冻结日历版本摘要。
+        calendar_version: [u8; 32],
+    },
+}
+
+impl DepositTarget {
+    /// 目标必须与 4A 的操作闭集一致；不匹配时不得写入账本。
+    pub(crate) fn valid_for(&self, operation: DepositOperation) -> bool {
+        matches!(
+            (self, operation),
+            (Self::Listing(_), DepositOperation::IssueReservation)
+                | (Self::Listing(_), DepositOperation::Withdraw)
+                | (Self::Listing(_), DepositOperation::AdminDelist)
+                | (Self::Listing(_), DepositOperation::ReleaseOperationsHold)
+                | (Self::Reservation(_), DepositOperation::ExpireReservation)
+                | (Self::Quarantine(_), DepositOperation::AppendQuarantineObservation)
+                | (Self::Quarantine(_), DepositOperation::RecheckQuarantine)
+                | (Self::Quarantine(_), DepositOperation::ReleaseQuarantine)
+                | (Self::FinalDecision(_), DepositOperation::StartDispositionWrite)
+                | (Self::OriginalAttempt(_), DepositOperation::ApplyMailProof)
+                | (Self::MailKey(_), DepositOperation::DecideEnvelope)
+                | (Self::Season { .. }, DepositOperation::SeasonNotice)
+                | (Self::Season { .. }, DepositOperation::SeasonClose)
+        )
+    }
+
+    pub(crate) fn request_target(&self) -> String {
+        match self {
+            Self::Listing(id)
+            | Self::Reservation(id)
+            | Self::Quarantine(id)
+            | Self::FinalDecision(id)
+            | Self::OriginalAttempt(id) => id.to_string(),
+            Self::MailKey(key) => format!(
+                "{}|{}|{}",
+                key.authenticated_bot_uid(),
+                auction_domain::consignment::settlement_world_code(key.world()),
+                key.external_mid()
+            ),
+            Self::Season { season_id, .. } => season_id.clone(),
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(super) fn columns(
+        &self,
+    ) -> (
+        &'static str,
+        Option<Uuid>,
+        Option<&str>,
+        Option<&str>,
+        Option<&str>,
+        Option<&str>,
+        Option<&[u8]>,
+    ) {
+        match self {
+            Self::Listing(id) => ("listing", Some(*id), None, None, None, None, None),
+            Self::Reservation(id) => ("reservation", Some(*id), None, None, None, None, None),
+            Self::Quarantine(id) => ("quarantine", Some(*id), None, None, None, None, None),
+            Self::FinalDecision(id) => ("final_decision", Some(*id), None, None, None, None, None),
+            Self::OriginalAttempt(id) => {
+                ("original_attempt", Some(*id), None, None, None, None, None)
+            }
+            Self::MailKey(key) => (
+                "mail_key",
+                None,
+                Some(key.authenticated_bot_uid()),
+                Some(auction_domain::consignment::settlement_world_code(key.world())),
+                Some(key.external_mid()),
+                None,
+                None,
+            ),
+            Self::Season { season_id, calendar_version } => {
+                ("season", None, None, None, None, Some(season_id), Some(calendar_version))
+            }
         }
     }
 }
@@ -180,6 +281,117 @@ impl<'conn> CommandTransaction<'conn> {
             code: row.try_get("result_code")?,
             body: row.try_get("result_body")?,
         }))
+    }
+}
+
+/// v2 账本仲裁结果：已有回执原样重放，或授予仅限本事务的首次写入能力。
+pub(crate) enum DepositArbitration<'w, 'tx, 'conn> {
+    /// 同命令 ID、同请求的首次回执。
+    Replay(StoredReceipt),
+    /// 本事务首次写入。
+    First(DepositWriter<'w, 'tx, 'conn>),
+}
+
+impl<'tx, 'conn> DepositTransaction<'tx, 'conn> {
+    /// 不变量 1、2、6：先核 actor、operation、target 与摘要，再由调用方判开关、资格和版本。
+    pub(crate) async fn arbitrate<'w>(
+        &'w mut self,
+        actor: DepositActor,
+        operation: DepositOperation,
+        target: DepositTarget,
+        request_hash: RequestHash,
+        request_id: Option<&'w str>,
+    ) -> Result<DepositArbitration<'w, 'tx, 'conn>, WriteError> {
+        if !target.valid_for(operation) {
+            return Err(WriteError::invariant("consignment_deposit_command_target"));
+        }
+        let row = sqlx::query(
+            "SELECT schema_version, actor_kind, actor_ref, operation, request_target,
+                    request_digest, target_kind, target_id, target_bot_uid, target_world_id,
+                    target_external_mid, target_season_id, target_calendar_version,
+                    result_status, result_code, result_body
+             FROM public.consignment_commands WHERE command_id = $1",
+        )
+        .bind(self.command_id)
+        .fetch_optional(self.connection())
+        .await?;
+        let Some(row) = row else {
+            return Ok(DepositArbitration::First(DepositWriter {
+                tx: self,
+                actor,
+                operation,
+                target,
+                events: Vec::new(),
+                request_hash,
+                request_id,
+            }));
+        };
+        let schema_version: i16 = row.try_get("schema_version")?;
+        let digest: &[u8] = row.try_get("request_digest")?;
+        let same_target = match &target {
+            DepositTarget::Listing(id)
+            | DepositTarget::Reservation(id)
+            | DepositTarget::Quarantine(id)
+            | DepositTarget::FinalDecision(id)
+            | DepositTarget::OriginalAttempt(id) => {
+                row.try_get::<Option<&str>, _>("target_kind")? == Some(target.kind())
+                    && row.try_get::<Option<Uuid>, _>("target_id")? == Some(*id)
+            }
+            DepositTarget::MailKey(key) => {
+                row.try_get::<Option<&str>, _>("target_kind")? == Some("mail_key")
+                    && row.try_get::<Option<&str>, _>("target_bot_uid")?
+                        == Some(key.authenticated_bot_uid())
+                    && row.try_get::<Option<&str>, _>("target_world_id")?
+                        == Some(auction_domain::consignment::settlement_world_code(key.world()))
+                    && row.try_get::<Option<&str>, _>("target_external_mid")?
+                        == Some(key.external_mid())
+            }
+            DepositTarget::Season { season_id, calendar_version } => {
+                row.try_get::<Option<&str>, _>("target_kind")? == Some("season")
+                    && row.try_get::<Option<&str>, _>("target_season_id")? == Some(season_id)
+                    && row.try_get::<Option<&[u8]>, _>("target_calendar_version")?
+                        == Some(calendar_version.as_slice())
+            }
+        };
+        let digest_matches =
+            digest.len() == 32 && bool::from(digest.ct_eq(request_hash.as_bytes().as_slice()));
+        if schema_version != 2
+            || row.try_get::<&str, _>("actor_kind")? != actor.kind()
+            || row.try_get::<&str, _>("actor_ref")? != actor_reference(&actor)
+            || row.try_get::<&str, _>("operation")? != operation.as_str()
+            || row.try_get::<&str, _>("request_target")? != target.request_target()
+            || !same_target
+            || !digest_matches
+        {
+            return Err(ConsignmentError::CommandIdConflict.into());
+        }
+        Ok(DepositArbitration::Replay(StoredReceipt {
+            status: row.try_get("result_status")?,
+            code: row.try_get("result_code")?,
+            body: row.try_get("result_body")?,
+        }))
+    }
+}
+
+pub(crate) fn actor_reference(actor: &DepositActor) -> String {
+    match actor {
+        DepositActor::PublicUser(user_id) => user_id.as_uuid().to_string(),
+        DepositActor::Admin(actor) => actor.clone(),
+        DepositActor::Worker | DepositActor::System => "consignment".into(),
+    }
+}
+
+impl DepositTarget {
+    pub(crate) const fn kind(&self) -> &'static str {
+        match self {
+            Self::Listing(_) => "listing",
+            Self::Reservation(_) => "reservation",
+            Self::Quarantine(_) => "quarantine",
+            Self::FinalDecision(_) => "final_decision",
+            Self::OriginalAttempt(_) => "original_attempt",
+            Self::MailKey(_) => "mail_key",
+            Self::Season { .. } => "season",
+        }
     }
 }
 

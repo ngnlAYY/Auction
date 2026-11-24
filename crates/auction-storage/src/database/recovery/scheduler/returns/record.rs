@@ -57,24 +57,41 @@ pub(crate) async fn record_return_postgres(
                    recovery.payment_obligation_id::text,
                    recovery.equipment_obligation_id::text
                )
+           LEFT JOIN public.settlement_recovery_return_handoffs AS handoff
+               ON handoff.return_mail_id = inbound.id
            INNER JOIN public.settlement_obligations AS obligation
                ON obligation.id::text = inbound.decision_metadata ->> 'obligation_id'
            INNER JOIN public.equipment AS equipment
                ON equipment.id = recovery.equipment_id
-           WHERE recovery.return_mail_id IS NULL
+           -- 接管引用允许原 recovery 已预关联该退件；仍要求无消费事实，由本事务沿用旧分类消费一次。
+           WHERE (
+                 recovery.return_mail_id IS NULL
+                 OR (recovery.return_mail_id = inbound.id AND handoff.id IS NOT NULL)
+             )
              AND recovery.stage <> 'completed'
              AND inbound.mail_kind = 'delivery'
              AND inbound.status = 'accepted'
-             AND inbound.decision_code = 'settlement_recovery_returned'
              AND inbound.received_at <= $1
              AND NOT EXISTS (
                  SELECT 1
                  FROM public.settlement_recovery_return_consumptions AS consumed
                  WHERE consumed.return_mail_id = inbound.id
              )
-             AND "#,
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM public.settlement_return_evidence AS evidence
+                 WHERE evidence.return_mail_id = inbound.id
+             )
+             AND ((
+                 inbound.decision_code = 'settlement_recovery_returned'
+                 AND "#,
         system_settlement_return_source!(),
         r#"
+             ) OR (
+                 handoff.id IS NOT NULL
+                 AND handoff.recovery_id = recovery.id
+                 AND handoff.obligation_id = obligation.id
+             ))
            ORDER BY inbound.received_at, inbound.id, recovery.id
            LIMIT 1
            FOR UPDATE OF recovery SKIP LOCKED"#
@@ -179,7 +196,7 @@ pub(crate) async fn record_return_postgres(
                updated_at = $5
            WHERE id = $6
              AND state_version = $7
-             AND return_mail_id IS NULL
+             AND (return_mail_id IS NULL OR return_mail_id = $1)
              AND stage <> 'completed'
            RETURNING id, stage, state_version"#,
     )

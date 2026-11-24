@@ -26,6 +26,7 @@ mod actions;
 mod advance;
 mod mapping;
 mod returns;
+pub(crate) use returns::{RecoveryHandoff, handoff_recovery_return_in_tx};
 
 impl RecoveryWorkStore for DatabaseStore {
     fn record_due_return(

@@ -15,13 +15,14 @@ use serde_json::{Value, json};
 use crate::support;
 
 /// 投递来源：通知来源、结算来源，以及闭集外的值（应落入 `manual`）。
-const ORIGINS: [&str; 9] = [
+const ORIGINS: [&str; 10] = [
     "mail_intake",
     "settlement_recovery_action",
     "operations_alert",
     "lot_watch",
     "seller_summary",
     "season_reminder",
+    "consignment_notice",
     "settlement",
     "manual",
     "",

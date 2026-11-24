@@ -3,7 +3,7 @@
   "format": "auction-retention-policy.v2",
   "policy_id": "auction-retention-policy",
   "version": 2,
-  "database_schema_version": 133,
+  "database_schema_version": 134,
   "authority": "user-decisions-7-23-25-26-29-31",
   "inventory_authorizes_mutation": false,
   "deletion_requires_dry_run_and_operator_approval": true,
@@ -44,7 +44,16 @@
         "mail_commands",
         "mail_admin_commands",
         "mail_poll_state",
-        "mail_scan_checkpoints"
+        "mail_scan_checkpoints",
+        "mail_evidence_sessions",
+        "mail_originals",
+        "mail_original_links",
+        "mail_envelope_observations",
+        "mail_observation_conflicts",
+        "mail_initial_decisions",
+        "mail_quarantines",
+        "mail_quarantine_releases",
+        "mail_final_dispositions"
       ]
     },
     {
@@ -266,7 +275,18 @@
         "consignment_events",
         "consignment_snapshots",
         "consignment_listing_lot_baselines",
-        "consignment_listing_auction_conflicts"
+        "consignment_listing_auction_conflicts",
+        "consignment_season_windows",
+        "consignment_deposit_reservations",
+        "consignment_equipment_claims",
+        "consignment_custody_assets",
+        "consignment_deposit_items",
+        "consignment_custody_positions",
+        "consignment_disposition_generations",
+        "consignment_custody_events",
+        "consignment_custody_controls",
+        "consignment_equipment_handoffs",
+        "consignment_season_notices"
       ]
     },
     {
@@ -277,7 +297,9 @@
       "mutation_authorized": false,
       "tables": [
         "consignment_registration_secrets",
-        "consignment_replay_keys"
+        "consignment_replay_keys",
+        "consignment_reservation_secrets",
+        "mail_evidence_envelopes"
       ]
     },
     {
@@ -345,7 +367,12 @@
         "settlement_funding_receipts",
         "settlement_funding_returns",
         "settlement_funding_delivery_bindings",
-        "settlement_funding_commands"
+        "settlement_funding_commands",
+        "settlement_recovery_return_handoffs",
+        "mail_disposition_work",
+        "mail_disposition_attempts",
+        "mail_disposition_write_starts",
+        "mail_disposition_proofs"
       ]
     },
     {
@@ -360,7 +387,9 @@
         "auction_intake_targets",
         "mail_runtime_generation",
         "consignment_lookup_work",
-        "consignment_lookup_control"
+        "consignment_lookup_control",
+        "consignment_mail_readiness",
+        "mail_quarantine_rechecks"
       ]
     },
     {

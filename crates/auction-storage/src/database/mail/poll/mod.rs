@@ -20,6 +20,8 @@ mod inbound;
 mod reads;
 mod state;
 
+pub(crate) use reads::complete_prefix;
+
 impl MailPollReadJournal for DatabaseStore {
     fn pending_reads(
         &self,

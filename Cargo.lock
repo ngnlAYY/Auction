@@ -419,6 +419,7 @@ version = "0.1.8"
 dependencies = [
  "async-stream",
  "auction-application",
+ "auction-contracts",
  "auction-domain",
  "auction-integrations",
  "auction-jobs",

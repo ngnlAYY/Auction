@@ -23,6 +23,10 @@ fn send_category_mirrors_sql_function_order() {
         send_category("seller_summary", &json!({"operation": "send"})).as_deref(),
         Some("settlement")
     );
+    assert_eq!(
+        send_category("consignment_notice", &json!({"operation": "send"})).as_deref(),
+        Some("settlement")
+    );
     for template in ["register_key", "rekey_key", "rekey_result", "rebind_result"] {
         assert_eq!(
             send_category("mail_intake", &json!({"operation": "send", "template": template}))
@@ -125,10 +129,11 @@ fn retired_player_notification(
 
 #[test]
 fn player_notification_preflight_retirements_validate() {
-    // 收件人改名同时退役卖方汇总与换季提醒；换季提醒还可在边界已过或义务完成时退役。
+    // 收件人改名同时退役卖方汇总、换季提醒与寄售季前通知；换季提醒还可在边界已过或义务完成时退役。
     for (origin_kind, reason_code, failure_code) in [
         ("seller_summary", "recipient_renamed", "recipient_renamed"),
         ("season_reminder", "recipient_renamed", "recipient_renamed"),
+        ("consignment_notice", "recipient_renamed", "recipient_renamed"),
         ("season_reminder", "season_boundary_passed", "season_notice_invalidated"),
         ("season_reminder", "season_reminder_resolved", "season_notice_invalidated"),
     ] {

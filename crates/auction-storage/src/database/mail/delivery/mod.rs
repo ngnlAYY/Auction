@@ -20,6 +20,7 @@ mod validation;
 pub(crate) use activation::activate_in_transaction;
 use activation::activate_postgres;
 pub(crate) use errors::MailDeliveryTransactionError;
+pub(crate) use outbox::enqueue_in_transaction_with_id;
 use outbox::enqueue_within_limit_postgres;
 use outbox::{enqueue_postgres, prepare_postgres};
 use validation::validate_command;

@@ -12,6 +12,7 @@ use super::management::{Management, execute};
 use super::receipts::closed;
 use super::target::existing;
 use crate::database::DatabaseStore;
+use crate::database::consignment::eligibility::claims::cancel_active_reservations;
 
 /// 取消以当前活动版为前置，保留第一次已提交的关闭原因。不变量 1、2、3、5、8。
 pub(super) async fn withdraw(
@@ -19,21 +20,37 @@ pub(super) async fn withdraw(
     cmd: WithdrawListingCommand,
 ) -> Result<ListingCommandOutcome<ListingClosed>, ConsignmentError> {
     existing(store, cmd.target.command_id, cmd.target.listing_id, &cmd, |cmd, identity, tx| {
-        Box::pin(execute(
-            Management {
-                actor: Actor::PublicUser(cmd.target.seller_user_id.as_uuid()),
-                operation: ListingOperation::Withdraw,
-                listing_id: cmd.target.listing_id,
-                request_hash: cmd.request_hash,
-                request_id: cmd.request_id.as_deref(),
-                trigger: ListingTrigger::Withdraw { expected_version: cmd.target.expected_version },
-                changed: ChangedOperation::Withdraw,
-                enabled: true,
-            },
-            identity,
-            tx,
-            closed,
-        ))
+        Box::pin(async move {
+            let outcome = execute(
+                Management {
+                    actor: Actor::PublicUser(cmd.target.seller_user_id.as_uuid()),
+                    operation: ListingOperation::Withdraw,
+                    listing_id: cmd.target.listing_id,
+                    request_hash: cmd.request_hash,
+                    request_id: cmd.request_id.as_deref(),
+                    trigger: ListingTrigger::Withdraw {
+                        expected_version: cmd.target.expected_version,
+                    },
+                    changed: ChangedOperation::Withdraw,
+                    enabled: true,
+                },
+                identity,
+                tx,
+                closed,
+            )
+            .await?;
+            if matches!(outcome, ListingCommandOutcome::Accepted(_)) {
+                let now = super::target::now(tx.connection()).await?;
+                cancel_active_reservations(
+                    tx.connection(),
+                    cmd.target.listing_id,
+                    cmd.target.command_id.as_uuid(),
+                    now,
+                )
+                .await?;
+            }
+            Ok(outcome)
+        })
     })
     .await
 }

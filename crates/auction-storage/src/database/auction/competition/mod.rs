@@ -9,6 +9,7 @@ use auction_application::core::{
     SlowProxyExecutionContext, StoredCommand, TransactionFailure, TransactionFuture,
     TransactionPolicy, TransactionRunner,
 };
+use auction_domain::consignment::ListingEquipmentIdentity;
 use auction_domain::{AuctionId, CompetitionPlan, LotId, ProxyAuthorizationId, UserId};
 use auction_time::Timestamp;
 use sqlx::Postgres;
@@ -16,12 +17,14 @@ use uuid::Uuid;
 
 use crate::database::DatabaseStore;
 use crate::database::TrackedTransaction as Transaction;
+use crate::database::consignment::commands::EquipmentLease;
 mod admin;
 mod after_commit;
 mod bid_queue;
 mod bidding;
 mod lifecycle;
 mod mapping;
+mod preflight;
 
 pub(crate) use mapping::*;
 
@@ -211,6 +214,45 @@ impl TransactionRunner for DatabaseStore {
             self.run_holding_auction_queue(lease, policy, operation).await
         }
     }
+
+    /// 拍卖与寄售共用的实物准入：先取实物租约，再执行既有事务尝试、观测窗口与提交后处理。
+    ///
+    /// 不变量 2：实物锁必须早于 Serializable 快照；租约覆盖事务、提交与提交后工作，避免
+    /// 同一装备在拍卖建 lot 与寄售强占用之间出现无锁窗口。
+    ///
+    /// 维护者 2026-11-23 决定：调用方在进入本入口前已做只读门控，只有该实物此刻存在寄售
+    /// 预约或 position 持有时才调用这里；没有任何持有时应用层直接走既有 `run`，不取租约、
+    /// 不占出价队列配额。锁内强占用检查无论是否经过本入口都保留，用来兜住门控预判之后才
+    /// 签发的预约；Serializable 重试与 lot 守卫是第二道防线。
+    #[allow(clippy::manual_async_fn)]
+    fn run_with_equipment_locks<T, E, F>(
+        &self,
+        equipment: &[ListingEquipmentIdentity],
+        policy: TransactionPolicy,
+        operation: F,
+    ) -> impl Future<Output = Result<T, E>> + Send
+    where
+        T: Send,
+        E: TransactionFailure,
+        F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send,
+    {
+        async move {
+            let lease = EquipmentLease::acquire(self.pool(), equipment).await.map_err(E::from)?;
+            let result = self.run(policy, operation).await;
+            lease.release().await;
+            result
+        }
+    }
+}
+
+/// 数据库 lot 守卫对寄售强占用的确定性拒绝；只在 SQLSTATE 与显式约束名同时匹配时成立。
+pub(crate) fn is_equipment_busy_error(error: &sqlx::Error) -> bool {
+    matches!(
+        error,
+        sqlx::Error::Database(database)
+            if database.code().as_deref() == Some("23514")
+                && database.constraint() == Some("c4_claims_equipment_busy")
+    )
 }
 
 impl DatabaseStore {
@@ -314,6 +356,23 @@ impl CompetitionTransaction for PostgresCompetitionTransaction {
     ) -> impl Future<Output = Result<Option<StoredCommand>, CompetitionTransactionError>> + Send
     {
         async move { self.find_command_inner(command_id).await }
+    }
+
+    fn any_equipment_held(
+        &mut self,
+        equipment: &[ListingEquipmentIdentity],
+    ) -> impl Future<Output = Result<bool, CompetitionTransactionError>> + Send {
+        async move { preflight::any_equipment_held(self, equipment).await }
+    }
+
+    fn mail_auction_submission_exists(
+        &mut self,
+        mailbox_key: &str,
+        external_mail_id: &str,
+    ) -> impl Future<Output = Result<bool, CompetitionTransactionError>> + Send {
+        async move {
+            preflight::mail_auction_submission_exists(self, mailbox_key, external_mail_id).await
+        }
     }
 
     fn insert_command(

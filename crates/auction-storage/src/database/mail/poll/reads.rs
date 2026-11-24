@@ -26,7 +26,8 @@ pub(super) async fn pending(
         .map_err(|error| storage_error_from(error, "开启 MoogleMail 待读事务失败"))?;
     lock_claim(&mut transaction, claim, world_id).await?;
     let rows = sqlx::query(
-        "SELECT external_mail_id, world_id, sender, subject, received_at
+        "SELECT external_mail_id, world_id, sender, subject, received_at,
+                list_world_marker, received_minute_raw
          FROM public.mail_poll_pending_reads
          WHERE mailbox_key = $1 AND world_id = $2
          ORDER BY read_sequence LIMIT $3",
@@ -46,6 +47,8 @@ pub(super) async fn pending(
                 sender: row.try_get("sender")?,
                 subject: row.try_get("subject")?,
                 received_at: row.try_get("received_at")?,
+                list_world_marker: row.try_get("list_world_marker")?,
+                received_minute_raw: row.try_get("received_minute_raw")?,
             };
             Ok::<_, sqlx::Error>(summary)
         })
@@ -84,6 +87,10 @@ pub(super) async fn stage(
         })
         .collect::<Vec<_>>();
     let received_at = summaries.iter().map(|summary| summary.received_at).collect::<Vec<_>>();
+    let list_world_markers =
+        summaries.iter().map(|summary| summary.list_world_marker.as_deref()).collect::<Vec<_>>();
+    let received_minute_raw =
+        summaries.iter().map(|summary| summary.received_minute_raw.as_deref()).collect::<Vec<_>>();
     let mut transaction = pool
         .begin()
         .await
@@ -93,20 +100,28 @@ pub(super) async fn stage(
     // 不覆盖第一次 GET 前已提交的依据。任一项不匹配即回滚整批，不能提交其余项。
     let verified = sqlx::query(
         "INSERT INTO public.mail_poll_pending_reads
-            (mailbox_key, world_id, external_mail_id, sender, subject, received_at)
-         SELECT $1, $2, summary.external_mail_id, summary.sender, summary.subject, summary.received_at
-         FROM UNNEST($3::text[], $4::text[], $5::text[], $6::timestamptz[])
-             WITH ORDINALITY AS summary(external_mail_id, sender, subject, received_at, position)
+            (mailbox_key, world_id, external_mail_id, sender, subject, received_at,
+             list_world_marker, received_minute_raw)
+         SELECT $1, $2, summary.external_mail_id, summary.sender, summary.subject,
+                summary.received_at, summary.list_world_marker, summary.received_minute_raw
+         FROM UNNEST($3::text[], $4::text[], $5::text[], $6::timestamptz[],
+                     $7::text[], $8::text[])
+             WITH ORDINALITY AS summary(external_mail_id, sender, subject, received_at,
+                                        list_world_marker, received_minute_raw, position)
          ORDER BY summary.position
          ON CONFLICT (mailbox_key, external_mail_id) DO UPDATE
          SET external_mail_id = EXCLUDED.external_mail_id
          WHERE mail_poll_pending_reads.world_id = EXCLUDED.world_id
            AND mail_poll_pending_reads.sender = EXCLUDED.sender
-           AND (CASE WHEN starts_with(mail_poll_pending_reads.subject, $7)
+           AND (CASE WHEN starts_with(mail_poll_pending_reads.subject, $9)
                      THEN mail_poll_pending_reads.subject
-                     ELSE $7 || encode(sha256(convert_to(mail_poll_pending_reads.subject, 'UTF8')), 'hex')
+                     ELSE $9 || encode(sha256(convert_to(mail_poll_pending_reads.subject, 'UTF8')), 'hex')
                 END) COLLATE \"C\" = EXCLUDED.subject
-           AND mail_poll_pending_reads.received_at = EXCLUDED.received_at",
+           AND mail_poll_pending_reads.received_at = EXCLUDED.received_at
+           AND mail_poll_pending_reads.list_world_marker
+               IS NOT DISTINCT FROM EXCLUDED.list_world_marker
+           AND mail_poll_pending_reads.received_minute_raw
+               IS NOT DISTINCT FROM EXCLUDED.received_minute_raw",
     )
     .bind(&claim.mailbox_key)
     .bind(world_id)
@@ -114,6 +129,8 @@ pub(super) async fn stage(
     .bind(&senders)
     .bind(&subjects)
     .bind(&received_at)
+    .bind(&list_world_markers)
+    .bind(&received_minute_raw)
     .bind(SUBJECT_DIGEST_PREFIX)
     .execute(&mut *transaction)
     .await
@@ -188,7 +205,7 @@ async fn check_live_claim(
     Ok(())
 }
 
-pub(super) async fn complete_prefix(
+pub(crate) async fn complete_prefix(
     transaction: &mut Transaction<'_, Postgres>,
     mailbox_key: &str,
     completed_cursor: Option<&str>,

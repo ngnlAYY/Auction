@@ -1,7 +1,8 @@
 //! 寄售事务的 SQLSTATE 分类与脱敏错误边界。
 
+use auction_application::consignment::ReservationSecretCryptoError;
 use auction_application::consignment::{ConsignmentError, ListingBusinessRejection};
-use auction_domain::consignment::ListingError;
+use auction_domain::consignment::{ListingError, UnknownHeldOffMarketReason, UnknownListingReason};
 use thiserror::Error;
 
 use crate::database::backend::{
@@ -86,6 +87,42 @@ impl From<sqlx::Error> for WriteError {
             }
         };
         ConsignmentError::from(business).into()
+    }
+}
+
+impl From<ListingError> for WriteError {
+    fn from(error: ListingError) -> Self {
+        invalid_projection(error)
+    }
+}
+
+impl From<std::num::TryFromIntError> for WriteError {
+    fn from(_error: std::num::TryFromIntError) -> Self {
+        Self::invariant("consignment_integer_range")
+    }
+}
+
+impl From<UnknownListingReason> for WriteError {
+    fn from(_error: UnknownListingReason) -> Self {
+        Self::invariant("consignment_listing_reason")
+    }
+}
+
+impl From<UnknownHeldOffMarketReason> for WriteError {
+    fn from(_error: UnknownHeldOffMarketReason) -> Self {
+        Self::invariant("consignment_held_reason")
+    }
+}
+
+impl From<ReservationSecretCryptoError> for WriteError {
+    fn from(error: ReservationSecretCryptoError) -> Self {
+        ConsignmentError::from(error).into()
+    }
+}
+
+impl From<auction_time::ParseError> for WriteError {
+    fn from(_error: auction_time::ParseError) -> Self {
+        Self::invariant("consignment_instant_parse")
     }
 }
 

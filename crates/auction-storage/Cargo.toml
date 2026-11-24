@@ -31,6 +31,8 @@ uuid = { workspace = true, features = ["v5"] }
 url.workspace = true
 
 [dev-dependencies]
+# 可选：跨层对齐用例用 4W 的严格 DTO 解码 4A 构造、4M 落库的同一份回执。
+auction-contracts.workspace = true
 # 可选：结算退件巡检的贯通用例用真实 MoogleMail 解析器把详情页 HTML 变成领取证明，再经应用服务与
 # 本 crate 入账；不进入运行时制品，不连接外部账号。
 auction-integrations.workspace = true

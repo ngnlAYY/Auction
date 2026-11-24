@@ -4,6 +4,7 @@ use auction_application::recovery::{
     RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
     RecoveryConfirmationResult,
 };
+use auction_domain::consignment::ListingEquipmentIdentity;
 use auction_domain::legacy_natural_key_uuid;
 use auction_time::{TimeDelta, Timestamp};
 use serde_json::json;
@@ -18,12 +19,23 @@ use super::scope::RecoveryRow;
 use super::scope::RelistResult;
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::operations::audit_health::AuditWriteResult;
+use crate::database::pool::TrackedPool;
 use crate::database::realtime::SequencedEvent;
 use crate::database::realtime::append_sequenced_event;
 use crate::database::realtime::preview_catalog_changed_payload;
 
 /// 旧赛季装备在赛季开始后不能重挂的阻断码；Admin 报表经防腐层显示为 `recovery_relist_unavailable`。
 const RELIST_SEASON_CLOSED: &str = "relist_season_closed";
+/// 实物正被寄售活动预约或代管持有时暂不重列；与赛季关闭一样退出自动重试。
+const RELIST_EQUIPMENT_HELD: &str = "relist_equipment_held";
+
+/// 重列事务开始前预读的实物身份；锁内只复核身份，不把预读当作授权。
+#[derive(Debug, Clone)]
+pub(super) struct PreloadedRecoveryEquipment {
+    pub(super) identity: Option<ListingEquipmentIdentity>,
+    /// 预读时该实物是否已被寄售预约或 position 持有；只有为真时才需要实物租约。
+    pub(super) equipment_held: bool,
+}
 
 pub(super) async fn relist_recovery(
     transaction: &mut Transaction<'_, Postgres>,
@@ -62,6 +74,36 @@ pub(super) async fn relist_recovery(
             lot_id: None,
             blocking_code: Some(RELIST_SEASON_CLOSED),
         });
+    }
+    // 不变量 2、6：同一 `(world, 规范 EID)` 的寄售活动预约或代管 position 与拍卖建 lot
+    // 共用实物互斥行。锁内显式查持有者，被持有时暂不重列，零新 lot；阻断码与赛季关闭
+    // 一样退出自动重试，交由 Admin 处置寄售侧后再重列。
+    if consignment_claim_schema_available(transaction).await.map_err(map_sql_error)? {
+        let equipment_held: bool = sqlx::query_scalar(
+            r#"SELECT EXISTS (
+                   SELECT 1
+                   FROM public.equipment AS equipment
+                   INNER JOIN public.consignment_equipment_claims AS claim
+                       ON claim.world_id = equipment.world_id
+                      AND claim.canonical_eid =
+                          public.consignment_eid_alias(equipment.external_equipment_id)
+                   WHERE equipment.id = $1
+                     AND (claim.reservation_id IS NOT NULL OR claim.position_id IS NOT NULL)
+               )"#,
+        )
+        .bind(original_lot.equipment_id)
+        .fetch_one(&mut **transaction)
+        .await
+        .map_err(map_sql_error)?;
+        if equipment_held {
+            return Ok(RelistResult {
+                stage: "relist_pending",
+                resolution: action.as_str(),
+                auction_id: None,
+                lot_id: None,
+                blocking_code: Some(RELIST_EQUIPMENT_HELD),
+            });
+        }
     }
     // 赛季开始前的新赛季草稿不接收装备，按“暂无可重挂目标”保留持久化退避。
     let row = sqlx::query(
@@ -192,6 +234,150 @@ pub(super) async fn relist_recovery(
         lot_id: Some(relisted_lot_id),
         blocking_code: None,
     })
+}
+
+/// 按恢复记录预读实物身份；行不存在时返回 `None`，由事务保持既有 `NotFound` 语义。
+pub(super) async fn preload_recovery_equipment(
+    pool: &TrackedPool<Postgres>,
+    recovery_id: Uuid,
+) -> Result<Option<PreloadedRecoveryEquipment>, RecoveryCommandError> {
+    let mut connection = pool.acquire().await.map_err(map_sql_error)?;
+    if !consignment_claim_schema_available(&mut connection).await.map_err(map_sql_error)? {
+        return Ok(None);
+    }
+    let row = sqlx::query(
+        r#"SELECT recovery.world_id,
+                  public.consignment_eid_alias(equipment.external_equipment_id) AS canonical_eid,
+                  EXISTS (
+                      SELECT 1
+                      FROM public.consignment_equipment_claims AS claim
+                      WHERE claim.world_id = recovery.world_id
+                        AND claim.canonical_eid = public.consignment_eid_alias(
+                            equipment.external_equipment_id
+                        )
+                        AND (claim.reservation_id IS NOT NULL
+                             OR claim.position_id IS NOT NULL)
+                  ) AS equipment_held
+           FROM public.settlement_recoveries AS recovery
+           INNER JOIN public.equipment AS equipment
+               ON equipment.id = recovery.equipment_id
+           WHERE recovery.id = $1"#,
+    )
+    .bind(recovery_id)
+    .fetch_optional(&mut *connection)
+    .await
+    .map_err(map_sql_error)?;
+    row.map(|row| {
+        let world_id: String = row.try_get("world_id").map_err(map_sql_error)?;
+        let canonical_eid: Option<String> = row.try_get("canonical_eid").map_err(map_sql_error)?;
+        let equipment_held: bool = row.try_get("equipment_held").map_err(map_sql_error)?;
+        Ok(PreloadedRecoveryEquipment {
+            identity: canonical_lock_identity(&world_id, canonical_eid),
+            equipment_held,
+        })
+    })
+    .transpose()
+}
+
+/// 按现有候选顺序预读一条到期重列的实物身份；真正领取仍由事务锁内重读决定。
+pub(super) async fn preload_due_relist_equipment(
+    pool: &TrackedPool<Postgres>,
+    now: Timestamp,
+) -> Result<Option<PreloadedRecoveryEquipment>, RecoveryCommandError> {
+    let mut connection = pool.acquire().await.map_err(map_sql_error)?;
+    if !consignment_claim_schema_available(&mut connection).await.map_err(map_sql_error)? {
+        return Ok(None);
+    }
+    let row = sqlx::query(
+        r#"SELECT recovery.world_id,
+                  public.consignment_eid_alias(equipment.external_equipment_id) AS canonical_eid,
+                  EXISTS (
+                      SELECT 1
+                      FROM public.consignment_equipment_claims AS claim
+                      WHERE claim.world_id = recovery.world_id
+                        AND claim.canonical_eid = public.consignment_eid_alias(
+                            equipment.external_equipment_id
+                        )
+                        AND (claim.reservation_id IS NOT NULL
+                             OR claim.position_id IS NOT NULL)
+                  ) AS equipment_held
+           FROM public.settlement_recoveries AS recovery
+           INNER JOIN public.equipment AS equipment
+               ON equipment.id = recovery.equipment_id
+           WHERE recovery.stage = 'relist_pending'
+             AND recovery.resolution IS NOT NULL
+             AND recovery.blocking_code IS NULL
+             AND recovery.manual_reconcile_delivery_id IS NULL
+             AND recovery.custody_proof_kind IS NOT NULL
+             AND recovery.relisted_auction_id IS NULL
+             AND recovery.relisted_lot_id IS NULL
+             AND (recovery.next_attempt_at IS NULL OR recovery.next_attempt_at <= $1)
+           ORDER BY COALESCE(recovery.next_attempt_at, recovery.created_at),
+                    recovery.created_at, recovery.id
+           LIMIT 1"#,
+    )
+    .bind(now)
+    .fetch_optional(&mut *connection)
+    .await
+    .map_err(map_sql_error)?;
+    row.map(|row| {
+        let world_id: String = row.try_get("world_id").map_err(map_sql_error)?;
+        let canonical_eid: Option<String> = row.try_get("canonical_eid").map_err(map_sql_error)?;
+        let equipment_held: bool = row.try_get("equipment_held").map_err(map_sql_error)?;
+        Ok(PreloadedRecoveryEquipment {
+            identity: canonical_lock_identity(&world_id, canonical_eid),
+            equipment_held,
+        })
+    })
+    .transpose()
+}
+
+/// 事务内锁定恢复记录后按同一别名规则重读实物身份。
+pub(super) async fn recovery_equipment_identity(
+    transaction: &mut Transaction<'_, Postgres>,
+    recovery: &RecoveryRow,
+) -> Result<Option<ListingEquipmentIdentity>, RecoveryCommandError> {
+    if !consignment_claim_schema_available(transaction).await.map_err(map_sql_error)? {
+        return Ok(None);
+    }
+    let canonical_eid: Option<String> = sqlx::query_scalar(
+        "SELECT public.consignment_eid_alias(external_equipment_id)
+         FROM public.equipment WHERE id = $1",
+    )
+    .bind(recovery.equipment_id)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?;
+    Ok(canonical_lock_identity(&recovery.world_id, canonical_eid))
+}
+
+/// 预读集合变化时退出本事务重新规划；调用方按可重试冲突处理，零事实。
+pub(super) fn ensure_preloaded_equipment(
+    preloaded: Option<&PreloadedRecoveryEquipment>,
+    current: Option<&ListingEquipmentIdentity>,
+) -> Result<(), RecoveryCommandError> {
+    let expected = preloaded.and_then(|preloaded| preloaded.identity.as_ref());
+    if expected == current { Ok(()) } else { Err(RecoveryCommandError::SerializationConflict) }
+}
+
+fn canonical_lock_identity(
+    world_id: &str,
+    canonical_eid: Option<String>,
+) -> Option<ListingEquipmentIdentity> {
+    canonical_eid.and_then(|eid| ListingEquipmentIdentity::new(world_id, &eid).ok())
+}
+
+/// 迁移测试会在 000134 之前的库上运行当前二进制；缺少寄售实物表/别名函数时跳过新增判定，
+/// 保持旧库上的既有重列行为。000134 之后两者同时存在，检查必须生效。
+async fn consignment_claim_schema_available(
+    connection: &mut sqlx::PgConnection,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT to_regclass('public.consignment_equipment_claims') IS NOT NULL
+            AND to_regprocedure('public.consignment_eid_alias(text)') IS NOT NULL",
+    )
+    .fetch_one(connection)
+    .await
 }
 
 pub(super) async fn insert_preview_event(
@@ -335,4 +521,29 @@ pub(super) async fn insert_recovery_audit(
     .record_audit_failure()
     .map_err(map_sql_error)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_application::recovery::RecoveryCommandError;
+    use auction_domain::consignment::ListingEquipmentIdentity;
+
+    use super::{PreloadedRecoveryEquipment, ensure_preloaded_equipment};
+
+    #[test]
+    fn preloaded_identity_mismatch_is_a_retryable_conflict() {
+        let main_42 = ListingEquipmentIdentity::new("main", "42").expect("已知装备身份");
+        let main_43 = ListingEquipmentIdentity::new("main", "43").expect("已知装备身份");
+        let preloaded =
+            PreloadedRecoveryEquipment { identity: Some(main_42.clone()), equipment_held: false };
+        assert!(ensure_preloaded_equipment(Some(&preloaded), Some(&main_42)).is_ok());
+        assert!(matches!(
+            ensure_preloaded_equipment(Some(&preloaded), Some(&main_43)),
+            Err(RecoveryCommandError::SerializationConflict)
+        ));
+        assert!(matches!(
+            ensure_preloaded_equipment(None, Some(&main_43)),
+            Err(RecoveryCommandError::SerializationConflict)
+        ));
+    }
 }

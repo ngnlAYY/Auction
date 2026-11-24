@@ -57,6 +57,52 @@ impl DatabaseStore {
         result.map_err(|error| WriteError::from(error).into_application())
     }
 
+    /// 寄售是否还有需要 Worker 继续处理的存量；关闭只停止新承诺，不停止原决定处置。
+    pub async fn has_consignment_work(&self) -> Result<bool, ConsignmentError> {
+        let result: Result<bool, sqlx::Error> = async {
+            let mut tx = self.pool().begin_read_snapshot().await?;
+            set_read_only_limits(&mut tx).await.map_err(|(_, error)| error)?;
+            // 不变量 5、6：单一只读快照覆盖挂单、预约、处置、重检、起写、position 与季通知；
+            // 任何读失败都失败关闭，不能把错误当作空库。
+            let has_work = sqlx::query_scalar(
+                "SELECT
+                    EXISTS (SELECT 1 FROM public.consignment_listings
+                            WHERE state NOT IN ('rejected', 'expired', 'closed'))
+                 OR EXISTS (SELECT 1 FROM public.consignment_deposit_reservations
+                            WHERE state = 'active')
+                 OR EXISTS (SELECT 1 FROM public.mail_disposition_work AS work
+                            JOIN public.deliveries AS delivery
+                              ON delivery.id = work.delivery_id
+                            WHERE delivery.status IN
+                                  ('prepared', 'pending', 'claimed', 'sending'))
+                 OR EXISTS (SELECT 1 FROM public.mail_quarantine_rechecks
+                            WHERE state IN ('queued', 'leased'))
+                 OR EXISTS (SELECT 1 FROM public.mail_disposition_write_starts AS started
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM public.mail_disposition_proofs AS proof
+                                WHERE proof.work_id = started.work_id))
+                 OR EXISTS (SELECT 1 FROM public.consignment_custody_positions
+                            WHERE state NOT IN ('handed_over', 'season_ended', 'lost'))
+                 OR EXISTS (
+                        SELECT 1 FROM public.consignment_season_notices AS notice
+                        LEFT JOIN public.mail_disposition_work AS work
+                          ON work.notice_id = notice.id
+                        WHERE work.id IS NULL
+                           OR EXISTS (
+                                SELECT 1 FROM public.deliveries AS delivery
+                                WHERE delivery.id = work.delivery_id
+                                  AND delivery.status NOT IN
+                                      ('succeeded', 'failed', 'manual_reconcile')))",
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            Ok(has_work)
+        }
+        .await;
+        result.map_err(|error| WriteError::from(error).into_application())
+    }
+
     /// 装配解析工作端口，回收的两个规范命令构造器由应用层提供。
     pub fn consignment_lookup(
         &self,
