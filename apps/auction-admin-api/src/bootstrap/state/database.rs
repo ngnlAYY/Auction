@@ -14,6 +14,9 @@ use auction_application::admin::{
     DeliverySentProofService, SettlementCatalogReader,
 };
 use auction_application::auction::{AuctionLifecycleCommandPort, AuctionLifecyclePolicy};
+use auction_application::consignment::{
+    AdminListingRead, ListingCommandStore, ManageListingService,
+};
 use auction_application::delivery::{DeliveryAdminPort, DeliverySentConfirmationPort};
 use auction_application::operations::{
     OperationsAlertConsole, OperationsAlertSourceReader, OperationsAlertStore,
@@ -26,7 +29,7 @@ use auction_application::recovery::{
 use auction_application::sessions::AdminSessionService;
 use auction_application::settlement::SettlementReportReader;
 use auction_config::{AppConfig, TomlRuntimeFileStore};
-use auction_http::AdminApiState;
+use auction_http::{AdminApiState, AdminConsignmentCapabilities};
 use auction_integrations::{
     CredentialSealer, CredentialVerifier, EquipmentKeySealer, MoogleMailLoginKeyIssuer,
     MoogleMailLoginKeyReader, build_keyring,
@@ -372,16 +375,29 @@ pub(super) async fn configure_state(
     .with_runtime_switch_snapshot(switches.clone())
     .with_readiness(Arc::new(
         auction_http::HttpReadinessProbe::new(
-            store,
+            store.clone(),
             config.readiness.cache_enabled,
             metrics.readiness(),
         )
         .with_runtime_switches(switches),
     ));
+    let state = configure_consignment(state, config, store);
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "发布 Admin ready 心跳失败");
     }
     Ok((state, Some(heartbeat), Some([runtime_switch_task, mail_template_task])))
+}
+
+fn configure_consignment<S: AdminListingRead + ListingCommandStore + 'static>(
+    state: AdminApiState,
+    config: &AppConfig,
+    store: Arc<S>,
+) -> AdminApiState {
+    // 不变量 1、6：停用仍需读取历史与仲裁原下架命令，首次操作由持久有效态约束。
+    state.with_consignment(AdminConsignmentCapabilities {
+        read: Some(store.clone()),
+        manage: Some(Arc::new(ManageListingService::new(store, config.consignment.enabled()))),
+    })
 }
 
 fn database_profile(
@@ -405,4 +421,253 @@ fn database_profile(
             idle_transaction_millis: value.idle_in_transaction_session_timeout_millis,
         });
     Ok(DatabaseConnectionProfile::service(purpose, config.database_pool.max_connections, timeouts))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+
+    use auction_application::admin::EquipmentKeySealerPort;
+    use auction_application::consignment::{
+        AdminDelistListingCommand, AdminListingDetail, AdminListingQuery, AdminListingRead,
+        AdminListingRecord, ApplyListingLookupCommand, AutoCloseListingCommand, ConsignmentFuture,
+        ListingAutoCloseEffect, ListingClosed, ListingCommandOutcome, ListingCommandStore,
+        ListingLookupEffect, ListingPriceReceipt, ListingReadPage, ListingRegistered,
+        RegisterListingCommand, RegistrationReplayCrypto, RepriceListingCommand,
+        StoredListingDecision, WithdrawListingCommand,
+    };
+    use auction_application::core::ApplicationFuture;
+    use auction_application::public::{AdminLoginResult, AdminSessionIdentity, AdminSessionPort};
+    use auction_config::{AppConfig, Role};
+    use auction_domain::consignment::ListingVersion;
+    use auction_http::AdminApiState;
+    use auction_time::Timestamp;
+    use axum::Router;
+    use axum::body::{Body, to_bytes};
+    use axum::extract::ConnectInfo;
+    use axum::http::{Request, StatusCode};
+    use serde_json::{Value, json};
+    use tower::ServiceExt;
+    use uuid::Uuid;
+
+    use super::configure_consignment;
+    use crate::bootstrap::config::configure_security;
+    use crate::bootstrap::service::configure_router;
+
+    const LIST: &str = "/api/v1/admin/consignment/listings";
+    const LISTING: Uuid = Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0001);
+    const COMMAND: Uuid = Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0002);
+    const ORIGIN: &str = "https://admin.example.invalid";
+    const ACTOR: &str = "fixture-admin";
+    const REASON: &str = "运营夹具下架";
+
+    #[tokio::test]
+    async fn consignment_disabled_preserves_admin_list_and_delist_replay() {
+        let config = disabled_config();
+        let state = AdminApiState::new(
+            Some(Arc::new(Session)),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            configure_security(&config).unwrap(),
+        );
+        let app =
+            configure_router(configure_consignment(state, &config, Arc::new(ConsignmentStore)));
+        let page = send(&app, "GET", &format!("{LIST}?state=closed&page_size=37"), None).await;
+        assert_eq!(page["data"]["items"], json!([]));
+        assert_eq!(page["data"]["page_size"], 37);
+        let receipt = send(
+            &app,
+            "POST",
+            &format!("{LIST}/{LISTING}/delist"),
+            Some(json!({"command_id": COMMAND, "expected_version": 7, "reason": REASON})),
+        )
+        .await;
+        assert_eq!(receipt["data"]["command_id"], COMMAND.to_string());
+        assert_eq!(receipt["data"]["listing_id"], LISTING.to_string());
+        assert_eq!(receipt["data"]["operation"], "admin_delist");
+        assert_eq!(receipt["data"]["listing_version"], 8);
+        assert_eq!(receipt["data"]["state"], "closed");
+    }
+
+    fn disabled_config() -> AppConfig {
+        let directory =
+            std::env::temp_dir().join(format!("auction-admin-consignment-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let role_path = directory.join("admin.toml");
+        fs::write(&role_path, "common_file = 'common.toml'\nsecrets_file = 'secrets.toml'\n")
+            .unwrap();
+        fs::write(directory.join("common.toml"), "[consignment]\nenabled = false\n").unwrap();
+        fs::write(directory.join("secrets.toml"), "").unwrap();
+        let config = AppConfig::load_from_path(Role::Admin, &role_path);
+        fs::remove_dir_all(directory).unwrap();
+        let mut config = config.unwrap();
+        config.http_security.allowed_origins = vec![ORIGIN.to_owned()];
+        config
+    }
+
+    async fn send(app: &Router, method: &str, uri: &str, input: Option<Value>) -> Value {
+        let mut request = Request::builder().method(method).uri(uri).header(
+            "cookie",
+            "auction_admin_session=fixture-session; auction_admin_csrf=fixture-csrf",
+        );
+        let body = match input {
+            Some(input) => {
+                request = request
+                    .header("origin", ORIGIN)
+                    .header("x-csrf-token", "fixture-csrf")
+                    .header("content-type", "application/json");
+                Body::from(input.to_string())
+            }
+            None => Body::empty(),
+        };
+        let mut request = request.body(body).unwrap();
+        request.extensions_mut().insert(ConnectInfo(SocketAddr::from(([192, 0, 2, 22], 3123))));
+        let response = app.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 8192).await.unwrap();
+        assert_eq!(status, StatusCode::OK, "{method} {uri}: {}", String::from_utf8_lossy(&body));
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    struct Session;
+
+    impl AdminSessionPort for Session {
+        fn login(
+            &self,
+            _actor: String,
+            _secret: Vec<u8>,
+            _now: Timestamp,
+        ) -> ApplicationFuture<'_, AdminLoginResult> {
+            panic!("测试不登录")
+        }
+
+        fn current(
+            &self,
+            token: String,
+            csrf: String,
+            now: Timestamp,
+        ) -> ApplicationFuture<'_, AdminSessionIdentity> {
+            assert_eq!(token, "fixture-session");
+            assert_eq!(csrf, "fixture-csrf");
+            Box::pin(async move {
+                Ok(AdminSessionIdentity {
+                    actor: ACTOR.to_owned(),
+                    expires_at: now,
+                    absolute_expires_at: now,
+                })
+            })
+        }
+
+        fn touch(
+            &self,
+            token: String,
+            csrf: String,
+            now: Timestamp,
+        ) -> ApplicationFuture<'_, AdminSessionIdentity> {
+            self.current(token, csrf, now)
+        }
+
+        fn logout(&self, _token: String, _now: Timestamp) -> ApplicationFuture<'_, ()> {
+            panic!("测试不退出")
+        }
+    }
+
+    struct ConsignmentStore;
+
+    impl AdminListingRead for ConsignmentStore {
+        fn list_admin(
+            &self,
+            query: AdminListingQuery,
+        ) -> ConsignmentFuture<'_, ListingReadPage<AdminListingRecord>> {
+            assert_eq!(query.listings.window.page_size(), 37);
+            Box::pin(async move {
+                Ok(ListingReadPage { items: vec![], total: 0, window: query.listings.window })
+            })
+        }
+
+        fn admin_detail(
+            &self,
+            _listing_id: Uuid,
+        ) -> ConsignmentFuture<'_, Option<AdminListingDetail>> {
+            panic!("测试不读详情")
+        }
+    }
+
+    impl ListingCommandStore for ConsignmentStore {
+        fn register<'a>(
+            &'a self,
+            _command: RegisterListingCommand<'a>,
+            _sealer: Option<&'a dyn EquipmentKeySealerPort>,
+            _replay_crypto: Option<&'a dyn RegistrationReplayCrypto>,
+        ) -> ConsignmentFuture<'a, ListingCommandOutcome<ListingRegistered>> {
+            panic!("Admin 不登记")
+        }
+
+        fn reprice(
+            &self,
+            _command: RepriceListingCommand,
+        ) -> ConsignmentFuture<'_, ListingCommandOutcome<ListingPriceReceipt>> {
+            panic!("Admin 不改价")
+        }
+
+        fn withdraw(
+            &self,
+            _command: WithdrawListingCommand,
+        ) -> ConsignmentFuture<'_, ListingCommandOutcome<ListingClosed>> {
+            panic!("Admin 不取消")
+        }
+
+        fn apply_lookup(
+            &self,
+            _command: ApplyListingLookupCommand,
+        ) -> ConsignmentFuture<'_, ListingCommandOutcome<ListingLookupEffect>> {
+            panic!("Admin 不解析")
+        }
+
+        fn auto_close(
+            &self,
+            _command: AutoCloseListingCommand,
+        ) -> ConsignmentFuture<'_, ListingCommandOutcome<ListingAutoCloseEffect>> {
+            panic!("Admin 不清退")
+        }
+
+        fn admin_delist(
+            &self,
+            command: AdminDelistListingCommand,
+        ) -> ConsignmentFuture<'_, ListingCommandOutcome<ListingClosed>> {
+            assert_eq!(command.admin_actor, ACTOR);
+            assert_eq!(command.command_id.as_uuid(), COMMAND);
+            assert_eq!(command.listing_id, LISTING);
+            assert_eq!(command.expected_version.value(), 7);
+            assert_eq!(command.reason.as_str(), REASON);
+            Box::pin(async {
+                let receipt = ListingClosed::new(LISTING, ListingVersion::new(8).unwrap(), None)?;
+                Ok(ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(receipt)))
+            })
+        }
+    }
 }

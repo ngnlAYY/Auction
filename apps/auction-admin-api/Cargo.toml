@@ -19,10 +19,16 @@ auction-process.workspace = true
 auction-setup = { workspace = true, optional = true }
 rust-embed.workspace = true
 auction-time.workspace = true
+axum.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 libc.workspace = true
+
+[dev-dependencies]
+auction-domain.workspace = true
+serde_json.workspace = true
+tower.workspace = true
 
 [features]
 # 可选：都不启用时只提供 API，不内嵌 Admin 页面，首次设置入口不可用。
@@ -31,6 +37,8 @@ default = []
 web-embed = ["dep:auction-setup"]
 # 可选：内嵌 Solid 版的 Admin 页面；`web-solid` 蕴含 `web-embed`，首次设置随 Admin 一起切换。
 web-solid = ["web-embed"]
+# 可选：只用于本地调试构建开启未完成的一口价挂单；发布构建即使误带也拒开。
+consignment-dev-preview = []
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。

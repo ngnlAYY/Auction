@@ -1,7 +1,7 @@
 //! 密钥重加密的本地门禁、部分回执与审计范围回归用例；不连接数据库。
 
 use std::{
-    collections::BTreeMap,
+    cell::Cell,
     fs,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
@@ -12,7 +12,8 @@ use auction_time::Timestamp;
 use clap::Parser;
 use uuid::Uuid;
 
-use super::rewrite::{DomainOutcome, FailureStage};
+use super::equipment::require_zero_old_references;
+use super::rewrite::{DomainOutcome, FailureStage, apply_if_requested};
 use super::{ProcessedDomain, audit_details, audited, plan, receipt_document};
 use crate::cli::{Cli, Command, KeysCommand, KeysReencryptArgs};
 
@@ -60,12 +61,7 @@ fn processed(
 ) -> ProcessedDomain {
     ProcessedDomain {
         domain,
-        to_key_id: format!("{}-2026-11", domain.as_str()),
-        outcome: DomainOutcome {
-            scanned,
-            rewritten,
-            from_keys: BTreeMap::from([("old-2025-11".to_owned(), scanned)]),
-        },
+        outcome: DomainOutcome { scanned, rewritten, ..DomainOutcome::new(domain) },
         failure_stage,
     }
 }
@@ -147,7 +143,6 @@ fn partial_receipt_records_committed_rewrites_and_failure_stage() {
     assert_eq!(document["domains"]["equipment"]["complete"], true);
     assert_eq!(document["domains"]["user_login"]["rewritten"], 2);
     assert_eq!(document["domains"]["user_login"]["complete"], false);
-    assert_eq!(document["from_key_ids"]["old-2025-11"], 8);
     assert!(document["domains"].get("credential").is_none(), "未进入的域不出现在回执里");
 
     let completed = receipt_document(Uuid::new_v4(), true, Timestamp::now(), &items[..1], None);
@@ -198,4 +193,87 @@ fn audit_covers_write_failure_with_unknown_result() {
     let completed = audit_details(audited_items[0], "ops", receipt_id, "a", true);
     assert_eq!(completed["outcome"], "completed");
     assert!(completed["failure_stage"].is_null());
+}
+
+#[tokio::test]
+async fn dry_run_does_not_enter_the_database_mutation_boundary() {
+    let writes = Cell::new(0);
+    for (apply, expected) in [(false, 0), (true, 1)] {
+        apply_if_requested(apply, async || {
+            writes.set(writes.get() + 1);
+            Ok(())
+        })
+        .await
+        .expect("运行离线轮换的写入边界");
+        assert_eq!(writes.get(), expected);
+    }
+}
+
+#[test]
+fn equipment_receipt_and_audit_keep_three_source_counts_without_key_metadata() {
+    let mut item = processed(DataKeyDomain::Equipment, 0, 0, None);
+    for _ in 0..3 {
+        item.outcome.scanned("equipment_secrets");
+        item.outcome.rewritten("equipment_secrets");
+    }
+    for _ in 0..5 {
+        item.outcome.scanned("consignment_registration_secrets");
+    }
+    for _ in 0..2 {
+        item.outcome.rewritten("consignment_registration_secrets");
+    }
+    let receipt_id = Uuid::new_v4();
+    let document =
+        receipt_document(receipt_id, true, Timestamp::now(), std::slice::from_ref(&item), None);
+    let domain = &document["domains"]["equipment"];
+    let counts = &domain["sources"];
+    assert_eq!(document["format"], "auction-key-reencrypt-receipt-v2");
+    assert_eq!(
+        counts,
+        &serde_json::json!({
+            "equipment_secrets": {"scanned": 3, "rewritten": 3},
+            "consignment_registration_secrets": {"scanned": 5, "rewritten": 2},
+            "consignment_replay_keys": {"scanned": 0, "rewritten": 0},
+        })
+    );
+    let audit = audit_details(&item, "ops", receipt_id, "a", true);
+    assert_eq!(&audit["sources"], counts);
+    assert!(document.get("from_key_ids").is_none());
+    assert!(domain.get("current_key_id").is_none());
+    assert!(domain.get("to_key_id").is_none());
+    assert!(domain.get("from_key_ids").is_none());
+    assert!(audit.get("from_key_ids").is_none());
+    assert!(audit.get("current_key_id").is_none());
+    assert!(audit.get("to_key_id").is_none());
+}
+
+#[test]
+fn retirement_check_rejects_existing_old_references_even_when_current_exists() {
+    const CURRENT: &str = "fake-current-key";
+    const OLD: &str = "fake-old-key";
+    assert!(require_zero_old_references(&[], CURRENT).is_ok());
+    assert!(require_zero_old_references(&[(CURRENT.to_owned(), 4)], CURRENT).is_ok());
+    let error =
+        require_zero_old_references(&[(CURRENT.to_owned(), 4), (OLD.to_owned(), 1)], CURRENT)
+            .expect_err("在线退休前必须没有旧引用");
+    assert_eq!(error.to_string(), "装备域仍有 1 个信封引用旧钥，请先完成重加密");
+}
+
+#[test]
+fn equipment_verification_is_an_explicit_read_only_status_mode() {
+    let cli = Cli::try_parse_from(["auction-cli", "keys", "status", "--require-current-equipment"])
+        .expect("解析退休前核对参数");
+    assert!(matches!(
+        cli.command,
+        Command::Keys(KeysCommand::Status { strict: false, require_current_equipment: true })
+    ));
+    let error = Cli::try_parse_from([
+        "auction-cli",
+        "keys",
+        "status",
+        "--strict",
+        "--require-current-equipment",
+    ])
+    .expect_err("互斥的状态模式不能混用");
+    assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
 }

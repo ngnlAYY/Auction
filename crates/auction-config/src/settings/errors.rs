@@ -147,6 +147,20 @@ pub enum ConfigError {
     #[error("invalid auction policy configuration: {0}")]
     InvalidAuctionConfig(&'static str),
 
+    /// 寄售节的形状无效，诊断只包含文件路径和固定的修正提示。
+    #[error("配置文件 {path} 中的 consignment 必须是 TOML 表")]
+    InvalidConsignmentShape { path: PathBuf },
+
+    /// 寄售数值超出闭区间，诊断只包含固定字段名与允许范围。
+    #[error("[consignment].{field} 必须是 {min}..={max} 范围内的整数")]
+    InvalidConsignmentRange { field: &'static str, min: i64, max: i64 },
+
+    /// 未完成功能只能由显式预览调试制品开启。
+    #[error(
+        "寄售功能尚未完成，当前制品不能开启；请将 [consignment].enabled 改回 false，或使用带 consignment-dev-preview 的本地调试构建"
+    )]
+    ConsignmentPreviewRequired,
+
     #[error(
         "enabled E-Hentai forum Worker requires sensitive ehentai_cookie or credential data key"
     )]

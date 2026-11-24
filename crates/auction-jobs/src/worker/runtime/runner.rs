@@ -16,6 +16,7 @@ use super::operations::{OperationsAlertLoopAction, run_operations_alert_loop};
 use super::scheduling::{
     bind_worker_metric_modes, drain_delivery_tasks, drain_worker_tasks, poll_delay,
 };
+use crate::worker::consignment::{ConsignmentWorker, observe_worker_iteration};
 use crate::worker::diagnostics;
 use crate::worker::mail::poll as mail_poll;
 use crate::worker::{auction, forum, player_notifications, recovery, settlement as fulfillment};
@@ -49,6 +50,25 @@ where
     C: Clock + 'static,
     S: std::future::Future<Output = ()>,
 {
+    worker.run_with_consignment_until_shutdown(None, shutdown).await
+}
+
+impl<C: Clock + 'static> PersistentWorker<C> {
+    /// 监管已经同步代次的一口价挂单任务，并与其他持久任务共用停止通知与排空截止。
+    pub async fn run_with_consignment_until_shutdown(
+        self,
+        consignment: Option<ConsignmentWorker>,
+        shutdown: impl std::future::Future<Output = ()>,
+    ) -> Result<(), WorkerError> {
+        run_persistent(self, consignment, shutdown).await
+    }
+}
+
+async fn run_persistent<C: Clock + 'static>(
+    worker: PersistentWorker<C>,
+    consignment: Option<ConsignmentWorker>,
+    shutdown: impl std::future::Future<Output = ()>,
+) -> Result<(), WorkerError> {
     if !worker.auction.validate() {
         return Err(WorkerError::InvalidAuctionConfiguration);
     }
@@ -112,6 +132,17 @@ where
     );
     worker.control.mark_serving();
     let (drain_sender, _) = tokio::sync::watch::channel(false);
+    let mut consignment_tasks = JoinSet::new();
+    if let Some(consignment) = consignment {
+        let metrics = Arc::clone(&worker.metrics);
+        // 不变量 5、6：保留任务所有权，排空时等解析完成提交或按原围栏让出。
+        consignment_tasks.spawn(consignment.run(
+            drain_sender.subscribe(),
+            move |kind, result, duration, failed| {
+                observe_worker_iteration(metrics.as_ref(), kind, result, duration, failed);
+            },
+        ));
+    }
     let poll_wakeup = worker.control.poll_wakeup();
     let mut poll_wakeup_wait = Box::pin(poll_wakeup.notified());
     let mut delivery_cycles = JoinSet::new();
@@ -430,6 +461,13 @@ where
                     Some(Ok(())) | None => break Some(WorkerError::ForumTaskExited),
                 }
             }
+            result = consignment_tasks.join_next(), if !consignment_tasks.is_empty() => {
+                match result {
+                    Some(Err(error)) => break Some(WorkerError::ConsignmentTaskJoin(error)),
+                    Some(Ok(())) if worker.control.is_draining() => {}
+                    Some(Ok(())) | None => break Some(WorkerError::ConsignmentTaskExited),
+                }
+            }
             _ = &mut poll_wakeup_wait => {
                 if worker.control.take_mail_poll_request() {
                     for runtime in &worker.mail_polls {
@@ -464,6 +502,7 @@ where
             drain_worker_tasks(&mut mail_poll_tasks, "MoogleMail").await,
             drain_worker_tasks(&mut mail_maintenance_tasks, "MoogleMail maintenance").await,
             drain_worker_tasks(&mut forum_tasks, "forum").await,
+            drain_worker_tasks(&mut consignment_tasks, "一口价挂单").await,
         ];
         results.into_iter().find_map(Result::err).map_or(Ok(()), Err)
     };

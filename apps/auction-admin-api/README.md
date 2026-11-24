@@ -27,10 +27,12 @@
 
 ## 正常启动
 
-1. 加载 Admin 配置；角色文件还通过 `worker_config_file` 读取 Worker 配置（control 客户端与仪表盘的世界/邮箱投影）。
+1. 加载 Admin 配置并在监听前校验寄售制品能力；角色文件还通过 `worker_config_file` 读取 Worker 配置（control 客户端与仪表盘的世界/邮箱投影）。
 2. 经 `auction-http` 的 `HttpListener` 绑定 listener（TCP 默认 `127.0.0.1:8091` 或 Unix socket），连接服务与排空由 `serve_http` 统一处理。
 3. 有数据库时：必须配置 `admin_actor` 与 `admin_secret`；配置了 `runtime_config_file` 时先执行 runtime 恢复（未完成命令收口，恢复后 fingerprint 必须与启动加载一致，否则拒绝启动）。可选能力按数据密钥启用：`equipment_data_key` → 手工录入；`user_login_data_key` → 用户与登录 key；`credential_data_key` → 凭据导入与在线校验（只返回瞬时观测；论坛 Cookie 在本进程检查，邮件 Cookie 经 Worker control 交给 Worker 检查，Worker 不可用时只报暂不可用）。装配会话、心跳与运维端口；初始化会话服务会永久撤销既有 Admin 会话，重启后须重新登录。
 4. 无数据库时仍提供健康与内嵌页面，但 readiness 未就绪、会话端口缺失，需认证的 API 返回会话服务不可用。
+
+正式 Admin 随数据库装配挂单查询和下架用例，沿用原会话与写请求守卫。停用寄售时仍可查询历史和重放下架回执。首次设置使用独立路由与状态。预览仅供同时启用 `consignment-dev-preview` 与调试断言的构建使用。 [本地一口价挂单预览](../../docs/development.md#本地一口价挂单预览)
 
 ## Worker control 与 runtime 配置
 

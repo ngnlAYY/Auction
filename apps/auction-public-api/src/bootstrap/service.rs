@@ -4,11 +4,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use auction_config::{AppConfig, Role};
+use auction_config::{
+    AppConfig, CONSIGNMENT_COMPLETE, ConsignmentActivation, Role, consignment_activation,
+};
+use auction_http::PublicApiState;
 use auction_observability::{DiagnosticLogOwner, ProcessMetrics, TracingConfig, TracingRuntime};
 use auction_process::{
     DrainOutcome, TaskGuard, TerminationSignals, join_error_kind, wait_for_drain,
 };
+use axum::Router;
 use tokio::sync::oneshot;
 
 use super::{listener, state};
@@ -27,6 +31,11 @@ pub async fn run_from_path(path: std::path::PathBuf) -> anyhow::Result<()> {
 }
 
 async fn run_config(config: AppConfig) -> anyhow::Result<()> {
+    let consignment = startup_preflight(
+        &config,
+        cfg!(feature = "consignment-dev-preview"),
+        cfg!(debug_assertions),
+    )?;
     let mut signals = TerminationSignals::subscribe().context("订阅 public-api 终止信号失败")?;
     let tracing_config = tracing_config(&config.tracing);
     let telemetry = auction_observability::init_with_config(
@@ -43,7 +52,7 @@ async fn run_config(config: AppConfig) -> anyhow::Result<()> {
     let mut forced = false;
     let result = {
         let diagnostic_logs = DiagnosticLogOwner::install();
-        let body = run_service(&config, &telemetry, &mut signals, &mut forced);
+        let body = run_service(&config, consignment, &telemetry, &mut signals, &mut forced);
         diagnostic_logs.run(body).await
     };
     if !forced {
@@ -52,8 +61,18 @@ async fn run_config(config: AppConfig) -> anyhow::Result<()> {
     result
 }
 
+fn startup_preflight(
+    config: &AppConfig,
+    preview: bool,
+    debug: bool,
+) -> anyhow::Result<ConsignmentActivation> {
+    consignment_activation(config.consignment.enabled(), CONSIGNMENT_COMPLETE, preview, debug)
+        .context("校验 Public 一口价挂单制品能力失败")
+}
+
 async fn run_service(
     config: &AppConfig,
+    consignment: ConsignmentActivation,
     telemetry: &TracingRuntime,
     signals: &mut TerminationSignals,
     forced: &mut bool,
@@ -94,6 +113,7 @@ async fn run_service(
             let listener = listener::bind(config).await?;
             let (state, heartbeat, realtime_relay, refresh_tasks) = state::configure_state(
                 config,
+                consignment,
                 telemetry.health_reader(),
                 Arc::clone(&metrics),
                 switches.clone(),
@@ -116,15 +136,7 @@ async fn run_service(
             )
         })
         .map(TaskGuard::new);
-    // 传入本二进制的版本，健康检查才能报告运行进程的版本而非契约 crate 的版本。
-    // 边界与读闸句柄都从注入指标后的 state 取得（上面的 with_metrics）；提前取会让拒绝计数
-    // 静默落到 no-op 记录器。
-    let boundary = state.http_boundary();
-    let anonymous_read_gate = state.anonymous_read_gate();
-    let app = auction_http::public_router_with_web_script_policy::<
-        crate::web_assets::PublicWebAssets,
-    >(env!("CARGO_PKG_VERSION"), boundary, anonymous_read_gate, web_script_policy())
-    .with_state(state);
+    let app = configure_router(state);
 
     tracing::info!(listener = %listener_description, "public-api 开始监听");
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -243,6 +255,17 @@ async fn run_service(
     result
 }
 
+pub(super) fn configure_router(state: PublicApiState) -> Router {
+    // 使用运行进程的版本。边界与读闸在注入指标后取得，才能记录请求拒绝。
+    auction_http::public_router_with_web_script_policy::<crate::web_assets::PublicWebAssets>(
+        env!("CARGO_PKG_VERSION"),
+        state.http_boundary(),
+        state.anonymous_read_gate(),
+        web_script_policy(),
+    )
+    .with_state(state)
+}
+
 fn abort_background_task(task: &Option<TaskGuard<()>>) {
     if let Some(task) = task {
         task.abort();
@@ -314,5 +337,51 @@ fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
         max_export_batch_size: settings.max_export_batch_size as usize,
         sample_ratio: f64::from(settings.sample_ratio_ppm) / 1_000_000.0,
         shutdown_timeout: Duration::from_secs(settings.shutdown_timeout_seconds),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use auction_config::{AppConfig, ConfigError, ConsignmentActivation, Role};
+    use uuid::Uuid;
+
+    use super::startup_preflight;
+
+    #[test]
+    fn consignment_startup_requires_debug_preview() {
+        let enabled = load_consignment_config(true);
+        for (preview, debug) in [(false, false), (true, false), (false, true)] {
+            let error = startup_preflight(&enabled, preview, debug).unwrap_err();
+            assert!(matches!(
+                error.downcast_ref::<ConfigError>(),
+                Some(ConfigError::ConsignmentPreviewRequired)
+            ));
+        }
+        assert_eq!(
+            startup_preflight(&enabled, true, true).unwrap(),
+            ConsignmentActivation::Enabled
+        );
+        let disabled = load_consignment_config(false);
+        assert_eq!(
+            startup_preflight(&disabled, false, false).unwrap(),
+            ConsignmentActivation::Disabled
+        );
+    }
+
+    fn load_consignment_config(enabled: bool) -> AppConfig {
+        let directory =
+            std::env::temp_dir().join(format!("auction-public-startup-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let role_path = directory.join("public.toml");
+        fs::write(&role_path, "common_file = 'common.toml'\nsecrets_file = 'secrets.toml'\n")
+            .unwrap();
+        fs::write(directory.join("common.toml"), format!("[consignment]\nenabled = {enabled}\n"))
+            .unwrap();
+        fs::write(directory.join("secrets.toml"), "").unwrap();
+        let config = AppConfig::load_from_path(Role::Public, role_path);
+        fs::remove_dir_all(directory).unwrap();
+        config.unwrap()
     }
 }

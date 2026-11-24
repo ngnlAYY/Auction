@@ -29,6 +29,27 @@ migration_compatibility_mode = "shadow"
 # 可选：默认 true；运行时 readiness_cache_enabled 未设置、clear 或过期时使用此基线；HTTP 就绪缓存 1 秒，false 回到逐次探测。
 cache_enabled = true
 
+# 可选区块：三角色共用的寄售启动配置；省略整节时使用以下默认值。
+[consignment]
+# 可选：布尔开关，默认 false。功能尚未完成，正式制品设为 true 会拒绝启动；隔离验收时才用带预览能力的本地调试构建开启。
+enabled = false
+# 可选：寄售手续费率（基点），默认 500（5%），范围 0–9999；需要调整新寄售登记的费率时修改。
+fee_bps = 500
+# 可选：非寄售展示期（天），默认 30，范围 1–90；需要调整首次展示时冻结的期限时修改。
+display_ttl_days = 30
+# 可选：寄售待寄期（天），默认 7，范围 1–30；需要调整进入待寄时冻结的期限时修改。
+deposit_ttl_days = 7
+# 可选：每位卖家的有效活动挂单上限，默认 20，范围 1–100；需要调整跨世界的活动单额度时修改。
+max_open_per_user = 20
+# 可选：每位卖家的滚动一小时登记上限，默认 10，范围 1–100；需要调整已接受登记的限额时修改。
+registrations_per_hour = 10
+# 可选：一次解析的端到端预算（秒），默认 10，范围 1–30；需要调整整次尝试的预算时修改，底层更紧的限制仍生效。
+lookup_timeout_seconds = 10
+# 可选：解压后响应的硬上限（字节），默认 65536，范围 4096–262144；需要调整解析的响应体预算时修改。
+lookup_max_response_bytes = 65536
+# 可选：全服务两次解析起始许可的最小间隔（毫秒），默认 1000，范围 250–60000；需要调整解析请求频率时修改。
+lookup_min_interval_ms = 1000
+
 # 可选区块：仅 CLI 读取；backup scheduled 使用全部字段，两个水位字段另被 alert report 与 deploy 复用。
 # 省略时取以下默认值，定时备份的启停由 systemd timer 控制。
 [backup]
