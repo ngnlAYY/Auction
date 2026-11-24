@@ -70,6 +70,12 @@ auction-domain（纯领域规则）
 | [web/README.md](../web/README.md) | 前端 | Public 与 Admin 的第二套实现（TypeScript 7 + SolidJS 2.0，纯客户端渲染） |
 | [crates/auction-test-support/README.md](../crates/auction-test-support/README.md) | 测试 | 只进 `dev-dependencies` 的 MoogleMail 与论坛回环替身，回放脱敏的真实页面 |
 
+### 一口价挂单
+
+`auction-domain::consignment` 定义挂单状态、定价与资格规则。`auction-application::consignment` 拥有命令、读模型、解析及补扫用例。PostgreSQL 适配器持久化挂单、租约、准入、事件及审计，并以既有拍卖 lot 的提交事实判断碰撞。`auction-integrations` 提供固定装备来源和开封器。Public 与 Admin 经 HTTP 适配器访问各自的读写端口。见[数据库契约](contracts/database.md#一口价挂单)和[HTTP 路由契约](contracts/routes.md#一口价挂单)。
+
+Worker 在启动时同步停用代次。任务调度分为受暂停和持久许可约束的解析循环、在本地重新取证并清退的维护循环。开启时，独立的数据库心跳为玩家登记提供 Worker 就绪证明。见[Worker 装配](../apps/auction-worker/README.md#一口价挂单)。
+
 ### 共享 helper 归属
 
 跨装配根重复的机制按下表收敛到 owner，调用方只做配置解析、绑定与生命周期，不在 `apps/*` 复制实现或在其上叠加业务规则：

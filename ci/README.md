@@ -122,6 +122,7 @@ feature、产物目录、工具、体积预算、构建回执与复用身份全�
 - **体积预算**：两端 payload 的体积按 [ci/release/web-size-budget.v1](release/web-size-budget.v1) 的基线比较；Dioxus 统计 WASM 与总量，Solid 统计总量与入口首屏 JS；明显增长只告警，超过硬上限使发布失败。见 [Web payload 体积预算](#web-payload-体积预算)。
 - **二进制标记**：Public 只含 Public payload 的标记与哈希，Admin 只含 Admin 的，Worker 与 auction-cli 不含任何页面标记；API-only 二进制含“资源缺失”提示而不含 payload。
 - **依赖边界**（`cargo tree`）：Worker 不依赖任何前端 crate；Public 不依赖 Admin 前端；Admin 不依赖 Public 前端；`auction-server` 不依赖 `auction-cli`。分体 API 的图按各自实际 feature 检查，合并服务按 `web_cargo_features server` 的结果检查。
+- **寄售预览制品门**保留发布配方守卫、编译参数与 `BUILD-INFO` 的 feature 复核。正式发布与候选制品均使用 `release` profile，关闭 `debug_assertions`。未完成的寄售功能只在 `consignment-dev-preview` 与 `debug_assertions` 同时成立时可开启，因此上述制品即使误带预览 feature 也会拒绝 `[consignment].enabled=true`，验收无需执行各二进制读取预览身份。
 - **BUILD-INFO 与校验和**：每个制品目录记录源码身份、构建输入与环境指纹、feature 和文件摘要；工具链经发布工具的字节身份绑定。任一端为 Solid 时回执另记 `web_stack_public` / `web_stack_admin`，缺省全 Dioxus 的字段与顺序保持不变。复用判定比较这些指纹、锁文件、feature、两端技术栈和制品摘要；仅仓库提交或不在构建输入范围内的文档变化，不必重新编译。
 - **已发布迁移**：发布 tag 中存在的 `migrations/postgres/*.up.sql` 必须在当前工作树逐字节不变；修改、重命名或删除已发布文件使 `published-migrations` 与发布工作流失败，只允许追加新编号。
 - **装包**：文件白名单与权限固定（程序 755、文档 644、配置示例 640、敏感示例 600），禁止符号链接、日志与真实敏感文件名；归档确定性生成（固定排序、mtime、owner），解包复核后输出 `SHA256SUMS` 与 `DEPENDENCIES.md`。正式发布要求干净工作树（`--allow-dirty` 只用于本地证据，包名带 `-dirty`）。
