@@ -43,7 +43,7 @@ pub fn send_category(origin_kind: &str, payload: &Value) -> Option<String> {
         "outbid"
     } else if origin_kind == "operations_alert" {
         "operations"
-    } else if matches!(origin_kind, "seller_summary" | "season_reminder") {
+    } else if matches!(origin_kind, "seller_summary" | "season_reminder" | "consignment_notice") {
         "settlement"
     } else if origin_kind == "mail_intake"
         && matches!(

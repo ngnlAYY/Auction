@@ -54,6 +54,13 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
         return false;
     }
 
+    // 寄售处置链把起写许可记在 `mail_disposition_write_starts`，不伪造 sending 事实：
+    // Take/Return 只从 claimed 直接进入 succeeded/manual_reconcile。该来源在任何状态都不得有
+    // sending_at；处置链不会产生的 pending/sending/failed 也一律失败关闭（不变量 4、6）。
+    if snapshot.origin_kind == "consignment_disposition" {
+        return valid_consignment_disposition_snapshot(snapshot);
+    }
+
     // 新准备阶段可以确定拒绝非法载荷；没有发送事实，仍要求完整 claimed/completed 时间链。
     if preparation_rejected(snapshot) {
         return snapshot.reason_code.is_none()
@@ -103,7 +110,7 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
     }
 
     // 仅明确失效且从未发送允许没有 sending 时间；未知发送不能进入此例外。
-    // watch 提醒因 lot 失效或收件人改名退役；玩家提醒（卖方汇总、换季提醒）只在收件人改名时
+    // watch 提醒因 lot 失效或收件人改名退役；玩家提醒（卖方汇总、换季提醒、寄售季前通知）只在收件人改名时
     // 允许该原因，换季提醒另有边界已过/义务完成的退役原因，见下一分支。
     if matches!(
         snapshot.reason_code.as_deref(),
@@ -111,7 +118,10 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
     ) {
         let origin_allowed = snapshot.origin_kind == "lot_watch"
             || (snapshot.reason_code.as_deref() == Some("recipient_renamed")
-                && matches!(snapshot.origin_kind.as_str(), "seller_summary" | "season_reminder"));
+                && matches!(
+                    snapshot.origin_kind.as_str(),
+                    "seller_summary" | "season_reminder" | "consignment_notice"
+                ));
         return origin_allowed
             && snapshot.failure_code.as_deref() == snapshot.reason_code.as_deref()
             && valid_preflight_retirement(snapshot);
@@ -325,6 +335,63 @@ fn valid_preflight_retirement(snapshot: &DeliveryAdminSnapshot) -> bool {
         })
 }
 
+/// 寄售处置投递的专属状态与时间线：没有发送围栏，只允许 `prepared/claimed/succeeded/manual_reconcile`。
+fn valid_consignment_disposition_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
+    // 退役/抑制标记只允许出现在 failed，本来源没有 failed；出现即不是处置链写出的形状。
+    if snapshot.sending_at.is_some()
+        || snapshot.retirement_reason.is_some()
+        || snapshot.suppression_reason.is_some()
+    {
+        return false;
+    }
+    let claimed_valid = snapshot.claimed_at.is_some_and(|claimed| {
+        !is_zero_time(claimed) && claimed >= snapshot.created_at && claimed <= snapshot.updated_at
+    });
+    let completed_after_claim = snapshot.completed_at.is_some_and(|completed| {
+        !is_zero_time(completed)
+            && snapshot.claimed_at.is_some_and(|claimed| completed >= claimed)
+            && completed <= snapshot.updated_at
+    });
+    let no_lease = snapshot.lease_expires_at.is_none();
+    match snapshot.status.as_str() {
+        "prepared" => {
+            no_lease
+                && snapshot.claimed_at.is_none()
+                && snapshot.completed_at.is_none()
+                && snapshot.external_reference.is_none()
+                && snapshot.failure_code.is_none()
+        }
+        "claimed" => {
+            snapshot.lease_expires_at.is_some_and(|lease| !is_zero_time(lease))
+                && claimed_valid
+                && snapshot.completed_at.is_none()
+                && snapshot.external_reference.is_none()
+                && snapshot.failure_code.is_none()
+                && snapshot.fencing_version > 0
+                && snapshot.attempt_count > 0
+        }
+        "succeeded" => {
+            no_lease
+                && claimed_valid
+                && completed_after_claim
+                && snapshot.external_reference.as_deref().is_some_and(valid_stored_text)
+                && snapshot.failure_code.is_none()
+                && snapshot.fencing_version > 0
+                && snapshot.attempt_count > 0
+        }
+        "manual_reconcile" => {
+            no_lease
+                && claimed_valid
+                && completed_after_claim
+                && snapshot.external_reference.is_none()
+                && snapshot.failure_code.as_deref().is_some_and(valid_stored_text)
+                && snapshot.fencing_version > 0
+                && snapshot.attempt_count > 0
+        }
+        _ => false,
+    }
+}
+
 fn valid_timeline(
     created_at: Timestamp,
     claimed_at: Option<Timestamp>,
@@ -353,6 +420,11 @@ fn valid_origin_kind(value: &str) -> bool {
             | "lot_watch"
             | "seller_summary"
             | "season_reminder"
+            // 季前撤回通知只读投影；通用 Send 路径处理发送，Admin 不放宽任何投递动作。
+            | "consignment_notice"
+            // 寄售处置投递只读投影仍须可构造快照；五个 Admin 动作由领域守卫按来源拒绝，
+            // 不能只靠快照不可读偶然拦住（不变量 4，起写许可只发一次）。
+            | "consignment_disposition"
     )
 }
 

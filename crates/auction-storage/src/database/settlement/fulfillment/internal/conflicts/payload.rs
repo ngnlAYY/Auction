@@ -187,10 +187,21 @@ mod tests {
             MailDeliveryOrigin::SellerSummary => {
                 (format!("seller_summary:{}:alice", Uuid::new_v4()), command_id.to_string())
             }
+            // 寄售处置投递不是通知来源，模板表不会产生；按来源键格式给出形状以保持匹配穷尽。
+            MailDeliveryOrigin::ConsignmentDisposition => {
+                (format!("consignment:{}:{}", Uuid::new_v4(), Uuid::new_v4()), "4243".to_owned())
+            }
             MailDeliveryOrigin::SeasonReminder => (
                 "season_reminder:1793523600:alice".to_owned(),
                 "season-end:2026-11-01T09:00:00Z".to_owned(),
             ),
+            MailDeliveryOrigin::ConsignmentNotice => {
+                let notice_id = Uuid::new_v4();
+                (
+                    format!("consignment_notice:{notice_id}"),
+                    format!("consignment-notice:{notice_id}"),
+                )
+            }
         };
         Stored {
             payload: AttachmentPayload {

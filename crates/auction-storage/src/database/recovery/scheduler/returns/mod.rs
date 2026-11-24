@@ -2,7 +2,10 @@
 //! record_return_postgres 仍是唯一事务入口，外部副作用由后续 delivery owner 负责。
 
 mod action;
+mod handoff;
 mod mapping;
 mod model;
 pub(in crate::database::recovery::scheduler) mod record;
 mod validation;
+
+pub(crate) use handoff::{RecoveryHandoff, handoff_recovery_return_in_tx};

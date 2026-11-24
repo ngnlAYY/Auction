@@ -199,6 +199,52 @@ async fn postgres_quotas_use_fixed_time_and_count_both_worlds() {
 }
 
 #[tokio::test]
+async fn postgres_activity_keeps_expired_available_but_drops_expired_displayed() {
+    let db = TestDatabase::create().await.expect("临时 PG18");
+    let owner = db.maintenance_store().await.expect("维护连接");
+    let runtime = db.store().await.expect("服务连接");
+    seed(owner.postgres_pool()).await;
+    let mut tx = runtime.postgres_pool().begin().await.expect("额度事务");
+    let displayed = Listing::new(201, "42");
+    let available = Listing { mode: "consigned", ..Listing::new(202, "43") };
+    displayed.register(&mut tx).await;
+    displayed.publish(&mut tx).await;
+    available.register(&mut tx).await;
+    available.publish(&mut tx).await;
+    commit(tx).await;
+    let mut owner_connection = owner.postgres_pool().acquire().await.expect("维护连接");
+    batch(
+        &mut owner_connection,
+        &format!(
+            "ALTER TABLE public.consignment_listings DISABLE TRIGGER USER;
+             UPDATE public.consignment_listings
+             SET state='available', state_version=3, updated_at='{LATER}'
+             WHERE id='{}';
+             ALTER TABLE public.consignment_listings ENABLE TRIGGER USER;",
+            available.listing_id
+        ),
+    )
+    .await;
+    drop(owner_connection);
+    let mut tx = runtime.postgres_pool().begin().await.expect("额度读取事务");
+    let as_of = at(END);
+    assert_eq!(
+        effective_activity_count(&mut tx, UserId::from_uuid(SELLER), as_of)
+            .await
+            .expect("活动额度"),
+        1,
+        "过期 displayed 不占额度，available 占额度"
+    );
+    assert_eq!(
+        effective_activity_count(&mut tx, UserId::from_uuid(SELLER), at(LATER))
+            .await
+            .expect("未到期额度"),
+        2
+    );
+    commit(tx).await;
+}
+
+#[tokio::test]
 async fn postgres_reopened_service_hides_previous_epoch() {
     let db = TestDatabase::create().await.expect("临时 PG18");
     let owner = db.maintenance_store().await.expect("维护连接");

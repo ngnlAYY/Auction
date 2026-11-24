@@ -4,18 +4,23 @@ mod admin_delist;
 mod apply_lookup;
 mod auto_close;
 mod credentials;
+mod equipment_lease;
 pub(crate) mod errors;
 pub(crate) mod facts;
 pub(crate) mod ledger;
 mod management;
 mod receipts;
+mod receipts_v2;
 mod register;
 mod reprice;
 pub(crate) mod session;
 mod snapshot;
 mod target;
 mod termination;
+#[cfg(feature = "test-db")]
+pub mod test_access_v2;
 mod withdraw;
+mod writer_v2;
 
 #[cfg(feature = "test-db")]
 mod pg_tests;
@@ -76,3 +81,8 @@ impl ListingCommandStore for DatabaseStore {
         Box::pin(admin_delist::admin_delist(self, command))
     }
 }
+
+pub(crate) use equipment_lease::EquipmentLease;
+pub(crate) use receipts_v2::DepositReceipt;
+pub(crate) use session::{LockKeys, with_deposit_transaction};
+pub(crate) use writer_v2::{DepositRejection, DepositWriter};

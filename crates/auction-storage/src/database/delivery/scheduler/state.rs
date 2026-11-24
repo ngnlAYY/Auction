@@ -20,7 +20,9 @@ pub(super) async fn release_postgres(
 ) -> Result<(), auction_application::core::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     lock_delivery_lease(&mut transaction, claim.delivery_id).await?;
-    let result = sqlx::query(
+    // 寄售处置的 Take/Return 只能由寄售专用链的起写许可推进；滚动升级期间旧 Worker 即使
+    // 还持有寄售 claim，这里也拒绝把它释放回通用 pending（不变量 4，起写许可只发一次）。
+    let result = sqlx::query(concat!(
         r#"UPDATE public.deliveries
            SET status = 'pending',
                attempt_count = GREATEST(attempt_count - 1, 0),
@@ -33,8 +35,10 @@ pub(super) async fn release_postgres(
              AND lease_token = $3
              AND fencing_version = $4
              AND lease_expires_at > $2
-             AND lease_expires_at > clock_timestamp()"#,
-    )
+             AND lease_expires_at > clock_timestamp()
+             AND "#,
+        delivery_generic_origin_guard!()
+    ))
     .bind(claim.delivery_id)
     .bind(released_at)
     .bind(claim.lease_token)

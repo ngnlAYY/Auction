@@ -1,5 +1,7 @@
 //! 寄售审计故障在独立测试进程运行，避免污染 postgres 的就绪检查。
 
+mod deposit;
+mod deposit_fixture;
 mod reaper;
 mod termination;
 

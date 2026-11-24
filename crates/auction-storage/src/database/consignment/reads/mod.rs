@@ -3,6 +3,7 @@
 mod availability;
 mod catalog;
 mod commands;
+mod deposits;
 mod maintenance;
 mod private;
 mod projection;

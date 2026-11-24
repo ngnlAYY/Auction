@@ -434,39 +434,74 @@ async fn append_event(
     command_id: Uuid,
     event: &PendingEvent,
 ) -> Result<(), WriteError> {
+    append_event_row(
+        connection,
+        command_id,
+        event.listing_id,
+        event.projection.state_version.value(),
+        event.actor,
+        event.change.as_str(),
+        event.from_state,
+        event.projection.state,
+        event.projection.reason.map(ListingReason::as_str),
+        event.projection.price.value(),
+        event.now,
+    )
+    .await
+}
+
+/// v1/v2 共用的持久事件写入；列由调用方按同版本事实冻结。
+#[allow(clippy::too_many_arguments, reason = "事件列与 v1/v2 共用绑定一一对应")]
+pub(super) async fn append_event_row(
+    connection: &mut PgConnection,
+    command_id: Uuid,
+    listing_id: Uuid,
+    state_version: u64,
+    actor: &str,
+    event_kind: &str,
+    from_state: Option<ListingState>,
+    to_state: ListingState,
+    reason: Option<&str>,
+    price: i64,
+    occurred_at: Timestamp,
+) -> Result<(), WriteError> {
     sqlx::query(
         "INSERT INTO public.consignment_events
             (listing_id, state_version, command_id, actor_kind, event_kind, from_state,
              to_state, reason_code, price, occurred_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
     )
-    .bind(event.listing_id)
-    .bind(event.projection.state_version.value().cast_signed())
+    .bind(listing_id)
+    .bind(state_version.cast_signed())
     .bind(command_id)
-    .bind(event.actor)
-    .bind(event.change.as_str())
-    .bind(event.from_state.map(ListingState::as_str))
-    .bind(event.projection.state.as_str())
-    .bind(event.projection.reason.map(ListingReason::as_str))
-    .bind(event.projection.price.value())
-    .bind(event.now)
+    .bind(actor)
+    .bind(event_kind)
+    .bind(from_state.map(ListingState::as_str))
+    .bind(to_state.as_str())
+    .bind(reason)
+    .bind(price)
+    .bind(occurred_at)
     .execute(connection)
     .await?;
     Ok(())
 }
 
-struct Audit<'a> {
-    actor: Actor<'a>,
-    request_id: Option<&'a str>,
-    action: &'static str,
-    listing_id: Option<Uuid>,
-    accepted: bool,
-    now: Timestamp,
-    command_id: Uuid,
-    metadata: Value,
+/// 同一事务内的追加审计；v1/v2 共用同一敏感值边界。
+pub(super) struct Audit<'a> {
+    pub(super) actor: Actor<'a>,
+    pub(super) request_id: Option<&'a str>,
+    pub(super) action: &'static str,
+    pub(super) listing_id: Option<Uuid>,
+    pub(super) accepted: bool,
+    pub(super) now: Timestamp,
+    pub(super) command_id: Uuid,
+    pub(super) metadata: Value,
 }
 
-async fn audit(connection: &mut PgConnection, audit: Audit<'_>) -> Result<(), WriteError> {
+pub(super) async fn audit(
+    connection: &mut PgConnection,
+    audit: Audit<'_>,
+) -> Result<(), WriteError> {
     sqlx::query(
         "INSERT INTO public.audit_records
             (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id, result,

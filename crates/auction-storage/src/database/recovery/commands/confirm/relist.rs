@@ -1,5 +1,6 @@
 //! Worker recovery relist 的候选领取、证明复核和状态推进。
 
+use auction_application::core::CompetitionTransactionError;
 use auction_application::recovery::{
     RecoveryCommandError, RecoveryConfirmationAction, RecoveryResolutionAdvance,
 };
@@ -8,12 +9,16 @@ use serde_json::json;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
+use crate::database::consignment::commands::EquipmentLease;
 use crate::database::recovery::commands::confirm::{
     block_recovery_relist, complete_recovery_relist, defer_recovery_relist,
     insert_worker_recovery_audit, scheduled_relist_command_id,
 };
 use crate::database::recovery::commands::mapping::is_conflict;
 use crate::database::recovery::commands::mapping::map_sql_error;
+use crate::database::recovery::commands::relist::ensure_preloaded_equipment;
+use crate::database::recovery::commands::relist::preload_due_relist_equipment;
+use crate::database::recovery::commands::relist::recovery_equipment_identity;
 use crate::database::recovery::commands::relist::relist_recovery;
 use crate::database::recovery::commands::scope::database_now;
 use crate::database::recovery::commands::scope::lock_actions;
@@ -46,6 +51,86 @@ pub(in crate::database::recovery::commands) async fn advance_relist_postgres_onc
     now: Timestamp,
     retry_after: TimeDelta,
     preview_event_id: Uuid,
+) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
+    advance_relist_postgres_once_between(pool, now, retry_after, preview_event_id, || async {})
+        .await
+}
+
+/// 预读与实物租约之间保留一个测试钩子；生产入口传入空 future。
+async fn advance_relist_postgres_once_between<F, Fut>(
+    pool: &crate::database::TrackedPool<Postgres>,
+    now: Timestamp,
+    retry_after: TimeDelta,
+    preview_event_id: Uuid,
+    between: F,
+) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    // 不变量 2：先按到期候选预读实物身份并取会话锁，再开 Serializable 快照。
+    // 维护者 2026-11-23 决定：只有预读时该实物已被寄售预约或 position 持有才取实物租约；
+    // 无持有时恢复重列保持既有路径（零租约、零等待）。预判之后才签发的预约由事务内强占用
+    // 检查、Serializable 与 lot 守卫兜底；预读身份仍在锁内复核，变化按可重试冲突退出。
+    let preloaded = preload_due_relist_equipment(pool, now).await?;
+    between().await;
+    let equipment = preloaded
+        .as_ref()
+        .filter(|preloaded| preloaded.equipment_held)
+        .and_then(|preloaded| preloaded.identity.clone())
+        .into_iter()
+        .collect::<Vec<_>>();
+    let lease = if equipment.is_empty() {
+        None
+    } else {
+        Some(EquipmentLease::acquire(pool, &equipment).await.map_err(map_equipment_lease_error)?)
+    };
+    let result = advance_relist_postgres_once_locked(
+        pool,
+        now,
+        retry_after,
+        preview_event_id,
+        preloaded.as_ref(),
+    )
+    .await;
+    if let Some(lease) = lease {
+        lease.release().await;
+    }
+    result
+}
+
+#[cfg(feature = "test-db")]
+#[doc(hidden)]
+impl crate::database::DatabaseStore {
+    /// 测试两段执行：预读之后、取租约与锁内复核之前运行钩子，用于确定性地改变实物身份。
+    pub async fn test_advance_relist_postgres_once_with_between_hook<F, Fut>(
+        &self,
+        now: Timestamp,
+        retry_after: TimeDelta,
+        preview_event_id: Uuid,
+        between: F,
+    ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = ()>,
+    {
+        advance_relist_postgres_once_between(
+            self.pool(),
+            now,
+            retry_after,
+            preview_event_id,
+            between,
+        )
+        .await
+    }
+}
+
+async fn advance_relist_postgres_once_locked(
+    pool: &crate::database::TrackedPool<Postgres>,
+    now: Timestamp,
+    retry_after: TimeDelta,
+    preview_event_id: Uuid,
+    preloaded: Option<&crate::database::recovery::commands::relist::PreloadedRecoveryEquipment>,
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
     let mut transaction =
         pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(map_sql_error)?;
@@ -106,6 +191,8 @@ pub(in crate::database::recovery::commands) async fn advance_relist_postgres_onc
     let candidate_auction_id: Uuid = candidate.try_get("auction_id").map_err(map_sql_error)?;
     let auction = lock_auction(&mut transaction, candidate_auction_id).await?;
     let recovery = lock_recovery(&mut transaction, recovery_id).await?;
+    let current_equipment = recovery_equipment_identity(&mut transaction, &recovery).await?;
+    ensure_preloaded_equipment(preloaded, current_equipment.as_ref())?;
     let Some(resolution) = recovery.resolution.as_deref() else {
         return Err(RecoveryCommandError::InvalidStoredResult);
     };
@@ -233,4 +320,16 @@ pub(in crate::database::recovery::commands) async fn advance_relist_postgres_onc
         state_version: updated_state_version,
         completed: relist.stage == "completed",
     }))
+}
+
+fn map_equipment_lease_error(error: CompetitionTransactionError) -> RecoveryCommandError {
+    match error {
+        CompetitionTransactionError::EquipmentLockUnavailable => {
+            RecoveryCommandError::Failed("recovery 实物锁暂不可用".to_owned())
+        }
+        CompetitionTransactionError::CommandLedger(error) => {
+            RecoveryCommandError::Failed(format!("recovery 实物锁账本失败: {error}"))
+        }
+        _ => RecoveryCommandError::Failed("recovery 实物锁取得失败".to_owned()),
+    }
 }

@@ -8,7 +8,9 @@ use auction_time::Timestamp;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::database::auction::competition::{PostgresCompetitionTransaction, map_sql_error};
+use crate::database::auction::competition::{
+    PostgresCompetitionTransaction, is_equipment_busy_error, map_sql_error,
+};
 use crate::database::auction::intake_target;
 use crate::database::mail::delivery::disposition::has_return_intent;
 use crate::database::mail::intake::failed;
@@ -99,6 +101,29 @@ pub(super) async fn add_mail_auction_intake_inner(
     .map_err(map_sql_error)?;
     if existing_submission.is_some() {
         return Err(CompetitionTransactionError::Conflict);
+    }
+
+    // 不变量 2、6：同一 `(world, 规范 EID)` 的寄售强占用与拍卖建 lot 共用实物互斥行。
+    // 勘误 E1 要求既有投稿续办保持原路径：先把同一原信的投稿冲突按既有顺序返回，再检查
+    // 强占用。锁内显式拒绝预约或 position 持有，整封零事实；lot 守卫再作纵深防御。
+    for item in &write.items {
+        let held: bool = sqlx::query_scalar(
+            r#"SELECT EXISTS (
+                   SELECT 1
+                   FROM public.consignment_equipment_claims AS claim
+                   WHERE claim.world_id = $1
+                     AND claim.canonical_eid = public.consignment_eid_alias($2)
+                     AND (claim.reservation_id IS NOT NULL OR claim.position_id IS NOT NULL)
+               )"#,
+        )
+        .bind(&write.world_id)
+        .bind(&item.external_equipment_id)
+        .fetch_one(&mut **transaction)
+        .await
+        .map_err(map_sql_error)?;
+        if held {
+            return Err(CompetitionTransactionError::EquipmentHeld);
+        }
     }
 
     let category_rows = sqlx::query(
@@ -286,7 +311,7 @@ pub(super) async fn add_mail_auction_intake_inner(
         .bind(now)
         .execute(&mut **transaction)
         .await
-        .map_err(map_sql_error)?;
+        .map_err(map_lot_insert_error)?;
     }
 
     if !intake_target::advance(transaction, &target, next_versions, now)
@@ -341,4 +366,13 @@ pub(super) async fn add_mail_auction_intake_inner(
     .await
     .map_err(map_sql_error)?;
     Ok(result)
+}
+
+/// lot 守卫的寄售强占用拒绝映射为业务错误；其他 SQL 错误保持原映射。
+fn map_lot_insert_error(error: sqlx::Error) -> CompetitionTransactionError {
+    if is_equipment_busy_error(&error) {
+        CompetitionTransactionError::EquipmentHeld
+    } else {
+        map_sql_error(error)
+    }
 }

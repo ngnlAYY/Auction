@@ -128,6 +128,13 @@ pub(super) fn map_competition_error(
         auction_application::core::CompetitionTransactionError::QueueWaitTimeout => {
             SettlementTransactionError::Failed("竞价事务排队超时".to_owned())
         }
+        // 结算路径不经过寄售实物准入；出现时按可重试但未归类的基础设施失败上报。
+        auction_application::core::CompetitionTransactionError::EquipmentLockUnavailable => {
+            SettlementTransactionError::Failed("竞价事务实物锁不可用".to_owned())
+        }
+        auction_application::core::CompetitionTransactionError::EquipmentHeld => {
+            SettlementTransactionError::Failed("竞价事务实物被寄售持有".to_owned())
+        }
         auction_application::core::CompetitionTransactionError::CommandLedger(error) => {
             SettlementTransactionError::CommandLedger(error)
         }

@@ -58,7 +58,7 @@ async fn insert_postgres(
         };
         let mut transaction = begin.await.map_err(map_storage_error)?;
         let (result, created) =
-            enqueue_in_transaction_with_created(&mut transaction, command, prepared_status)
+            enqueue_in_transaction_with_created(&mut transaction, command, prepared_status, None)
                 .await
                 .map_err(MailDeliveryTransactionError::into_repository)?;
         transaction.commit().await.map_err(map_storage_error)?;
@@ -82,7 +82,7 @@ pub(crate) async fn enqueue_in_transaction(
     notifications: Option<&dyn auction_application::notification_metrics::NotificationRecorder>,
 ) -> Result<MailDeliveryResult, MailDeliveryTransactionError> {
     let (result, created) =
-        enqueue_in_transaction_with_created(transaction, command, prepared_status).await?;
+        enqueue_in_transaction_with_created(transaction, command, prepared_status, None).await?;
     if created
         && let Some(notifications) = notifications
         && let Some(kind) = notification_kind(command)
@@ -94,20 +94,52 @@ pub(crate) async fn enqueue_in_transaction(
     }
     Ok(result)
 }
+
+/// 由调用方给出显式投递 ID 的同一入队原语；只有寄售季前通知使用，其他来源仍按命令 ID
+/// 派生 `auction/mail-delivery-v1/*`。校验、冲突检查、审计与提交流程完全复用。
+pub(crate) async fn enqueue_in_transaction_with_id(
+    transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
+    command: &MailDeliveryCommand,
+    prepared_status: Option<&str>,
+    notifications: Option<&dyn auction_application::notification_metrics::NotificationRecorder>,
+    delivery_id: Uuid,
+) -> Result<MailDeliveryResult, MailDeliveryTransactionError> {
+    let (result, created) = enqueue_in_transaction_with_created(
+        transaction,
+        command,
+        prepared_status,
+        Some(delivery_id),
+    )
+    .await?;
+    if created
+        && let Some(notifications) = notifications
+        && let Some(kind) = notification_kind(command)
+    {
+        notifications.observe_stage(
+            kind,
+            auction_application::notification_metrics::NotificationStage::Created,
+        );
+    }
+    Ok(result)
+}
+
 async fn enqueue_in_transaction_with_created(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     command: &MailDeliveryCommand,
     prepared_status: Option<&str>,
+    delivery_id: Option<Uuid>,
 ) -> Result<(MailDeliveryResult, bool), MailDeliveryTransactionError> {
     super::validation::validate_command(command)
         .map_err(|_| repository_error("MoogleMail delivery 命令无效"))?;
     let payload = payload(command);
     let status = prepared_status.unwrap_or("pending");
     let occurred_at = Timestamp::now();
-    let delivery_id = Uuid::new_v5(
-        &Uuid::NAMESPACE_URL,
-        format!("auction/mail-delivery-v1/{}", command.command_id).as_bytes(),
-    );
+    let delivery_id = delivery_id.unwrap_or_else(|| {
+        Uuid::new_v5(
+            &Uuid::NAMESPACE_URL,
+            format!("auction/mail-delivery-v1/{}", command.command_id).as_bytes(),
+        )
+    });
     super::disposition::guard_disposition(transaction, command).await?;
     let inserted = sqlx::query(
         r#"INSERT INTO public.deliveries
@@ -274,7 +306,7 @@ pub(super) async fn enqueue_within_limit_postgres(
                 }
             }
             let (result, created) =
-                enqueue_in_transaction_with_created(&mut transaction, command, None)
+                enqueue_in_transaction_with_created(&mut transaction, command, None, None)
                     .await
                     .map_err(MailDeliveryTransactionError::into_repository)?;
             transaction.commit().await.map_err(map_storage_error)?;

@@ -10,6 +10,11 @@ use uuid::Uuid;
 
 use crate::database::operations::audit_health::AuditWriteResult as _;
 
+mod admin_commands;
+mod stored_keys;
+pub use admin_commands::{replace_admin_command_key_envelope, scan_admin_command_key_envelopes};
+pub use stored_keys::stored_key_ids;
+
 /// 单页扫描上限；离线维护命令逐页推进，避免一次性持有全部密文。
 pub const KEY_ROTATION_PAGE_SIZE: i64 = 200;
 
@@ -58,6 +63,10 @@ pub enum KeyEnvelopeSource {
     UserLogin,
     /// 外部凭据信封。
     Credential,
+    /// 寄售预约码密文。
+    ReservationSecret,
+    /// 寄售受保护证据密文。
+    EvidenceEnvelope,
     /// Admin 用户命令的响应信封。
     AdminCommand,
 }
@@ -71,6 +80,8 @@ impl KeyEnvelopeSource {
             Self::ReplayKey => "consignment_replay_keys",
             Self::UserLogin => "user_login_key_envelopes",
             Self::Credential => "credential_keys",
+            Self::ReservationSecret => "consignment_reservation_secrets",
+            Self::EvidenceEnvelope => "mail_evidence_envelopes",
             Self::AdminCommand => "user_admin_commands",
         }
     }
@@ -80,6 +91,8 @@ impl KeyEnvelopeSource {
             Self::Equipment => "equipment_id",
             Self::Registration => "listing_id",
             Self::ReplayKey | Self::Credential => "id",
+            Self::ReservationSecret => "reservation_id",
+            Self::EvidenceEnvelope => "id",
             Self::UserLogin => "user_id",
             Self::AdminCommand => "command_id",
         }
@@ -89,6 +102,9 @@ impl KeyEnvelopeSource {
         let (aad, retired) = match self {
             Self::Equipment => ("equipment_id", "false"),
             Self::Registration => ("aad_equipment_id", "retired_at IS NOT NULL"),
+            Self::ReservationSecret | Self::EvidenceEnvelope => {
+                ("NULL::uuid", "retired_at IS NOT NULL")
+            }
             _ => ("NULL::uuid", "false"),
         };
         let (ciphertext, fingerprint) = if self == Self::ReplayKey {
@@ -101,9 +117,16 @@ impl KeyEnvelopeSource {
         } else {
             ("NULL::text", "NULL::text")
         };
+        let (generation, seller, purpose, aad_owner) = match self {
+            Self::ReservationSecret => ("generation", "seller_user_id", "NULL::text", "NULL::text"),
+            Self::EvidenceEnvelope => ("NULL::bigint", "NULL::uuid", "purpose", "aad_owner"),
+            _ => ("NULL::bigint", "NULL::uuid", "NULL::text", "NULL::text"),
+        };
         format!(
             "SELECT {pk} AS entity_id, {aad} AS equipment_aad, {retired} AS retired,
                     {kind} AS credential_kind, {scope} AS scope,
+                    {generation} AS generation, {seller} AS seller_user_id,
+                    {purpose} AS purpose, {aad_owner} AS aad_owner,
                     {ciphertext} AS ciphertext, nonce, encryption_key_id,
                     {fingerprint} AS fingerprint FROM public.{table}",
             pk = self.primary_key(),
@@ -114,6 +137,12 @@ impl KeyEnvelopeSource {
 
 const EQUIPMENT_SOURCES: [KeyEnvelopeSource; 3] =
     [KeyEnvelopeSource::Equipment, KeyEnvelopeSource::Registration, KeyEnvelopeSource::ReplayKey];
+
+const CREDENTIAL_SOURCES: [KeyEnvelopeSource; 3] = [
+    KeyEnvelopeSource::Credential,
+    KeyEnvelopeSource::ReservationSecret,
+    KeyEnvelopeSource::EvidenceEnvelope,
+];
 
 /// 上一页最后一条信封的位置，表种与表内身份共同决定顺序。
 #[derive(Clone, Copy)]
@@ -135,6 +164,14 @@ pub struct StoredKeyEnvelope {
     pub credential_kind: Option<String>,
     /// 外部凭据的作用域。
     pub scope: Option<String>,
+    /// 预约密文绑定的代。
+    pub generation: Option<i64>,
+    /// 预约密文绑定的卖家。
+    pub seller_user_id: Option<Uuid>,
+    /// 受保护证据的用途码。
+    pub purpose: Option<String>,
+    /// 受保护证据的 AAD owner。
+    pub aad_owner: Option<String>,
     /// 密文及认证标签。
     pub ciphertext: Vec<u8>,
     /// 本次扫描捕获的 nonce。
@@ -148,6 +185,9 @@ pub struct StoredKeyEnvelope {
 impl StoredKeyEnvelope {
     /// 装备域回执需初始化的来源，即使一处没有信封也记录零计数。
     pub const EQUIPMENT_SOURCES: [KeyEnvelopeSource; 3] = EQUIPMENT_SOURCES;
+
+    /// 凭据域的三处来源；新增密文用途必须同时进入此清单。
+    pub const CREDENTIAL_SOURCES: [KeyEnvelopeSource; 3] = CREDENTIAL_SOURCES;
 
     /// 供回执计数及写回选择正确的表。
     pub const fn source(&self) -> KeyEnvelopeSource {
@@ -229,7 +269,7 @@ pub enum KeyEnvelopeReplacement {
     /// 活动登记已被退休。
     Retired,
     /// 别的进程已换到本次目标钥，调用方仍须验证这份信封。
-    AlreadyCurrent(StoredKeyEnvelope),
+    AlreadyCurrent(Box<StoredKeyEnvelope>),
 }
 
 impl KeyEnvelopeReplacement {
@@ -239,9 +279,9 @@ impl KeyEnvelopeReplacement {
     }
 
     /// 并发进程写回的信封。
-    pub const fn current_envelope(&self) -> Option<&StoredKeyEnvelope> {
+    pub fn current_envelope(&self) -> Option<&StoredKeyEnvelope> {
         match self {
-            Self::AlreadyCurrent(row) => Some(row),
+            Self::AlreadyCurrent(row) => Some(row.as_ref()),
             Self::Replaced | Self::Retired => None,
         }
     }
@@ -258,7 +298,7 @@ pub async fn scan_key_envelopes(
     let sources: &[KeyEnvelopeSource] = match domain {
         DataKeyDomain::Equipment => &EQUIPMENT_SOURCES,
         DataKeyDomain::UserLogin => &[KeyEnvelopeSource::UserLogin],
-        DataKeyDomain::Credential => &[KeyEnvelopeSource::Credential],
+        DataKeyDomain::Credential => &CREDENTIAL_SOURCES,
         DataKeyDomain::MailDiagnostics => return Err(KeyRotationError::UnsupportedDomain),
     };
     scan_sources(pool, sources, Some(current_key_id), after, limit).await
@@ -279,8 +319,16 @@ async fn scan_sources(
         }
         let after_id =
             after.filter(|cursor| cursor.source == source).map(|cursor| cursor.entity_id);
-        let active =
-            if source == KeyEnvelopeSource::Registration { "AND retired_at IS NULL" } else { "" };
+        let active = if matches!(
+            source,
+            KeyEnvelopeSource::Registration
+                | KeyEnvelopeSource::ReservationSecret
+                | KeyEnvelopeSource::EvidenceEnvelope
+        ) {
+            "AND retired_at IS NULL"
+        } else {
+            ""
+        };
         let pk = source.primary_key();
         let position = if after_id.is_some() { format!("AND {pk} > $3") } else { String::new() };
         // 表名、列名和 SQL 片段只来自闭集；密钥标识、主键和页长都绑定为参数。
@@ -316,6 +364,10 @@ fn decode_envelope(
         owner_user_id: (source == KeyEnvelopeSource::UserLogin).then_some(entity_id),
         credential_kind: row.try_get("credential_kind").map_err(read_failed)?,
         scope: row.try_get("scope").map_err(read_failed)?,
+        generation: row.try_get("generation").map_err(read_failed)?,
+        seller_user_id: row.try_get("seller_user_id").map_err(read_failed)?,
+        purpose: row.try_get("purpose").map_err(read_failed)?,
+        aad_owner: row.try_get("aad_owner").map_err(read_failed)?,
         ciphertext: row.try_get("ciphertext").map_err(read_failed)?,
         nonce: row.try_get("nonce").map_err(read_failed)?,
         encryption_key_id: row.try_get("encryption_key_id").map_err(read_failed)?,
@@ -335,7 +387,9 @@ pub async fn replace_key_envelope(
     }
     let (payload, active) = match source {
         KeyEnvelopeSource::ReplayKey => ("wrapped_key = $1", ""),
-        KeyEnvelopeSource::Registration => {
+        KeyEnvelopeSource::Registration
+        | KeyEnvelopeSource::ReservationSecret
+        | KeyEnvelopeSource::EvidenceEnvelope => {
             ("ciphertext = $1, fingerprint = $7", "AND retired_at IS NULL")
         }
         _ => ("ciphertext = $1, fingerprint = $7", ""),
@@ -366,7 +420,12 @@ pub async fn replace_key_envelope(
         return Ok(KeyEnvelopeReplacement::Replaced);
     }
 
-    if !EQUIPMENT_SOURCES.contains(&source) {
+    if !EQUIPMENT_SOURCES.contains(&source)
+        && !matches!(
+            source,
+            KeyEnvelopeSource::ReservationSecret | KeyEnvelopeSource::EvidenceEnvelope
+        )
+    {
         return Err(KeyRotationError::Conflict);
     }
     recheck_equipment_envelope(pool, expected, &rotated.encryption_key_id).await
@@ -393,125 +452,9 @@ async fn recheck_equipment_envelope(
     if current.encryption_key_id == current_key_id
         && current.equipment_aad == expected.equipment_aad
     {
-        return Ok(KeyEnvelopeReplacement::AlreadyCurrent(current));
+        return Ok(KeyEnvelopeReplacement::AlreadyCurrent(Box::new(current)));
     }
     Err(KeyRotationError::Conflict)
-}
-
-/// 读取一页仍引用非当前 key ID 的 Admin 命令响应信封；与登录 key 信封共用 `UserLogin` 域。
-pub async fn scan_admin_command_key_envelopes(
-    pool: &PgPool,
-    current_key_id: &str,
-    after: Option<Uuid>,
-    limit: i64,
-) -> Result<Vec<StoredKeyEnvelope>, KeyRotationError> {
-    let limit = limit.clamp(1, KEY_ROTATION_PAGE_SIZE);
-    let after = after.unwrap_or(Uuid::nil());
-    let rows = sqlx::query(
-        "SELECT command_id AS entity_id, user_id, NULL::text AS credential_kind,
-                NULL::text AS scope, response_ciphertext AS ciphertext,
-                response_nonce AS nonce, response_encryption_key_id AS encryption_key_id,
-                response_fingerprint AS fingerprint
-         FROM public.user_admin_commands
-         WHERE response_encryption_key_id IS NOT NULL
-           AND response_encryption_key_id <> $1
-           AND command_id > $2
-         ORDER BY command_id
-         LIMIT $3",
-    )
-    .bind(current_key_id)
-    .bind(after)
-    .bind(limit)
-    .fetch_all(pool)
-    .await
-    .map_err(read_failed)?;
-    rows.into_iter()
-        .map(|row| {
-            Ok(StoredKeyEnvelope {
-                source: KeyEnvelopeSource::AdminCommand,
-                equipment_aad: None,
-                entity_id: row.try_get("entity_id").map_err(read_failed)?,
-                owner_user_id: row.try_get("user_id").map_err(read_failed)?,
-                credential_kind: row.try_get("credential_kind").map_err(read_failed)?,
-                scope: row.try_get("scope").map_err(read_failed)?,
-                ciphertext: row.try_get("ciphertext").map_err(read_failed)?,
-                nonce: row.try_get("nonce").map_err(read_failed)?,
-                encryption_key_id: row.try_get("encryption_key_id").map_err(read_failed)?,
-                fingerprint: row.try_get("fingerprint").map_err(read_failed)?,
-            })
-        })
-        .collect()
-}
-
-/// 以旧 key ID 为 CAS 条件替换 Admin 命令响应信封。
-pub async fn replace_admin_command_key_envelope(
-    pool: &PgPool,
-    command_id: Uuid,
-    expected_key_id: &str,
-    rotated: &RotatedKeyEnvelope,
-) -> Result<bool, KeyRotationError> {
-    let result = sqlx::query(
-        "UPDATE public.user_admin_commands
-         SET response_ciphertext = $1, response_nonce = $2,
-             response_encryption_key_id = $3, response_fingerprint = $4
-         WHERE command_id = $5 AND response_encryption_key_id = $6",
-    )
-    .bind(&rotated.ciphertext)
-    .bind(&rotated.nonce)
-    .bind(&rotated.encryption_key_id)
-    .bind(&rotated.fingerprint)
-    .bind(command_id)
-    .bind(expected_key_id)
-    .execute(pool)
-    .await
-    .map_err(replace_failed)?;
-    Ok(result.rows_affected() == 1)
-}
-
-/// 列出该域实际出现的 key ID 与信封数量；用于核对旧密钥是否仍被引用。
-pub async fn stored_key_ids(
-    pool: &PgPool,
-    domain: DataKeyDomain,
-) -> Result<Vec<(String, i64)>, KeyRotationError> {
-    let query = match domain {
-        DataKeyDomain::Equipment => {
-            "SELECT encryption_key_id, count(*) AS envelopes
-             FROM (
-                 SELECT encryption_key_id FROM public.equipment_secrets
-                 UNION ALL
-                 SELECT encryption_key_id FROM public.consignment_registration_secrets
-                 WHERE retired_at IS NULL
-                 UNION ALL
-                 SELECT encryption_key_id FROM public.consignment_replay_keys
-             ) AS envelopes
-             GROUP BY encryption_key_id ORDER BY encryption_key_id"
-        }
-        DataKeyDomain::UserLogin => {
-            "SELECT encryption_key_id, count(*) AS envelopes
-             FROM (
-                 SELECT encryption_key_id
-                 FROM public.user_login_key_envelopes
-                 UNION ALL
-                 SELECT response_encryption_key_id AS encryption_key_id
-                 FROM public.user_admin_commands
-                 WHERE response_encryption_key_id IS NOT NULL
-             ) AS envelopes
-             GROUP BY encryption_key_id ORDER BY encryption_key_id"
-        }
-        DataKeyDomain::Credential => {
-            "SELECT encryption_key_id, count(*) AS envelopes
-             FROM public.credential_keys GROUP BY encryption_key_id ORDER BY encryption_key_id"
-        }
-        DataKeyDomain::MailDiagnostics => return Err(KeyRotationError::UnsupportedDomain),
-    };
-    let rows = sqlx::query(query).fetch_all(pool).await.map_err(read_failed)?;
-    rows.into_iter()
-        .map(|row| {
-            let key_id: String = row.try_get("encryption_key_id").map_err(read_failed)?;
-            let count: i64 = row.try_get("envelopes").map_err(read_failed)?;
-            Ok((key_id, count))
-        })
-        .collect()
 }
 
 /// 追加离线重加密审计；metadata 使用脱敏计数与回执身份。

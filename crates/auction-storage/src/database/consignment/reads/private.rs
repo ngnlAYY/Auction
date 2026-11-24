@@ -36,11 +36,41 @@ const ADMIN_JOIN: &str = " LEFT JOIN LATERAL (
 ) a ON true";
 const MAX_CONFLICTS: usize = 50;
 
+/// 旧解码器能表达的存储态；其余新态只由 v2 读模型返回。
+const V1_STATES: [&str; 6] =
+    ["resolving", "displayed", "awaiting_deposit", "rejected", "expired", "closed"];
+
+/// 领域有、旧 DTO 原因闭集没有的终态原因，由两个闭集相减得出，不手写名字。
+/// 单元测试比对旧 DTO 的闭集；任一侧新增原因时测试失败。
+const V1_INEXPRESSIBLE_REASONS: [ListingReason; 4] = [
+    ListingReason::Sold,
+    ListingReason::WithdrawnDelivered,
+    ListingReason::SeasonClosed,
+    ListingReason::LossConfirmed,
+];
+
+/// 旧列表、总数与详情共用的可表达性谓词：失败关闭，不让旧解码器遇到新态整页报错。
+/// 判断存储态 `l.state` 在旧状态集合内、有效原因不在被排除集合内，且该挂单从未有过代管 position。
+/// 按存储态而非有效态判断与后者等价：强制原因只会把有效态推到 closed/rejected/expired，
+/// 这些都在旧集合内；代管态的存储态仍被挡住，因此不会漏放，新增状态默认被隐藏（失败关闭）。
+/// 有过 position 的挂单即使以旧原因关闭，实物可能仍在平台代管，旧页面不能显示成普通“已关闭”。
+fn v1_expressible(sql: &mut QueryBuilder<Postgres>) {
+    let reasons: Vec<&str> =
+        V1_INEXPRESSIBLE_REASONS.iter().map(|reason| reason.as_str()).collect();
+    sql.push(" AND l.state = ANY(")
+        .push_bind(V1_STATES.to_vec())
+        .push(") AND COALESCE(effective.forced_reason, l.reason_code, '') <> ALL(")
+        .push_bind(reasons)
+        .push(
+            ") AND NOT EXISTS (SELECT 1 FROM public.consignment_custody_positions v1_position
+                WHERE v1_position.listing_id = l.id)",
+        );
+}
+
 fn listing_query(
     as_of: Timestamp,
     page_rows: bool,
     admin: bool,
-    filter_state: bool,
     prefix: &str,
 ) -> QueryBuilder<Postgres> {
     let mut sql = QueryBuilder::new(prefix);
@@ -48,22 +78,20 @@ fn listing_query(
     if page_rows && admin {
         sql.push(ADMIN_COLUMNS);
     }
-    sql.push(" FROM public.consignment_listings l");
-    if page_rows || filter_state {
-        sql.push(listing_sql!(eligibility_joins))
-            .push(" CROSS JOIN (SELECT ")
-            .push_bind(as_of)
-            .push("::timestamptz AS at) db_clock CROSS JOIN LATERAL (SELECT ")
-            .push(listing_sql!(forced_reason, "db_clock.at"))
-            .push(" AS forced_reason) effective");
-    }
+    // 可表达性谓词读取有效原因，计数查询也需要这些连接。
+    sql.push(" FROM public.consignment_listings l")
+        .push(listing_sql!(eligibility_joins))
+        .push(" CROSS JOIN (SELECT ")
+        .push_bind(as_of)
+        .push("::timestamptz AS at) db_clock CROSS JOIN LATERAL (SELECT ")
+        .push(listing_sql!(forced_reason, "db_clock.at"))
+        .push(" AS forced_reason) effective");
     if page_rows {
         sql.push(EQUIPMENT_JOIN).push(WORK_JOIN);
         if admin {
             sql.push(ADMIN_JOIN);
         }
     }
-    sql.push(" WHERE true");
     sql
 }
 
@@ -81,7 +109,9 @@ pub(super) fn list_query(
     page_rows: bool,
     prefix: &str,
 ) -> QueryBuilder<Postgres> {
-    let mut sql = listing_query(as_of, page_rows, admin, query.state.is_some(), prefix);
+    let mut sql = listing_query(as_of, page_rows, admin, prefix);
+    sql.push(" WHERE true");
+    v1_expressible(&mut sql);
     seller_filter(&mut sql, seller);
     if let Some(world) = query.world {
         sql.push(" AND l.world_id = ").push_bind(world.as_str());
@@ -107,7 +137,9 @@ fn detail_query(
     seller: Option<UserId>,
     admin: bool,
 ) -> QueryBuilder<Postgres> {
-    let mut sql = listing_query(as_of, true, admin, false, "");
+    let mut sql = listing_query(as_of, true, admin, "");
+    sql.push(" WHERE true");
+    v1_expressible(&mut sql);
     seller_filter(&mut sql, seller);
     sql.push(" AND l.id = ").push_bind(listing_id);
     sql
@@ -249,5 +281,34 @@ impl AdminListingRead for DatabaseStore {
                     .collect(),
             }))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_contracts as dto;
+    use auction_domain::consignment::ListingReason;
+    use serde::Deserialize;
+    use serde::de::value::{Error, StrDeserializer};
+
+    use super::{V1_INEXPRESSIBLE_REASONS, V1_STATES};
+
+    fn parses<T: for<'de> Deserialize<'de>>(code: &str) -> bool {
+        T::deserialize(StrDeserializer::<Error>::new(code)).is_ok()
+    }
+
+    #[test]
+    fn inexpressible_reasons_are_domain_minus_v1_dto() {
+        let derived: Vec<ListingReason> = ListingReason::ALL
+            .into_iter()
+            .filter(|reason| !parses::<dto::ListingReason>(reason.as_str()))
+            .collect();
+        assert_eq!(derived, V1_INEXPRESSIBLE_REASONS);
+    }
+
+    #[test]
+    fn v1_states_are_the_v1_dto_states() {
+        assert!(V1_STATES.iter().all(|state| parses::<dto::ListingState>(state)));
+        assert_eq!(V1_STATES.len(), 6);
     }
 }

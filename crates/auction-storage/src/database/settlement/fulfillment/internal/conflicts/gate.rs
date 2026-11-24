@@ -125,7 +125,8 @@ pub(super) async fn exclude_conflicts(
            FROM public.deliveries d
            WHERE d.origin_kind IN (
                'mail_intake','settlement_recovery_action','settlement_return_action',
-               'operations_alert','lot_watch','seller_summary','season_reminder'
+               'operations_alert','lot_watch','seller_summary','season_reminder',
+               'consignment_notice'
            )"#,
     )
     .fetch(&mut **tx);

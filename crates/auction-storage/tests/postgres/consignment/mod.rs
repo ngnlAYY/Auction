@@ -3,10 +3,14 @@
 //! 会写入进程级审计健康计数的场景在独立的 `postgres_audit` 测试目标运行。
 
 mod commands;
+mod delivery_guard;
+mod delivery_reads;
+mod deposit;
 mod eligibility;
 mod key_rotation;
 mod lookup;
 mod migration;
+mod readiness;
 mod reads;
 mod registration_fixture;
 mod work_store;

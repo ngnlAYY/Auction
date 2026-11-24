@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use super::failed;
 use crate::database::auction::competition::{
-    PostgresCompetitionTransaction, is_unique_error, map_sql_error,
+    PostgresCompetitionTransaction, is_equipment_busy_error, is_unique_error, map_sql_error,
 };
 use crate::database::auction::intake_target;
 
@@ -78,6 +78,26 @@ pub(super) async fn add_admin_intake_inner(
         None => return Err(CompetitionTransactionError::AdminIntakeUnavailable),
         Some("active") => {}
         Some(_) => return Err(CompetitionTransactionError::InvalidState),
+    }
+
+    // 不变量 2、6：Admin 建 lot 与寄售强占用共用同一 `(world, 规范 EID)` 事实。锁内先明确
+    // 拒绝预约或 position 持有，返回零事实；lot 守卫再作纵深防御。
+    let held: bool = sqlx::query_scalar(
+        r#"SELECT EXISTS (
+               SELECT 1
+               FROM public.consignment_equipment_claims AS claim
+               WHERE claim.world_id = $1
+                 AND claim.canonical_eid = public.consignment_eid_alias($2)
+                 AND (claim.reservation_id IS NOT NULL OR claim.position_id IS NOT NULL)
+           )"#,
+    )
+    .bind(&write.world_id)
+    .bind(&write.external_equipment_id)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?;
+    if held {
+        return Err(CompetitionTransactionError::EquipmentHeld);
     }
 
     let existing_equipment = sqlx::query_scalar::<_, Uuid>(
@@ -183,7 +203,7 @@ pub(super) async fn add_admin_intake_inner(
     .bind(now)
     .execute(&mut **transaction)
     .await
-    .map_err(map_sql_error)?;
+    .map_err(map_lot_insert_error)?;
 
     if !intake_target::advance(transaction, &target, next_versions, now)
         .await
@@ -255,6 +275,14 @@ fn map_command_insert_error(error: sqlx::Error) -> CompetitionTransactionError {
 fn map_equipment_insert_error(error: sqlx::Error) -> CompetitionTransactionError {
     if is_unique_error(&error) {
         CompetitionTransactionError::AdminIntakeEquipmentConflict
+    } else {
+        map_sql_error(error)
+    }
+}
+
+fn map_lot_insert_error(error: sqlx::Error) -> CompetitionTransactionError {
+    if is_equipment_busy_error(&error) {
+        CompetitionTransactionError::EquipmentHeld
     } else {
         map_sql_error(error)
     }

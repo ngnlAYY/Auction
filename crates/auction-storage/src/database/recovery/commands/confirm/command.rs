@@ -1,5 +1,6 @@
 //! Admin recovery 确认命令及其 Serializable 重试。
 
+use auction_application::core::CompetitionTransactionError;
 use auction_application::recovery::{
     RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
     RecoveryConfirmationResult,
@@ -7,13 +8,17 @@ use auction_application::recovery::{
 use sqlx::Postgres;
 use uuid::Uuid;
 
+use crate::database::consignment::commands::EquipmentLease;
 use crate::database::recovery::commands::confirm::closure::close_voided_fulfillments;
 use crate::database::recovery::commands::confirm::recovered::close_recovered_dependents;
 use crate::database::recovery::commands::mapping::is_conflict;
 use crate::database::recovery::commands::mapping::map_reversal_error;
 use crate::database::recovery::commands::mapping::map_sql_error;
+use crate::database::recovery::commands::relist::ensure_preloaded_equipment;
 use crate::database::recovery::commands::relist::insert_recovery_audit;
 use crate::database::recovery::commands::relist::insert_recovery_command;
+use crate::database::recovery::commands::relist::preload_recovery_equipment;
+use crate::database::recovery::commands::relist::recovery_equipment_identity;
 use crate::database::recovery::commands::relist::relist_recovery;
 use crate::database::recovery::commands::relist::update_recovery;
 use crate::database::recovery::commands::scope::activate_buyer_refund;
@@ -53,6 +58,69 @@ pub(in crate::database::recovery::commands) async fn confirm_postgres_once(
     command: RecoveryConfirmationCommand,
     preview_event_id: Uuid,
 ) -> Result<RecoveryConfirmationResult, RecoveryCommandError> {
+    confirm_postgres_once_between(pool, command, preview_event_id, || async {}).await
+}
+
+/// 预读与实物租约之间保留一个测试钩子；生产入口传入空 future。
+async fn confirm_postgres_once_between<F, Fut>(
+    pool: &crate::database::TrackedPool<Postgres>,
+    command: RecoveryConfirmationCommand,
+    preview_event_id: Uuid,
+    between: F,
+) -> Result<RecoveryConfirmationResult, RecoveryCommandError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    // 不变量 2：实物锁必须早于 Serializable 快照；预读只用于确定锁键，锁内仍重读身份。
+    // 维护者 2026-11-23 决定：只有预读时该实物已被寄售预约或 position 持有才取实物租约；
+    // 无持有时恢复重列保持既有路径（零租约、零等待）。预判之后才签发的预约由事务内强占用
+    // 检查、Serializable 与 lot 守卫兜底；预读身份仍在锁内复核，变化按可重试冲突退出。
+    let preloaded = preload_recovery_equipment(pool, command.recovery_id.as_uuid()).await?;
+    between().await;
+    let equipment = preloaded
+        .as_ref()
+        .filter(|preloaded| preloaded.equipment_held)
+        .and_then(|preloaded| preloaded.identity.clone())
+        .into_iter()
+        .collect::<Vec<_>>();
+    let lease = if equipment.is_empty() {
+        None
+    } else {
+        Some(EquipmentLease::acquire(pool, &equipment).await.map_err(map_equipment_lease_error)?)
+    };
+    let result =
+        confirm_postgres_once_locked(pool, command, preview_event_id, preloaded.as_ref()).await;
+    if let Some(lease) = lease {
+        lease.release().await;
+    }
+    result
+}
+
+#[cfg(feature = "test-db")]
+#[doc(hidden)]
+impl crate::database::DatabaseStore {
+    /// 测试两段执行：预读之后、取租约与锁内复核之前运行钩子，用于确定性地改变实物身份。
+    pub async fn test_confirm_postgres_once_with_between_hook<F, Fut>(
+        &self,
+        command: RecoveryConfirmationCommand,
+        preview_event_id: Uuid,
+        between: F,
+    ) -> Result<RecoveryConfirmationResult, RecoveryCommandError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = ()>,
+    {
+        confirm_postgres_once_between(self.pool(), command, preview_event_id, between).await
+    }
+}
+
+async fn confirm_postgres_once_locked(
+    pool: &crate::database::TrackedPool<Postgres>,
+    command: RecoveryConfirmationCommand,
+    preview_event_id: Uuid,
+    preloaded: Option<&crate::database::recovery::commands::relist::PreloadedRecoveryEquipment>,
+) -> Result<RecoveryConfirmationResult, RecoveryCommandError> {
     let mut transaction =
         pool.begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE").await.map_err(map_sql_error)?;
 
@@ -73,6 +141,8 @@ pub(in crate::database::recovery::commands) async fn confirm_postgres_once(
     }
 
     let recovery = lock_recovery(&mut transaction, command.recovery_id.as_uuid()).await?;
+    let current_equipment = recovery_equipment_identity(&mut transaction, &recovery).await?;
+    ensure_preloaded_equipment(preloaded, current_equipment.as_ref())?;
     validate_recovery_row(&recovery, &scope, &command)?;
 
     let lot = lock_original_lot(
@@ -158,6 +228,18 @@ pub(in crate::database::recovery::commands) async fn confirm_postgres_once(
 
     transaction.commit().await.map_err(map_sql_error)?;
     Ok(result)
+}
+
+fn map_equipment_lease_error(error: CompetitionTransactionError) -> RecoveryCommandError {
+    match error {
+        CompetitionTransactionError::EquipmentLockUnavailable => {
+            RecoveryCommandError::Failed("recovery 实物锁暂不可用".to_owned())
+        }
+        CompetitionTransactionError::CommandLedger(error) => {
+            RecoveryCommandError::Failed(format!("recovery 实物锁账本失败: {error}"))
+        }
+        _ => RecoveryCommandError::Failed("recovery 实物锁取得失败".to_owned()),
+    }
 }
 
 async fn replay_after_command_conflict(

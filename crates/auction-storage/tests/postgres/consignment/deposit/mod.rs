@@ -1,0 +1,30 @@
+//! 寄售第 4 期收件与代管的 PG18 测试：库结构、整封提交守卫、lot 实物守卫、升级与授权。
+
+mod acl;
+mod alignment;
+mod auction_entries;
+mod b;
+mod binding;
+mod claim_fact;
+mod compatibility;
+mod constraints;
+mod disposition;
+mod envelope_guard;
+mod envelopes;
+mod key_rotation;
+mod ledger;
+mod locks;
+mod lot_guard;
+mod owner_handoff;
+mod owner_recheck;
+mod poll_ingress;
+mod quarantine;
+mod receipt_guard;
+mod rejections;
+mod retirement;
+mod retry;
+mod schema;
+mod support;
+mod transitions;
+mod upgrade;
+mod v1_compat;

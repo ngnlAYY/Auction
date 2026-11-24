@@ -57,6 +57,8 @@ pub(super) async fn unproven_sends(
     // 仅旧结算解析既有装备引用；正文和登录 key 不进入维护投影。
     // 先物化轮转前缀，再解析冻结尝试和旧装备引用，避免为本批未处理的后缀执行关联查询。
     // 轮首游标与候选取自同一快照。即便没有常规候选，补采仍需用该游标回绕（不变量 5）。
+    // 寄售处置投递由寄售专用链按原起写事实核对，不进入通用巡检轮转或重发
+    // （不变量 4，起写许可只发一次）。
     sqlx::query(
         concat!(
             "WITH sweep AS (
@@ -76,6 +78,9 @@ pub(super) async fn unproven_sends(
               AND d.sending_at IS NOT NULL
               AND d.completed_at IS NOT NULL
               AND COALESCE(d.payload_world, 'main') = $1
+              AND ",
+            crate::database::delivery::scheduler::delivery_generic_origin_guard!("d"),
+            "
             ORDER BY sweep_order, d.created_at, d.id
             LIMIT $2
          ), projection AS (
@@ -345,7 +350,7 @@ pub(super) async fn record_sweep_attempt<'e>(
         return Err(storage_error("MoogleMail 维护轮转快照无效"));
     }
     let attempt_id = sweep_id.map(|_| Uuid::new_v4());
-    let result = sqlx::query(
+    let result = sqlx::query(concat!(
         r#"INSERT INTO public.mailbox_sweep_cursors
                (world_id, last_created_at, last_delivery_id, last_sweep_id, last_attempt_id)
            SELECT $1, delivery.created_at, delivery.id, $6, $7
@@ -403,6 +408,10 @@ pub(super) async fn record_sweep_attempt<'e>(
                          AND pending.external_reference IS NULL
                          AND pending.sending_at IS NOT NULL
                          AND pending.completed_at IS NOT NULL
+                         AND "#,
+        // 回绕判定与候选查询同口径：寄售处置投递不是巡检候选（不变量 4）。
+        crate::database::delivery::scheduler::delivery_generic_origin_guard!("pending"),
+        r#"
                          AND (pending.created_at, pending.id) >
                              (mailbox_sweep_cursors.last_created_at,
                               mailbox_sweep_cursors.last_delivery_id)
@@ -422,7 +431,7 @@ pub(super) async fn record_sweep_attempt<'e>(
                          )
                    ))
                )"#,
-    )
+    ))
     .bind(world_id)
     .bind(delivery_id)
     .bind(failed_fence)

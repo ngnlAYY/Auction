@@ -141,7 +141,7 @@ AND (
 AND (
     -- 玩家通知收件人改名后，冻结旧名不得再进入 sending；领取时的退役清理有行数上限，
     -- 必须在发送围栏复核同一谓词。
-    deliveries.origin_kind NOT IN ('seller_summary', 'season_reminder')
+    deliveries.origin_kind NOT IN ('seller_summary', 'season_reminder', 'consignment_notice')
     OR NOT "#,
             recipient_renamed_fact!(),
             r#"
@@ -168,6 +168,21 @@ macro_rules! delivery_recovery_return_gate {
         )
     };
 }
+
+/// 通用投递路径（领取、sending 围栏、租约释放、过期回收、邮箱巡检）不处理寄售处置投递：
+/// Take/Return 只由寄售专用链在 `mail_disposition_write_starts` 的一次性起写许可下执行。
+/// 只排除 `consignment_disposition`；后续寄售通知等来源仍走通用发送路径。
+/// 保护不变量 4：外部写入只在本地提交后执行；结果未知只转人工核对，绝不自动重发。
+macro_rules! delivery_generic_origin_guard {
+    () => {
+        "deliveries.origin_kind <> 'consignment_disposition'"
+    };
+    // 候选 CTE 使用短别名时显式传入，避免为宏改写既有查询的别名。
+    ($source:literal) => {
+        concat!($source, ".origin_kind <> 'consignment_disposition'")
+    };
+}
+pub(crate) use delivery_generic_origin_guard;
 
 /// MailIntake delivery 必须等待入站邮件及其命令账本完成，并由决定元数据明确授权当前
 /// delivery；没有入站账本授权的行（含已删除的论坛回执历史行）永不领取。
@@ -218,6 +233,8 @@ mod cadence;
 mod capability;
 mod cash;
 mod claims;
+mod disposition_work;
+mod disposition_write;
 mod expired;
 mod mapping;
 mod outcome;

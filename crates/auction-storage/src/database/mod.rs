@@ -90,6 +90,19 @@ pub use commands::{
     DatabaseAdminMailCommands, DatabaseAdminRulesCommands, DatabaseAdminRuntimeCommands,
     DatabaseAuctionLifecycleCommands, DatabaseCompetitionCommands,
 };
+#[cfg(feature = "test-db")]
+pub use consignment::commands::test_access_v2::{
+    TestDepositLocks, TestDepositOutcome, TestDepositReceipt, TestDepositRejection,
+    TestDepositStoredReceipt, TestDepositTarget, test_deposit_audit_count,
+    test_deposit_command_exists, test_deposit_event_count, test_deposit_listing_state,
+    test_deposit_marker_exists, test_deposit_rejected_audit_count,
+};
+#[cfg(feature = "test-db")]
+pub use consignment::deposit::test_access::TestAcceptedItem;
+pub use consignment::deposit::{
+    DepositRepository, DepositSettings, ReservationSecretAad, ReservationSecretCrypto,
+    ReservationSecretCryptoError, SealedReservationSecret,
+};
 mod forum;
 mod lot_watch;
 #[cfg(feature = "test-db")]

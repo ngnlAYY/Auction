@@ -110,6 +110,39 @@ async fn insert_summary(pool: &PgPool, recipient: &str) -> Uuid {
     id
 }
 
+/// 插入一条冻结收件人的待发送寄售季前通知（载荷满足 000134 的来源约束）。
+async fn insert_consignment_notice(pool: &PgPool, recipient: &str) -> Uuid {
+    let id = Uuid::new_v4();
+    let notice_id = Uuid::new_v4();
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "operation": "send",
+        "world": "isekai",
+        "external_mail_id": format!("consignment-notice:{notice_id}"),
+        "template": "consignment_season_notice",
+        "result_code": "season_preclose",
+        "user_key_user_id": null,
+        "credits": 0,
+        "cod": 0,
+        "attachment_ids": [],
+        "body": "Frozen body",
+    });
+    sqlx::query(
+        "INSERT INTO public.deliveries
+            (id, command_id, request_digest, origin_kind, origin_id, recipient, payload, status)
+         VALUES ($1, $1, decode(repeat('33', 32), 'hex'), 'consignment_notice', $2, $3,
+                 $4::jsonb, 'pending')",
+    )
+    .bind(id)
+    .bind(format!("consignment_notice:{notice_id}"))
+    .bind(recipient)
+    .bind(payload.to_string())
+    .execute(pool)
+    .await
+    .expect("写入待发送寄售季前通知");
+    id
+}
+
 #[tokio::test]
 async fn postgres_player_notices_retire_after_rebind_or_forum_rename() {
     let database = support::TestDatabase::create().await.expect("克隆模板库");
@@ -128,13 +161,16 @@ async fn postgres_player_notices_retire_after_rebind_or_forum_rename() {
     let rebind_notice = insert_summary(pool, "RebindOld").await;
     let forum_notice = insert_summary(pool, "ForumOld").await;
     let stable_notice = insert_summary(pool, "Stable").await;
+    // 寄售季前通知与玩家通知共用改名退役：冻结旧名不得再发送给可能接手该名的人。
+    let consignment_notice = insert_consignment_notice(pool, "RebindOld").await;
+    let stable_consignment_notice = insert_consignment_notice(pool, "Stable").await;
 
     store
         .begin_claim_cycle(Timestamp::now(), std::time::Duration::from_secs(60))
         .await
         .expect("领取前退役清理");
 
-    for delivery_id in [rebind_notice, forum_notice] {
+    for delivery_id in [rebind_notice, forum_notice, consignment_notice] {
         let (status, failure_code, reason_code): (String, Option<String>, Option<String>) =
             sqlx::query_as(
                 "SELECT status, failure_code, result_metadata ->> 'reason_code'
@@ -157,12 +193,15 @@ async fn postgres_player_notices_retire_after_rebind_or_forum_rename() {
         .expect("读取预检退役处置");
         assert_eq!(dispositions, 1, "退役必须追加一条预检退役处置");
     }
-    let status: String = sqlx::query_scalar("SELECT status FROM public.deliveries WHERE id = $1")
-        .bind(stable_notice)
-        .fetch_one(pool)
-        .await
-        .expect("读取未改名投递");
-    assert_eq!(status, "pending", "当前名存在的收件人不得退役");
+    for delivery_id in [stable_notice, stable_consignment_notice] {
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM public.deliveries WHERE id = $1")
+                .bind(delivery_id)
+                .fetch_one(pool)
+                .await
+                .expect("读取未改名投递");
+        assert_eq!(status, "pending", "当前名存在的收件人不得退役");
+    }
     store.postgres_pool().close().await;
 }
 

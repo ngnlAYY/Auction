@@ -66,9 +66,9 @@ macro_rules! listing_sql {
     (unexpired, $as_of:literal) => {
         concat!("(l.expires_at > ", $as_of, "::timestamptz)")
     };
-    // 尚未持久终结的挂单，匹配数据库部分索引。
+    // 尚未持久终结且占额度的挂单；available 仍占用卖家活动额度并排斥同件新登记。
     (stored_active) => {
-        "l.state IN ('resolving', 'displayed', 'awaiting_deposit')"
+        "l.state IN ('resolving', 'displayed', 'awaiting_deposit', 'available')"
     };
     // 已核验发布的持久状态。
     (stored_published) => {
@@ -86,7 +86,10 @@ macro_rules! listing_sql {
                    WHEN ", listing_sql!(collision), " THEN 'auction_lot_created'
                    WHEN NOT ", listing_sql!(listing_seller_eligible), " THEN 'seller_ineligible'
                    WHEN NOT ", listing_sql!(admitting_epoch), " THEN 'service_disabled'
-                   WHEN NOT ", listing_sql!(unexpired, $as_of), " THEN CASE l.state
+                   -- D9 §1.2：只有 resolving/displayed/awaiting_deposit 有待寄或展示 TTL；
+                   -- available 无待寄 TTL，不能因历史 expires_at 被当成失效。
+                   WHEN l.state IN ('resolving', 'displayed', 'awaiting_deposit')
+                        AND NOT ", listing_sql!(unexpired, $as_of), " THEN CASE l.state
                        WHEN 'resolving' THEN 'lookup_deadline'
                        WHEN 'displayed' THEN 'display_expired'
                        WHEN 'awaiting_deposit' THEN 'deposit_expired' END
@@ -96,8 +99,8 @@ macro_rules! listing_sql {
     // 跨世界活动额度与同件有效占用共用的谓词。
     (effective_active, $as_of:literal) => {
         concat!(
-            "(", listing_sql!(stored_active), " AND ", listing_sql!(unexpired, $as_of),
-            " AND ", listing_sql!(forced_reason, $as_of), " IS NULL)"
+            "(", listing_sql!(stored_active), " AND ",
+            listing_sql!(forced_reason, $as_of), " IS NULL)"
         )
     };
     // 目录和详情共用的谓词，要求当前快照确属本挂单。
