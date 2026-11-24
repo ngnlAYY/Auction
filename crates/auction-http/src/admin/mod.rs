@@ -12,6 +12,7 @@ mod session;
 pub(crate) mod alerts;
 pub(crate) mod auctions;
 pub(crate) mod audit;
+pub(crate) mod consignment;
 pub(crate) mod credentials;
 pub(crate) mod dashboard;
 pub(crate) mod delivery;

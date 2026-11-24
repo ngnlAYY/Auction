@@ -10,6 +10,7 @@ use auction_application::admin::{
     AdminUserPort, AdminWorldPort, SettlementCatalogReader,
 };
 use auction_application::auction::AuctionLifecycleCommandPort;
+use auction_application::consignment::{AdminListingRead, ManageListingService};
 use auction_application::delivery::DeliveryAdminPort;
 use auction_application::forum::PublicForumReader;
 use auction_application::operations::{
@@ -22,6 +23,7 @@ use auction_application::recovery::{RecoveryCommandPort, RecoveryReportReader};
 use auction_application::settlement::{SettlementReportReader, SettlementReturnAdminPort};
 use auction_observability::{HealthReader, ProcessMetrics};
 
+use crate::admin::consignment::{AdminConsignmentCapabilities, AdminConsignmentState};
 use crate::middleware::HttpBoundary;
 use crate::middleware::security::AdminHttpSecurity;
 
@@ -35,6 +37,7 @@ pub struct AdminApiState {
     )>,
     mail_templates: Option<Arc<dyn auction_application::mail_templates::MailTemplateStore>>,
     session: Option<Arc<dyn AdminSessionPort>>,
+    consignment: AdminConsignmentCapabilities,
     lifecycle: Option<Arc<dyn AuctionLifecycleCommandPort>>,
     auction_create: Option<Arc<dyn AdminAuctionCreatePort>>,
     auction_schedule: Option<Arc<dyn AdminAuctionSchedulePort>>,
@@ -147,6 +150,7 @@ impl AdminApiState {
             runtime_switches: None,
             mail_templates: None,
             session,
+            consignment: AdminConsignmentCapabilities::default(),
             lifecycle,
             auction_create,
             auction_schedule: None,
@@ -188,6 +192,12 @@ impl AdminApiState {
             readiness: None,
             security,
         }
+    }
+
+    /// 注入寄售历史读取与下架仲裁能力，停用时仍允许读取历史和重放原命令。
+    pub fn with_consignment(mut self, capabilities: AdminConsignmentCapabilities) -> Self {
+        self.consignment = capabilities;
+        self
     }
 
     /// 注入进程本地 Prometheus 指标注册表；指标不读取 Admin 业务状态。
@@ -472,5 +482,19 @@ impl AdminApiState {
 
     pub(crate) fn security(&self) -> &AdminHttpSecurity {
         &self.security
+    }
+}
+
+impl AdminConsignmentState for AdminApiState {
+    fn admin_state(&self) -> &Self {
+        self
+    }
+
+    fn consignment_read(&self) -> Option<&dyn AdminListingRead> {
+        self.consignment.read.as_deref()
+    }
+
+    fn consignment_manage(&self) -> Option<&ManageListingService> {
+        self.consignment.manage.as_deref()
     }
 }

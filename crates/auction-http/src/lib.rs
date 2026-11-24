@@ -22,11 +22,13 @@ mod server;
 mod session;
 mod state;
 
+pub use admin::consignment::AdminConsignmentCapabilities;
 pub use assets::serve_admin_setup_asset;
 pub use middleware::{
     AdminHttpSecurity, AnonymousReadGate, HttpBoundary, HttpSecurityOptions, PublicHttpSecurity,
     WebScriptPolicy, apply_browser_security_headers,
 };
+pub use public::consignment::ConsignmentCapabilities;
 pub use realtime_hub::{RealtimeHub, RealtimeHubSink, RealtimeSubscriptionError};
 pub use server::{
     HttpListener, HttpReadinessProbe, admin_router_with_web_script_policy,
