@@ -753,3 +753,26 @@ consignment-listing-limit-reached = 活动挂单数已达上限
 consignment-invalid-price = 请输入有效的整数标价
 consignment-invalid-equipment-url = 请输入含规范正十进制编号的装备链接
 consignment-world-unavailable = 该世界暂不接受新登记
+
+# 一口价挂单 · 本人寄件指引
+consignment-deposit-instructions = 寄件指引
+consignment-deposit-none = 没有有效的寄件预约。
+consignment-deposit-not-sent = 请仅在拥有当前预约码时寄送装备；切勿泄露预约码。
+consignment-deposit-issue = 创建寄件指引
+consignment-deposit-active-title = 寄送这件装备
+consignment-deposit-refresh = 刷新指引
+consignment-deposit-world = 收件世界
+consignment-deposit-bot = 收件 Bot
+consignment-deposit-subject = 邮件主题
+consignment-deposit-body = 预约码
+consignment-deposit-expires = 预约截止
+consignment-deposit-copy = 复制预约码
+consignment-deposit-copied = 预约码已复制。
+consignment-deposit-copy-failed = 无法复制，请手动选择预约码。
+consignment-deposit-reissue = 更换寄件指引
+consignment-deposit-invalid-request = 寄件请求无效。
+consignment-deposit-mail-unavailable = 邮箱当前无法接收寄售邮件。
+consignment-deposit-participant-ineligible = 你不具备寄送该装备的资格。
+consignment-deposit-bot-party = Bot 账号不能作为寄售交易当事人。
+consignment-deposit-season-closed = 寄售季已关闭。
+consignment-deposit-action-not-allowed = 当前状态下不允许该操作。

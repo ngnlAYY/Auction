@@ -34,7 +34,9 @@ export const VIRTUAL_MODULE_TEST_FILES: ReadonlySet<string> = new Set([
   "web/public/src/surface/consignment/render-fixture.test.ts",
   "web/public/src/surface/reads/bid-log/page-tree-fixture.test.ts",
   "web/public/src/surface/consignment/private-fixture.test.ts",
+  "web/public/src/surface/consignment/deposit-instructions.test.ts",
   "web/admin/src/solid-render-fixture.test.ts",
+  "web/admin/src/surface/consignment/quarantine.test.ts",
 ]);
 
 export interface SpecifierInput {

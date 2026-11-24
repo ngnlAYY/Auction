@@ -187,6 +187,48 @@ fn check_before_send_projection(delivery: Value, valid: bool) {
     assert_eq!((list_valid, detail_valid), (valid, valid), "列表与详情投影 {delivery}");
 }
 
+/// 季前通知来源必须能解码整页列表；闭集漏项会让 Admin 投递页对整页报无效响应。
+#[test]
+fn delivery_list_decodes_consignment_notice_origin() {
+    let notice_id = "5b0f3a2e-7d5c-4f1a-9b8c-1d2e3f405162";
+    let payload = json!({
+        "code": "ok",
+        "message": "loaded",
+        "data": {
+            "deliveries": [{
+                "id": DELIVERY_ID,
+                "origin_kind": "consignment_notice",
+                "origin_id": format!("consignment_notice:{notice_id}"),
+                "recipient": "FakeSeller",
+                "cod": 0,
+                "status": "pending",
+                "template": "consignment_season_notice",
+                "category": "settlement",
+                "world": "isekai",
+                "retirement_reason": null,
+                "suppression_reason": null,
+                "lease_expires_at": null,
+                "fencing_version": 0,
+                "attempt_count": 0,
+                "claimed_at": null,
+                "sending_at": null,
+                "completed_at": null,
+                "external_reference": null,
+                "failure_code": null,
+                "reason_code": null,
+                "take_required": false,
+                "returned_mail_id": null,
+                "created_at": time(0),
+                "updated_at": time(0)
+            }],
+            "pagination": {"page": 1, "page_size": 10, "total": 1}
+        }
+    });
+    let payload = serde_json::from_value(payload).unwrap();
+    let page = decode_delivery_list(payload, 1, 10).expect("季前通知来源必须可解码");
+    assert_eq!(page.deliveries[0].origin_kind, "consignment_notice");
+}
+
 #[test]
 fn delivery_accepts_server_preflight_retirements() {
     for (origin, reason, failure) in [
@@ -244,6 +286,55 @@ fn delivery_rejects_malformed_preflight_retirements() {
     missing_reason.as_object_mut().unwrap().remove("reason_code");
     check_before_send_projection(missing_reason, false);
     sent.as_object_mut().unwrap().remove("retirement_reason");
+    check_before_send_projection(sent, false);
+}
+
+fn consignment_disposition(status: &str) -> Value {
+    let mut row = serde_json::to_value(delivery()).unwrap();
+    row["origin_kind"] = json!("consignment_disposition");
+    row["origin_id"] = json!("consignment:fake-decision:fake-work");
+    row["recipient"] = json!("FakeBot");
+    row["template"] = json!("consignment_take");
+    row["category"] = Value::Null;
+    row["status"] = json!(status);
+    row["created_at"] = json!("2026-11-06T10:00:00.000000Z");
+    row["updated_at"] = json!("2026-11-06T10:00:05.000000Z");
+    row["lease_expires_at"] = Value::Null;
+    row["fencing_version"] = json!(0);
+    row["attempt_count"] = json!(0);
+    row["claimed_at"] = Value::Null;
+    row["sending_at"] = Value::Null;
+    row["completed_at"] = Value::Null;
+    row["external_reference"] = Value::Null;
+    row["failure_code"] = Value::Null;
+    if status != "prepared" {
+        row["claimed_at"] = json!("2026-11-06T10:00:01.000000Z");
+        row["fencing_version"] = json!(1);
+        row["attempt_count"] = json!(1);
+    }
+    match status {
+        "claimed" => row["lease_expires_at"] = json!("2026-11-06T10:05:00.000000Z"),
+        "succeeded" => {
+            row["completed_at"] = json!("2026-11-06T10:00:05.000000Z");
+            row["external_reference"] = json!("ab".repeat(32));
+        }
+        "manual_reconcile" => {
+            row["completed_at"] = json!("2026-11-06T10:00:05.000000Z");
+            row["failure_code"] = json!("remote_write_unknown");
+        }
+        _ => {}
+    }
+    row
+}
+
+#[test]
+fn delivery_decodes_consignment_disposition_without_sending_fence() {
+    for status in ["prepared", "claimed", "succeeded", "manual_reconcile"] {
+        check_before_send_projection(consignment_disposition(status), true);
+    }
+
+    let mut sent = consignment_disposition("succeeded");
+    sent["sending_at"] = json!("2026-11-06T10:00:02.000000Z");
     check_before_send_projection(sent, false);
 }
 

@@ -1,30 +1,16 @@
-// 验证 Admin 寄售 API 请求、严格解码及真实 Admin 写守卫的失败证据。
+// 验证 Admin 寄售列表与详情的请求、严格解码及读错误投影。
 
 import { expect, test } from "bun:test";
 
-import {
-  createAdminRequestHarness,
-  installFixtureFetch,
-  recordRequest,
-  TEST_SESSION,
-  TEST_SESSION_BODY,
-} from "../../api/api-request-fixture";
-import { prepareAdminDelist } from "../../api/consignment/delist";
+import { createAdminRequestHarness, TEST_SESSION } from "../../api/api-request-fixture";
 import { fetchAdminListing } from "../../api/consignment/detail";
 import { fetchAdminListings } from "../../api/consignment/list";
-import {
-  adminWriteFailureDisplayCode,
-  classifyAdminWriteFailure,
-  observedResponseStatus,
-} from "../../api/failure";
 import { registerAdminSessionHost } from "../../api/session";
 import {
   adminDetail,
   adminListing,
   COMMAND_ID,
-  DELIST,
   DETAIL,
-  delistReceipt,
   failure,
   LISTING_ID,
   LISTINGS,
@@ -34,7 +20,6 @@ import {
 } from "./fixtures";
 
 const FILTERS = { world: "", mode: "", state: "", sellerUserId: "" };
-const VALID_REASON = "Reviewed by operations";
 const SIGNAL = () => new AbortController().signal;
 
 test("列表校验有效状态与精确卖家；不会按已记录状态误筛", async () => {
@@ -193,136 +178,6 @@ test("读错误区分挂单不存在、参数错误和 503；仅可信 401 通�
     }
   } finally {
     registration.release();
-    harness.cleanup();
-  }
-});
-
-test("下架经真实 CSRF 守卫发送并拒绝错命令、错版本与伪成功", async () => {
-  const harness = createAdminRequestHarness();
-  const calls: string[] = [];
-  const posts: { method: string; csrfPresent: boolean; body: string }[] = [];
-  const replies = [
-    success(delistReceipt(COMMAND_ID)),
-    success(delistReceipt(SELLER_ID)),
-    success(delistReceipt(COMMAND_ID, 5)),
-    { ...success(delistReceipt(COMMAND_ID)), status: 202 },
-    success({ ...delistReceipt(COMMAND_ID), listing_id: SELLER_ID }),
-    success({ ...delistReceipt(COMMAND_ID), operation: "withdraw" }),
-  ];
-  const restore = installFixtureFetch(async (input, init) => {
-    const request = recordRequest(input, init);
-    calls.push(new URL(request.url, "https://auction.test").pathname);
-    if (calls.at(-1) === "/api/v1/admin/session") return Response.json(TEST_SESSION_BODY);
-    if (calls.at(-1) !== DELIST) throw new Error("未预期的内存请求");
-    posts.push({
-      method: request.method,
-      csrfPresent: new Headers(init?.headers).get("x-csrf-token") === TEST_SESSION.csrfToken,
-      body: request.body,
-    });
-    const reply = replies.shift();
-    if (reply === undefined) throw new Error("内存回执用尽");
-    return new Response(reply.body, { status: reply.status ?? 200 });
-  });
-  try {
-    const { host } = harness.registerHost();
-    harness.installBrowserRequest();
-    const submit = prepareAdminDelist(host, LISTING_ID, 3, VALID_REASON);
-    expect(await submit(COMMAND_ID, SIGNAL())).toEqual({
-      ok: true,
-      value: delistReceipt(COMMAND_ID),
-    });
-    expect(await submit(SELLER_ID, SIGNAL())).toEqual({
-      ok: false,
-      error: { kind: "not-sent", code: "invalid_request" },
-    });
-    for (const status of [200, 200, 202, 200, 200]) {
-      expect(await submit(COMMAND_ID, SIGNAL())).toEqual({
-        ok: false,
-        error: { kind: "outcome-unknown", code: "invalid_response", responseStatus: status },
-      });
-    }
-    expect(posts).toEqual(
-      Array.from({ length: 6 }, () => ({
-        method: "POST",
-        csrfPresent: true,
-        body: JSON.stringify({ command_id: COMMAND_ID, expected_version: 3, reason: VALID_REASON }),
-      })),
-    );
-    expect(calls).toEqual(
-      Array.from({ length: 6 }, () => ["/api/v1/admin/session", DELIST]).flat(),
-    );
-  } finally {
-    restore();
-    harness.cleanup();
-  }
-});
-
-test("下架保留 HTTP 错误码与状态，按专用白名单区分本次拒绝、已核对重放和未知", async () => {
-  const harness = createAdminRequestHarness();
-  try {
-    harness.installBrowserRequest();
-    const { host } = harness.registerHost();
-    const outcomes = [
-      [404, "listing_not_found", "replay_checked"],
-      [409, "stale_version", "replay_checked"],
-      [409, "listing_not_active", "replay_checked"],
-      [409, "command_id_conflict", "replay_checked"],
-      [400, "invalid_reason", "this_attempt"],
-      [401, "unauthenticated", "this_attempt"],
-      [403, "origin_forbidden", "this_attempt"],
-      [403, "csrf_invalid", "this_attempt"],
-      [429, "rate_limited", "this_attempt"],
-      [409, "conflict", "unknown"],
-      [503, "consignment_unavailable", "unknown"],
-      [503, "outcome_unknown", "unknown"],
-    ] as const;
-    const requests = harness.installFetch(
-      outcomes.flatMap(([status, code]) => [
-        { body: JSON.stringify(TEST_SESSION_BODY) },
-        failure(status, code),
-      ]),
-    );
-    for (const [status, code, scope] of outcomes) {
-      const result = await prepareAdminDelist(
-        host,
-        LISTING_ID,
-        3,
-        VALID_REASON,
-      )(COMMAND_ID, SIGNAL());
-      if (result.ok) throw new Error("错误应答被当作写成功");
-      expect(observedResponseStatus(result.error)).toBe(status);
-      expect(adminWriteFailureDisplayCode(result.error)).toBe(code);
-      expect(classifyAdminWriteFailure(result.error)).toBe(scope);
-      expect(result.error.kind).toBe(
-        code === "outcome_unknown" ? "outcome-unknown" : "verified-http",
-      );
-    }
-    expect(requests).toHaveLength(2 * outcomes.length);
-  } finally {
-    harness.cleanup();
-  }
-});
-
-test("下架接口前置校验保护私有说明；256 字节的规范输入可发送", async () => {
-  const harness = createAdminRequestHarness();
-  try {
-    harness.installBrowserRequest();
-    const { host } = harness.registerHost();
-    const requests = harness.installFetch([
-      { body: JSON.stringify(TEST_SESSION_BODY) },
-      success(delistReceipt(COMMAND_ID)),
-    ]);
-    const run = (reason: string) =>
-      prepareAdminDelist(host, LISTING_ID, 3, reason)(COMMAND_ID, SIGNAL());
-    expect(await run("fixture key=not-a-secret")).toEqual({
-      ok: false,
-      error: { kind: "not-sent", code: "invalid_reason" },
-    });
-    expect(requests).toEqual([]);
-    const valid = `${"审".repeat(85)}!`;
-    expect((await run(valid)).ok).toBe(true);
-    expect(requests[1]?.body).toContain(valid);
-  } finally {
     harness.cleanup();
   }
 });

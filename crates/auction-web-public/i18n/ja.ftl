@@ -753,3 +753,26 @@ consignment-listing-limit-reached = 有効な出品数が上限に達しまし�
 consignment-invalid-price = 有効な整数の出品価格を入力してください。
 consignment-invalid-equipment-url = 装備 ID が先頭に 0 や符号のない正の十進整数である装備 URL を入力してください。
 consignment-world-unavailable = このワールドでは新規登録を一時停止しています。
+
+# 一口価格出品 · 本人の郵送手順
+consignment-deposit-instructions = 発送手順
+consignment-deposit-none = 有効な発送予約はありません。
+consignment-deposit-not-sent = 現在の予約コードがある場合のみ装備を発送してください。コードは他人に共有しないでください。
+consignment-deposit-issue = 発送手順を作成
+consignment-deposit-active-title = この装備を発送する
+consignment-deposit-refresh = 手順を更新
+consignment-deposit-world = 受取ワールド
+consignment-deposit-bot = 受取 Bot
+consignment-deposit-subject = 件名
+consignment-deposit-body = 予約コード
+consignment-deposit-expires = 予約期限
+consignment-deposit-copy = コードをコピー
+consignment-deposit-copied = 予約コードをコピーしました。
+consignment-deposit-copy-failed = コピーできませんでした。コードを手動で選択してください。
+consignment-deposit-reissue = 発送手順を差し替える
+consignment-deposit-invalid-request = 発送リクエストが無効です。
+consignment-deposit-mail-unavailable = メールボックスは現在寄託メールを受け取れません。
+consignment-deposit-participant-ineligible = この装備を発送する資格がありません。
+consignment-deposit-bot-party = Bot アカウントは寄託取引の当事者になれません。
+consignment-deposit-season-closed = 寄託シーズンは終了しています。
+consignment-deposit-action-not-allowed = 現在の状態ではこの操作は許可されていません。

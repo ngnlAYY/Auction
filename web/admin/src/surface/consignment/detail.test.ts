@@ -26,6 +26,7 @@ import {
   delistedListing,
   delistReceipt,
   failure,
+  holdSetReceipt,
   LISTING_ID,
   SNAPSHOT,
   success,
@@ -267,6 +268,55 @@ test("有效活动但 can_delist=false 时仍没有下架入口", async () => {
     expect(tree.find((node) => node.tag === "textarea")).toBeNull();
   });
 });
+
+for (const [disposition, feedbackText] of [
+  ["closed", "已关闭"],
+  ["hold_set", "已设置运营止售"],
+] as const) {
+  test(`下架走 v2 ${disposition} 回执并显示对应成功反馈`, async () => {
+    await withDetail(async (tree, mount) => {
+      tree.requests.installBrowserRequest();
+      const posts: string[] = [];
+      const restore = installFixtureFetch(async (input, init) => {
+        const request = recordRequest(input, init);
+        switch (address(request)) {
+          case DETAIL:
+            return emit(success(adminDetail(adminListing())));
+          case SESSION:
+            return Response.json(TEST_SESSION_BODY);
+          case DELIST: {
+            posts.push(request.body);
+            const commandId = parseJsonObject(request.body, "v2 下架命令").command_id;
+            if (typeof commandId !== "string") throw new Error("内存下架命令没有 ID");
+            return emit(
+              success(
+                disposition === "closed" ? delistReceipt(commandId) : holdSetReceipt(commandId),
+              ),
+            );
+          }
+          default:
+            throw new Error("未预期的内存请求");
+        }
+      });
+      try {
+        mount();
+        await settle();
+        confirm(tree);
+        await settle();
+        expect(posts).toHaveLength(1);
+        expect(parseJsonObject(posts[0] ?? "", "v2 下架命令")).toMatchObject({
+          command_id: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+          expected_version: 3,
+          reason: REASON,
+        });
+        expect(present(tree, feedbackText)).toBe(true);
+        expect(tree.find((node) => node.getAttribute("role") === "dialog")).toBeNull();
+      } finally {
+        restore();
+      }
+    });
+  });
+}
 
 test("下架表单拒绝空、超出 UTF-8 字节上限、换行和装备链接", async () => {
   await withDetail(async (tree, mount) => {

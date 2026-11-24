@@ -1,4 +1,4 @@
-// 确认并下架挂单；未决命令由认证外壳持有，可用原正文恢复。
+// 确认并下架挂单；v2 对代管件改设运营止售，未决命令由认证外壳持有，可用原正文恢复。
 
 import type { AdminListing } from "@auction/contracts/dto/admin/consignment";
 import { createCell } from "@auction/web-shared/reactive/cell";
@@ -7,24 +7,29 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { Show } from "solid-js";
 
-import { delistReasonError, prepareAdminDelist } from "../../api/consignment/delist";
+import { delistReasonError } from "../../api/consignment/delist";
+import { prepareAdminHold } from "../../api/consignment/quarantine";
 import { adminSessionWritesAllowed } from "../../api/session";
 import { useAdminSessionHost } from "../auth/shell";
 import type { PendingCommands } from "../pending";
-import type { AdminActionFeedback } from "../presentation";
-import { listingDispositionKey } from "./labels";
 import { consignmentErrorMessage } from "./presentation";
+
+/** 下架成功的两种服务端处置；详情页据此选择成功文案。 */
+export type DelistFeedback =
+  | { readonly kind: "success"; readonly disposition: "closed" | "hold_set" }
+  | { readonly kind: "error"; readonly code: string };
 
 /** 读取只提供下架资格，写入仍须确认版本和私有说明。 */
 export function DelistAction(props: {
   readonly record: AdminListing;
   readonly commands: PendingCommands;
   readonly currentRead: () => boolean;
-  readonly onFeedback: (feedback: AdminActionFeedback | null) => void;
+  readonly onFeedback: (feedback: DelistFeedback | null) => void;
 }): JSX.Element {
   const host = useAdminSessionHost();
   const entity = () => `consignment:${props.record.listing.listing_id}`;
   const expectedVersion = createCell<number | null>(null);
+  const preparing = createCell(false);
   const reason = createCell("");
   const error = createCell<"required" | "invalid" | null>(null);
   const cancel = (): void => {
@@ -40,9 +45,10 @@ export function DelistAction(props: {
     props.record.can_delist &&
     adminSessionWritesAllowed(host) &&
     !props.commands.contains(entity()) &&
-    !props.commands.anyBusy();
+    !props.commands.anyBusy() &&
+    !preparing();
 
-  const submit = (event: SubmitEvent): void => {
+  const submit = async (event: SubmitEvent): Promise<void> => {
     event.preventDefault();
     const version = expectedVersion.peek();
     const listingId = props.record.listing.listing_id;
@@ -52,23 +58,30 @@ export function DelistAction(props: {
     error.set(problem);
     if (problem !== null) return;
 
-    // 不变量 1、6、7：确认绑定原版本，提交后私有说明只保留在会话宿主固定的命令里。
-    const operation = prepareAdminDelist(host, listingId, version, explanation);
+    preparing.set(true);
     const target = entity();
     const commands = props.commands;
     const feedback = props.onFeedback;
-    const submitted = commands.submit(
-      target,
-      t("consignment-delist"),
-      operation,
-      (receipt) => {
-        if (listingDispositionKey(receipt.disposition) !== null) feedback({ kind: "success" });
-      },
-      (code) => {
-        if (!commands.contains(target)) feedback({ kind: "error", code });
-      },
-    );
-    if (submitted) cancel();
+    props.onFeedback(null);
+    try {
+      const operation = await prepareAdminHold(host, listingId, version, explanation);
+      if (!props.currentRead()) return;
+      // 不变量 1、6、7：确认绑定原版本，提交后私有说明只保留在会话宿主固定的命令里。
+      const submitted = commands.submit(
+        target,
+        t("consignment-delist"),
+        operation,
+        (outcome) => {
+          feedback({ kind: "success", disposition: outcome.receipt.disposition });
+        },
+        (code) => {
+          if (!commands.contains(target)) feedback({ kind: "error", code });
+        },
+      );
+      if (submitted) cancel();
+    } finally {
+      preparing.set(false);
+    }
   };
 
   return (
@@ -90,7 +103,7 @@ export function DelistAction(props: {
           <Dialog
             title={t("consignment-delist-confirm")}
             closeLabel={t("settlement-return-cancel")}
-            busy={props.commands.anyBusy()}
+            busy={props.commands.anyBusy() || preparing()}
             onClose={cancel}
           >
             <form class="admin-consignment-actions__form" novalidate onSubmit={submit}>

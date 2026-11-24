@@ -753,3 +753,26 @@ consignment-listing-limit-reached = 已達有效掛單數量上限
 consignment-invalid-price = 請輸入有效的整數標價
 consignment-invalid-equipment-url = 請輸入含規範正十進位編號的裝備連結
 consignment-world-unavailable = 此世界暫不接受新登記
+
+# 一口價掛單 · 本人寄件指引
+consignment-deposit-instructions = 寄件指引
+consignment-deposit-none = 沒有有效的寄件預約。
+consignment-deposit-not-sent = 請僅在擁有目前預約碼時寄送裝備；切勿洩露預約碼。
+consignment-deposit-issue = 建立寄件指引
+consignment-deposit-active-title = 寄送這件裝備
+consignment-deposit-refresh = 重新整理指引
+consignment-deposit-world = 收件世界
+consignment-deposit-bot = 收件 Bot
+consignment-deposit-subject = 郵件主旨
+consignment-deposit-body = 預約碼
+consignment-deposit-expires = 預約截止
+consignment-deposit-copy = 複製預約碼
+consignment-deposit-copied = 預約碼已複製。
+consignment-deposit-copy-failed = 無法複製，請手動選取預約碼。
+consignment-deposit-reissue = 更換寄件指引
+consignment-deposit-invalid-request = 寄件請求無效。
+consignment-deposit-mail-unavailable = 郵箱目前無法接收寄售郵件。
+consignment-deposit-participant-ineligible = 你不具備寄送該裝備的資格。
+consignment-deposit-bot-party = Bot 帳號不能作為寄售交易當事人。
+consignment-deposit-season-closed = 寄售季已關閉。
+consignment-deposit-action-not-allowed = 目前狀態下不允許該操作。

@@ -125,6 +125,77 @@ function validTimeline(
   );
 }
 
+/** 寄售处置投递的专属状态与时间线：没有发送围栏，只允许 `prepared/claimed/succeeded/manual_reconcile`。 */
+function validConsignmentDispositionState(
+  value: AdminDeliveryResponse,
+  createdAt: bigint,
+  updatedAt: bigint,
+  claimedAt: bigint | null,
+  sendingAt: bigint | null,
+  completedAt: bigint | null,
+): boolean {
+  // 退役/抑制标记只允许出现在 failed，本来源没有 failed；出现即不是处置链写出的形状。
+  if (sendingAt !== null || value.retirement_reason !== null || value.suppression_reason !== null) {
+    return false;
+  }
+  const hasLease = value.lease_expires_at !== null;
+  const claimedValid =
+    claimedAt !== null &&
+    !isZeroDeliveryTime(claimedAt) &&
+    claimedAt >= createdAt &&
+    claimedAt <= updatedAt;
+  const completedAfterClaim =
+    completedAt !== null &&
+    !isZeroDeliveryTime(completedAt) &&
+    claimedAt !== null &&
+    completedAt >= claimedAt &&
+    completedAt <= updatedAt;
+  switch (value.status) {
+    case "prepared":
+      return (
+        !hasLease &&
+        claimedAt === null &&
+        completedAt === null &&
+        value.external_reference === null &&
+        value.failure_code === null
+      );
+    case "claimed":
+      return (
+        hasLease &&
+        claimedValid &&
+        completedAt === null &&
+        value.external_reference === null &&
+        value.failure_code === null &&
+        value.fencing_version > 0 &&
+        value.attempt_count > 0
+      );
+    case "succeeded":
+      return (
+        !hasLease &&
+        claimedValid &&
+        completedAfterClaim &&
+        value.external_reference !== null &&
+        validTrimmedText(value.external_reference) &&
+        value.failure_code === null &&
+        value.fencing_version > 0 &&
+        value.attempt_count > 0
+      );
+    case "manual_reconcile":
+      return (
+        !hasLease &&
+        claimedValid &&
+        completedAfterClaim &&
+        value.external_reference === null &&
+        value.failure_code !== null &&
+        validTrimmedText(value.failure_code) &&
+        value.fencing_version > 0 &&
+        value.attempt_count > 0
+      );
+    default:
+      return false;
+  }
+}
+
 export function validStateFields(
   value: AdminDeliveryResponse,
   createdAt: bigint,
@@ -148,6 +219,20 @@ export function validStateFields(
     (claimedAt === null || completedAt >= claimedAt) &&
     completedAt <= updatedAt;
   const claimedHasAttempt = claimedAt === null || value.attempt_count > 0;
+
+  // 寄售处置链把起写许可记在 `mail_disposition_write_starts`，不伪造 sending 事实：
+  // Take/Return 只从 claimed 直接进入 succeeded/manual_reconcile。该来源在任何状态都不得有
+  // sending_at；处置链不会产生的 pending/sending/failed 也一律失败关闭。
+  if (value.origin_kind === "consignment_disposition") {
+    return validConsignmentDispositionState(
+      value,
+      createdAt,
+      updatedAt,
+      claimedAt,
+      sendingAt,
+      completedAt,
+    );
+  }
 
   // 专用分支按存储层 valid_snapshot 的顺序选定，匹配后一起校验时间链和状态。
   // 准备失败须保留领取与完成事实，并优先校验这一终态以拒绝相冲突的原因码。

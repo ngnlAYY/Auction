@@ -288,6 +288,8 @@ function validOriginKind(value: string): boolean {
     case "lot_watch":
     case "seller_summary":
     case "season_reminder":
+    case "consignment_notice":
+    case "consignment_disposition":
       return true;
     default:
       return false;

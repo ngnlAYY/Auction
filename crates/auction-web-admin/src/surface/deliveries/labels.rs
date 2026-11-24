@@ -102,6 +102,8 @@ pub(super) fn delivery_display_type(origin_kind: &str) -> String {
         "lot_watch" => t!("delivery-type-lot-watch"),
         "seller_summary" => t!("delivery-type-seller-summary"),
         "season_reminder" => t!("delivery-type-season-reminder"),
+        "consignment_notice" => t!("delivery-type-consignment-notice"),
+        "consignment_disposition" => t!("delivery-type-consignment-disposition"),
         _ => origin_kind.to_owned(),
     }
 }

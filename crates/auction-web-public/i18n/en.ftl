@@ -754,3 +754,26 @@ consignment-listing-limit-reached = You have reached the limit for active listin
 consignment-invalid-price = Enter a valid whole-number asking price.
 consignment-invalid-equipment-url = Enter an equipment URL whose ID uses decimal digits, starts with a nonzero digit, and has no sign.
 consignment-world-unavailable = This world is temporarily closed to new registrations.
+
+# 一口价挂单 · 本人寄件指引
+consignment-deposit-instructions = Delivery instructions
+consignment-deposit-none = No active delivery reservation.
+consignment-deposit-not-sent = Only send equipment with a current code. Never share this code.
+consignment-deposit-issue = Create delivery instructions
+consignment-deposit-active-title = Send this equipment
+consignment-deposit-refresh = Refresh instructions
+consignment-deposit-world = Mail world
+consignment-deposit-bot = Send to
+consignment-deposit-subject = Subject
+consignment-deposit-body = Reservation code
+consignment-deposit-expires = Reservation expires
+consignment-deposit-copy = Copy code
+consignment-deposit-copied = Reservation code copied.
+consignment-deposit-copy-failed = Could not copy; select the code manually.
+consignment-deposit-reissue = Replace delivery instructions
+consignment-deposit-invalid-request = The delivery request is invalid.
+consignment-deposit-mail-unavailable = The mail account cannot accept consignments right now.
+consignment-deposit-participant-ineligible = You are not eligible to send this equipment.
+consignment-deposit-bot-party = A bot account cannot be a consignment party.
+consignment-deposit-season-closed = This consignment season is closed.
+consignment-deposit-action-not-allowed = This action is not allowed in the current state.

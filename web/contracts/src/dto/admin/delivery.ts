@@ -16,6 +16,8 @@ const ADMIN_DELIVERY_ORIGIN_KINDS = [
   "lot_watch",
   "seller_summary",
   "season_reminder",
+  "consignment_notice",
+  "consignment_disposition",
 ] as const;
 const ADMIN_DELIVERY_CATEGORIES = [
   "outbid",
