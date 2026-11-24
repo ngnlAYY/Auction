@@ -1,0 +1,18 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "schema_version": 2,
+    "operation": "release_quarantine",
+    "disposition": "quarantine_released",
+    "command_id": "00000000-0000-4000-8000-000000000429",
+    "quarantine_id": "00000000-0000-4000-8000-000000000401",
+    "release_id": "00000000-0000-4000-8000-000000000430",
+    "decision_id": "00000000-0000-4000-8000-000000000431",
+    "decision_kind": "acquire_return",
+    "return_intake_id": "00000000-0000-4000-8000-000000000413",
+    "original_round": 2,
+    "take_work_id": "00000000-0000-4000-8000-000000000414",
+    "take_delivery_id": "00000000-0000-4000-8000-000000000415"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "schema_version": 2,
+    "operation": "withdraw",
+    "disposition": "withdrawal_requested",
+    "command_id": "00000000-0000-4000-8000-000000000450",
+    "listing_id": "00000000-0000-4000-8000-000000000104",
+    "listing_version": 4,
+    "state": "deposit_accepted",
+    "intent_id": "00000000-0000-4000-8000-000000000417"
+  }
+}

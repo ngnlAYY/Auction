@@ -1,0 +1,182 @@
+[
+  {
+    "kind": "resolving",
+    "progress": {
+      "attempts": 0,
+      "max_attempts": 6,
+      "next_attempt_at": null,
+      "last_reason": null,
+      "paused": false,
+      "deadline_at": "2026-11-21T18:00:00Z"
+    }
+  },
+  {
+    "kind": "lookup_failed",
+    "reason": "source_too_large",
+    "last_lookup_reason": null
+  },
+  {
+    "kind": "ineligible",
+    "equipment": {
+      "name": "Fixture Bound Robe",
+      "alt_name": null,
+      "category": "Cloth",
+      "level": {
+        "kind": "soulbound"
+      },
+      "tradeable": false,
+      "stat_groups": [],
+      "source": "hvdata-equip-v1",
+      "observed_at": "2026-11-20T18:10:00Z"
+    },
+    "reason": "not_tradeable"
+  },
+  {
+    "kind": "displayed",
+    "equipment": {
+      "name": "Fixture Oak Staff",
+      "alt_name": null,
+      "category": "Staff",
+      "level": {
+        "kind": "assigned",
+        "value": 42
+      },
+      "tradeable": true,
+      "stat_groups": [],
+      "source": "hvdata-equip-v1",
+      "observed_at": "2026-11-20T18:10:00Z"
+    }
+  },
+  {
+    "kind": "awaiting_deposit",
+    "equipment": {
+      "name": "Fixture Oak Staff",
+      "alt_name": null,
+      "category": "Staff",
+      "level": {
+        "kind": "assigned",
+        "value": 42
+      },
+      "tradeable": true,
+      "stat_groups": [],
+      "source": "hvdata-equip-v1",
+      "observed_at": "2026-11-20T18:10:00Z"
+    }
+  },
+  {
+    "kind": "deposit_accepted",
+    "equipment": {
+      "name": "Fixture Oak Staff",
+      "alt_name": null,
+      "category": "Staff",
+      "level": {
+        "kind": "assigned",
+        "value": 42
+      },
+      "tradeable": true,
+      "stat_groups": [],
+      "source": "hvdata-equip-v1",
+      "observed_at": "2026-11-20T18:10:00Z"
+    }
+  },
+  {
+    "kind": "available",
+    "equipment": {
+      "name": "Fixture Oak Staff",
+      "alt_name": null,
+      "category": "Staff",
+      "level": {
+        "kind": "assigned",
+        "value": 42
+      },
+      "tradeable": true,
+      "stat_groups": [],
+      "source": "hvdata-equip-v1",
+      "observed_at": "2026-11-20T18:10:00Z"
+    }
+  },
+  {
+    "kind": "sale_pending",
+    "equipment": {
+      "name": "Fixture Oak Staff",
+      "alt_name": null,
+      "category": "Staff",
+      "level": {
+        "kind": "assigned",
+        "value": 42
+      },
+      "tradeable": true,
+      "stat_groups": [],
+      "source": "hvdata-equip-v1",
+      "observed_at": "2026-11-20T18:10:00Z"
+    }
+  },
+  {
+    "kind": "held_off_market",
+    "equipment": {
+      "name": "Fixture Oak Staff",
+      "alt_name": null,
+      "category": "Staff",
+      "level": {
+        "kind": "assigned",
+        "value": 42
+      },
+      "tradeable": true,
+      "stat_groups": [],
+      "source": "hvdata-equip-v1",
+      "observed_at": "2026-11-20T18:10:00Z"
+    },
+    "reason": "quota_blocked",
+    "hold_id": null
+  },
+  {
+    "kind": "withdrawal_pending",
+    "equipment": {
+      "name": "Fixture Oak Staff",
+      "alt_name": null,
+      "category": "Staff",
+      "level": {
+        "kind": "assigned",
+        "value": 42
+      },
+      "tradeable": true,
+      "stat_groups": [],
+      "source": "hvdata-equip-v1",
+      "observed_at": "2026-11-20T18:10:00Z"
+    }
+  },
+  {
+    "kind": "closed",
+    "reason": "sold",
+    "equipment": {
+      "name": "Fixture Oak Staff",
+      "alt_name": null,
+      "category": "Staff",
+      "level": {
+        "kind": "assigned",
+        "value": 42
+      },
+      "tradeable": true,
+      "stat_groups": [],
+      "source": "hvdata-equip-v1",
+      "observed_at": "2026-11-20T18:10:00Z"
+    }
+  },
+  {
+    "kind": "expired",
+    "reason": "display_expired",
+    "equipment": {
+      "name": "Fixture Oak Staff",
+      "alt_name": null,
+      "category": "Staff",
+      "level": {
+        "kind": "assigned",
+        "value": 42
+      },
+      "tradeable": true,
+      "stat_groups": [],
+      "source": "hvdata-equip-v1",
+      "observed_at": "2026-11-20T18:10:00Z"
+    }
+  }
+]

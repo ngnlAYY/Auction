@@ -1,0 +1,13 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "schema_version": 2,
+    "operation": "withdraw",
+    "disposition": "closed",
+    "command_id": "00000000-0000-4000-8000-000000000451",
+    "listing_id": "00000000-0000-4000-8000-000000000106",
+    "listing_version": 5,
+    "state": "closed"
+  }
+}

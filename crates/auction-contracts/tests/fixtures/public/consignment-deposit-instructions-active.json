@@ -1,0 +1,13 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "state": "active",
+    "world": "main",
+    "bot": "FixtureBot",
+    "subject": "consign",
+    "body": "C1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "reservation_id": "00000000-0000-4000-8000-000000000301",
+    "expires_at": "2026-11-27T18:10:00Z"
+  }
+}

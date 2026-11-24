@@ -60,6 +60,24 @@ pub(super) fn loaded(data: impl Serialize) -> RouteResult {
     success(StatusCode::OK, ApiResponse::ok("已加载", data), ConsignmentError::Unavailable)
 }
 
+/// 返回 201 创建结果；回执编码失败时写结果仍未知，客户端只能原样重放。
+pub(super) fn created(message: &'static str, data: impl Serialize) -> RouteResult {
+    success(
+        StatusCode::CREATED,
+        ApiResponse::created(message, data),
+        ConsignmentError::OutcomeUnknown,
+    )
+}
+
+/// 返回 202 已接受结果；回执编码失败时写结果仍未知，客户端只能原样重放。
+pub(super) fn accepted(message: &'static str, data: impl Serialize) -> RouteResult {
+    success(
+        StatusCode::ACCEPTED,
+        ApiResponse::accepted(message, data),
+        ConsignmentError::OutcomeUnknown,
+    )
+}
+
 /// 初次接受和重放共用同一回执、状态与成功文案。
 pub(super) fn command(receipt: Result<CommandReceipt, ConsignmentError>) -> RouteResult {
     let failure = ConsignmentError::OutcomeUnknown;

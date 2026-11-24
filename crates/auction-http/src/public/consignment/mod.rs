@@ -13,6 +13,7 @@ use crate::middleware::method_strict::{self, MethodRouterExt as _};
 use crate::middleware::{boundary, response_cache};
 use crate::state::PublicApiState;
 
+pub(crate) mod deposit;
 mod input;
 mod mapping;
 mod mutation;

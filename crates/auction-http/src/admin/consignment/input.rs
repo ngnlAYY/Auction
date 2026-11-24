@@ -4,7 +4,7 @@ use std::error::Error as _;
 use std::str::FromStr;
 
 use auction_application::consignment::{
-    AdminListingQuery, ConsignmentError, ListingDelistReason, ListingPageWindow,
+    AdminDepositQuery, AdminListingQuery, ConsignmentError, ListingDelistReason, ListingPageWindow,
     PrivateListingQuery,
 };
 use auction_contracts::{AdminDelistListing, ListingVersion};
@@ -15,6 +15,7 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::Response;
 use http_body_util::LengthLimitError;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
 use super::boundary::{error, json_error};
@@ -23,6 +24,8 @@ use crate::query::{parse_canonical_uuid, parse_query};
 
 const LIST_KEYS: [&str; 6] = ["world", "mode", "state", "seller_user_id", "page", "page_size"];
 const DELIST_BODY_LIMIT: usize = 4 << 10;
+const DEPOSIT_BODY_LIMIT: usize = 4 << 10;
+const MAX_OBSERVATIONS: u16 = 200;
 
 /// 仅把经过完整校验的闭集条件与有效态筛选交给查询端口。
 pub(super) fn list_query(uri: &Uri) -> Result<AdminListingQuery, ConsignmentError> {
@@ -81,6 +84,84 @@ pub(super) fn listing_target(
     parse_canonical_uuid(&value).ok_or(ConsignmentError::InvalidListingId)
 }
 
+/// 隔离详情允许观察游标与页长；其他键或非法编码一律 400。
+pub(super) struct DepositDetailQuery {
+    pub(super) cursor: Option<Uuid>,
+    pub(super) limit: u16,
+}
+
+impl DepositDetailQuery {
+    pub(super) fn into_port(self, quarantine_id: Uuid) -> AdminDepositQuery {
+        AdminDepositQuery { quarantine_id, cursor: self.cursor, limit: self.limit }
+    }
+}
+
+pub(super) fn deposit_detail_query(uri: &Uri) -> Result<DepositDetailQuery, ConsignmentError> {
+    let query = parse_query(uri, &["cursor", "limit"])
+        .map_err(|()| ConsignmentError::InvalidDepositRequest)?;
+    let cursor = query
+        .get("cursor")
+        .map(|value| parse_canonical_uuid(value).ok_or(ConsignmentError::InvalidDepositRequest))
+        .transpose()?;
+    let limit = match query.get("limit") {
+        Some(value) => {
+            if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(ConsignmentError::InvalidDepositRequest);
+            }
+            value
+                .parse::<u16>()
+                .ok()
+                .filter(|limit| (1..=MAX_OBSERVATIONS).contains(limit))
+                .ok_or(ConsignmentError::InvalidDepositRequest)?
+        }
+        None => MAX_OBSERVATIONS,
+    };
+    Ok(DepositDetailQuery { cursor, limit })
+}
+
+/// 隔离路径只接受规范小写 UUID；写入前拒绝查询参数。
+pub(super) fn deposit_target(
+    uri: &Uri,
+    path: Result<Path<String>, PathRejection>,
+) -> Result<Uuid, ConsignmentError> {
+    if uri.query().is_some_and(|query| !query.is_empty()) {
+        return Err(ConsignmentError::InvalidDepositRequest);
+    }
+    deposit_path(path)
+}
+
+/// 隔离详情同样拒绝百分号编码，避免绕过路径规范化。
+pub(super) fn deposit_path(
+    path: Result<Path<String>, PathRejection>,
+) -> Result<Uuid, ConsignmentError> {
+    let Ok(Path(value)) = path else {
+        return Err(ConsignmentError::InvalidDepositRequest);
+    };
+    if value.contains('%') {
+        return Err(ConsignmentError::InvalidDepositRequest);
+    }
+    parse_canonical_uuid(&value).ok_or(ConsignmentError::InvalidDepositRequest)
+}
+
+/// v2 回执中的安全整数版本。
+pub(super) fn listing_version(
+    value: i64,
+) -> Result<auction_contracts::ListingVersion, ConsignmentError> {
+    auction_contracts::ListingVersion::new(value).ok_or(ConsignmentError::InvalidDepositRequest)
+}
+
+/// 送进应用命令的领域版本。
+pub(super) fn domain_listing_version(
+    value: i64,
+) -> Result<auction_domain::consignment::ListingVersion, ConsignmentError> {
+    let value = u64::try_from(value).map_err(invalid_deposit)?;
+    auction_domain::consignment::ListingVersion::new(value).map_err(invalid_deposit)
+}
+
+fn invalid_deposit<T>(_error: T) -> ConsignmentError {
+    ConsignmentError::InvalidDepositRequest
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DelistFields {
@@ -118,6 +199,43 @@ pub(super) async fn delist_request(
         }
     };
     parse_delist(&bytes).map_err(|failure| Box::new(error(headers, failure)))
+}
+
+/// 严格解码 v2 收件、隔离与止售写入；DTO 自行拒绝未知键、重复键与尾随值。
+pub(super) async fn deposit_write<T: DeserializeOwned>(
+    headers: &HeaderMap,
+    body: Body,
+) -> Result<T, Box<Response>> {
+    if !application_json(headers) {
+        return Err(Box::new(json_error(
+            headers,
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "unsupported_media_type",
+            "请求必须使用 JSON",
+        )));
+    }
+    let bytes = match to_bytes(body, DEPOSIT_BODY_LIMIT).await {
+        Ok(bytes) => bytes,
+        Err(cause) => {
+            let response = if cause
+                .source()
+                .is_some_and(<dyn std::error::Error + 'static>::is::<LengthLimitError>)
+            {
+                json_error(headers, StatusCode::PAYLOAD_TOO_LARGE, "body_too_large", "请求体过大")
+            } else {
+                error(headers, ConsignmentError::InvalidDepositRequest)
+            };
+            return Err(Box::new(response));
+        }
+    };
+    if bytes.iter().copied().find(|byte| !byte.is_ascii_whitespace()) != Some(b'{') {
+        return Err(Box::new(error(headers, ConsignmentError::InvalidDepositRequest)));
+    }
+    serde_json::from_slice(&bytes).map_err(|parse_error| {
+        // 解码器细节可能含输入片段，只保留固定安全错误。
+        drop(parse_error);
+        Box::new(error(headers, ConsignmentError::InvalidDepositRequest))
+    })
 }
 
 fn parse_delist(bytes: &[u8]) -> Result<AdminDelistListing, ConsignmentError> {

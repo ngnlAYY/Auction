@@ -11,8 +11,8 @@ DTO 只描述线上形状，不含业务规则；从应用投影到 DTO 的映�
 | 路径 | 内容 |
 | --- | --- |
 | [crates/auction-contracts/src/dto/response.rs](src/dto/response.rs) | 响应外壳 `ApiResponse`、错误外壳 `ApiErrorResponse`、健康探针、Public 实时事件信封、字段反序列化边界 |
-| [crates/auction-contracts/src/dto/public](src/dto/public) | Public 账号与会话、拍卖目录（拍卖、lot、装备、补偿池、履约进度、论坛镜像、竞价日志与价格历史）、两端共用的装备大类对照表 `EQUIPMENT_CATEGORY_CODES`（公开分类键、规范大类名、lot 代码前缀）、两端共用的 Public 列表页长上限 `MAX_PUBLIC_PAGE_SIZE`（见[docs/contracts/routes.md#列表页长](../../docs/contracts/routes.md#列表页长)）、竞价与代理命令、装备标记与提醒偏好、一口价挂单（`consignment/`：服务状态、公开目录与详情、本人挂单的各种视图与解析进度、登记/改价/取消命令与回执；对应路由尚未提供） |
-| [crates/auction-contracts/src/dto/admin](src/dto/admin) | Admin 会话、拍卖与排期、lot、装备录入与词典、邮件状态与入站审查、规则、runtime 配置、凭据、用户与改名历史、投递、恢复、结算报表与目录、结算退件案件（`returns.rs`：列表、详情、处理命令与浏览器按闭集解码所用的状态、动作、阻断原因、原因码、资产位置与事件常量）、导航待办（`include=settlement_returns` 时才输出的退件计数）、realtime 运维、审计、世界启停、一口价挂单的运营视图与下架命令（`consignment/`，对应路由尚未提供）；各列表共用的数字分页信封（严格/宽松两种解码，原名字保留为类型别名） |
+| [crates/auction-contracts/src/dto/public](src/dto/public) | Public 账号与会话、拍卖目录（拍卖、lot、装备、补偿池、履约进度、论坛镜像、竞价日志与价格历史）、两端共用的装备大类对照表 `EQUIPMENT_CATEGORY_CODES`（公开分类键、规范大类名、lot 代码前缀）、两端共用的 Public 列表页长上限 `MAX_PUBLIC_PAGE_SIZE`（见[docs/contracts/routes.md#列表页长](../../docs/contracts/routes.md#列表页长)）、竞价与代理命令、装备标记与提醒偏好、一口价挂单（`consignment/`：服务状态、公开目录与详情、本人挂单的各种视图与解析进度、登记/改价/取消命令与回执；v1 路由与 v2 收件路由均已挂载，见[docs/contracts/routes.md#一口价挂单](../../docs/contracts/routes.md#一口价挂单)） |
+| [crates/auction-contracts/src/dto/admin](src/dto/admin) | Admin 会话、拍卖与排期、lot、装备录入与词典、邮件状态与入站审查、规则、runtime 配置、凭据、用户与改名历史、投递、恢复、结算报表与目录、结算退件案件（`returns.rs`：列表、详情、处理命令与浏览器按闭集解码所用的状态、动作、阻断原因、原因码、资产位置与事件常量）、导航待办（`include=settlement_returns` 时才输出的退件计数）、realtime 运维、审计、世界启停、一口价挂单的运营视图与下架命令（`consignment/`，v1 路由与 v2 收件路由均已挂载，见[docs/contracts/routes.md#一口价挂单](../../docs/contracts/routes.md#一口价挂单)）；各列表共用的数字分页信封（严格/宽松两种解码，原名字保留为类型别名） |
 | [crates/auction-contracts/src/setup/mod.rs](src/setup/mod.rs) | 首次设置请求与稳定结果码 |
 
 ## 线上约定

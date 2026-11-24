@@ -12,6 +12,7 @@ use crate::state::AdminApiState;
 mod boundary;
 mod input;
 mod mapping;
+pub(crate) mod quarantine;
 mod routes;
 #[cfg(test)]
 mod tests;

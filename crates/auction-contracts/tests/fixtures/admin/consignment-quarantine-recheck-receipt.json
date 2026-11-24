@@ -1,0 +1,12 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "schema_version": 2,
+    "operation": "recheck_quarantine",
+    "disposition": "recheck_queued",
+    "command_id": "00000000-0000-4000-8000-000000000420",
+    "quarantine_id": "00000000-0000-4000-8000-000000000401",
+    "work_id": "00000000-0000-4000-8000-000000000405"
+  }
+}

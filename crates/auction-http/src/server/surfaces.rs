@@ -234,9 +234,10 @@ fn public_feature_routes(
                 .strict_methods("CONNECT, GET"),
         );
     // 不变量 1、6、7：写入口保留寄售自身的守卫、严格解码和原命令仲裁。
-    public_handlers::consignment::mount(
+    let router = public_handlers::consignment::mount(
         router.merge(routes.route_layer(middleware::from_fn(boundary::normalize_api_rejection))),
-    )
+    );
+    public_handlers::consignment::deposit::mount(router)
 }
 
 /// 注册已冻结的 Admin 路径。
@@ -552,7 +553,8 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
             .route_layer(middleware::from_fn(boundary::normalize_api_rejection)),
     );
     // 不变量 1、6、8：只有正式 Admin 路由接入下架命令，并沿用既有会话与审计边界。
-    admin_handlers::consignment::mount(router)
+    let router = admin_handlers::consignment::mount(router);
+    admin_handlers::consignment::quarantine::mount(router)
 }
 
 #[cfg(test)]
@@ -603,14 +605,15 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        admin_router_with_web_script_policy, public_feature_routes, public_router,
+        admin_router, admin_router_with_web_script_policy, public_feature_routes, public_router,
         public_router_with_web_script_policy,
     };
     use crate::mapping::encode_public_cursor;
     use crate::middleware::response_cache::SETTLED_CACHE_CONTROL;
     use crate::middleware::security::PublicHttpSecurity;
     use crate::server::contract_fixtures::{
-        AUCTION_ID, admin_get, admin_request, admin_state, assert_http, response_json,
+        AUCTION_ID, admin_address, admin_get, admin_request, admin_state, assert_http,
+        response_json,
     };
     use crate::state::{AdminApiState, PublicApiState};
     use crate::{AdminConsignmentCapabilities, ConsignmentCapabilities, WebScriptPolicy};
@@ -722,6 +725,47 @@ mod tests {
                 .expect("入口响应");
             assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "enabled={enabled}");
         }
+    }
+
+    /// v2 收件路由必须接入总路由；没有数据库骨架时 status 返回 503 而不是 404。
+    #[tokio::test]
+    async fn public_v2_consignment_status_is_mounted_without_database() {
+        let state = PublicApiState::default();
+        let app = public_router::<NoAssets>(
+            "fixture",
+            state.http_boundary(),
+            state.anonymous_read_gate(),
+        )
+        .with_state(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v2/consignment/status")
+                    .body(Body::empty())
+                    .expect("v2 状态请求"),
+            )
+            .await
+            .expect("v2 状态响应");
+        assert_eq!(
+            consignment_json(StatusCode::SERVICE_UNAVAILABLE, response).await["code"],
+            "consignment_unavailable",
+        );
+    }
+
+    /// Admin v2 隔离详情必须接入总路由，未登录时沿用既有认证拒绝而不是 404。
+    #[tokio::test]
+    async fn admin_v2_quarantine_detail_is_mounted_and_requires_session() {
+        let mut request = Request::builder()
+            .uri("/api/v2/admin/consignment/deposits/0f8fad5b-d9cb-469f-a165-70867728950e")
+            .body(Body::empty())
+            .expect("v2 隔离详情请求");
+        request.extensions_mut().insert(admin_address());
+        let response = admin_router::<NoAssets>("fixture", crate::HttpBoundary::default())
+            .with_state(admin_state())
+            .oneshot(request)
+            .await
+            .expect("v2 隔离详情响应");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     async fn consignment_json(status: StatusCode, response: Response) -> serde_json::Value {

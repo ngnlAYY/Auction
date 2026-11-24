@@ -72,11 +72,18 @@ pub(super) fn browser_route(surface: Surface, path: &str) -> bool {
             PUBLIC_EXACT_ROUTES.contains(&path)
                 || path.strip_prefix("/lots/").is_some_and(valid_parameter)
                 || path
+                    .strip_suffix("/deposit-instructions")
+                    .and_then(|prefix| prefix.strip_prefix("/consignment/me/"))
+                    .is_some_and(|listing_id| parse_canonical_uuid(listing_id).is_some())
+                || path
                     .strip_prefix("/consignment/me/")
                     .is_some_and(|listing_id| parse_canonical_uuid(listing_id).is_some())
         }
         Surface::Admin => {
             ADMIN_EXACT_ROUTES.contains(&path)
+                || path
+                    .strip_prefix("/consignment/deposits/")
+                    .is_some_and(|quarantine_id| parse_canonical_uuid(quarantine_id).is_some())
                 || path.strip_circumfix("/auctions/", "/lots").is_some_and(valid_parameter)
                 || path.strip_prefix("/deliveries/").is_some_and(valid_parameter)
                 || path.strip_prefix("/settlement-returns/").is_some_and(valid_parameter)
