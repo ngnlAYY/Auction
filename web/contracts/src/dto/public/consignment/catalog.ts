@@ -1,47 +1,22 @@
-// 寄售能力、列表分页、公开目录与可安全显示的装备快照。
+// 寄售列表分页、公开目录与可安全显示的装备快照。
 
 import * as v from "valibot";
 
 import { float, requiredNullable, strictStruct, unsignedInteger } from "../../../wire";
 import { MAX_PUBLIC_PAGE_SIZE } from "../pagination";
+import { ListingModeSchema, ListingWorldSchema } from "./listing-options";
 import {
   ConsignmentTimestampSchema,
   ConsignmentUuidSchema,
   consignmentTextSchema,
   ExternalEquipmentIdSchema,
-  LISTING_PRICE_MAX,
-  ListingFeeBpsSchema,
   ListingPriceSchema,
   ListingVersionSchema,
 } from "./scalar";
-import {
-  ListingModeSchema,
-  ListingWorldSchema,
-  listingStateMatchesMode,
-  PublicListingStateSchema,
-} from "./states";
+import { listingStateMatchesMode, PublicListingStateSchema } from "./states";
 
-/** 匿名可读的寄售能力，前三期收件和购买固定为 false。 */
-export const ConsignmentStatusSchema = v.pipe(
-  strictStruct({
-    enabled: v.boolean(),
-    registration_ready: v.boolean(),
-    registration_modes: v.array(ListingModeSchema),
-    registration_worlds: v.array(ListingWorldSchema),
-    accepts_mail: v.literal(false),
-    purchasable: v.literal(false),
-    fee_bps: ListingFeeBpsSchema,
-    min_price: v.literal(1),
-    max_price: v.literal(LISTING_PRICE_MAX),
-  }),
-  v.check((status) =>
-    status.registration_ready
-      ? status.enabled
-      : status.registration_modes.length === 0 && status.registration_worlds.length === 0,
-  ),
-);
-/** Public 页面可用的服务能力快照。 */
-export type ConsignmentStatus = v.InferOutput<typeof ConsignmentStatusSchema>;
+// 兼容既有目录导入；首屏能力入口直接使用状态模块。
+export { type ConsignmentStatus, ConsignmentStatusSchema } from "./status";
 
 /** 公开目录、本人和运营列表共用分页契约，空页仍有 total。 */
 export function listingPageSchema<const TItem extends v.GenericSchema>(itemSchema: TItem) {

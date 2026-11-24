@@ -2,9 +2,9 @@
 // 路径契约见 `docs/contracts/routes.md`。管理命令的实现必须走版本化 REST 契约，
 // 不在浏览器端重建状态机。
 
-import type { RouteDefinition } from "@auction/web-shared/router";
+import { lazyPage, type RouteDefinition } from "@auction/web-shared/router";
 
-/** 管理端路由名；与 Rust `Route` 变体名一一对应，入口组件按名字查页面表。 */
+/** 管理端路由名；含仅 Solid 支持的寄售页，入口组件按名字查页面表。 */
 export type AdminRouteName =
   | "Setup"
   | "Dashboard"
@@ -13,6 +13,8 @@ export type AdminRouteName =
   | "Auctions"
   | "AuctionLots"
   | "AuctionOverview"
+  | "Consignment"
+  | "ConsignmentListing"
   | "Mails"
   | "MailOverview"
   | "Cookies"
@@ -46,6 +48,8 @@ export const ADMIN_ROUTES: readonly RouteDefinition[] = [
   // 单场次的拍品清单；场次标识由路径段解出后交给页面。
   { name: "AuctionLots", pattern: "/auctions/:auction_id/lots" },
   { name: "AuctionOverview", pattern: "/auction" },
+  { name: "Consignment", pattern: "/consignment" },
+  { name: "ConsignmentListing", pattern: "/consignment/listings/:listing_id" },
   { name: "Mails", pattern: "/mails" },
   { name: "MailOverview", pattern: "/mail" },
   { name: "Cookies", pattern: "/cookies" },
@@ -75,3 +79,13 @@ export const ADMIN_ROUTES: readonly RouteDefinition[] = [
   { name: "Status", pattern: "/status" },
 ];
 // Dioxus 的 `/:..segments` 未匹配路由由共享路由器直接返回 not-found，不重复登记 catch-all。
+
+/** 只有 Solid 提供寄售运营列表，进入路由后才载入。 */
+export const consignmentPage = lazyPage(() =>
+  import("../consignment/list").then(({ page }) => page),
+);
+
+/** 只有 Solid 提供寄售运营详情，进入路由后才载入。 */
+export const consignmentListingPage = lazyPage(() =>
+  import("../consignment/detail").then(({ detailPage }) => detailPage),
+);

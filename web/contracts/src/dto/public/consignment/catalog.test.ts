@@ -1,10 +1,9 @@
-// 验证寄售能力、公开目录、分页及装备白名单的线协议。
+// 验证寄售公开目录、分页及装备白名单的线协议。
 
 import { expect, expectTypeOf, test } from "bun:test";
 
 import { decode } from "../../../wire";
 import {
-  ConsignmentStatusSchema,
   type ListingDetail,
   ListingDetailSchema,
   type ListingSummary,
@@ -28,38 +27,6 @@ async function readDetail() {
   return (await readResponse(DETAIL, ListingDetailSchema)).data;
 }
 
-test("状态夹具分别表示可登记、关闭与依赖不可用", async () => {
-  const ready = await readResponse("public/consignment-status.json", ConsignmentStatusSchema);
-  const disabled = await readResponse(
-    "public/consignment-status-disabled.json",
-    ConsignmentStatusSchema,
-  );
-  const unavailable = await readResponse(
-    "public/consignment-status-unavailable.json",
-    ConsignmentStatusSchema,
-  );
-  expect(ready.data).toMatchObject({
-    enabled: true,
-    registration_ready: true,
-    registration_modes: ["direct", "consigned"],
-    registration_worlds: ["main", "isekai"],
-    accepts_mail: false,
-    purchasable: false,
-  });
-  expect(disabled.data).toMatchObject({
-    enabled: false,
-    registration_ready: false,
-    registration_modes: [],
-    registration_worlds: [],
-  });
-  expect(unavailable.data).toMatchObject({
-    enabled: true,
-    registration_ready: false,
-    registration_modes: [],
-    registration_worlds: [],
-  });
-});
-
 test("公开目录和两种详情夹具保留模式、装备编号及属性", async () => {
   const { data: page } = await readResponse(
     "public/consignment-listings.json",
@@ -82,36 +49,6 @@ test("公开目录和两种详情夹具保留模式、装备编号及属性", as
   ]);
   expect(consigned.summary).toMatchObject({ state: "awaiting_deposit", purchasable: false });
   expect(consigned.equipment.level).toEqual({ kind: "unassigned" });
-});
-
-test("状态拒绝矛盾能力、未知枚举和非法协议常量", async () => {
-  const { data: status } = await readResponse(
-    "public/consignment-status.json",
-    ConsignmentStatusSchema,
-  );
-  for (const patch of [
-    { enabled: false },
-    { registration_ready: false },
-    { registration_modes: ["display_only"] },
-    { registration_worlds: [{ main: null }] },
-    { accepts_mail: true },
-    { purchasable: true },
-    { fee_bps: 10_000 },
-    { min_price: 0 },
-    { max_price: 1_000_000_001 },
-  ]) {
-    expect(decode(ConsignmentStatusSchema, { ...status, ...patch }).ok).toBe(false);
-  }
-});
-
-test("登记未就绪时世界数组必须为空", async () => {
-  const { data: status } = await readResponse(
-    "public/consignment-status-unavailable.json",
-    ConsignmentStatusSchema,
-  );
-  expect(decode(ConsignmentStatusSchema, { ...status, registration_worlds: ["main"] }).ok).toBe(
-    false,
-  );
 });
 
 test("分页允许空页及偏移上界，拒绝越界和非安全整数", () => {
