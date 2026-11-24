@@ -13,6 +13,12 @@ use uuid::Uuid;
 
 use crate::text::{valid_positive_decimal, valid_text};
 
+mod original;
+
+pub use original::{
+    OriginalMailKey, OriginalMailKeyError, parse_settlement_world, settlement_world_code,
+};
+
 /// 预检退役中唯一解除失败计数的失败码；其余预检退役仍计入通知失败。
 pub const PREFLIGHT_LOT_WATCH_INVALIDATED: &str = "lot_watch_invalidated";
 
