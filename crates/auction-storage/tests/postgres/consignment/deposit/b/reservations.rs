@@ -248,6 +248,48 @@ async fn postgres_deposit_expire_reservation_retires_and_releases_claim() {
     assert_eq!(holder, None);
 }
 
+/// 回归：预约退休后占用行保留为空行，同一挂单仍可签发新预约（反例见 busy.rs 的活动预约阻止用例）。
+#[tokio::test]
+async fn postgres_deposit_issue_succeeds_after_reservation_expired() {
+    let database = TestDatabase::create().await.expect("克隆模板库");
+    let maintenance = database.maintenance_store().await.expect("维护连接");
+    let pool = maintenance.postgres_pool();
+    seed_listing(pool, listing_id(), auction_domain::SettlementWorld::Main).await;
+    seed_mail_ready(pool).await;
+    let now: auction_time::Timestamp =
+        sqlx::query_scalar("SELECT clock_timestamp()").fetch_one(pool).await.expect("数据库时钟");
+    let issued = now.checked_add_signed(auction_time::Duration::hours(-2)).expect("两小时前");
+    let expired = now.checked_add_signed(auction_time::Duration::hours(-1)).expect("一小时前");
+    let reservation_id = Uuid::new_v4();
+    seed_active_reservation(pool, listing_id(), reservation_id, 1, issued, expired).await;
+    let repository = repository(&database).await;
+    repository
+        .expire_reservation(expire_command(worker_command(1), reservation_id, 1, expired))
+        .await
+        .expect("到期退休");
+    let listing_version: i64 =
+        sqlx::query_scalar("SELECT state_version FROM public.consignment_listings WHERE id=$1")
+            .bind(listing_id())
+            .fetch_one(pool)
+            .await
+            .expect("读取挂单版本");
+    let listing_version = u64::try_from(listing_version).expect("版本非负");
+    let reissued = repository
+        .issue_reservation(issue_command(client_command(2), listing_id(), listing_version, 0x22))
+        .await
+        .expect("已释放的占用行不得阻止同件重新签发");
+    assert_eq!(reissued.state, ListingState::AwaitingDeposit);
+    let active: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM public.consignment_deposit_reservations
+         WHERE listing_id=$1 AND state='active'",
+    )
+    .bind(listing_id())
+    .fetch_one(pool)
+    .await
+    .expect("读取活动预约");
+    assert_eq!(active, 1);
+}
+
 #[tokio::test]
 async fn postgres_deposit_expire_cannot_declare_cancelled() {
     let database = TestDatabase::create().await.expect("克隆模板库");
