@@ -5,6 +5,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 #![cfg(feature = "test-db")]
 
+mod consignment;
 mod perf;
 mod public_lots;
 mod support;
