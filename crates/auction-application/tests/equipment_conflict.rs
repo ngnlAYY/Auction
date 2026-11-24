@@ -19,7 +19,7 @@ use auction_application::mail::{
     MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation,
     MailDeliveryResult, MailEquipmentAttachment, MailEquipmentReader, MailMessage,
     MailNoticeEnqueue, MailNoticeLimit, MailNotificationTemplate, MailProcessingDecision,
-    MailProcessor, MailProcessorConfig, MailProcessorService, MailReplyPolicy,
+    MailProcessingError, MailProcessor, MailProcessorConfig, MailProcessorService, MailReplyPolicy,
     MailReplyPolicySource, MailUserCommandKind, MailUserPort, MailUserRebindCommand,
     MailUserRegisterCommand, MailUserRekeyCommand, MailUserResult,
 };
@@ -97,6 +97,8 @@ impl MailEquipmentReader for Equipment {
 enum IntakeRefusal {
     EquipmentConflict,
     IntakeClosed,
+    EquipmentHeld,
+    EquipmentLockUnavailable,
 }
 
 struct RefusingAuctions(IntakeRefusal);
@@ -118,6 +120,10 @@ impl MailAuctionIntakePort for RefusingAuctions {
                 CompetitionTransactionError::AdminIntakeEquipmentConflict
             }
             IntakeRefusal::IntakeClosed => CompetitionTransactionError::IntakeClosed,
+            IntakeRefusal::EquipmentHeld => CompetitionTransactionError::EquipmentHeld,
+            IntakeRefusal::EquipmentLockUnavailable => {
+                CompetitionTransactionError::EquipmentLockUnavailable
+            }
         };
         Box::pin(async move { Err(ApplicationError::CompetitionTransaction(error)) })
     }
@@ -268,6 +274,15 @@ fn process<A: MailAuctionIntakePort + 'static>(
     equipment: Equipment,
     auctions: A,
 ) -> (MailProcessingDecision, Vec<MailDeliveryCommand>) {
+    let (result, commands) = process_result(equipment, auctions);
+    (result.expect("must be rejected, not error"), commands)
+}
+
+/// 与 [`process`] 相同，但保留处理器的完整结果，用于断言错误映射不是整封退回。
+fn process_result<A: MailAuctionIntakePort + 'static>(
+    equipment: Equipment,
+    auctions: A,
+) -> (Result<MailProcessingDecision, ApplicationError>, Vec<MailDeliveryCommand>) {
     let deliveries = Arc::new(RecordingDeliveries::default());
     let processor = MailProcessorService::new(
         vec!["main".to_owned()],
@@ -312,8 +327,7 @@ fn process<A: MailAuctionIntakePort + 'static>(
         claimable: true,
         content_digest: [9; 32],
     };
-    let decision =
-        block_on(processor.process(message)).result.expect("must be rejected, not error");
+    let decision = block_on(processor.process(message)).result;
     let commands = deliveries.commands.lock().unwrap().clone();
     (decision, commands)
 }
@@ -388,4 +402,37 @@ fn accepted_submission_take_passes_the_unified_judgement() {
     assert_eq!(take.request_hash, legacy);
     assert_eq!(take.attachment_ids, ["900000001"]);
     assert!(take.shape().admits());
+}
+
+#[test]
+fn consignment_strong_claim_stops_on_unsafe_disposition_without_asset_actions() {
+    let (result, commands) = process_result(
+        Equipment { invalid_source: false },
+        RefusingAuctions(IntakeRefusal::EquipmentHeld),
+    );
+    assert!(matches!(
+        result,
+        Err(ApplicationError::MailProcessing(MailProcessingError::UnsafeDisposition))
+    ));
+    assert!(commands.is_empty(), "强占用不得安排退回或说明信，保持既有游标停信");
+}
+
+#[test]
+fn equipment_lock_budget_failure_is_retryable_and_schedules_nothing() {
+    let (result, commands) = process_result(
+        Equipment { invalid_source: false },
+        RefusingAuctions(IntakeRefusal::EquipmentLockUnavailable),
+    );
+    let error = result.expect_err("锁预算耗尽应按暂时不可用返回");
+    assert!(matches!(
+        error,
+        ApplicationError::CompetitionTransaction(
+            CompetitionTransactionError::EquipmentLockUnavailable
+        )
+    ));
+    assert_eq!(
+        error.mail_processing_retryability(),
+        auction_application::core::MailProcessingRetryability::Retryable
+    );
+    assert!(commands.is_empty());
 }

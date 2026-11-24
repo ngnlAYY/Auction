@@ -4,11 +4,21 @@
 //! 重复处理恢复原投稿资产并补齐同一领取意图，不根据变化后的远端页面反向退回。
 
 mod commands;
+mod consignment;
+mod consignment_ingress;
 mod intake;
 mod pricing;
 mod processor;
 mod receipt;
 
+pub use consignment::{
+    ConsignmentMailInput, ConsignmentMailOutcome, ConsignmentMailPlan, ConsignmentMailService,
+    ConsignmentNotApplicable, is_consignment_candidate,
+};
+pub use consignment_ingress::{
+    ConsignmentIngressOutcome, ConsignmentIngressRequest, ConsignmentIngressService,
+    ConsignmentMailCandidate,
+};
 pub use intake::MailAuctionIntakeService;
 pub use processor::{MailProcessorConfig, MailProcessorService};
 pub use receipt::{

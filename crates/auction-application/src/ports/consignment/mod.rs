@@ -1,6 +1,7 @@
 //! 寄售登记、分权查询、解析、加密和维护的窄端口。
 
 mod commands;
+pub(crate) mod deposit;
 mod equipment;
 mod errors;
 mod maintenance;
@@ -9,6 +10,7 @@ mod reads;
 mod work;
 
 pub use commands::*;
+pub use deposit::*;
 pub use equipment::*;
 pub use errors::*;
 pub use maintenance::*;

@@ -2,6 +2,7 @@
 
 use std::{future::Future, pin::Pin};
 
+use auction_domain::consignment::{ListingEquipmentIdentity, matches_historical_equipment_alias};
 use auction_domain::{
     AuctionRules, AuctionStatus, BidAmount, CommandId, CompetitionPlan, LotBidState, LotId,
     ProxyAuthorization, ProxyAuthorizationId, ProxyStatus, UserId,
@@ -155,6 +156,13 @@ pub enum CompetitionTransactionError {
     AdminIntakeSellerBlacklisted,
     #[error("Admin 录入装备已经存在")]
     AdminIntakeEquipmentConflict,
+    /// 同一世界、同一规范装备编号正被寄售活动预约或代管 position 强占用。
+    #[error("装备正被寄售预约或代管持有")]
+    EquipmentHeld,
+    /// 实物会话锁在预算内没有取得；调用方不重试事务，按暂时不可用返回，客户端可用同一
+    /// `command_id` 原样重试。
+    #[error("实物锁在预算内未取得")]
+    EquipmentLockUnavailable,
     #[error("管理 lot 的状态版本已经过期")]
     StaleState,
     #[error("管理 lot 当前状态不允许该命令")]
@@ -201,6 +209,33 @@ pub trait CompetitionTransaction: Send {
         &mut self,
         command_id: auction_domain::CommandId,
     ) -> impl Future<Output = Result<Option<StoredCommand>, CompetitionTransactionError>> + Send;
+
+    /// 锁前门控：判断给定规范实物中是否至少一件正被寄售预约或 position 持有。
+    ///
+    /// 只读查询，供拍卖准入在开启写事务前决定是否取得实物租约。默认返回 `false`，让
+    /// 不关心寄售的测试替身继续走既有 `run` 路径；生产适配器必须按
+    /// `(world, 规范 EID)` 读取 `consignment_equipment_claims`。该预判不是授权：
+    /// 锁内强占用检查、Serializable 与 lot 守卫仍然必须保留。
+    fn any_equipment_held(
+        &mut self,
+        equipment: &[ListingEquipmentIdentity],
+    ) -> impl Future<Output = Result<bool, CompetitionTransactionError>> + Send {
+        let _ = equipment;
+        async { Ok(false) }
+    }
+
+    /// 锁前续办预判：同一 `(mailbox_key, external_mail_id)` 是否已有拍卖投稿。
+    ///
+    /// 勘误 E1：既有投稿续办不以实物锁为前提，因此结果只用于选择既有 `run` 路径；
+    /// 默认 `false` 供测试替身使用，生产适配器只读查询 `auction_submissions`。
+    fn mail_auction_submission_exists(
+        &mut self,
+        mailbox_key: &str,
+        external_mail_id: &str,
+    ) -> impl Future<Output = Result<bool, CompetitionTransactionError>> + Send {
+        let _ = (mailbox_key, external_mail_id);
+        async { Ok(false) }
+    }
 
     fn insert_command(
         &mut self,
@@ -322,5 +357,96 @@ pub trait TransactionRunner: Send + Sync {
     {
         let _ = auction_id;
         self.run(policy, operation)
+    }
+
+    /// 拍卖与寄售共用的实物准入入口：先按预读的规范实物身份取得会话锁，再执行既有事务。
+    ///
+    /// 锁只保护实际争用该实物的写入，不把全站竞价都改成拿装备锁。默认实现直接执行，供不
+    /// 关心实物仲裁的测试替身使用；生产适配器必须在开始 Serializable 快照之前取得全部实物
+    /// 锁，并持有到事务、提交与提交后处理结束。无法构造规范身份的装备不进入预读集合，调用方
+    /// 仍按原有处理继续（与数据库守卫在别名为空时跳过一致）。
+    fn run_with_equipment_locks<T, E, F>(
+        &self,
+        equipment: &[ListingEquipmentIdentity],
+        policy: TransactionPolicy,
+        operation: F,
+    ) -> impl Future<Output = Result<T, E>> + Send
+    where
+        T: Send,
+        E: TransactionFailure,
+        F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send,
+    {
+        let _ = equipment;
+        self.run(policy, operation)
+    }
+
+    /// 按锁前门控结果选择既有 `run` 或带实物锁入口。
+    ///
+    /// 没有寄售持有时保持原路径，不建立租约、不占出价队列配额；有持有时才进入
+    /// [`TransactionRunner::run_with_equipment_locks`]。闭包直接作为参数传入，保持
+    /// runner 要求的 higher-ranked lifetime，避免先存成局部变量后丢失 `for<'a>` 约束。
+    fn run_with_equipment_gate<T, E, F>(
+        &self,
+        equipment_held: bool,
+        equipment: &[ListingEquipmentIdentity],
+        policy: TransactionPolicy,
+        operation: F,
+    ) -> impl Future<Output = Result<T, E>> + Send
+    where
+        T: Send,
+        E: TransactionFailure,
+        F: for<'a> Fn(&'a mut Self::Transaction) -> TransactionFuture<'a, T, E> + Send,
+    {
+        async move {
+            if equipment_held {
+                self.run_with_equipment_locks(equipment, policy, operation).await
+            } else {
+                self.run(policy, operation).await
+            }
+        }
+    }
+}
+
+/// 把原文装备编号规范化为寄售实物锁身份。
+///
+/// 新登记与 `ListingEquipmentIdentity::new` 只接受规范正十进制；拍卖旧路径的原文 EID 允许
+/// 前导零（如 `00042`），必须先按数据库 `consignment_eid_alias` 的同一规则去零。这里先按
+/// 文本去零，再复用领域的历史别名比较与既有校验，不另造编号规则；全零、非 ASCII 数字或
+/// 超过 32 位的结果返回 `None`，调用方按“无法构造身份”跳过实物锁。
+pub(crate) fn canonical_equipment_lock_identity(
+    world_id: &str,
+    raw_equipment_id: &str,
+) -> Option<ListingEquipmentIdentity> {
+    let canonical = raw_equipment_id.trim_start_matches('0');
+    let identity = ListingEquipmentIdentity::new(world_id, canonical).ok()?;
+    matches_historical_equipment_alias(&identity, world_id, raw_equipment_id).then_some(identity)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonical_equipment_lock_identity;
+
+    #[test]
+    fn equipment_lock_identity_uses_the_same_alias_rule_as_the_database() {
+        let canonical = canonical_equipment_lock_identity("main", "42").expect("规范身份");
+        let padded = canonical_equipment_lock_identity("main", "00042").expect("去零身份");
+        assert_eq!(canonical, padded);
+        assert_eq!(canonical.world_id(), "main");
+        assert_eq!(canonical.external_equipment_id(), "42");
+        assert_ne!(
+            canonical,
+            canonical_equipment_lock_identity("isekai", "00042").expect("不同世界身份")
+        );
+    }
+
+    #[test]
+    fn equipment_lock_identity_skips_values_the_database_alias_cannot_normalize() {
+        for raw in ["", "0", "000", "+42", "-42", " 42", "42 ", "４２", "4.2", "x42"] {
+            assert!(canonical_equipment_lock_identity("main", raw).is_none(), "{raw}");
+        }
+        assert!(
+            canonical_equipment_lock_identity("main", &"9".repeat(33)).is_none(),
+            "超过寄售身份上限的旧编号不取锁"
+        );
     }
 }

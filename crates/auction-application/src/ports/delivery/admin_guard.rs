@@ -81,8 +81,9 @@ pub struct DeliveryAdminGuardSnapshot {
 /// 阻断项闭集；顺序即判定优先级，调用方取第一项。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryAdminGuardBlocker {
-    /// 结算退件 Take 由退件案件 owner 推进：结果未知只认系统可验证证明，不允许人工释放、
-    /// 重试或声明成功/失败；同一邮件已交接给结算退件 Take 后，原领取或退回意图也不能被重新激活。
+    /// 投递动作由另一个 owner 推进：结算退件 Take 归退件案件，寄售处置 Take/Return 归寄售专用
+    /// 起写链。结果未知只认系统可验证证明，不允许人工释放、重试或声明成功/失败；同一邮件已
+    /// 交接给结算退件 Take 后，原领取或退回意图也不能被重新激活。
     SettlementReturnActionOwned,
     /// 结算义务已不可执行（成交已撤销）、投递已不是当前派发，或恢复流程已接管该义务被退回的
     /// 邮件，禁止重新激活。
@@ -206,7 +207,13 @@ impl DeliveryAdminGuardSnapshot {
         if !self.command_snapshot_readable {
             blockers.push(DeliveryAdminGuardBlocker::CommandSnapshotUnreadable);
         }
+        // 寄售处置投递只能由寄售专用链按 `mail_disposition_write_starts` 的一次性起写许可执行；
+        // 通用 Admin 动作的新命令一律拒绝（不变量 4：结果未知只转人工核对，绝不自动重发；
+        // 起写许可只发一次）。已提交命令的重放由调用方先查账本，不受此阻断影响；详情读取也不经
+        // 本判定。这里复用既有映射为 `Invalid` 的“另一 owner 持有动作”阻断，避免新增 HTTP
+        // 原因码；Admin 对寄售处置的核对出口在寄售自己的页面。
         if self.origin_kind == "settlement_return_action"
+            || self.origin_kind == "consignment_disposition"
             || (checks_lot_eligibility(self.action) && self.mail_handed_over)
         {
             blockers.push(DeliveryAdminGuardBlocker::SettlementReturnActionOwned);
@@ -297,5 +304,56 @@ impl DeliveryAdminGuardSnapshot {
             serde_json::json!({})
         };
         DeliveryAdminGuardDecision { transition, blockers, result_metadata }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ports::delivery::admin::{DeliveryAdminAction, DeliveryAdminError};
+    use crate::ports::delivery::admin_guard::{
+        DeliveryAdminGuardBlocker, DeliveryAdminGuardSnapshot,
+    };
+
+    fn consignment_snapshot(action: DeliveryAdminAction) -> DeliveryAdminGuardSnapshot {
+        DeliveryAdminGuardSnapshot {
+            action,
+            expected_fencing_version: 1,
+            fencing_version: 1,
+            status: action.transition().expected_status.to_owned(),
+            reason_code: None,
+            has_sending_fence: true,
+            origin_kind: "consignment_disposition".to_owned(),
+            payload_operation: Some("take".to_owned()),
+            sent_reference_sighted: false,
+            funded_delivery: false,
+            command_snapshot_readable: true,
+            retired: false,
+            lot_eligible: Some(true),
+            settlement_eligible: None,
+            settlement_fulfillment_state: None,
+            has_reconcile_reference: true,
+            mail_handed_over: false,
+            recipient_renamed: false,
+            recovery_retry_eligible: true,
+        }
+    }
+
+    #[test]
+    fn consignment_disposition_blocks_every_delivery_admin_action() {
+        for action in [
+            DeliveryAdminAction::Release,
+            DeliveryAdminAction::RetryFailed,
+            DeliveryAdminAction::ReconcileRetry,
+            DeliveryAdminAction::ReconcileSucceeded,
+            DeliveryAdminAction::ReconcileFailed,
+        ] {
+            let decision = consignment_snapshot(action).evaluate();
+            assert_eq!(
+                decision.blockers,
+                vec![DeliveryAdminGuardBlocker::SettlementReturnActionOwned],
+                "动作 {action:?} 必须被寄售来源阻断"
+            );
+            assert_eq!(decision.blockers[0].error(), DeliveryAdminError::Invalid);
+        }
     }
 }

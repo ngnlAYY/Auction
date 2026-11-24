@@ -19,6 +19,8 @@ const MAX_BODY_BYTES: usize = 64 * 1024;
 const MAX_JSON_BYTES: usize = 128 * 1024;
 const MAX_ATTACHMENT_IDS: usize = 1000;
 const LOGIN_KEY_TEXT_LENGTH: usize = 43;
+const RESERVATION_TEXT_LENGTH: usize = 46;
+const RESERVATION_PREFIX: &[u8] = b"C1-";
 const MANUAL_KEY_MIN_BYTES: usize = 32;
 const REDACTED: &str = "[REDACTED]";
 
@@ -118,6 +120,11 @@ impl MailDisplaySnapshot {
         limit_redacted_text(redact_text(body, None), MAX_BODY_BYTES)
     }
 
+    /// 对失败诊断或错误主题应用同一脱敏规则；预约码、登录 key 与装备 URL key 都不外泄。
+    pub fn redact_failure_diagnostic(source: &str) -> String {
+        limit_redacted_text(redact_text(source, None), MAX_BODY_BYTES)
+    }
+
     /// 校验展示投影边界和版本闭集。
     pub fn validate(&self) -> bool {
         self.schema_version == MAIL_DISPLAY_SCHEMA_VERSION
@@ -177,6 +184,7 @@ fn redact_text(source: &str, attachment_keys: Option<(&HashSet<u64>, &RandomStat
     let mut ranges = url_key_ranges(source)
         .chain(credential_token_ranges(source, attachment_keys.is_none()))
         .chain(labeled_key_ranges(source))
+        .chain(reservation_code_ranges(source))
         .collect::<Vec<_>>();
     // 原始 key 不离开同步借用；集合仅保留本次随机盐指纹，碰撞最多额外屏蔽展示文本。
     // 附件 key 固定十字节；一次扫描同时匹配全部 key，成本不随附件数乘倍增长。
@@ -241,6 +249,26 @@ fn credential_token_ranges(
                     && token.iter().all(u8::is_ascii_hexdigit))
             .then_some(range)
         })
+}
+
+fn reservation_code_ranges(text: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
+    let bytes = text.as_bytes();
+    bytes.iter().enumerate().filter_map(move |(start, byte)| {
+        if *byte != b'C'
+            || bytes.get(start + 1) != Some(&b'1')
+            || bytes.get(start + 2) != Some(&b'-')
+        {
+            return None;
+        }
+        let end = start.checked_add(RESERVATION_TEXT_LENGTH)?;
+        if end > bytes.len() || text.get(start..end)?.len() != RESERVATION_TEXT_LENGTH {
+            return None;
+        }
+        let body = bytes.get(start + RESERVATION_PREFIX.len()..end)?;
+        body.iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'-' | b'_'))
+            .then_some((start, end))
+    })
 }
 
 fn labeled_key_ranges(text: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
@@ -453,5 +481,42 @@ mod tests {
         assert_eq!(display(SYSTEM_RETURN_SENDER, canonical), canonical);
         assert_eq!(display(SYSTEM_RETURN_SENDER, &padded), "[REDACTED]");
         assert_eq!(display("MoogleMail ", &padded), canonical);
+    }
+
+    #[test]
+    fn reservation_codes_are_redacted_from_subjects_bodies_and_failures() {
+        let code = format!("C1-{}", "A".repeat(43));
+        assert_eq!(code.len(), 46);
+        let text = format!("consign {code} https://example.invalid/equip/123/0123abcdef");
+        let safe = "consign [REDACTED] https://example.invalid/equip/123/[REDACTED]";
+        assert_eq!(MailDisplaySnapshot::redact_subject("Player", &text, &[]), safe,);
+        assert_eq!(MailDisplaySnapshot::redact_stored_body(&text), safe);
+        assert_eq!(MailDisplaySnapshot::redact_failure_diagnostic(&text), safe);
+        assert!(
+            !MailDisplaySnapshot::redact_failure_diagnostic(&format!("坏正文 {code}"))
+                .contains(&code)
+        );
+        assert_eq!(
+            MailDisplaySnapshot::display_stored_subject("Player", &format!("consign {code}")),
+            "consign [REDACTED]",
+        );
+        let message = MailMessage {
+            mailbox_key: "main".to_owned(),
+            external_mail_id: "9001".to_owned(),
+            world_id: "main".to_owned(),
+            received_at: Timestamp::from_timestamp(1_800_000_000, 0).unwrap(),
+            sender: "Player".to_owned(),
+            subject: "consign".to_owned(),
+            body: format!("坏正文 {code}"),
+            credits: 0,
+            cod: 0,
+            attachments: Vec::new(),
+            returnable: false,
+            claimable: true,
+            content_digest: [1; 32],
+        };
+        let snapshot = MailDisplaySnapshot::from_message(&message).expect("展示快照");
+        assert!(!snapshot.body.contains(&code));
+        assert!(!format!("{snapshot:?}").contains(&code));
     }
 }

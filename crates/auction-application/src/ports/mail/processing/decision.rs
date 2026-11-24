@@ -38,6 +38,15 @@ impl MailProcessingDecision {
 
 pub trait MailProcessor: Send + Sync {
     fn process(&self, message: MailMessage) -> MailProcessingFuture<'_>;
+
+    /// 在不改变旧路由优先级的前提下给或许可器分流。
+    ///
+    /// 默认实现只调用原处理器；实现寄售候选分流的处理器必须覆盖本方法，先完成世界校验、
+    /// 既有接受续办、精确主题与系统结算退件识别，只有全部无法归属且调用方确认该信带寄售
+    /// 候选时才返回 [`MailProcessingRoute::ConsignmentCandidate`]。
+    fn route(&self, message: MailMessage, _consignment_candidate: bool) -> MailRoutingFuture<'_> {
+        Box::pin(async move { MailProcessingRoute::Legacy(Box::new(self.process(message).await)) })
+    }
 }
 
 /// 单次业务尝试及其可选留证任务；业务错误仍按原有类型和重试规则处理。
@@ -48,3 +57,14 @@ pub struct MailProcessingAttempt {
 
 pub type MailProcessingFuture<'a> =
     Pin<Box<dyn Future<Output = MailProcessingAttempt> + Send + 'a>>;
+
+/// 旧路由决定或寄售候选的两态结果。
+pub enum MailProcessingRoute {
+    /// 旧路由已归属或已按未知邮件完成处理。
+    Legacy(Box<MailProcessingAttempt>),
+    /// 旧路由全部无法归属，且该信确实带 4D1 寄售候选。
+    ConsignmentCandidate,
+}
+
+/// 一次路由尝试；候选不含旧处理器的留证任务。
+pub type MailRoutingFuture<'a> = Pin<Box<dyn Future<Output = MailProcessingRoute> + Send + 'a>>;

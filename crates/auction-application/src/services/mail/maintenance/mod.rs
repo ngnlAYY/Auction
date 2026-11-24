@@ -9,9 +9,32 @@
 
 mod cleanup;
 mod diagnostics;
+mod disposition;
+mod frozen_manifest;
 mod matching;
+mod quarantine_recheck;
 mod sent;
 mod sweep;
+mod write_transport;
+
+pub use disposition::{
+    DispositionMaintenanceService, DispositionRound, DispositionRoundRequest, DispositionWorkStore,
+};
+pub use frozen_manifest::{
+    ConsignmentDispositionRequest, ConsignmentNotSent, ConsignmentNotSentReason,
+    ConsignmentSentUnprovenReason, DispositionManifest, DispositionManifestAttachment,
+    DispositionObservationEvidence, DispositionReconcileReason, DispositionRetryReason,
+    DispositionWorkClaim,
+};
+pub use quarantine_recheck::{
+    QuarantineMailLocator, QuarantineRecheckClaim, QuarantineRecheckReadError,
+    QuarantineRecheckReader, QuarantineRecheckRound, QuarantineRecheckService,
+    QuarantineRecheckStore, QuarantineReobservation,
+};
+pub use write_transport::{
+    ConsignmentDispositionExecution, ConsignmentDispositionProof, ConsignmentDispositionTransport,
+    PreparedDisposition, SignedConsignmentProof, disposition_proof_observation_id,
+};
 
 use std::sync::Arc;
 

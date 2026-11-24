@@ -252,4 +252,22 @@ mod tests {
         assert!(!allows_delivery(classes, "mail_intake", Some("rekey_key")));
         assert!(allows_delivery(classes, "mail_intake", Some("auction_no_attachments")));
     }
+
+    /// 维护者决定：寄售季前通知不受任何分类开关控制，关闭全部类别也不得抑制它。
+    #[test]
+    fn consignment_notice_is_never_suppressed_by_send_classes() {
+        let all_off = MailSendClasses {
+            account_reply: false,
+            intake_reply: false,
+            settlement_notice: false,
+            outbid_reminder: false,
+            player_summary: false,
+            operations_alert: false,
+        };
+        assert_eq!(class_of("consignment_notice", Some("consignment_season_notice")), None);
+        assert!(allows_delivery(all_off, "consignment_notice", Some("consignment_season_notice")));
+        let (origins, templates) = all_off.suppressed_delivery_patterns();
+        assert!(!origins.contains(&"consignment_notice"));
+        assert!(!templates.contains(&"consignment_season_notice"));
+    }
 }

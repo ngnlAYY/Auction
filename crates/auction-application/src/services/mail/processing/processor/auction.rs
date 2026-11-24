@@ -294,6 +294,11 @@ where
                     )
                     .await;
             }
+            // 维护者决定：寄售强占用时拍卖入站转人工核对，不建 lot、不排退回、不动寄售预约；
+            // 收件游标停在这封信上，按既有 UnsafeDisposition 人工处理路径收口。
+            Err(ApplicationError::CompetitionTransaction(
+                CompetitionTransactionError::EquipmentHeld,
+            )) => return Err(MailProcessingError::UnsafeDisposition.into()),
             Err(error) => return Err(error),
         };
         self.finish_accepted_auction(&message, result, attachment_ids).await

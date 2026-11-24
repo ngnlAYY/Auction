@@ -13,13 +13,19 @@ use crate::errors::ApplicationError;
 use crate::ports::core::Clock;
 use crate::ports::mail::{
     MailAuctionIntakePort, MailDeliveryEnqueuer, MailEquipmentReader, MailMessage,
-    MailNotificationTemplate, MailProcessingDecision, MailProcessingError, MailUserCommandKind,
-    MailUserPort, MailUserRebindCommand, MailUserRegisterCommand, MailUserRekeyCommand,
-    MailUserResultCode,
+    MailNotificationTemplate, MailProcessingAttempt, MailProcessingDecision, MailProcessingError,
+    MailProcessingRoute, MailUserCommandKind, MailUserPort, MailUserRebindCommand,
+    MailUserRegisterCommand, MailUserRekeyCommand, MailUserResultCode,
 };
 use crate::ports::settlement::{
     parse_returned_settlement_body, system_returned_settlement_obligation_id,
 };
+
+/// 旧路由的中间结果；未知邮件由调用方决定继续 `process_unknown` 还是交给寄售候选。
+enum LegacyMessageRoute {
+    Decision(MailProcessingDecision),
+    Unknown(MailMessage),
+}
 
 impl<E, A, D, U, C> MailProcessorService<E, A, D, U, C>
 where
@@ -36,6 +42,54 @@ where
             crate::ports::mail::PendingMailEquipmentDiagnostic,
         >,
     ) -> Result<MailProcessingDecision, ApplicationError> {
+        match self.route_legacy_message(message, pending_equipment_diagnostic).await? {
+            LegacyMessageRoute::Decision(decision) => Ok(decision),
+            LegacyMessageRoute::Unknown(message) => self.process_unknown(message).await,
+        }
+    }
+
+    /// 旧路由优先的分流入口；只有调用方确认带 4D1 候选且全部旧路由无法归属时才返回候选。
+    pub(super) async fn route_message(
+        &self,
+        message: MailMessage,
+        consignment_candidate: bool,
+        pending_equipment_diagnostic: &mut Option<
+            crate::ports::mail::PendingMailEquipmentDiagnostic,
+        >,
+    ) -> MailProcessingRoute {
+        let routed = self.route_legacy_message(message, pending_equipment_diagnostic).await;
+        match routed {
+            Ok(LegacyMessageRoute::Decision(decision)) => {
+                MailProcessingRoute::Legacy(Box::new(MailProcessingAttempt {
+                    result: Ok(decision),
+                    pending_equipment_diagnostic: pending_equipment_diagnostic.take(),
+                }))
+            }
+            Ok(LegacyMessageRoute::Unknown(_)) if consignment_candidate => {
+                MailProcessingRoute::ConsignmentCandidate
+            }
+            Ok(LegacyMessageRoute::Unknown(message)) => {
+                let result = self.process_unknown(message).await;
+                MailProcessingRoute::Legacy(Box::new(MailProcessingAttempt {
+                    result,
+                    pending_equipment_diagnostic: pending_equipment_diagnostic.take(),
+                }))
+            }
+            Err(error) => MailProcessingRoute::Legacy(Box::new(MailProcessingAttempt {
+                result: Err(error),
+                pending_equipment_diagnostic: pending_equipment_diagnostic.take(),
+            })),
+        }
+    }
+
+    /// 原有世界校验、续办、精确主题与系统结算退件分支；函数体逐项保持原顺序。
+    async fn route_legacy_message(
+        &self,
+        message: MailMessage,
+        pending_equipment_diagnostic: &mut Option<
+            crate::ports::mail::PendingMailEquipmentDiagnostic,
+        >,
+    ) -> Result<LegacyMessageRoute, ApplicationError> {
         message.validate()?;
         if !self.world_ids.iter().any(|world_id| world_id == &message.world_id) {
             return Err(MailProcessingError::InvalidConfiguration.into());
@@ -43,7 +97,7 @@ where
         // 标的提交与领取入队之间可能发生取消；接受事实优先于当前远端内容，禁止重试时
         // 因页面暂时不可读或附件已被领取而改判为退回。
         if let Some(decision) = self.resume_accepted_auction(&message).await? {
-            return Ok(decision);
+            return Ok(LegacyMessageRoute::Decision(decision));
         }
         // Users 的创建/更新时刻只来自本地处理时钟；远端邮件时间可能偏快，不能污染账号元数据。
         // 装备投稿仍保留既有的接收时间门禁。
@@ -51,22 +105,28 @@ where
         // 旧版使用 Unicode CaseFold 路由，但刻意不裁剪标题首尾空白；保持这一边界可以
         // 兼容合法的大小写变体，同时不把带隐藏空白的未知标题误认成业务命令。
         let routing_subject = message.subject.to_ascii_lowercase();
-        match routing_subject.as_str() {
+        Ok(match routing_subject.as_str() {
             "auction" => {
                 let intake_now = now.max(message.received_at);
-                self.process_auction(message, intake_now, pending_equipment_diagnostic).await
+                LegacyMessageRoute::Decision(
+                    self.process_auction(message, intake_now, pending_equipment_diagnostic).await?,
+                )
             }
-            "register" => self.process_register(message, now).await,
-            "rebind" => self.process_rebind(message, now).await,
-            "rekey" if self.rekey_enabled => self.process_rekey(message, now).await,
+            "register" => LegacyMessageRoute::Decision(self.process_register(message, now).await?),
+            "rebind" => LegacyMessageRoute::Decision(self.process_rebind(message, now).await?),
+            "rekey" if self.rekey_enabled => {
+                LegacyMessageRoute::Decision(self.process_rekey(message, now).await?)
+            }
             // 被拒收或过期的结算邮件只由系统发件人 `MoogleMail` 以 `[RTS] ` + 原 canonical
             // 主题退回。义务 ID 可由公开 ID 推出，不能证明来源：无前缀的结算主题与玩家自拟的
             // 同名主题都按未知邮件处理（不变量 6）。
             subject => match system_returned_settlement_obligation_id(&message.sender, subject) {
-                Some(obligation_id) => self.process_settlement_return(message, obligation_id),
-                None => self.process_unknown(message).await,
+                Some(obligation_id) => LegacyMessageRoute::Decision(
+                    self.process_settlement_return(message, obligation_id)?,
+                ),
+                None => LegacyMessageRoute::Unknown(message),
             },
-        }
+        })
     }
 
     /// 将系统退回的结算邮件转换为严格的退件证据。
@@ -337,5 +397,246 @@ where
                 "notice_suppressed": notice_id.is_none(),
             }),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+    use std::pin::pin;
+    use std::sync::Arc;
+    use std::task::{Context, Poll, Waker};
+
+    use auction_time::Timestamp;
+    use uuid::Uuid;
+
+    use super::super::MailProcessorConfig;
+    use super::super::MailProcessorService;
+    use crate::ports::admin::AdminIntakeSourceSnapshot;
+    use crate::ports::core::{ApplicationFuture, Clock};
+    use crate::ports::mail::{
+        MailAuctionAcceptance, MailAuctionIntakeCommand, MailAuctionIntakeLookup,
+        MailAuctionIntakePort, MailAuctionIntakeResult, MailDeliveryActivation,
+        MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryResult, MailEquipmentAttachment,
+        MailEquipmentFilter, MailEquipmentReader, MailMessage, MailNoticeEnqueue, MailNoticeLimit,
+        MailProcessingAttempt, MailProcessingRoute, MailProcessor, MailReplyPolicy,
+        MailReplyPolicySource, MailUserPort, MailUserRebindCommand, MailUserRegisterCommand,
+        MailUserRekeyCommand, MailUserResult, SubmissionReceiptFacts,
+    };
+
+    struct UnusedEquipment;
+
+    impl MailEquipmentReader for UnusedEquipment {
+        fn read(
+            &self,
+            _world_id: String,
+            _attachment: MailEquipmentAttachment,
+        ) -> ApplicationFuture<'_, AdminIntakeSourceSnapshot> {
+            Box::pin(async { unreachable!("旧路由测试不读取装备") })
+        }
+    }
+
+    struct NothingAccepted;
+
+    impl MailAuctionIntakePort for NothingAccepted {
+        fn find_accepted(
+            &self,
+            _lookup: MailAuctionIntakeLookup,
+        ) -> ApplicationFuture<'_, Option<MailAuctionAcceptance>> {
+            Box::pin(async { Ok(None) })
+        }
+
+        fn ingest_mail(
+            &self,
+            _command: MailAuctionIntakeCommand,
+        ) -> ApplicationFuture<'_, MailAuctionIntakeResult> {
+            Box::pin(async { unreachable!("旧路由测试不写入投稿") })
+        }
+
+        fn load_submission_receipt(
+            &self,
+            _submission_id: Uuid,
+        ) -> ApplicationFuture<'_, Option<SubmissionReceiptFacts>> {
+            Box::pin(async { unreachable!("旧路由测试不读取投稿回执") })
+        }
+    }
+
+    struct SuppressedDeliveries;
+
+    impl MailDeliveryEnqueuer for SuppressedDeliveries {
+        fn enqueue(
+            &self,
+            _command: MailDeliveryCommand,
+        ) -> ApplicationFuture<'_, MailDeliveryResult> {
+            Box::pin(async { unreachable!("旧路由测试不直接入队") })
+        }
+
+        fn enqueue_within_limit(
+            &self,
+            _command: MailDeliveryCommand,
+            _limit: MailNoticeLimit,
+        ) -> ApplicationFuture<'_, MailNoticeEnqueue> {
+            Box::pin(async { Ok(MailNoticeEnqueue::Suppressed) })
+        }
+
+        fn prepare_recovery(
+            &self,
+            _command: MailDeliveryCommand,
+        ) -> ApplicationFuture<'_, MailDeliveryResult> {
+            Box::pin(async { unreachable!("旧路由测试不准备 recovery") })
+        }
+
+        fn activate_recovery(
+            &self,
+            _activation: MailDeliveryActivation,
+        ) -> ApplicationFuture<'_, MailDeliveryResult> {
+            Box::pin(async { unreachable!("旧路由测试不激活 recovery") })
+        }
+    }
+
+    struct UnusedUsers;
+
+    impl MailUserPort for UnusedUsers {
+        fn register_or_recover(
+            &self,
+            _command: MailUserRegisterCommand,
+        ) -> ApplicationFuture<'_, MailUserResult> {
+            Box::pin(async { unreachable!("旧路由测试不注册账号") })
+        }
+
+        fn rebind_username(
+            &self,
+            _command: MailUserRebindCommand,
+        ) -> ApplicationFuture<'_, MailUserResult> {
+            Box::pin(async { unreachable!("旧路由测试不换绑账号") })
+        }
+
+        fn rekey_login_key(
+            &self,
+            _command: MailUserRekeyCommand,
+        ) -> ApplicationFuture<'_, MailUserResult> {
+            Box::pin(async { unreachable!("旧路由测试不轮换 key") })
+        }
+    }
+
+    struct FixedClock;
+
+    impl Clock for FixedClock {
+        fn now(&self) -> Timestamp {
+            Timestamp::from_timestamp(1_790_000_000, 0).expect("固定测试时钟")
+        }
+    }
+
+    #[derive(Debug)]
+    struct FixedReplyPolicy;
+
+    impl MailReplyPolicySource for FixedReplyPolicy {
+        fn current(&self) -> MailReplyPolicy {
+            MailReplyPolicy::default()
+        }
+    }
+
+    type Service = MailProcessorService<
+        UnusedEquipment,
+        NothingAccepted,
+        SuppressedDeliveries,
+        UnusedUsers,
+        FixedClock,
+    >;
+
+    fn run<T>(future: impl Future<Output = T>) -> T {
+        let mut future = pin!(future);
+        let mut context = Context::from_waker(Waker::noop());
+        for _ in 0..64 {
+            if let Poll::Ready(result) = future.as_mut().poll(&mut context) {
+                return result;
+            }
+        }
+        panic!("内存端口未在预期轮数内完成");
+    }
+
+    fn service() -> Service {
+        MailProcessorService::new(
+            vec!["main".to_owned()],
+            MailProcessorConfig {
+                start_price: 100,
+                equipment_filter: MailEquipmentFilter::default(),
+                rekey_enabled: true,
+                reply_policy: Arc::new(FixedReplyPolicy),
+            },
+            Arc::new(UnusedEquipment),
+            Arc::new(NothingAccepted),
+            Arc::new(SuppressedDeliveries),
+            Arc::new(UnusedUsers),
+            Arc::new(FixedClock),
+        )
+        .expect("测试处理器配置")
+    }
+
+    fn message(subject: &str, sender: &str) -> MailMessage {
+        MailMessage {
+            mailbox_key: "mooglemail:main".to_owned(),
+            external_mail_id: "3125357".to_owned(),
+            world_id: "main".to_owned(),
+            received_at: FixedClock.now(),
+            sender: sender.to_owned(),
+            subject: subject.to_owned(),
+            body: String::new(),
+            credits: 0,
+            cod: 0,
+            attachments: Vec::new(),
+            returnable: true,
+            claimable: true,
+            content_digest: [7; 32],
+        }
+    }
+
+    fn legacy_attempt(route: MailProcessingRoute) -> MailProcessingAttempt {
+        match route {
+            MailProcessingRoute::Legacy(attempt) => *attempt,
+            MailProcessingRoute::ConsignmentCandidate => {
+                panic!("旧路由必须优先归属")
+            }
+        }
+    }
+
+    #[test]
+    fn identified_system_return_stays_on_legacy_route() {
+        let service = service();
+        let obligation = Uuid::from_u128(77);
+        let route = run(service.route(
+            message(&format!("[RTS] Auction buyer refund [{obligation}]"), "MoogleMail"),
+            true,
+        ));
+        let decision = legacy_attempt(route).result.expect("系统退件决定");
+        assert_eq!(decision.mail_kind, "delivery");
+        assert_eq!(decision.decision_code, "settlement_recovery_returned");
+    }
+
+    #[test]
+    fn exact_auction_subject_stays_on_legacy_route() {
+        let service = service();
+        let route = run(service.route(message("auction", "FakeSeller"), true));
+        let decision = legacy_attempt(route).result.expect("拍卖主题决定");
+        assert_eq!(decision.mail_kind, "equipment");
+        assert_eq!(decision.decision_code, "auction_no_attachments");
+    }
+
+    #[test]
+    fn unknown_with_candidate_returns_consignment_candidate() {
+        let service = service();
+        match run(service.route(message("consign", "FakeSeller"), true)) {
+            MailProcessingRoute::ConsignmentCandidate => {}
+            MailProcessingRoute::Legacy(_) => panic!("旧路由无法归属时必须返回候选"),
+        }
+    }
+
+    #[test]
+    fn unknown_without_candidate_keeps_process_unknown_result() {
+        let service = service();
+        let route = run(service.route(message("unrelated", "FakeSeller"), false));
+        let decision = legacy_attempt(route).result.expect("未知邮件决定");
+        assert_eq!(decision.mail_kind, "unknown");
+        assert_eq!(decision.decision_code, "archived");
     }
 }
