@@ -413,7 +413,27 @@ Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当
 | `GET /admin/consignment/listings/{listing_id}` | Admin 会话。路径挂单 UUID | `200 AdminListingDetail`，不存在为 `404 listing_not_found`。碰撞按 `detected_at DESC,lot_id DESC` 返回最近至多 50 条 | 同开启 |
 | `POST /admin/consignment/listings/{listing_id}/delist` | Admin 写守卫。路径挂单 UUID，正文 `command_id,expected_version,reason` | `200 CommandReceipt`，处置为 `closed`。不存在为 `404 listing_not_found`。旧版本或非活动态分别为 `409 stale_version`、`409 listing_not_active` | 原结果可重放。首次按有效关闭与版本规则拒绝，尚未落库的强制终止在事务中收口 |
 
+旧接口（本表 `GET /me/consignment/listings*` 与 `GET /admin/consignment/listings*`）不返回旧解码器无法表达的挂单（代管态与第 4 期起的新原因），总数同一过滤，对应详情为 `404 listing_not_found`。
+
 能力接口始终公告有效开关与配置费率 `fee_bps`。开启时，登记就绪读取失败或耗尽 1 秒预算仍返回 200，标记未就绪。外层请求预算先耗尽时返回 `504 timeout`。登记世界必须在准入列表内并处于启用、可用状态。第三方解析结果由本人视图给出安全原因，目录接口只报告本站读取结果。
+
+v1 的改价、撤回与 Admin 下架对已进入代管的挂单（`deposit_accepted`、`available`、`sale_pending`、`held_off_market`、`withdrawal_pending`）返回 `409 listing_not_active`，不改变挂单版本；撤回与运营动作改走 v2。
+
+### v2 API
+
+表内路径相对于 `/api/v2`。v2 与 v1 共享同一命令仲裁：玩家与 Admin 写请求携带 UUIDv4 `command_id`，成功回执带 `schema_version: 2`，同一 ID 同请求返回首次结果、异请求为 `409 command_id_conflict`。私有 `/me` 与 `/admin` 响应（含错误与 404）均 `Cache-Control: no-store`。v2 只在寄售激活且数据库可用时装配读写端口；未配置数据库或未激活时 `GET /consignment/status` 返回 `503 consignment_unavailable`，这与 v1 status“无库仍 200”不同。
+
+| 方法与路径 | 身份与参数 | 行为 |
+| --- | --- | --- |
+| `GET /consignment/status` | 匿名，无参数 | `200 ConsignmentStatus`，含 `enabled,registration_ready,registration_modes,registration_worlds,fee_bps,min_price,max_price,accepts_mail,purchasable,worlds`。未装配读端口为 `503 consignment_unavailable` |
+| `GET /me/consignment/listings/{listing_id}/deposit-instructions` | 本人。路径挂单 UUID | 有效预约为 `200 active`，带世界、Bot、主题、正文、预约 ID 与截止；无预约为 `200 none`，不含秘密。软关闭时停止首次接受并返回 `404 consignment_disabled`（指引无意义）；非本人或不存在为 `404 listing_not_found` |
+| `POST /me/consignment/listings/{listing_id}/deposit-reservations` | 本人及 Public 写守卫。正文 `command_id,expected_version` | `201 reservation_issued`，带 L、`reservation_id,expires_at`。拒 `stale_version`、`listing_not_active`、`equipment_busy`、`participant_ineligible`、`bot_party`、`season_closed`、`mail_unavailable`。软关闭后新命令为 `404 consignment_disabled` 且不落库；关闭前已接受的同 ID 同请求仍按账本返回原 `201` 回执，同 ID 异请求为 `409 command_id_conflict` |
+| `POST /consignment/listings/{listing_id}/withdraw` | 本人及 Public 写守卫。正文 `command_id,expected_version` | 已代管件 `202 withdrawal_requested`，带 L、`intent_id`，state 为 `deposit_accepted/withdrawal_pending/held_off_market`；未代管件 `200 closed`，带 L、state `closed`，无 `intent_id`。拒 `stale_version`、`listing_not_active`。本命令不检查服务开关，软关闭后撤回与旧命令重放继续 |
+| `GET /admin/consignment/deposits/{quarantine_id}` | Admin 会话。路径隔离 UUID | `200` 安全详情，含 `observation_total`、观察的 `credits/cod/returnable/takeable`、观察项 `amount` 与已解除的 `release` 记录；不含原证密文、正文、预约码或装备 key。不存在为 `404 listing_not_found`，未装配读端口为 `503 consignment_unavailable` |
+| `POST /admin/consignment/deposits/{quarantine_id}/recheck` | Admin 写守卫。正文 `command_id,expected_version` | `202 recheck_queued`，带 `quarantine_id,work_id` |
+| `POST /admin/consignment/deposits/{quarantine_id}/release-quarantine` | Admin 写守卫。正文 `command_id,expected_version,observation_id,proposed_kind` | `200 quarantine_released`；六种决定使用 `listing_changes`、`return_evidence_id`、`recovery_handoff_id` 等分支字段，无 `force`。拒 `stale_version`、`source_mismatch`、`evidence_unproven`、`evidence_conflict`、`disposition_conflict` |
+| `POST /admin/consignment/listings/{listing_id}/delist` | Admin 写守卫。正文 `command_id,expected_version,reason` | 未代管 `200 closed`；已代管 `200 hold_set` 带 `hold_id`。拒 `stale_version`、`listing_not_active`、`hold_mismatch`。软关闭后新命令为 `404 consignment_disabled` 且不落库；关闭前已接受的同 ID 同请求仍按账本返回原 `200` 回执，同 ID 异请求为 `409 command_id_conflict`。Solid Admin 寄售详情的下架走本 v2 路由：未代管件关闭，代管件设置运营止售 |
+| `POST /admin/consignment/listings/{listing_id}/release-hold` | Admin 写守卫。正文 `command_id,expected_version,hold_id` | `200 hold_released` 带 L、`hold_id`，state 固定 `held_off_market`。本命令不检查服务开关，解除既有止售与旧命令重放不受软关闭影响。API 已挂载，Admin 页面暂未接入（等 v2 Admin 读模型） |
 
 ### 参数与错误优先级
 
@@ -438,13 +458,15 @@ Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当
 | Public | `/consignment/new` | 登记装备 |
 | Public | `/consignment/me` | 本人挂单列表 |
 | Public | `/consignment/me/{listing_id}` | 本人挂单详情 |
+| Public | `/consignment/me/{listing_id}/deposit-instructions` | 本人寄件指引；只有 Solid 提供 |
 | Public | `/consignment/listings/{listing_id}` | 公开挂单详情 |
 | Admin | `/consignment` | 运营挂单列表 |
 | Admin | `/consignment/listings/{listing_id}` | 运营挂单详情及允许的下架操作 |
+| Admin | `/consignment/deposits/{quarantine_id}` | 邮件隔离详情；只有 Solid 提供 |
 
 `listing_id` 必须是单个带连字符的小写非零 UUID 段。批准路径有内嵌资源时返回对应站点的 SPA 入口，缺资源返回 503，未知路径返回 404。`/api/…` 只提供 API 响应。首次设置不提供表内的页面或寄售 API。尾斜杠按既有约定规范化，见[浏览器页面](#浏览器页面)。
 
-服务开关不改变浏览器入口响应。挂单页面只有 Solid 版提供。Dioxus Public 按未匹配路径回到拍卖看板，Dioxus Admin 显示本站未匹配面板。Solid Public 按状态接口结果显示导航和登记能力，关闭时目录、登记和公开详情显示关闭状态，本人页面仍可在认证后直达。认证后的 Solid Admin 可直达列表和详情查询历史。前三期 Solid Admin 暂无可用的服务开关投影，寄售菜单常显，页面按 API 结果显示，第 8 期正式启用时将接入能力投影并在服务关闭时隐藏菜单。
+服务开关不改变浏览器入口响应。挂单页面只有 Solid 版提供。两个 v2 直达页（Public 的寄件指引与 Admin 的隔离详情）同样只有 Solid 提供：Rust 版没有对应页面，Public 进入后按未匹配路径回到拍卖看板，Admin 显示本站未匹配面板。Dioxus Public 按未匹配路径回到拍卖看板，Dioxus Admin 显示本站未匹配面板。Solid Public 按状态接口结果显示导航和登记能力，关闭时目录、登记和公开详情显示关闭状态，本人页面仍可在认证后直达。认证后的 Solid Admin 可直达列表、详情与隔离查询历史。前三期 Solid Admin 暂无可用的服务开关投影，寄售菜单常显，页面按 API 结果显示，第 8 期正式启用时将接入能力投影并在服务关闭时隐藏菜单。
 
 ## 首次设置（auction-setup）
 

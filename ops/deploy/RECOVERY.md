@@ -345,6 +345,71 @@ ROLLBACK;
 3. 按[停机时段门禁](../../apps/auction-cli/README.md#停机时段门禁)停止三角色，四个程序逐个用 `install -o root -g root -m 0755` 从已验证的包复制到安装目录内的临时名，核对 `sha256sum` 等于包内 `SHA256SUMS` 后 `mv -f` 覆盖原名；用该包的 CLI 执行 `service start --owner-secrets …`（与数据库同版本时迁移为空操作）。
 4. 核对 `/proc/<MainPID>/exe` 摘要等于包内摘要后，才能继续 `deploy`。重建之前创建的回滚记录保留的是当时可能已被改写的程序：逐条核对 `record.json` 中的摘要是否等于对应 Release 包的摘要，对不上的整目录删除，不再作为回退目标。
 
+## 寄售第 4 期回退前的只读核对
+
+跨过迁移 `000134`（breaking）回退，只能恢复升级前备份（见[程序回退](#程序回退)），并按[外部历史核对与启动](#6-外部历史核对与启动)核对外部世界。恢复前先在停机的一致快照上核对第 4 期可能留下的存量：旧程序表达不了这些事实，没有承接者的存量不得丢弃或改写。第 4 期 `[consignment] enabled` 默认 `false`，生产收件就绪的 `take_ready`、`return_ready` 固定为 false（见[Worker README](../../apps/auction-worker/README.md)），正常情况下不会产生已接受的整封、起写工作、季通知或 position；预期只有“预约”与“隔离中的原信”两类存量，其余各项应为零行。
+
+以下只含 SELECT，列名取自迁移 `000134`（[docs/contracts/database.md](../../docs/contracts/database.md#一口价挂单)为表族说明）。一律放在只读事务中，用 owner 之外的运行账号或迁移账号均可：
+
+```sql
+BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SET LOCAL statement_timeout = '5s';
+SET LOCAL lock_timeout = '1s';
+-- 1. active 预约
+SELECT state, count(*) AS reservations, min(expires_at) AS earliest_expiry
+FROM public.consignment_deposit_reservations
+WHERE state = 'active'
+GROUP BY state;
+-- 2. 隔离中的原信，及其 queued/leased 重检
+SELECT quarantine.state AS quarantine_state, recheck.state AS recheck_state,
+       count(*) AS quarantines, min(quarantine.updated_at) AS oldest_update
+FROM public.mail_quarantines AS quarantine
+LEFT JOIN public.mail_quarantine_rechecks AS recheck
+  ON recheck.quarantine_id = quarantine.id AND recheck.state IN ('queued', 'leased')
+WHERE quarantine.state = 'active'
+GROUP BY quarantine.state, recheck.state;
+-- 3. 已起写、尚无结论性证明的处置工作
+SELECT work.id AS work_id, work.action, start.started_at, delivery.status AS delivery_status
+FROM public.mail_disposition_write_starts AS start
+JOIN public.mail_disposition_work AS work ON work.id = start.work_id
+JOIN public.deliveries AS delivery ON delivery.id = start.delivery_id
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.mail_disposition_proofs AS proof
+  WHERE proof.work_id = start.work_id AND proof.conclusion IN ('take_proven', 'return_proven')
+)
+ORDER BY start.started_at;
+-- 4. 未收口的季通知（季通知走通用投递，按投递状态判断；manual_reconcile 表示结果未知）
+SELECT notice.kind, delivery.status AS delivery_status, count(*) AS notices
+FROM public.mail_disposition_work AS work
+JOIN public.consignment_season_notices AS notice ON notice.id = work.notice_id
+JOIN public.deliveries AS delivery ON delivery.id = work.delivery_id
+WHERE work.action = 'send'
+  AND delivery.status NOT IN ('succeeded', 'failed')
+GROUP BY notice.kind, delivery.status;
+-- 5. 已冻结的季窗
+SELECT season_id, world_id, start_utc, end_utc, admission_cutoff_utc, preclose_days
+FROM public.consignment_season_windows
+ORDER BY start_utc;
+-- 6. 非终态 position
+SELECT world_id, state, count(*) AS positions
+FROM public.consignment_custody_positions
+WHERE state NOT IN ('handed_over', 'season_ended', 'lost')
+GROUP BY world_id, state
+ORDER BY world_id, state;
+ROLLBACK;
+```
+
+| 存量 | 查询 | 唯一承接者 | 处置 |
+| --- | --- | --- | --- |
+| active 预约 | 1 | 第 4 期 Worker 的预约到期收口（`consignment-maintenance`） | 随恢复前版本或同版本程序到期退休；预约不含已寄出的实物，卖家重新登记即可。不得手工改 `state` |
+| 隔离中的原信与 queued/leased 重检 | 2 | Worker 隔离重检循环；解除与交还原 owner 只经 Admin 隔离详情页 | 原信仍在 Bot 收件箱，未被领取或退回。回退前不要解除，恢复后由同版本程序继续重检；不要在游戏内手工领取或退回 |
+| 已起写未证明的处置工作 | 3 | 第 4 期 Worker 的处置维护，只经 `apply_mail_proof` 取得证明 | 起写之后外部结果未知：保持 `manual_reconcile`，按[外部历史核对与启动](#6-外部历史核对与启动)用原 Sent/Read Mail 详情核对，绝不自动重发、重领或重退 |
+| 未收口的季通知 | 4 | 通用投递 Worker（季任务在同一事务建 `mail_disposition_work.action='send'` 与 `deliveries`） | `pending`/`claimed` 由同版本程序按原投递发出；`sending`/`manual_reconcile` 是结果未知，按[外部历史核对与启动](#6-外部历史核对与启动)核对，绝不重发；不要在旧程序重建通知 |
+| 冻结季窗 | 5 | 无写入者：不变量 10 禁止改写 | 只读保留；恢复备份后季窗随备份一并回到当时状态，日历变化只从下一季生效 |
+| 非终态 position | 6 | 第 4 期 Worker 与 Admin 的代管流程 | 非空意味着已有已接受的实物，旧程序不认识：必须恢复到同版本程序，不能回退。预期为零行，非零按事故处理并先停止外部访问 |
+
+任一表出现与上表预期不符的行（例如 `enabled=false` 的部署出现起写工作或 position），先暂停外部访问并保存查询输出，再回到[恢复流程](#恢复流程)；本节不提供自动差额或迁移工具，业务核销由维护者逐项决定。
+
 ## 恢复流程
 
 ### 1. 停止服务

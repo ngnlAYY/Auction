@@ -127,6 +127,8 @@ target/debug/auction-cli --config-dir "$dir" config check --strict
 target/debug/auction-cli --config-dir "$dir" db migrate --owner-secrets "$owner_secrets" --no-systemd
 ```
 
+`reservation_ttl_hours`、`isekai_preclose_days` 等第 4 期字段的默认值、范围、关闭时仍校验的规则与 Credential 数据密钥要求见[寄售服务](../ops/config/README.md#寄售服务)；这里只按该文档填写临时配置。
+
 3. 使用各自的临时配置启动 Worker、Admin、Public，等 Worker 同步寄售准入并发布心跳后检查 Public 的 `/api/v1/consignment/status`。只验证空库和只读 HTTP 时保持队列为空。需要提交登记并观察解析结果时，先在测试装配注入 `ListingEquipmentLookup` 脱敏替身并限制进程出站。若通过 Admin 建立本地测试卖家并签发登录 key，另配独立的测试 `user_login_data_key` 及其标识。
 
 ```bash
@@ -135,6 +137,8 @@ AUCTION_CONFIG_FILE="$dir/worker.toml" target/debug/auction-worker
 AUCTION_CONFIG_FILE="$dir/admin.toml" target/debug/auction-admin-api
 AUCTION_CONFIG_FILE="$dir/public.toml" target/debug/auction-public-api
 ```
+
+Solid 预览的两个新页面只能经 `AUCTION_WEB_STACK=solid` 构建后访问：Public 用 `/consignment/me/<listing_id>/deposit-instructions` 打开本人寄件指引（未上架或非寄售挂单会按页面状态显示），Admin 用 `/consignment/deposits/<quarantine_id>` 打开邮件隔离详情。Rust 版没有对应页面，同一地址会按未匹配路径回退。这里只说明访问方式，不要求启动服务。
 
 验收停用时先停止三个进程，再把公共开关改回 `false`，从 Worker 开始重新启动。预览数据库及其备份不得作为生产升级输入。
 
@@ -176,6 +180,8 @@ mise run test-db     # 真实 PostgreSQL 18 集成测试
 非 superuser 维护账号继承夹具新建的临时登录角色，以便结束该角色的测试连接。清理时随临时角色一起撤销该成员资格。
 
 会写入进程级审计健康计数的测试放在 `postgres_audit` 目标里。`mise run test-db` 在 `postgres` 之后运行该目标，两者各用一个测试进程。寄售源码内的场景分派必须先验证当前目标，再执行会记录审计失败的场景，避免影响 `postgres` 中的就绪检查。
+
+寄售第 4 期的 PG 用例在 `crates/auction-storage/tests/postgres/consignment/deposit/`，可按过滤词单独运行：`cargo test --locked -p auction-storage --features test-db --test postgres consignment::deposit`。会改动进程级审计健康计数的寄售场景在 `postgres_audit` 目标（`crates/auction-storage/tests/postgres_audit/consignment/`），例如 `cargo test --locked -p auction-storage --features test-db --test postgres_audit postgres_deposit_audit_failure_rolls_back_multi_listing_command`；这些用例只由 `mise run test-db` 或显式入口运行，不并入默认门禁。
 
 同一入口接着用 `cargo build --locked -p auction-cli` 构建默认调试二进制，再通过 `--ignored consignment::key_rotation::postgres_cli_` 运行 `postgres` 目标中的装备数据密钥轮换 CLI 用例。这一组用真实子进程和夹具创建的独立数据库，覆盖演练、实际重封和旧钥退休检查。CI 的 `test` 作业调用这一入口。
 
