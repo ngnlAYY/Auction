@@ -19,6 +19,7 @@ use tokio::sync::watch;
 
 use crate::middleware::HttpBoundary;
 use crate::middleware::security::{AnonymousReadGate, PublicHttpSecurity};
+use crate::public::consignment::{ConsignmentCapabilities, ConsignmentState};
 use crate::realtime_hub::{RealtimeHub, RealtimeSubscriptionError};
 
 /// Public surface 可使用的应用端口集合。
@@ -46,6 +47,7 @@ pub struct PublicApiState {
     watches: Option<Arc<dyn auction_application::public::LotWatchPort>>,
     watch_preference: Option<Arc<dyn auction_application::public::LotWatchPreferencePort>>,
     commands: Option<Arc<dyn CompetitionCommandPort>>,
+    consignment: ConsignmentCapabilities,
     metrics: Option<Arc<ProcessMetrics>>,
     runtime_switch_snapshot: Option<auction_application::runtime_switches::RuntimeSwitches>,
     readiness: Option<Arc<dyn ProcessReadinessPort>>,
@@ -76,6 +78,7 @@ impl Default for PublicApiState {
             watches: None,
             watch_preference: None,
             commands: None,
+            consignment: ConsignmentCapabilities::default(),
             metrics: None,
             runtime_switch_snapshot: None,
             readiness: None,
@@ -127,12 +130,19 @@ impl PublicApiState {
             watches: None,
             watch_preference: None,
             commands,
+            consignment: ConsignmentCapabilities::default(),
             metrics: None,
             runtime_switch_snapshot: None,
             readiness: None,
             realtime_hub: None,
             realtime_shutdown: watch::channel(false).0,
         }
+    }
+
+    /// 注入寄售的启动配置与可选端口，停用时保留本人历史查询和原命令仲裁。
+    pub fn with_consignment(mut self, capabilities: ConsignmentCapabilities) -> Self {
+        self.consignment = capabilities;
+        self
     }
 
     /// 仅注入已校验的公开 bot 名单，不把完整运行配置或凭据交给 HTTP 层。
@@ -339,5 +349,15 @@ impl PublicApiState {
 
     pub(crate) fn realtime_shutdown(&self) -> watch::Receiver<bool> {
         self.realtime_shutdown.subscribe()
+    }
+}
+
+impl ConsignmentState for PublicApiState {
+    fn public_state(&self) -> &Self {
+        self
+    }
+
+    fn consignment(&self) -> &ConsignmentCapabilities {
+        &self.consignment
     }
 }

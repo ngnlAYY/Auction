@@ -80,6 +80,10 @@ fn serve<A: rust_embed::RustEmbed>(
     let path = request.uri().path();
     let request_headers = request.headers();
 
+    if reserved_json_path(path) {
+        return json_not_found(request_headers);
+    }
+
     if setup_only
         && path != "/setup"
         && path != "/favicon.ico"
@@ -103,10 +107,6 @@ fn serve<A: rust_embed::RustEmbed>(
             ),
             None => not_found(surface, method, request_headers),
         };
-    }
-
-    if reserved_json_path(path) {
-        return json_not_found(request_headers);
     }
 
     if let Some(relative_path) = exact_asset_path(path)
@@ -166,7 +166,9 @@ mod tests {
     use super::negotiation::entry_preload_links;
     use super::response::{asset_response, parse_http_date};
     use super::routes::Surface;
-    use super::{IMF_FIXDATE, serve_admin_asset, serve_public_asset};
+    use super::{
+        IMF_FIXDATE, serve, serve_admin_asset, serve_admin_setup_asset, serve_public_asset,
+    };
     use crate::{
         AdminApiState, PublicApiState, WebScriptPolicy, admin_router_with_web_script_policy,
         public_router_with_web_script_policy,
@@ -319,6 +321,18 @@ mod tests {
         }
     }
 
+    struct NoAssets;
+
+    impl rust_embed::RustEmbed for NoAssets {
+        fn get(_path: &str) -> Option<EmbeddedFile> {
+            None
+        }
+
+        fn iter() -> impl Iterator<Item = Cow<'static, str>> {
+            std::iter::empty()
+        }
+    }
+
     fn public_app<A: rust_embed::RustEmbed + Send + Sync + 'static>(
         web_script_policy: WebScriptPolicy,
     ) -> Router {
@@ -358,6 +372,124 @@ mod tests {
     async fn body_text(response: Response) -> String {
         let bytes = to_bytes(response.into_body(), 4096).await.expect("body");
         String::from_utf8(bytes.to_vec()).expect("utf8")
+    }
+
+    const PUBLIC_CONSIGNMENT_PAGES: [&str; 5] = [
+        "/consignment",
+        "/consignment/new",
+        "/consignment/me",
+        "/consignment/me/0f8fad5b-d9cb-469f-a165-70867728950e",
+        "/consignment/listings/0f8fad5b-d9cb-469f-a165-70867728950e",
+    ];
+    const ADMIN_CONSIGNMENT_PAGES: [&str; 2] =
+        ["/consignment", "/consignment/listings/0f8fad5b-d9cb-469f-a165-70867728950e"];
+    const ADMIN_CONSIGNMENT_API: [(Method, &str); 3] = [
+        (Method::GET, "/api/v1/admin/consignment/listings"),
+        (Method::GET, "/api/v1/admin/consignment/listings/0f8fad5b-d9cb-469f-a165-70867728950e"),
+        (
+            Method::POST,
+            "/api/v1/admin/consignment/listings/0f8fad5b-d9cb-469f-a165-70867728950e/delist",
+        ),
+    ];
+
+    #[tokio::test]
+    async fn consignment_browser_paths_serve_each_embedded_entry_or_report_missing_assets() {
+        for (surface, paths) in [
+            (Surface::Public, PUBLIC_CONSIGNMENT_PAGES.as_slice()),
+            (Surface::Admin, ADMIN_CONSIGNMENT_PAGES.as_slice()),
+        ] {
+            for &path in paths {
+                let solid = serve::<SolidAssets>(
+                    surface,
+                    request(path, None),
+                    false,
+                    WebScriptPolicy::Solid,
+                );
+                assert_eq!(solid.status(), StatusCode::OK, "{path}");
+                assert_eq!(solid.headers()[header::CACHE_CONTROL], "no-cache", "{path}");
+                assert_eq!(body_text(solid).await.as_bytes(), SOLID_INDEX, "{path}");
+
+                let dioxus = serve::<DioxusAssets>(
+                    surface,
+                    request(path, None),
+                    false,
+                    WebScriptPolicy::Dioxus,
+                );
+                assert_eq!(dioxus.status(), StatusCode::OK, "{path}");
+                assert_eq!(body_text(dioxus).await.as_bytes(), DIOXUS_INDEX, "{path}");
+
+                let missing =
+                    serve::<NoAssets>(surface, request(path, None), false, WebScriptPolicy::Solid);
+                assert_eq!(missing.status(), StatusCode::SERVICE_UNAVAILABLE, "{path}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn consignment_browser_paths_reject_noncanonical_ids_and_other_surfaces() {
+        for surface in [Surface::Public, Surface::Admin] {
+            for prefix in ["/consignment/listings/", "/consignment/me/"] {
+                for invalid in [
+                    "",
+                    "invalid",
+                    "00000000-0000-0000-0000-000000000000",
+                    "0F8FAD5B-D9CB-469F-A165-70867728950E",
+                    "0f8fad5bd9cb469fa16570867728950e",
+                    "%30f8fad5b-d9cb-469f-a165-70867728950e",
+                    "0f8fad5b-d9cb-469f-a165-70867728950e/extra",
+                ] {
+                    // 已有页面尾斜杠规则另作验证，空后缀只测试没有对应精确路径的前缀。
+                    if invalid.is_empty() && prefix == "/consignment/me/" {
+                        continue;
+                    }
+                    let path = format!("{prefix}{invalid}");
+                    let response = serve::<SolidAssets>(
+                        surface,
+                        request(&path, None),
+                        false,
+                        WebScriptPolicy::Solid,
+                    );
+                    assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+                }
+            }
+            let response = serve::<SolidAssets>(
+                surface,
+                request("/Consignment", None),
+                false,
+                WebScriptPolicy::Solid,
+            );
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
+        for path in ["/consignment/new", "/consignment/me", PUBLIC_CONSIGNMENT_PAGES[3]] {
+            let response =
+                serve_admin_asset::<SolidAssets>(request(path, None), WebScriptPolicy::Solid).await;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn setup_asset_fallback_excludes_formal_admin_consignment() {
+        let setup =
+            serve_admin_setup_asset::<SolidAssets>(request("/setup", None), WebScriptPolicy::Solid)
+                .await;
+        assert_eq!(setup.status(), StatusCode::OK);
+        for path in ADMIN_CONSIGNMENT_PAGES {
+            let page =
+                serve_admin_setup_asset::<SolidAssets>(request(path, None), WebScriptPolicy::Solid)
+                    .await;
+            assert_eq!(page.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+        for (method, path) in ADMIN_CONSIGNMENT_API {
+            let request = Request::builder()
+                .method(method)
+                .uri(path)
+                .header(header::ACCEPT, "text/html")
+                .body(Body::empty())
+                .expect("设置入口请求");
+            let api = serve_admin_setup_asset::<SolidAssets>(request, WebScriptPolicy::Solid).await;
+            assert_eq!(api.status(), StatusCode::NOT_FOUND, "{path}");
+            assert_eq!(api.headers()[header::CONTENT_TYPE], "application/json", "{path}");
+        }
     }
 
     #[tokio::test]
