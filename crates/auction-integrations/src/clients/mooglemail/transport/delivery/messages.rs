@@ -160,6 +160,12 @@ impl MoogleMailDeliveryTransport {
                 auction_application::player_notifications::SEASON_REMINDER_SUBJECT.to_owned(),
                 payload.body.take().ok_or_else(invalid_payload)?,
             )
+        } else if template == "consignment_season_notice" && result_code == "season_preclose" {
+            // 寄售季前通知正文只含冻结季末时刻与撤回入口，发送前不读配置或重建正文。
+            (
+                auction_application::consignment::CONSIGNMENT_SEASON_NOTICE_SUBJECT.to_owned(),
+                payload.body.take().ok_or_else(invalid_payload)?,
+            )
         } else {
             render_notification(
                 &self.templates,

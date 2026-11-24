@@ -285,6 +285,27 @@ impl MoogleMailParser {
     }
 }
 
+/// 寄售观察使用的动作按钮读取：解析失败保留 `false/false` 与 `proven=false`，不把未知当作可领取。
+///
+/// 不变量 6：按钮形状不清时整封只能待判或隔离，不能进入 Take/Return。
+pub(crate) fn parse_detail_actions_lenient(
+    envelope: scraper::ElementRef<'_>,
+    world: MoogleMailWorld,
+) -> (bool, bool, bool) {
+    match parse_detail_actions(envelope, world) {
+        Ok((returnable, claimable)) => (returnable, claimable, true),
+        Err(diagnostic_cause) => {
+            safe_diagnostics::warn(
+                "mooglemail_read",
+                "parse_consignment_actions",
+                safe_diagnostics::project(&diagnostic_cause),
+                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
+            );
+            (false, false, false)
+        }
+    }
+}
+
 /// 已解析详情页对结算退件 Take 的结论；仍可领取或仍有任何资产时交给调用方比对是否完整，并带出
 /// 页面是否仍给出领取入口。
 pub(crate) fn returned_take_state(

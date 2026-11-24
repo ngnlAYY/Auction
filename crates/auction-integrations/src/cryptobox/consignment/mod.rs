@@ -1,5 +1,13 @@
 //! 寄售凭证开封与登记重放比较钥的生成、认证和重包。
 
+mod deposit;
+
+pub use deposit::{
+    ConsignmentReservationCrypto, ConsignmentReservationCryptoConfigError,
+    ConsignmentSecretEnvelope, ConsignmentSecretError, ConsignmentSecretOpener,
+    ConsignmentSecretSealer, MailEvidencePurpose, consignment_reservation_crypto,
+};
+
 use std::fmt;
 use std::hint::black_box;
 

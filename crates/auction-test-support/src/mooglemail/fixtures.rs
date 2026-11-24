@@ -12,6 +12,8 @@ macro_rules! fixture {
 
 pub(super) const READ_MAIN: &str = fixture!("read-main");
 pub(super) const MISSING_SENT: &str = fixture!("sentdetail-missing");
+pub(super) const IDENTITY_MAIN: &str = fixture!("consign-identity-main");
+pub(super) const IDENTITY_ISEKAI: &str = fixture!("consign-identity-isekai");
 
 pub(super) fn page(
     world: &str,
@@ -40,6 +42,34 @@ pub(super) fn page(
         ("main", "sent", 0, Some("3125298")) => fixture!("sentdetail-3125298"),
         ("main", "sent", 0, Some("0")) => MISSING_SENT,
         ("main", "inbox" | "read", 0, Some("0")) => fixture!("inboxdetail-missing"),
+        ("main", "inbox" | "read", 0, Some("900001")) => fixture!("consign-detail-main-single"),
+        ("main", "inbox" | "read", 0, Some("900002")) => fixture!("consign-detail-main-multi"),
+        ("main", "inbox" | "read", 0, Some("900004")) => {
+            fixture!("consign-detail-main-duplicate-eid")
+        }
+        ("main", "inbox" | "read", 0, Some("900005")) => fixture!("consign-detail-main-alias"),
+        ("main", "inbox" | "read", 0, Some("900006")) => fixture!("consign-detail-main-unknown"),
+        ("main", "inbox" | "read", 0, Some("900007")) => fixture!("consign-detail-main-bad-count"),
+        ("main", "inbox" | "read", 0, Some("900008")) => fixture!("consign-detail-main-credits"),
+        ("main", "inbox" | "read", 0, Some("900009")) => fixture!("consign-detail-main-cod"),
+        ("main", "inbox" | "read", 0, Some("900010")) => {
+            fixture!("consign-detail-main-wrong-recipient")
+        }
+        ("main", "inbox" | "read", 0, Some("900011")) => {
+            fixture!("consign-detail-main-wrong-world")
+        }
+        ("main", "inbox" | "read", 0, Some("900012")) => {
+            fixture!("consign-detail-main-same-name")
+        }
+        ("main", "inbox" | "read", 0, Some("900013")) => {
+            fixture!("consign-take-after-main-single")
+        }
+        ("main", "inbox" | "read", 0, Some("900014")) => {
+            fixture!("consign-return-receipt-main")
+        }
+        ("isekai", "inbox" | "read", 0, Some("910001")) => {
+            fixture!("consign-detail-isekai-multi")
+        }
         _ => return None,
     })
 }

@@ -17,3 +17,17 @@ main 世界 Sent 第 0 页与 Read Mail 第 2 页带有指向未采集页的 Nex
 - 脱敏：玩家名、世界显示名、收件人名替换为 `Fixture*`；移除浏览器扩展与用户脚本注入的节点（含 `#mmail_fin` 之外的遭遇计时链接）；不含 token、MID 或凭据。
 - 字节数：6123；SHA-256：`c75fdc40de61d65b771ceba766090c57ef8beb6f3d4f2b9adc2bf3a1164d20d7`
 - 用途：`inspect_send_response` 的成功证明分支与 `MailDouble` 的 `WriteSucceeded`、`SlowWriteSucceeded`（POST 先延迟再返回同一页，供停机排空用例）。
+
+## 寄售派生件（派生，未签收）
+
+`mooglemail/consign-*.html` 从已脱敏的 `sentdetail-3125366.html`、`read-main.html` 与
+`read-isekai.html` 派生，只替换收件人、发件人、主题、正文、附件清单、世界标记与身份页声明。
+它们用于两世界单件/多件、Take 前后、系统 Return 回执、重复原文 EID、规范别名、未知附件、
+数量冲突、Credits/COD、错收件人/世界、Take 缺/多/重复/同名 marker、Return 回执与脱敏回归。
+
+- 这些文件不是真实采集样本，**未签收**；验证器版本标为未签收，生产上只能 `reconcile` / 隔离，
+  不授处分权。
+- 玩家名、装备编号、装备 key 与预约码全部是测试假值；预约码使用 `C1-` 加 43 个 `A`/`B`，
+  不与真实签发值对应。
+- `consign-identity-*.html` 在 `#mainpane` 注入唯一的 `let uid = 1000000;` 与 `#eqch_outer`，
+  用于离线认证身份页；底部原有 `var uid` 不参与声明。

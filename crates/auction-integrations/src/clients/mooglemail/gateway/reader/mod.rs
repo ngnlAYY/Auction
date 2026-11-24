@@ -21,9 +21,12 @@ use crate::clients::mooglemail::parser::MoogleMailParser;
 use crate::clients::mooglemail::protocol::MoogleMailWorld;
 
 mod candidate;
+mod consignment;
+mod consignment_candidate;
 mod error;
 mod gateway;
 mod inbox;
+mod quarantine_recheck;
 mod recovery_scan;
 mod returned;
 mod scan;
@@ -31,6 +34,11 @@ mod sent;
 mod sent_hints;
 mod snapshot;
 mod window;
+
+pub use consignment::{
+    BoundConsignmentObservation, ConsignmentReadOutcome, ConsignmentReadPending,
+    PreparedConsignmentDisposition,
+};
 
 type ReadJournalContext<'a> = (&'a dyn MailPollReadJournal, &'a MailPollClaim);
 

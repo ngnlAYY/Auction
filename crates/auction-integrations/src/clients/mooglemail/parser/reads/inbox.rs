@@ -8,7 +8,8 @@ use scraper::Html;
 use crate::clients::mooglemail::parser::{
     MAX_INBOX_ROWS_PER_PAGE, MAX_SUMMARY_SUBJECT_BYTES, MoogleMailActionState, MoogleMailInboxPage,
     MoogleMailParser, MoogleMailSummary, extract_mid, normalize_text, parse_next_page,
-    parse_page_time, protocol, read_selector, unique_element, valid_inbox_header,
+    parse_page_time, parse_world_marker, protocol, read_selector, unique_element,
+    valid_inbox_header,
 };
 use crate::clients::mooglemail::protocol::valid_line;
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailOperation, MoogleMailWorld};
@@ -77,6 +78,7 @@ impl MoogleMailParser {
 
         let cell_selector = read_selector!("td", operation, world)?;
         let empty_selector = read_selector!("td#mmail_nnm", operation, world)?;
+        let world_marker = parse_world_marker(&document, world);
         let mut summaries = Vec::with_capacity(rows.len().saturating_sub(1));
         let mut empty_row = false;
         for row in rows.iter().skip(1) {
@@ -102,11 +104,8 @@ impl MoogleMailParser {
             }
             let sender = normalize_text(cells[0].text().collect::<String>());
             let subject = normalize_text(cells[1].text().collect::<String>());
-            let received_at = parse_page_time(
-                &normalize_text(cells[2].text().collect::<String>()),
-                operation,
-                world,
-            )?;
+            let received_minute_raw = normalize_text(cells[2].text().collect::<String>());
+            let received_at = parse_page_time(&received_minute_raw, operation, world)?;
             if !valid_line(&sender, 256, false)
                 || !valid_line(&subject, MAX_SUMMARY_SUBJECT_BYTES, true)
             {
@@ -118,6 +117,8 @@ impl MoogleMailParser {
                 sender,
                 subject,
                 received_at,
+                received_minute_raw,
+                world_marker,
             });
         }
         if !empty_row && summaries.is_empty() {

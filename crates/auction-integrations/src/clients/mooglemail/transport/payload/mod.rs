@@ -3,5 +3,6 @@
 mod mail;
 mod settlement;
 
+pub use mail::decode_consignment_disposition_request;
 pub(crate) use mail::{decode_payload, is_notification_origin};
 pub(crate) use settlement::{decode_settlement_payload, render_settlement};

@@ -16,6 +16,12 @@ use envelope::{OpenError, SealError, SecretPurpose, open_secret, seal_secret};
 mod consignment;
 pub(crate) mod envelope;
 
+pub use consignment::{
+    ConsignmentReservationCrypto, ConsignmentReservationCryptoConfigError,
+    ConsignmentSecretEnvelope, ConsignmentSecretError, ConsignmentSecretOpener,
+    ConsignmentSecretSealer, MailEvidencePurpose, consignment_reservation_crypto,
+};
+
 const DATA_KEY_LENGTH: usize = 32;
 const DATA_KEY_FINGERPRINT_DOMAIN: &[u8] = b"auction/cryptobox/data-key/v1";
 const AAD_PREFIX: &str = "auction/equipment-key/v1/";

@@ -16,11 +16,14 @@ mod sent_evidence;
 pub(crate) use credentials::MoogleMailCredentialSession;
 pub use credentials::{MoogleMailCredentialSet, MoogleMailRuntimeCredential};
 pub use model::{
-    MoogleMailGatewayConfig, MoogleMailInboundRecoveryScan, MoogleMailPage,
-    MoogleMailSentLookupReport, MoogleMailSentLookupRequest, MoogleMailSentLookupStatus,
-    MoogleMailSentRecoveryScan,
+    MoogleMailConsignmentCandidate, MoogleMailGatewayConfig, MoogleMailInboundRecoveryScan,
+    MoogleMailPage, MoogleMailPageMessage, MoogleMailSentLookupReport, MoogleMailSentLookupRequest,
+    MoogleMailSentLookupStatus, MoogleMailSentRecoveryScan,
 };
-pub use reader::MoogleMailGateway;
+pub use reader::{
+    BoundConsignmentObservation, ConsignmentReadOutcome, ConsignmentReadPending, MoogleMailGateway,
+    PreparedConsignmentDisposition,
+};
 
 fn configuration(world: MoogleMailWorld) -> MoogleMailError {
     operation_error(MoogleMailOperation::Inbox, world, MoogleMailErrorCategory::Configuration)

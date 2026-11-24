@@ -24,6 +24,10 @@ pub struct MoogleMailSummary {
     pub subject: String,
     /// 远端页面按 UTC 展示的时间。
     pub received_at: Timestamp,
+    /// 列表页原始分钟文本；寄售观察需要保留原文与时区解释。
+    pub received_minute_raw: String,
+    /// 列表页声明的世界标记。
+    pub world_marker: Option<MoogleMailWorld>,
 }
 
 impl fmt::Debug for MoogleMailSummary {
@@ -35,6 +39,7 @@ impl fmt::Debug for MoogleMailSummary {
             .field("sender", &"[REDACTED]")
             .field("subject", &"[REDACTED]")
             .field("received_at", &self.received_at)
+            .field("world_marker", &self.world_marker)
             .finish()
     }
 }
@@ -45,6 +50,9 @@ impl MoogleMailSummary {
             && valid_line(&self.sender, 256, false)
             && valid_line(&self.subject, MAX_SUMMARY_SUBJECT_BYTES, true)
             && self.received_at.timestamp_nanos_opt().is_some()
+            && !self.received_minute_raw.is_empty()
+            && self.received_minute_raw.len() <= 64
+            && !self.received_minute_raw.chars().any(char::is_control)
     }
 }
 

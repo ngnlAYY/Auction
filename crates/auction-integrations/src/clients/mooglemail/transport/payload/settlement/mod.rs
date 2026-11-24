@@ -17,7 +17,7 @@ use crate::clients::mooglemail::forms::valid_body;
 use crate::clients::mooglemail::protocol::valid_line;
 use crate::clients::mooglemail::transport::types::MoogleMailNotificationTemplates;
 use crate::clients::mooglemail::transport::{
-    SCHEMA_VERSION, SettlementDeliveryPayload, SettlementEquipmentSecretReference,
+    MAIL_DELIVERY_SCHEMA_VERSION, SettlementDeliveryPayload, SettlementEquipmentSecretReference,
     SettlementReturnWirePayload, SettlementSendWirePayload, invalid_payload,
 };
 use crate::safe_diagnostics;
@@ -76,7 +76,7 @@ fn decode_send_payload(
         safe_diagnostics::error_map("settlement_delivery", "decode_send_payload", invalid_payload),
     )?;
     let world = MoogleMailWorld::parse(&payload.world).ok_or_else(invalid_payload)?;
-    if payload.schema_version != SCHEMA_VERSION
+    if payload.schema_version != MAIL_DELIVERY_SCHEMA_VERSION
         || payload.operation != "send"
         || payload.credits < 0
         || payload.cod < 0
@@ -118,7 +118,7 @@ fn decode_return_payload(
         ),
     )?;
     let world = MoogleMailWorld::parse(&payload.world).ok_or_else(invalid_payload)?;
-    if payload.schema_version != SCHEMA_VERSION
+    if payload.schema_version != MAIL_DELIVERY_SCHEMA_VERSION
         || payload.operation != "return"
         || !valid_line(&payload.external_mail_id, 256, false)
     {

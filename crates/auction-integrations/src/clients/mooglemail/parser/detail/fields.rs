@@ -1,6 +1,7 @@
 //! 详情页解析的字段、附件与终态证明辅助。
 
 use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world};
+use auction_domain::consignment::RemovedMarker;
 use scraper::{ElementRef, Html, Selector};
 use sha2::{Digest, Sha256};
 use url::Url;
@@ -411,6 +412,60 @@ pub(crate) fn valid_removed_attachment_receipt(value: &str, expected_count: usiz
         count += 1;
     }
     count == expected_count
+}
+
+/// 把系统 `Removed attachment:` 行逐项解析为可配对 marker；空名称、多个 marker 或格式漂移失败关闭。
+///
+/// 不变量 3、6：领取证明只接受服务器追加的完整行，格式不清不能当作任何一件已被领取。
+pub(crate) fn parse_removed_attachment_markers(
+    value: &str,
+    world: MoogleMailWorld,
+) -> Result<Vec<RemovedMarker>, MoogleMailError> {
+    const MARKER: &str = "Removed attachment:";
+    let mut markers = Vec::new();
+    for line in value.lines() {
+        let mut found = line.match_indices(MARKER);
+        let Some((start, _)) = found.next() else { continue };
+        if found.next().is_some() || !line[..start].trim().is_empty() {
+            return Err(action_proof_error(MoogleMailOperation::Take, world));
+        }
+        let rest = line[start + MARKER.len()..].trim();
+        if rest.is_empty() {
+            return Err(action_proof_error(MoogleMailOperation::Take, world));
+        }
+        let (canonical_eid, name) = split_marker_eid(rest);
+        if name.is_empty() {
+            return Err(action_proof_error(MoogleMailOperation::Take, world));
+        }
+        markers.push(RemovedMarker { name: name.to_owned(), canonical_eid });
+    }
+    Ok(markers)
+}
+
+fn split_marker_eid(rest: &str) -> (Option<String>, &str) {
+    let Some(after_open) = rest.strip_prefix('[') else { return (None, rest) };
+    let Some(close) = after_open.find(']') else { return (None, rest) };
+    let raw = &after_open[..close];
+    let tail = after_open[close + 1..].trim_start();
+    if tail.is_empty() {
+        return (None, rest);
+    }
+    match canonical_positive_eid(raw) {
+        Some(eid) => (Some(eid), tail),
+        None => (None, rest),
+    }
+}
+
+/// 规范正十进制 EID：只去前导零，不改变数字；超过 32 位或全零返回 `None`。
+pub(crate) fn canonical_positive_eid(raw: &str) -> Option<String> {
+    if raw.is_empty() || !raw.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let canonical = raw.trim_start_matches('0');
+    if canonical.is_empty() || canonical.len() > 32 {
+        return None;
+    }
+    Some(canonical.to_owned())
 }
 
 #[cfg(test)]
