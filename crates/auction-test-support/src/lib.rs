@@ -4,4 +4,5 @@
 #![allow(clippy::expect_used)]
 
 pub mod forum;
+pub mod hvdata;
 pub mod mooglemail;

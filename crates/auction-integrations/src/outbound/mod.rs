@@ -27,6 +27,7 @@ pub(crate) fn https_target(address: &str) -> Option<Url> {
 /// 受限客户端的构造器；`build()` 读取系统 TLS 根证书，调用方应构造一次后复用客户端。
 pub(crate) fn restricted_client_builder() -> ClientBuilder {
     let _ = rustls::crypto::ring::default_provider().install_default();
+    // 装备来源依赖 reqwest 默认的证书链和主机名校验，此处两项均必须启用。
     Client::builder()
         .https_only(true)
         .no_proxy()

@@ -1,0 +1,129 @@
+{
+  "name": "Legendary Tempestuous Shortsword of Balance",
+  "name_parts": {
+    "tier": "Legendary",
+    "prefix": "Tempestuous",
+    "type": "Shortsword",
+    "armor_type": null,
+    "slot_type": null,
+    "weapon_type": "Shortsword",
+    "suf_art": "of",
+    "suffix": "Balance"
+  },
+  "alt_name": null,
+  "category": "One-handed Weapon",
+  "level": 321,
+  "is_tradeable": true,
+  "weapon_damage": {
+    "Attack Damage": {
+      "type": "Slashing",
+      "value": 925,
+      "base": 194.0
+    },
+    "strikes": [
+      "Wind"
+    ],
+    "status_effects": [
+      "Burden: 5.5 Interference: 3.8",
+      "Bleeding Wound : 24.1% chance"
+    ]
+  },
+  "stats": {
+    "misc": {
+      "Attack Accuracy": {
+        "value": 272.9,
+        "base": 183.0
+      },
+      "Attack Crit Damage": {
+        "value": 0.4,
+        "base": 177.0
+      },
+      "Parry": {
+        "value": 182.9,
+        "base": 174.0
+      }
+    },
+    "Spell Damage": {
+      "Wind": {
+        "value": 27.58,
+        "base": 0
+      }
+    },
+    "Primary Attributes": {
+      "Strength": {
+        "value": 61.49,
+        "base": 196.0
+      },
+      "Dexterity": {
+        "value": 55.45,
+        "base": 175.0
+      },
+      "Agility": {
+        "value": 54.89,
+        "base": 173.0
+      }
+    }
+  },
+  "upgrade_tiers": null,
+  "owner": {
+    "name": "FixtureOwner",
+    "uid": 42424,
+    "date": "2000-01-01T00:00:00Z",
+    "source_name": "FixtureSourceOwner",
+    "source_uid": 42425,
+    "source_mob": "FixtureMonster"
+  },
+  "condition": {
+    "current": 60.0,
+    "max": 100
+  },
+  "potency": {
+    "tier": 0,
+    "current_xp": 0,
+    "max_xp": 1
+  },
+  "calculations": {
+    "fusion": {
+      "average_stat": 181.71428571428572,
+      "max_stat": 200,
+      "total_rem": 128.0,
+      "num_stats": 7,
+      "min_cost": 31167142.857142862,
+      "max_cost": 60853571.42857142
+    },
+    "percentiles": {
+      "weapon_damage": {
+        "Attack Damage": 0.8
+      },
+      "misc": {
+        "Attack Accuracy": 0.43333333333333335,
+        "Attack Crit Damage": 0.23333333333333334,
+        "Parry": 0.13333333333333333
+      },
+      "Spell Damage": {},
+      "Primary Attributes": {
+        "Strength": 0.8666666666666667,
+        "Dexterity": 0.16666666666666666,
+        "Agility": 0.1
+      }
+    },
+    "legendary_percentiles": {
+      "weapon_damage": {
+        "Attack Damage": 0.8
+      },
+      "misc": {
+        "Attack Accuracy": 0.43333333333333335,
+        "Attack Crit Damage": 0.23333333333333334,
+        "Parry": 0.13333333333333333
+      },
+      "Spell Damage": {},
+      "Primary Attributes": {
+        "Strength": 0.8666666666666667,
+        "Dexterity": 0.16666666666666666,
+        "Agility": 0.1
+      }
+    }
+  },
+  "eid": 424242,
+  "key": "decaf00000"
+}

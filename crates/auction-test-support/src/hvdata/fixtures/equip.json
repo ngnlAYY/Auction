@@ -1,0 +1,181 @@
+{
+  "name": "Peerless Tempestuous Willow Staff of Destruction",
+  "name_parts": {
+    "tier": "Peerless",
+    "prefix": "Tempestuous",
+    "type": "Willow Staff",
+    "armor_type": null,
+    "slot_type": null,
+    "weapon_type": "Willow Staff",
+    "suf_art": "of",
+    "suffix": "Destruction"
+  },
+  "alt_name": "无瑕之眷·册礼",
+  "category": "Staff",
+  "level": "Soulbound",
+  "is_tradeable": false,
+  "weapon_damage": {
+    "Attack Damage": {
+      "type": "Crushing",
+      "value": 1380,
+      "base": 200.0
+    },
+    "strikes": [
+      "Wind"
+    ],
+    "status_effects": [
+      "Burden: 5.0 Interference: None",
+      "Ether Tap : 40% chance (5 turns)"
+    ]
+  },
+  "stats": {
+    "misc": {
+      "Magic Damage": {
+        "value": 1627.9,
+        "base": 200.0
+      },
+      "Magic Accuracy": {
+        "value": 269.8,
+        "base": 200.0
+      },
+      "Magic Crit Damage": {
+        "value": 0.4,
+        "base": 200.0
+      },
+      "Counter-resist": {
+        "value": 20.16,
+        "base": 200.0
+      },
+      "Casting Speed": {
+        "value": 7.5,
+        "base": 0
+      },
+      "Mana Conservation": {
+        "value": 10.0,
+        "base": 0
+      }
+    },
+    "Spell Damage": {
+      "Elec": {
+        "value": 30.69,
+        "base": 200.0
+      },
+      "Wind": {
+        "value": 74.87,
+        "base": 200.0
+      },
+      "Dark": {
+        "value": 64.41,
+        "base": 200.0
+      }
+    },
+    "Proficiency": {
+      "Elemental": {
+        "value": 91.22,
+        "base": 200.0
+      },
+      "Forbidden": {
+        "value": 91.22,
+        "base": 200.0
+      },
+      "Deprecating": {
+        "value": 170.6,
+        "base": 200.0
+      }
+    },
+    "Primary Attributes": {
+      "Intelligence": {
+        "value": 68.61,
+        "base": 200.0
+      },
+      "Wisdom": {
+        "value": 105.0,
+        "base": 200.0
+      }
+    }
+  },
+  "upgrade_tiers": [
+    30,
+    30,
+    30
+  ],
+  "owner": {
+    "name": "FixtureOwner",
+    "uid": 42424,
+    "date": null,
+    "source_name": null,
+    "source_uid": null,
+    "source_mob": null
+  },
+  "condition": {
+    "current": 83.0,
+    "max": 100
+  },
+  "potency": {
+    "tier": 0,
+    "current_xp": 0,
+    "max_xp": 1
+  },
+  "calculations": {
+    "fusion": {
+      "average_stat": 200.0,
+      "max_stat": 200,
+      "total_rem": 0.0,
+      "num_stats": 13,
+      "min_cost": null,
+      "max_cost": null
+    },
+    "percentiles": {
+      "weapon_damage": {
+        "Attack Damage": 1
+      },
+      "misc": {
+        "Magic Damage": 1,
+        "Magic Accuracy": 1,
+        "Magic Crit Damage": 1,
+        "Counter-resist": 1
+      },
+      "Spell Damage": {
+        "Elec": 1,
+        "Wind": 1,
+        "Dark": 1
+      },
+      "Proficiency": {
+        "Elemental": 1,
+        "Forbidden": 1,
+        "Deprecating": 1
+      },
+      "Primary Attributes": {
+        "Intelligence": 1,
+        "Wisdom": 1
+      }
+    },
+    "legendary_percentiles": {
+      "weapon_damage": {
+        "Attack Damage": 1.0
+      },
+      "misc": {
+        "Magic Damage": 1.0,
+        "Magic Accuracy": 1.0,
+        "Magic Crit Damage": 1.0,
+        "Counter-resist": 1.0
+      },
+      "Spell Damage": {
+        "Elec": 1.0,
+        "Wind": 1.0,
+        "Dark": 1.0
+      },
+      "Proficiency": {
+        "Elemental": 1.0,
+        "Forbidden": 1.0,
+        "Deprecating": 1.0
+      },
+      "Primary Attributes": {
+        "Intelligence": 1.0,
+        "Wisdom": 1.0
+      }
+    }
+  },
+  "eid": 424242,
+  "key": "decaf00000"
+}
