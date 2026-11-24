@@ -2,6 +2,7 @@
 
 pub mod admin;
 pub mod auction;
+pub mod consignment;
 pub mod mail;
 pub mod mail_templates;
 pub mod player_notifications;

@@ -1,0 +1,461 @@
+//! 本人和运营命令的输入、原决定和安全拒绝。
+
+use std::fmt::Debug;
+use std::sync::Arc;
+
+use auction_domain::CommandId;
+use auction_domain::UserId;
+use auction_domain::consignment::ListingState;
+use uuid::Uuid;
+
+use crate::ports::consignment::test_support::{FakeListingCommands, invalid_listing_request_ids};
+use crate::ports::consignment::{
+    ConsignmentError, ListingBusinessRejection, ListingClosed, ListingCommandOutcome,
+    ListingCommandRejection, ListingPriceDisposition, ListingPriceReceipt, StoredListingDecision,
+    UnrecordedListingRejection,
+};
+use crate::services::consignment::ManageListingService;
+use crate::services::consignment::tests::{
+    FAKE_URL, INVALID_CLIENT_COMMAND_IDS, LISTING_ID, SELLER_ID, admin, command_id, price, run,
+    seller, version,
+};
+
+#[test]
+fn reprice_and_withdraw_bind_the_same_authenticated_seller_but_distinct_operations() {
+    let store = Arc::new(FakeListingCommands::default());
+    let open = ManageListingService::new(store.clone(), true);
+    let closed = ManageListingService::new(store.clone(), false);
+    let seller = seller();
+    let first_request_id = "Az09-_.x".repeat(8);
+    let replay_request_id = "fake-manage-retry";
+    let repriced = ListingPriceReceipt::new(
+        LISTING_ID,
+        version(3),
+        ListingState::Resolving,
+        price(101),
+        ListingPriceDisposition::Repriced,
+    )
+    .unwrap();
+    let unchanged = ListingPriceReceipt::new(
+        LISTING_ID,
+        version(3),
+        ListingState::Resolving,
+        price(101),
+        ListingPriceDisposition::Unchanged,
+    )
+    .unwrap();
+    store.reprice.reply(Ok(ListingCommandOutcome::Accepted(repriced)));
+    for _ in 0..2 {
+        store
+            .reprice
+            .reply(Ok(ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(repriced))));
+    }
+    store.reprice.reply(Ok(ListingCommandOutcome::Accepted(unchanged)));
+    assert_eq!(
+        run(open.reprice(
+            &seller,
+            command_id(),
+            LISTING_ID,
+            2,
+            101,
+            Some(first_request_id.clone())
+        )),
+        Ok(repriced)
+    );
+    assert_eq!(
+        run(closed.reprice(
+            &seller,
+            command_id(),
+            LISTING_ID,
+            2,
+            101,
+            Some(replay_request_id.to_owned())
+        )),
+        Ok(repriced)
+    );
+    assert_eq!(run(closed.reprice(&seller, command_id(), LISTING_ID, 2, 101, None)), Ok(repriced));
+    let new_command_id = CommandId::from_uuid(Uuid::new_v4());
+    assert_eq!(run(open.reprice(&seller, new_command_id, LISTING_ID, 3, 101, None)), Ok(unchanged));
+    let [first, replay, without_request_id, same_price] =
+        store.reprice.take_calls().try_into().unwrap();
+    assert_eq!(first.request_id.as_deref(), Some(first_request_id.as_str()));
+    assert_eq!(replay.request_id.as_deref(), Some(replay_request_id));
+    assert_eq!(without_request_id.request_id, None);
+    assert_eq!(same_price.request_id, None);
+    assert_eq!(first.target, replay.target);
+    assert_eq!(first.request_hash, replay.request_hash);
+    assert_eq!(replay.target, without_request_id.target);
+    assert_eq!(replay.price, without_request_id.price);
+    assert_eq!(replay.request_hash, without_request_id.request_hash);
+    assert_ne!(first.request_hash, same_price.request_hash);
+    assert!(first.enabled);
+    assert!(!replay.enabled);
+    assert_eq!(first.price, price(101));
+    assert_eq!(first.target.command_id, command_id());
+    assert_eq!(first.target.listing_id, LISTING_ID);
+    assert_eq!(first.target.seller_user_id, UserId::from_uuid(SELLER_ID));
+    assert_eq!(first.target.expected_version, version(2));
+    assert_eq!(same_price.target.command_id, new_command_id);
+    assert_eq!(same_price.target.expected_version, version(3));
+    assert_eq!(same_price.price, first.price);
+
+    let receipt = ListingClosed::new(LISTING_ID, version(3), None).unwrap();
+    store.withdraw.reply(Ok(ListingCommandOutcome::Accepted(receipt)));
+    for _ in 0..2 {
+        store
+            .withdraw
+            .reply(Ok(ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(receipt))));
+    }
+    assert_eq!(
+        run(open.withdraw(&seller, command_id(), LISTING_ID, 2, Some(first_request_id.clone()))),
+        Ok(receipt)
+    );
+    for request_id in [Some(replay_request_id.to_owned()), None] {
+        assert_eq!(
+            run(closed.withdraw(&seller, command_id(), LISTING_ID, 2, request_id)),
+            Ok(receipt)
+        );
+    }
+    let [withdraw, withdraw_replay, withdraw_without_id] =
+        store.withdraw.take_calls().try_into().unwrap();
+    assert_eq!(withdraw.target, first.target);
+    assert_eq!(withdraw.request_id.as_deref(), Some(first_request_id.as_str()));
+    assert_eq!(withdraw_replay.request_id.as_deref(), Some(replay_request_id));
+    assert_eq!(withdraw_without_id.request_id, None);
+    assert_eq!(withdraw.target, withdraw_replay.target);
+    assert_eq!(withdraw.target, withdraw_without_id.target);
+    assert_eq!(withdraw.request_hash, withdraw_replay.request_hash);
+    assert_eq!(withdraw.request_hash, withdraw_without_id.request_hash);
+    assert_ne!(withdraw.request_hash, first.request_hash);
+}
+
+#[test]
+fn delist_binds_authenticated_actor_and_validated_reason() {
+    let store = Arc::new(FakeListingCommands::default());
+    let service = ManageListingService::new(store.clone(), false);
+    let admin = admin();
+    let receipt = ListingClosed::new(LISTING_ID, version(3), Some(price(101))).unwrap();
+    let first_request_id = "Az09-_.x".repeat(8);
+    for (outcome, reason, request_id) in [
+        (ListingCommandOutcome::Accepted(receipt), "运营测试", Some(first_request_id.as_str())),
+        (
+            ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(receipt)),
+            "运营测试",
+            Some("fake-admin-retry"),
+        ),
+        (
+            ListingCommandOutcome::Replayed(StoredListingDecision::Accepted(receipt)),
+            "运营测试",
+            None,
+        ),
+        (
+            ListingCommandOutcome::Rejected(ListingCommandRejection::Unrecorded(
+                UnrecordedListingRejection::CommandIdConflict,
+            )),
+            "另一个说明",
+            None,
+        ),
+    ] {
+        let expected = if reason == "运营测试" {
+            Ok(receipt)
+        } else {
+            Err(ConsignmentError::CommandIdConflict)
+        };
+        store.admin_delist.reply(Ok(outcome));
+        assert_eq!(
+            run(service.admin_delist(
+                &admin,
+                command_id(),
+                LISTING_ID,
+                2,
+                reason.to_owned(),
+                request_id.map(str::to_owned)
+            )),
+            expected
+        );
+    }
+    let [first, replay, without_request_id, changed] =
+        store.admin_delist.take_calls().try_into().unwrap();
+    assert_eq!(first.request_id.as_deref(), Some(first_request_id.as_str()));
+    assert_eq!(replay.request_id.as_deref(), Some("fake-admin-retry"));
+    assert_eq!(without_request_id.request_id, None);
+    for call in [replay, without_request_id] {
+        assert_eq!(first.command_id, call.command_id);
+        assert_eq!(first.admin_actor, call.admin_actor);
+        assert_eq!(first.listing_id, call.listing_id);
+        assert_eq!(first.expected_version, call.expected_version);
+        assert_eq!(first.reason, call.reason);
+        assert_eq!(first.request_hash, call.request_hash);
+    }
+    assert_eq!(first.admin_actor, admin.actor);
+    assert_eq!(first.reason.as_str(), "运营测试");
+    assert_eq!(first.command_id, command_id());
+    assert_eq!(first.listing_id, LISTING_ID);
+    assert_eq!(first.expected_version, version(2));
+    assert_ne!(first.request_hash, changed.request_hash);
+}
+
+#[test]
+fn manage_requires_v4_command_ids_before_store() {
+    let store = Arc::new(FakeListingCommands::default());
+    let service = ManageListingService::new(store.clone(), true);
+    let seller = seller();
+    let admin = admin();
+    let reprice = |id| run(service.reprice(&seller, id, LISTING_ID, 2, 101, None));
+    let withdraw = |id| run(service.withdraw(&seller, id, LISTING_ID, 2, None));
+    let delist =
+        |id| run(service.admin_delist(&admin, id, LISTING_ID, 2, "运营测试".to_owned(), None));
+    let repriced = ListingPriceReceipt::new(
+        LISTING_ID,
+        version(3),
+        ListingState::Resolving,
+        price(101),
+        ListingPriceDisposition::Repriced,
+    )
+    .unwrap();
+    let closed = ListingClosed::new(LISTING_ID, version(3), None).unwrap();
+    store.reprice.reply(Ok(ListingCommandOutcome::Accepted(repriced)));
+    store.withdraw.reply(Ok(ListingCommandOutcome::Accepted(closed)));
+    store.admin_delist.reply(Ok(ListingCommandOutcome::Accepted(closed)));
+
+    for uuid in INVALID_CLIENT_COMMAND_IDS {
+        let id = CommandId::from_uuid(uuid);
+        for (operation, error) in [
+            ("reprice", reprice(id).err()),
+            ("withdraw", withdraw(id).err()),
+            ("admin_delist", delist(id).err()),
+        ] {
+            assert_eq!(error, Some(ConsignmentError::InvalidCommandId), "{operation} {uuid}");
+            assert_eq!(
+                error.and_then(ConsignmentError::api_error),
+                Some((400, "invalid_command_id"))
+            );
+        }
+    }
+    assert!(store.reprice.take_calls().is_empty());
+    assert!(store.withdraw.take_calls().is_empty());
+    assert!(store.admin_delist.take_calls().is_empty());
+
+    let id = command_id();
+    assert_eq!(reprice(id), Ok(repriced));
+    assert_eq!(withdraw(id), Ok(closed));
+    assert_eq!(delist(id), Ok(closed));
+    assert_eq!(store.reprice.take_calls()[0].target.command_id, id);
+    assert_eq!(store.withdraw.take_calls()[0].target.command_id, id);
+    assert_eq!(store.admin_delist.take_calls()[0].command_id, id);
+}
+
+#[test]
+fn manage_rejects_invalid_request_ids_before_writes() {
+    let store = Arc::new(FakeListingCommands::default());
+    let service = ManageListingService::new(store.clone(), true);
+    let seller = seller();
+    let admin = admin();
+    let closed = ListingClosed::new(LISTING_ID, version(3), None).unwrap();
+    let repriced = ListingPriceReceipt::new(
+        LISTING_ID,
+        version(3),
+        ListingState::Resolving,
+        price(101),
+        ListingPriceDisposition::Repriced,
+    )
+    .unwrap();
+    for invalid in invalid_listing_request_ids() {
+        store.reprice.reply(Ok(ListingCommandOutcome::Accepted(repriced)));
+        store.withdraw.reply(Ok(ListingCommandOutcome::Accepted(closed)));
+        store.admin_delist.reply(Ok(ListingCommandOutcome::Accepted(closed)));
+        let request_id = Some(invalid.clone());
+        assert_eq!(
+            run(service.reprice(&seller, command_id(), LISTING_ID, 2, 101, request_id.clone())),
+            Err(ConsignmentError::InvalidListingRequest),
+            "改价请求号 {invalid:?}"
+        );
+        assert_eq!(
+            run(service.withdraw(&seller, command_id(), LISTING_ID, 2, request_id.clone())),
+            Err(ConsignmentError::InvalidListingRequest),
+            "取消请求号 {invalid:?}"
+        );
+        assert_eq!(
+            run(service.admin_delist(
+                &admin,
+                command_id(),
+                LISTING_ID,
+                2,
+                "运营测试".to_owned(),
+                request_id
+            )),
+            Err(ConsignmentError::InvalidListingRequest),
+            "下架请求号 {invalid:?}"
+        );
+        assert!(store.reprice.take_calls().is_empty());
+        assert!(store.withdraw.take_calls().is_empty());
+        assert!(store.admin_delist.take_calls().is_empty());
+    }
+}
+
+#[test]
+fn manage_maps_each_authorization_version_and_command_rejection() {
+    let store = Arc::new(FakeListingCommands::default());
+    let service = ManageListingService::new(store.clone(), false);
+    let seller = seller();
+    let admin = admin();
+    check_rejections(
+        |outcome| store.reprice.reply(outcome),
+        || run(service.reprice(&seller, command_id(), LISTING_ID, 2, 101, None)),
+    );
+    check_rejections(
+        |outcome| store.withdraw.reply(outcome),
+        || run(service.withdraw(&seller, command_id(), LISTING_ID, 2, None)),
+    );
+    check_rejections(
+        |outcome| store.admin_delist.reply(outcome),
+        || {
+            run(service.admin_delist(
+                &admin,
+                command_id(),
+                LISTING_ID,
+                2,
+                "运营测试".to_owned(),
+                None,
+            ))
+        },
+    );
+    for (outcome, expected) in [
+        (
+            Ok(ListingCommandOutcome::Rejected(ListingCommandRejection::Unrecorded(
+                UnrecordedListingRejection::Disabled,
+            ))),
+            ConsignmentError::Disabled,
+        ),
+        (Err(ConsignmentError::Unavailable), ConsignmentError::Unavailable),
+        (Err(ConsignmentError::OutcomeUnknown), ConsignmentError::OutcomeUnknown),
+    ] {
+        store.reprice.reply(outcome);
+        assert_eq!(
+            run(service.reprice(&seller, command_id(), LISTING_ID, 2, 101, None)),
+            Err(expected)
+        );
+    }
+    assert_eq!(store.reprice.take_calls().len(), 10);
+    assert_eq!(store.withdraw.take_calls().len(), 7);
+    assert_eq!(store.admin_delist.take_calls().len(), 7);
+}
+
+fn check_rejections<T: Debug + PartialEq>(
+    reply: impl Fn(Result<ListingCommandOutcome<T>, ConsignmentError>),
+    execute: impl Fn() -> Result<T, ConsignmentError>,
+) {
+    use ListingBusinessRejection::{ListingNotActive, ListingNotFound, StaleVersion};
+    for (error, expected) in [
+        (ListingNotFound, (404, "listing_not_found")),
+        (StaleVersion, (409, "stale_version")),
+        (ListingNotActive, (409, "listing_not_active")),
+    ] {
+        for outcome in [
+            ListingCommandOutcome::Rejected(ListingCommandRejection::Recorded(error)),
+            ListingCommandOutcome::Replayed(StoredListingDecision::Rejected(error)),
+        ] {
+            reply(Ok(outcome));
+            assert_eq!(execute().err().and_then(ConsignmentError::api_error), Some(expected));
+        }
+    }
+    reply(Ok(ListingCommandOutcome::Rejected(ListingCommandRejection::Unrecorded(
+        UnrecordedListingRejection::CommandIdConflict,
+    ))));
+    assert_eq!(
+        execute().err().and_then(ConsignmentError::api_error),
+        Some((409, "command_id_conflict"))
+    );
+}
+
+#[test]
+fn manage_rejects_invalid_inputs_before_writes() {
+    let store = Arc::new(FakeListingCommands::default());
+    let service = ManageListingService::new(store.clone(), true);
+    let seller = seller();
+    let admin = admin();
+    assert_eq!(
+        run(service.reprice(&seller, command_id(), LISTING_ID, 2, 0, None)),
+        Err(ConsignmentError::InvalidPrice)
+    );
+    assert_eq!(
+        run(service.withdraw(&seller, command_id(), LISTING_ID, 0, None)),
+        Err(ConsignmentError::InvalidListingRequest)
+    );
+    assert_eq!(
+        run(service.withdraw(&seller, command_id(), Uuid::nil(), 2, None)),
+        Err(ConsignmentError::InvalidListingId)
+    );
+    assert_eq!(
+        run(service.withdraw(&seller, CommandId::from_uuid(Uuid::nil()), LISTING_ID, 2, None)),
+        Err(ConsignmentError::InvalidCommandId)
+    );
+    for input in ["", "多行\n说明", FAKE_URL] {
+        assert_eq!(
+            run(service.admin_delist(&admin, command_id(), LISTING_ID, 2, input.to_owned(), None)),
+            Err(ConsignmentError::InvalidReason)
+        );
+    }
+    let mut invalid_admin = admin;
+    invalid_admin.actor.clear();
+    assert_eq!(
+        run(service.admin_delist(
+            &invalid_admin,
+            command_id(),
+            LISTING_ID,
+            2,
+            "运营测试".to_owned(),
+            None,
+        )),
+        Err(ConsignmentError::InvalidListingRequest)
+    );
+    let mut invalid_seller = seller;
+    invalid_seller.user_id = Uuid::nil();
+    assert_eq!(
+        run(service.withdraw(&invalid_seller, command_id(), LISTING_ID, 2, None)),
+        Err(ConsignmentError::InvalidListingRequest)
+    );
+    assert!(store.reprice.take_calls().is_empty());
+    assert!(store.withdraw.take_calls().is_empty());
+    assert!(store.admin_delist.take_calls().is_empty());
+}
+
+#[test]
+fn reprice_hash_binds_target_version_and_price() {
+    let store = Arc::new(FakeListingCommands::default());
+    let service = ManageListingService::new(store.clone(), true);
+    let seller = seller();
+    let receipt = ListingPriceReceipt::new(
+        LISTING_ID,
+        version(3),
+        ListingState::Resolving,
+        price(101),
+        ListingPriceDisposition::Repriced,
+    )
+    .unwrap();
+    for (target, version, amount) in [
+        (LISTING_ID, 2, 101),
+        (Uuid::from_u128(98), 2, 101),
+        (LISTING_ID, 3, 101),
+        (LISTING_ID, 2, 102),
+    ] {
+        store.reprice.reply(Ok(ListingCommandOutcome::Accepted(receipt)));
+        assert_eq!(
+            run(service.reprice(&seller, command_id(), target, version, amount, None)),
+            Ok(receipt)
+        );
+    }
+    let [original, target_changed, version_changed, price_changed] =
+        store.reprice.take_calls().try_into().unwrap();
+    // v1 已持久化摘要的字节向量，变更编码必须另起版本。
+    assert_eq!(
+        original.request_hash.as_bytes(),
+        [
+            2, 115, 165, 85, 103, 176, 110, 249, 166, 134, 30, 251, 172, 42, 57, 166, 144, 19, 203,
+            146, 73, 25, 193, 113, 202, 191, 56, 155, 145, 51, 154, 225
+        ],
+    );
+    assert_ne!(original.request_hash, target_changed.request_hash);
+    assert_ne!(original.request_hash, version_changed.request_hash);
+    assert_ne!(original.request_hash, price_changed.request_hash);
+}
