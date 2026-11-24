@@ -39,6 +39,7 @@ macro_rules! merged_contexts {
 merged_contexts!(
     admin,
     auction,
+    consignment,
     mail,
     mail_templates,
     player_notifications,

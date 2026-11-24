@@ -2,6 +2,7 @@
 
 pub mod admin;
 pub mod auction;
+pub mod consignment;
 pub mod core;
 pub mod delivery;
 pub mod external_accounts;
