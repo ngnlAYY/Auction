@@ -2,13 +2,16 @@
 //! 装备页最终归一为同一份脱敏快照。
 
 mod config;
+mod consignment_url;
 mod game_link;
+pub mod hvdata;
 mod model;
 mod parser;
 mod reader;
 mod worker_proxy;
 
 pub use config::EquipmentSourcePolicy;
+pub use consignment_url::HentaiVerseListingUrlValidator;
 pub use game_link::EquipmentGameLinkResolver;
 pub use reader::{EquipmentSourceAdapter, build_equipment_http_client};
 pub use worker_proxy::WorkerEquipmentSourceReader;
