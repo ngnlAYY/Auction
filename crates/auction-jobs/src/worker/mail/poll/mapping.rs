@@ -40,6 +40,12 @@ pub(super) fn valid_page(
                 && message.credits >= 0
                 && message.cod >= 0
                 && message.attachment_count <= 1000
+                && message.consignment_candidate.as_ref().is_none_or(|candidate| {
+                    candidate.validate()
+                        && candidate.external_mail_id == message.external_mail_id
+                        && candidate.world_id == message.world_id
+                        && candidate.received_at == message.received_at
+                })
                 && seen_mail_ids.insert(message.external_mail_id.as_str())
                 && message.business.as_ref().is_none_or(|business| {
                     business.mailbox_key == claim.mailbox_key
@@ -209,6 +215,7 @@ mod tests {
                 cod: 0,
                 returnable: false,
                 claimable: false,
+                consignment_candidate: None,
                 business: None,
             };
             let decision = pending_decision(&message);

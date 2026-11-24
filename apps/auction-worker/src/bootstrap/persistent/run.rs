@@ -57,7 +57,7 @@ pub(super) async fn run_connected(
     store: Arc<DatabaseStore>,
     worker_id: String,
     runtime: PersistentRuntime,
-    consignment: Option<ConsignmentWorker>,
+    mut consignment: Option<ConsignmentWorker>,
 ) -> anyhow::Result<()> {
     let PersistentRuntime {
         tracing_health,
@@ -129,6 +129,28 @@ pub(super) async fn run_connected(
         metrics.external_metrics(),
     )
     .await?;
+    if consignment.is_some() {
+        let mail_readiness = if let Some(reads) = &mail_control_reads {
+            crate::bootstrap::mail::consignment::readiness_runtimes(
+                config,
+                Arc::clone(&store),
+                &reads.gateways,
+            )
+            .await
+        } else {
+            Vec::new()
+        };
+        consignment = super::consignment::attach_loops(
+            config,
+            &store,
+            &switches,
+            &worker_id,
+            consignment,
+            mail_control_reads.as_ref().map(|reads| &reads.gateways),
+            mail_readiness,
+        )
+        .await?;
+    }
     let runtime_owners = [
         ("mail_owner_invalid", mail_runtime_ownership),
         ("forum_owner_invalid", forum_runtime_ownership),

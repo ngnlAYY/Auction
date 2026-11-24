@@ -32,9 +32,13 @@ MoogleMail 默认 `poll_isolation_enabled = true`：每个世界独立运行收�
 
 ## 一口价挂单
 
-启用时，解析循环按数据库全局许可领单，空闲时至多等 5 秒，复用 Worker 的外部访问暂停与共享排空。固定来源读取的字节上限和本次领取的硬截止由 `[consignment]` 提供。维护循环每 30 秒补扫活动挂单，逐单核实碰撞、资格、停用或到期事实，并在开启时回收过期的解析租约。准入同步失败即启动失败。关闭时只在发现待清退存量后启动维护。
+启用时，解析循环按数据库全局许可领单，空闲时至多等 5 秒，复用 Worker 的外部访问暂停与共享排空。固定来源读取的字节上限和本次领取的硬截止由 `[consignment]` 提供。维护循环每 30 秒补扫活动挂单，逐单核实碰撞、资格、停用或到期事实，并在开启时回收过期的解析租约。准入同步失败即启动失败。
 
-登记准入心跳每 10 秒重新核对数据库及 schema，并依赖已装配的开封器、装备密钥环与来源端口。核对通过后续期至数据库时刻后 30 秒。指标固定循环名为 `consignment-resolve`、`consignment-maintenance`、`consignment-readiness`。各循环共用持久任务的监督与停止预算。见[一口价挂单的停用与恢复](../../ops/README.md#一口价挂单的停用与恢复)。
+第 4 期在准入同步后读取 `has_consignment_work`：单一只读快照检查非终态挂单、active 预约、未终态处置投递、queued/leased 重检、无证明的起写、非终态 position 与未完成的季通知。寄售关闭但仍有存量时，处置维护（Take/Return）、隔离重检与季任务三条循环照常启动；有存量却缺少 MoogleMail 读取器/传输或当前 Credential 数据密钥时启动失败，不能静默跳过。装配使用与 Public/Admin 相同的 `DepositSettings` 构造，并从 Credential 域密钥环构造预约码加解密。
+
+登记准入心跳每 10 秒重新核对数据库及 schema，并依赖已装配的开封器、装备密钥环与来源端口；核对通过后续期至数据库时刻后 30 秒。收件就绪心跳另按 10 秒节拍核对数据库与 schema，读取器签收详情能力时为每个已配置世界续期 `mail_evidence_sessions` 与 `consignment_mail_readiness`（当前有效期 120 秒）。第 4 期生产就绪策略把 `take_ready` 与 `return_ready` 固定为 false：需要取得或退回的整封在首决时分别记 `take_unproven` / `return_unproven` 并隔离，零资产外写，由运营处理；只有维护者提供两世界多件寄件详情、Take 前后与系统 Return 回执的真实脱敏样本并签收后才会改变，业务判定见[一口价挂单](../../docs/business-rules.md#一口价挂单)。指标固定循环名为 `consignment-resolve`、`consignment-maintenance`、`consignment-readiness`，处置、重检与季任务计入 `consignment-maintenance`。各循环共用持久任务的监督与停止预算。见[架构](../../docs/architecture.md#一口价挂单)与[一口价挂单的停用与恢复](../../ops/README.md#一口价挂单的停用与恢复)。
+
+**季任务循环。** 仅在寄售装配完成（启用，或关闭但有存量）后运行；它与处置维护、隔离重检并排，空闲 60 秒一轮，失败按 1–30 秒退避，内存定时器只负责唤醒。每轮按顺序：① 寄售启用且日历可用时，用与换季提醒同源的 `schedule_calendar().early_bird()` 经 `ConsignmentCalendar::from_early_bird_config` 加 `isekai_preclose_days` 计算当前季窗并首次冻结，已有 `(world, season_id)` 行原样保留；日历未启用或构造失败只记结构化警告，不冻结也不退出。② 对预停已到、季末未到的冻结季窗，列出该季窗内仍非终态且尚无 `preclose_withdrawal` 通知的 `(position, seller)`，逐条排队通知；预停后新取得的代管件在下一轮补上。③ 对已有通知但无工作的行，在同一事务写入通用 Send 投递与 `mail_disposition_work(action='send')`，投递、工作与 `external_mail_id`/`origin_id` 都由通知 ID 派生，重复调用幂等。④ 季末已到且仍有登记早于季末的非终态旧季挂单时调用 `close_season`；冻结界不因迟跑延长。所有到期判定读数据库墙钟，季窗、通知、工作与投递均以数据库为唯一事实来源。
 
 ## 退出
 

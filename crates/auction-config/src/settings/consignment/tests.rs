@@ -56,6 +56,8 @@ fn assert_defaults(config: ConsignmentConfig) {
     assert!(!config.enabled());
     assert_eq!(config.fee_bps().value(), 500);
     assert_eq!(config.publication_ttls(), ListingPublicationTtls::new(30, 7).unwrap());
+    assert_eq!(config.reservation_ttl_hours(), 24);
+    assert_eq!(config.isekai_preclose_days(), 3);
     assert_eq!(config.max_open_per_user(), 20);
     assert_eq!(config.registrations_per_hour(), 10);
     assert_eq!(config.lookup_timeout_seconds(), 10);
@@ -114,6 +116,8 @@ enabled = true
 fee_bps = 125
 display_ttl_days = 45
 deposit_ttl_days = 14
+reservation_ttl_hours = 36
+isekai_preclose_days = 5
 max_open_per_user = 35
 registrations_per_hour = 18
 lookup_timeout_seconds = 12
@@ -130,6 +134,8 @@ lookup_min_interval_ms = 2500
             ListingPublicationTtls::new(45, 14).unwrap(),
             "{role:?}"
         );
+        assert_eq!(config.reservation_ttl_hours(), 36, "{role:?}");
+        assert_eq!(config.isekai_preclose_days(), 5, "{role:?}");
         assert_eq!(config.max_open_per_user(), 35, "{role:?}");
         assert_eq!(config.registrations_per_hour(), 18, "{role:?}");
         assert_eq!(config.lookup_timeout_seconds(), 12, "{role:?}");
@@ -147,6 +153,8 @@ fn consignment_numeric_bounds_are_inclusive_and_errors_are_redacted() {
             ("fee_bps", 0, 9_999),
             ("display_ttl_days", 1, 90),
             ("deposit_ttl_days", 1, 30),
+            ("reservation_ttl_hours", 1, 168),
+            ("isekai_preclose_days", 1, 90),
             ("max_open_per_user", 1, 100),
             ("registrations_per_hour", 1, 100),
             ("lookup_timeout_seconds", 1, 30),
@@ -167,6 +175,12 @@ fn consignment_numeric_bounds_are_inclusive_and_errors_are_redacted() {
                         config.publication_ttls(),
                         ListingPublicationTtls::new(30, value).unwrap()
                     ),
+                    "reservation_ttl_hours" => {
+                        assert_eq!(config.reservation_ttl_hours(), value);
+                    }
+                    "isekai_preclose_days" => {
+                        assert_eq!(config.isekai_preclose_days(), u8::try_from(value).unwrap());
+                    }
                     "max_open_per_user" => assert_eq!(config.max_open_per_user(), value),
                     "registrations_per_hour" => assert_eq!(config.registrations_per_hour(), value),
                     "lookup_timeout_seconds" => {

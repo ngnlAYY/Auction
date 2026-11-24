@@ -18,9 +18,9 @@ pub use asset_reconciliation::{
 pub use forum_reply::{ForumReplyPorts, ForumReplyRuntime};
 pub use forum_sync::{ForumSyncPorts, ForumSyncRuntime};
 pub use mail_poll::{
-    MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway, MailPollGatewayError,
-    MailPollPage, MailPollRuntime, MailPollRuntimeBindings, MailPollRuntimeConfig,
-    MailPollSchedules,
+    MailPollConsignmentCandidate, MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway,
+    MailPollGatewayError, MailPollPage, MailPollRuntime, MailPollRuntimeBindings,
+    MailPollRuntimeConfig, MailPollSchedules,
 };
 pub use operations_alert::{OperationsAlertRuntime, OperationsAlertRuntimeConfig};
 pub use player_notifications::{PlayerNotificationRuntime, PlayerNotificationRuntimeConfig};

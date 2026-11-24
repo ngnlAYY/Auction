@@ -9,7 +9,8 @@ use auction_application::mail::{
 };
 use auction_observability::WorkerResult;
 
-use super::business::process_with_retry;
+use super::business::{MailProcessFailure, process_with_retry};
+use super::consignment::{CandidateStep, handle_candidate};
 use super::diagnostics;
 use super::fetch::fetch_with_retry;
 use crate::worker::diagnostics as worker_diagnostics;
@@ -34,6 +35,7 @@ where
         store,
         gateway,
         processor,
+        consignment,
         diagnostics,
         progress_observer,
         clock,
@@ -225,6 +227,135 @@ where
                 break;
             }
         }
+        // 在业务 envelope 释放附件 key 前生成安全主题。分类与协议匹配继续使用原主题。
+        let subject = intake_subject(&message);
+        if let Some(candidate) = message.consignment_candidate.take() {
+            // 本批在候选之前完成、但尚未随批次提交的旧信照原路径先提交；claim::commit
+            // 会释放租约，所以本轮到此结束，候选留到下一轮由自己的 deposit 事务推进到它。
+            // 只被 lookup_completion 跳过的旧信无需先提交：候选事务的前缀 CAS 会一并越过。
+            if !items.is_empty() {
+                let batch = MailPollBatch {
+                    mailbox_key: claim.mailbox_key.clone(),
+                    claim_token: claim.claim_token,
+                    next_cursor: last_completed_external_mail_id,
+                    polled_at,
+                    next_poll_at,
+                    items,
+                };
+                if let Err(error) = store.commit(claim.clone(), batch).await {
+                    worker_diagnostics::error(
+                        "mail_poll",
+                        "commit_before_consignment",
+                        error.diagnostic_kind(),
+                        DiagnosticContext::default(),
+                    );
+                    record_failure(
+                        store,
+                        clock,
+                        claim,
+                        "commit_failed".to_owned(),
+                        "MoogleMail 候选前的入站批次未能确认提交".to_owned(),
+                        failure_context,
+                    )
+                    .await;
+                    return WorkerResult::Error;
+                }
+                return WorkerResult::Success;
+            }
+            let (Some(processor), Some(service)) = (processor.as_ref(), consignment.as_ref())
+            else {
+                record_failure(
+                    store,
+                    clock,
+                    claim,
+                    "consignment_unavailable".to_owned(),
+                    "寄售候选已到达但寄售处理或旧业务处理器未装配".to_owned(),
+                    failure_context,
+                )
+                .await;
+                return WorkerResult::Error;
+            };
+            let Some(business) = message.business.take() else {
+                record_failure(
+                    store,
+                    clock,
+                    claim,
+                    "business_payload_missing".to_owned(),
+                    "MoogleMail 网关未提供寄售候选业务 envelope".to_owned(),
+                    failure_context,
+                )
+                .await;
+                return WorkerResult::Error;
+            };
+            if batch_deadline.checked_duration_since(std::time::Instant::now()).is_none() {
+                super::super::types::observe_budget(
+                    &world_id,
+                    external_metrics.as_ref(),
+                    auction_application::external_metrics::MailPhase::PollBatch,
+                    auction_application::external_metrics::MailBudget::Time,
+                );
+                record_failure(
+                    store,
+                    clock,
+                    claim,
+                    "batch_timeout".to_owned(),
+                    "MoogleMail 邮箱批次预算已耗尽，游标停在候选之前".to_owned(),
+                    failure_context,
+                )
+                .await;
+                return WorkerResult::Error;
+            }
+            if let Some(observer) = &progress_observer {
+                observer.update(
+                    &claim,
+                    MailPollProgressStage::Committing,
+                    Some(&candidate.external_mail_id),
+                );
+            }
+            let diagnostic =
+                diagnostics::MailMessageDiagnostic::prepare(diagnostics.clone(), &business);
+            match handle_candidate(
+                service.as_ref(),
+                processor.as_ref(),
+                business,
+                candidate,
+                &claim,
+                polled_at,
+                next_poll_at,
+                batch_deadline,
+                diagnostic,
+                config,
+                metric_context.clone(),
+            )
+            .await
+            {
+                CandidateStep::Committed => return WorkerResult::Success,
+                CandidateStep::Legacy(decision) => {
+                    let external_mail_id = message.external_mail_id.clone();
+                    items.push(intake_from_message(
+                        &claim.mailbox_key,
+                        message,
+                        decision,
+                        polled_at,
+                        subject,
+                    ));
+                    last_completed_external_mail_id = Some(external_mail_id);
+                    continue;
+                }
+                CandidateStep::Failed(failure) => {
+                    record_failure(
+                        store,
+                        clock,
+                        claim,
+                        failure.failure_code,
+                        failure.safe_detail,
+                        failure_context,
+                    )
+                    .await;
+                    return WorkerResult::Error;
+                }
+            }
+        }
         let Some(process_remaining) =
             batch_deadline.checked_duration_since(std::time::Instant::now())
         else {
@@ -237,8 +368,6 @@ where
             budget_exhausted = true;
             break;
         };
-        // 在业务 envelope 释放附件 key 前生成安全主题。分类与协议匹配继续使用原主题。
-        let subject = intake_subject(&message);
         let decision = match (processor.as_ref(), message.business.take()) {
             (Some(processor), Some(business)) => {
                 let diagnostic =
@@ -246,7 +375,8 @@ where
                 let mut pending_diagnostics =
                     Vec::with_capacity(usize::from(config.process_attempts));
                 let mut decision_diagnostic = None;
-                let mut processed = tokio::time::timeout(
+                // 业务结果及其超时已冻结；留证不占后续邮件的业务预算，也不更改重试分类。
+                let (processed, timed_out) = match tokio::time::timeout(
                     process_remaining,
                     process_with_retry(
                         processor.as_ref(),
@@ -257,29 +387,9 @@ where
                         &mut decision_diagnostic,
                     ),
                 )
-                .await;
-                // 业务结果及其超时已冻结；留证不占后续邮件的业务预算，也不更改重试分类。
-                if !pending_diagnostics.is_empty() {
-                    for (index, pending) in pending_diagnostics.into_iter().enumerate() {
-                        let diagnostic = pending.resolve().await;
-                        if decision_diagnostic == Some(index)
-                            && let Ok(Ok(decision)) = &mut processed
-                            && decision.mail_kind == "equipment"
-                            && decision.status == "rejected"
-                            && diagnostic.validate()
-                        {
-                            decision.equipment_diagnostic = Some(diagnostic);
-                        }
-                    }
-                }
-                let decision = match processed {
-                    Ok(Ok(decision)) => decision,
-                    Ok(Err(failure)) => {
-                        diagnostic.retain_failure(failure.failure_code).await;
-                        suffix_failure =
-                            Some((failure.failure_code.to_owned(), failure.safe_detail.to_owned()));
-                        break;
-                    }
+                .await
+                {
+                    Ok(result) => (result, false),
                     Err(error) => {
                         super::super::types::observe_budget(
                             &world_id,
@@ -293,21 +403,36 @@ where
                             worker_diagnostics::timeout_kind(&error),
                             DiagnosticContext::default(),
                         );
-
-                        diagnostic.retain_failure("batch_processing_timeout").await;
-                        budget_exhausted = true;
-                        break;
+                        (
+                            Err(MailProcessFailure {
+                                failure_code: "batch_processing_timeout",
+                                safe_detail: "MoogleMail 单封邮件处理在总时限内未完成",
+                            }),
+                            true,
+                        )
                     }
                 };
-                if decision.validate().is_err() {
-                    diagnostic.retain_failure("invalid_business_decision").await;
-                    suffix_failure = Some((
-                        "invalid_business_decision".to_owned(),
-                        "MoogleMail 业务处理器返回了无效决定".to_owned(),
-                    ));
-                    break;
+                match diagnostics::finalize_legacy_result(
+                    diagnostic,
+                    processed,
+                    pending_diagnostics,
+                    decision_diagnostic,
+                )
+                .await
+                {
+                    Ok(decision) => decision,
+                    Err(failure) => {
+                        if timed_out {
+                            budget_exhausted = true;
+                        } else {
+                            suffix_failure = Some((
+                                failure.failure_code.to_owned(),
+                                failure.safe_detail.to_owned(),
+                            ));
+                        }
+                        break;
+                    }
                 }
-                diagnostic.retain_decision(decision).await
             }
             (Some(_), None) => {
                 suffix_failure = Some((

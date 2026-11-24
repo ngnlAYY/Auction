@@ -55,6 +55,8 @@ pub struct ConsignmentConfig {
     enabled: bool,
     fee_bps: FeeBps,
     publication_ttls: ListingPublicationTtls,
+    reservation_ttl_hours: i64,
+    isekai_preclose_days: u8,
     max_open_per_user: i64,
     registrations_per_hour: i64,
     lookup_timeout_seconds: u64,
@@ -76,6 +78,16 @@ impl ConsignmentConfig {
     /// 核验通过时供领域冻结的展示期和待寄期。
     pub const fn publication_ttls(&self) -> ListingPublicationTtls {
         self.publication_ttls
+    }
+
+    /// 新寄件预约的最长有效期；签发时还会再受待寄截止与季末约束。
+    pub const fn reservation_ttl_hours(&self) -> i64 {
+        self.reservation_ttl_hours
+    }
+
+    /// isekai 换季前停止新预约与购买的提前本地日历日数。
+    pub const fn isekai_preclose_days(&self) -> u8 {
+        self.isekai_preclose_days
     }
 
     /// 单个用户跨世界的有效活动挂单上限。
@@ -111,6 +123,8 @@ pub(super) struct ConsignmentFileConfig {
     fee_bps: i64,
     display_ttl_days: i64,
     deposit_ttl_days: i64,
+    reservation_ttl_hours: i64,
+    isekai_preclose_days: i64,
     max_open_per_user: i64,
     registrations_per_hour: i64,
     lookup_timeout_seconds: i64,
@@ -125,6 +139,8 @@ impl Default for ConsignmentFileConfig {
             fee_bps: i64::from(FeeBps::DEFAULT_CONSIGNED.value()),
             display_ttl_days: DEFAULT_DISPLAY_TTL_DAYS,
             deposit_ttl_days: DEFAULT_DEPOSIT_TTL_DAYS,
+            reservation_ttl_hours: 24,
+            isekai_preclose_days: 3,
             max_open_per_user: 20,
             registrations_per_hour: 10,
             lookup_timeout_seconds: 10,
@@ -154,6 +170,22 @@ impl ConsignmentFileConfig {
             enabled: self.enabled,
             fee_bps,
             publication_ttls,
+            reservation_ttl_hours: in_range(
+                "reservation_ttl_hours",
+                self.reservation_ttl_hours,
+                1..=168,
+            )?,
+            isekai_preclose_days: u8::try_from(in_range(
+                "isekai_preclose_days",
+                self.isekai_preclose_days,
+                1..=i64::from(auction_domain::consignment::MAX_PRECLOSE_DAYS),
+            )?)
+            .map_err(|_error| {
+                range_error(
+                    "isekai_preclose_days",
+                    1..=i64::from(auction_domain::consignment::MAX_PRECLOSE_DAYS),
+                )
+            })?,
             max_open_per_user: in_range("max_open_per_user", self.max_open_per_user, 1..=100)?,
             registrations_per_hour: in_range(
                 "registrations_per_hour",

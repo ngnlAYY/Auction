@@ -11,9 +11,12 @@ use auction_application::mail::{
 };
 use auction_application::runtime_switches::RuntimeSwitches;
 use auction_application::scheduling::RecurringSchedule;
+use auction_application::settlement::MailAccountEvidenceBinding;
+use auction_domain::consignment::deposit::{EnvelopeObservation, LegacyReturnEvidence};
 use auction_observability::WorkerLoop;
 use auction_time::Timestamp;
 use tokio::sync::Notify;
+use uuid::Uuid;
 
 use crate::worker::runtime::WorkerError;
 
@@ -43,7 +46,43 @@ pub struct MailPollFetchedMessage {
     pub cod: i64,
     pub returnable: bool,
     pub claimable: bool,
+    /// 寄售候选的 4D1 观察；本段只透传，不改变旧信处理。
+    pub consignment_candidate: Option<MailPollConsignmentCandidate>,
     pub business: Option<MailMessage>,
+}
+
+/// 寄售候选在同一详情文档上的观察与列表原始投影。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MailPollConsignmentCandidate {
+    pub world_id: String,
+    pub external_mail_id: String,
+    pub world_marker: Option<String>,
+    pub sender: String,
+    pub subject: String,
+    pub received_minute_raw: String,
+    pub received_at: Timestamp,
+    pub observation: EnvelopeObservation,
+    pub binding: MailAccountEvidenceBinding,
+    pub remote_observation_id: Uuid,
+    pub observed_at: Timestamp,
+    pub subject_digest: [u8; 32],
+    pub body_digest: [u8; 32],
+    pub raw_count: Option<u32>,
+    pub legacy_evidence: LegacyReturnEvidence,
+}
+
+impl MailPollConsignmentCandidate {
+    /// 候选必须与同封通用解析结果指向同一身份，且绑定与观察摘要不是占位值。
+    pub fn validate(&self) -> bool {
+        matches!(self.world_id.as_str(), "main" | "isekai")
+            && !self.external_mail_id.is_empty()
+            && self.observation.manifest_digest != [0; 32]
+            && self.binding.validate()
+            && self.binding.world.as_str() == self.world_id
+            && !self.remote_observation_id.is_nil()
+            && self.subject_digest != [0; 32]
+            && self.body_digest != [0; 32]
+    }
 }
 
 impl std::fmt::Debug for MailPollFetchedMessage {
@@ -62,6 +101,10 @@ impl std::fmt::Debug for MailPollFetchedMessage {
             .field("cod", &self.cod)
             .field("returnable", &self.returnable)
             .field("claimable", &self.claimable)
+            .field(
+                "consignment_candidate",
+                &self.consignment_candidate.as_ref().map(|_| "[PRESENT]"),
+            )
             .field("business", &self.business.as_ref().map(|_| "[PRESENT]"))
             .finish()
     }
@@ -211,6 +254,9 @@ pub struct MailPollRuntime {
     pub(super) diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
     pub(super) progress_observer: Option<Arc<dyn MailPollProgressObserver>>,
     pub(in crate::worker::mail) maintenance: Option<Arc<MailboxMaintenanceService>>,
+    /// 寄售候选的 poll 编排；未启用或未装配时旧路径完全不变。
+    pub(in crate::worker::mail) consignment:
+        Option<Arc<auction_application::mail::ConsignmentIngressService>>,
     pub(crate) external_metrics:
         Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
     pub world_id: String,
@@ -246,6 +292,7 @@ impl MailPollRuntime {
             diagnostics: None,
             progress_observer: None,
             maintenance: None,
+            consignment: None,
             external_metrics: auction_application::external_metrics::noop_external_metrics_observer(
             ),
             world_id,
@@ -279,6 +326,15 @@ impl MailPollRuntime {
     /// 注入当前世界的维护服务；两条路径共用同一服务与互斥门。
     pub fn with_maintenance(mut self, maintenance: Arc<MailboxMaintenanceService>) -> Self {
         self.maintenance = Some(maintenance);
+        self
+    }
+
+    /// 注入寄售候选编排；只有配置激活且世界就绪时才由装配根提供。
+    pub fn with_consignment_ingress(
+        mut self,
+        consignment: Arc<auction_application::mail::ConsignmentIngressService>,
+    ) -> Self {
+        self.consignment = Some(consignment);
         self
     }
 

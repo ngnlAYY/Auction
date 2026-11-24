@@ -8,6 +8,7 @@ use auction_application::mail::{
     MailDiagnosticStage, MailMessage, MailProcessingDecision, PreparedMailEvidence,
 };
 
+use super::business::MailProcessFailure;
 use crate::worker::diagnostics;
 
 pub(super) struct MailMessageDiagnostic {
@@ -155,4 +156,43 @@ fn safe_code(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+/// 旧路由决定与候选路径共用的结果收口：留证、失败关闭与最终决定留档只在这里定义一次。
+///
+/// 先解析已冻结的装备诊断，再按决定闭集校验；校验失败以 `invalid_business_decision` 失败关闭，
+/// 不把损坏决定写进入站事实。
+pub(super) async fn finalize_legacy_result(
+    diagnostic: MailMessageDiagnostic,
+    mut result: Result<MailProcessingDecision, MailProcessFailure>,
+    pending_diagnostics: Vec<auction_application::mail::PendingMailEquipmentDiagnostic>,
+    decision_diagnostic: Option<usize>,
+) -> Result<MailProcessingDecision, MailProcessFailure> {
+    for (index, pending) in pending_diagnostics.into_iter().enumerate() {
+        let resolved = pending.resolve().await;
+        if decision_diagnostic == Some(index)
+            && let Ok(decision) = &mut result
+            && decision.mail_kind == "equipment"
+            && decision.status == "rejected"
+            && resolved.validate()
+        {
+            decision.equipment_diagnostic = Some(resolved);
+        }
+    }
+    match result {
+        Ok(decision) => {
+            if decision.validate().is_err() {
+                diagnostic.retain_failure("invalid_business_decision").await;
+                return Err(MailProcessFailure {
+                    failure_code: "invalid_business_decision",
+                    safe_detail: "MoogleMail 业务处理器返回了无效决定",
+                });
+            }
+            Ok(diagnostic.retain_decision(decision).await)
+        }
+        Err(failure) => {
+            diagnostic.retain_failure(failure.failure_code).await;
+            Err(failure)
+        }
+    }
 }

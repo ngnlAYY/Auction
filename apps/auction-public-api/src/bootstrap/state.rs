@@ -14,8 +14,9 @@ use auction_application::auction::{
     PublicLotReader, PublicPriceHistoryReader, WorldReader,
 };
 use auction_application::consignment::{
-    ListingCommandStore, ListingRegistrationPolicy, ListingWorlds, ManageListingService,
-    OwnedListingRead, PublicListingRead, RegisterListingService, RegistrationReplayCrypto,
+    DepositCommandService, DepositRead, ListingCommandStore, ListingRegistrationPolicy,
+    ListingWorlds, ManageListingService, OwnedListingRead, PublicListingRead,
+    RegisterListingService, RegistrationReplayCrypto,
 };
 use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, RepositoryError};
@@ -34,15 +35,18 @@ use auction_application::sessions::PublicSessionService;
 use auction_config::{AppConfig, ConsignmentActivation, ConsignmentConfig, DataKeyDomain};
 use auction_http::{ConsignmentCapabilities, PublicApiState, RealtimeHub, RealtimeHubSink};
 use auction_integrations::{
-    EquipmentGameLinkResolver, EquipmentKeyOpener, EquipmentKeySealer,
-    HentaiVerseListingUrlValidator, Keyring, build_keyring,
+    ConsignmentReservationCrypto, EquipmentGameLinkResolver, EquipmentKeyOpener,
+    EquipmentKeySealer, HentaiVerseListingUrlValidator, Keyring, build_keyring,
+    consignment_reservation_crypto,
 };
 use auction_observability::ProcessMetrics;
 use auction_observability::{
     HeartbeatHealthReader, HeartbeatPublisher, HeartbeatPublisherConfig, HeartbeatReadinessFuture,
     HeartbeatStore, ProcessRole, ServiceName,
 };
-use auction_storage::{DatabaseCompetitionCommands, DatabaseStore};
+use auction_storage::{
+    DatabaseCompetitionCommands, DatabaseStore, DepositRepository, DepositSettings,
+};
 use auction_time::Timestamp;
 use uuid::Uuid;
 
@@ -145,6 +149,63 @@ fn equipment_keyring(config: &AppConfig) -> anyhow::Result<Option<Arc<Keyring>>>
     .context("Public 装备数据密钥配置无效")
 }
 
+fn credential_keyring(config: &AppConfig) -> anyhow::Result<Option<Arc<Keyring>>> {
+    build_keyring(
+        DataKeyDomain::Credential,
+        config.data_key_current(DataKeyDomain::Credential),
+        config
+            .data_key_previous(DataKeyDomain::Credential)
+            .iter()
+            .map(|key| (key.id(), key.material())),
+    )
+    .context("Public 凭据数据密钥配置无效")
+}
+
+/// 寄售激活时加载预约码所需的凭据域密钥环；未激活时不读取密钥，激活后缺失即拒绝启动。
+fn reservation_crypto(
+    config: &AppConfig,
+    activation: ConsignmentActivation,
+) -> anyhow::Result<Option<Arc<ConsignmentReservationCrypto>>> {
+    let enabled = activation == ConsignmentActivation::Enabled;
+    let keyring = if enabled { credential_keyring(config)? } else { None };
+    consignment_reservation_crypto(enabled, keyring).map_err(anyhow::Error::from)
+}
+
+struct DepositAssembly {
+    enabled: bool,
+    read: Option<Arc<dyn DepositRead>>,
+    commands: Option<Arc<DepositCommandService>>,
+}
+
+/// 构造 v2 收件端口；存储不回退硬编码费率、价格边界、额度或预约有效期。
+fn configure_deposit(
+    config: &ConsignmentConfig,
+    activation: ConsignmentActivation,
+    store: Option<Arc<DatabaseStore>>,
+    crypto: Option<Arc<ConsignmentReservationCrypto>>,
+) -> anyhow::Result<DepositAssembly> {
+    let enabled = activation == ConsignmentActivation::Enabled;
+    let Some(store) = store.filter(|_store| enabled) else {
+        return Ok(DepositAssembly { enabled, read: None, commands: None });
+    };
+    let crypto = crypto.ok_or_else(|| anyhow::anyhow!("寄售已启用，但预约码加密能力不可用"))?;
+    let settings = DepositSettings::with_standard_price_bounds(
+        config.fee_bps(),
+        config.reservation_ttl_hours(),
+        config.max_open_per_user(),
+    )
+    .context("寄售收件设置无效")?;
+    let repository = Arc::new(DepositRepository::new((*store).clone(), crypto, settings));
+    let commands = Arc::new(DepositCommandService::new(
+        repository.clone(),
+        repository.clone(),
+        repository.clone(),
+        repository.clone(),
+        repository.clone(),
+    ));
+    Ok(DepositAssembly { enabled, read: Some(repository), commands: Some(commands) })
+}
+
 struct ConsignmentCredentials {
     sealer: Arc<dyn EquipmentKeySealerPort>,
     replay_crypto: Arc<dyn RegistrationReplayCrypto>,
@@ -221,6 +282,7 @@ pub(super) async fn configure_state(
 )> {
     let security = config::configure_security(config)?;
     let Some(database_url) = config.database_url() else {
+        // 骨架模式（未配置数据库）不构造收件端口，也就不要求凭据域密钥：v2 能力返回不可用。
         let state = PublicApiState::new(
             None, None, None, None, None, None, None, None, None, None, None, None, None, None,
             security,
@@ -228,8 +290,21 @@ pub(super) async fn configure_state(
         .with_runtime_switch_snapshot(switches);
         let consignment =
             configure_consignment::<DatabaseStore>(&config.consignment, activation, None, None)?;
-        return Ok((state.with_consignment(consignment), None, None, None));
+        let deposit = configure_deposit(&config.consignment, activation, None, None)?;
+        return Ok((
+            state.with_consignment(consignment).with_deposit(
+                deposit.enabled,
+                deposit.read,
+                deposit.commands,
+            ),
+            None,
+            None,
+            None,
+        ));
     };
+    // 不变量 7：凭据域密钥只用于预约码信封；配置了数据库且寄售激活时缺失或无效即启动失败，
+    // 不回显密钥材料。
+    let deposit_crypto = reservation_crypto(config, activation)?;
 
     // 审计失败按类别向共享影子框架记样本；进程级安装一次。
     auction_storage::install_audit_shadow_recorder(metrics.shadow());
@@ -395,11 +470,21 @@ pub(super) async fn configure_state(
     .with_readiness(readiness);
     let consignment =
         configure_consignment(&config.consignment, activation, Some(&store), credentials)?;
+    let deposit = configure_deposit(
+        &config.consignment,
+        activation,
+        Some(Arc::clone(&store)),
+        deposit_crypto,
+    )?;
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "发布 Public ready 心跳失败");
     }
     Ok((
-        state.with_consignment(consignment),
+        state.with_consignment(consignment).with_deposit(
+            deposit.enabled,
+            deposit.read,
+            deposit.commands,
+        ),
         Some(heartbeat),
         Some(realtime_relay),
         Some([runtime_switch_task, mail_template_task]),

@@ -13,7 +13,10 @@ use auction_application::scheduling::RecurringSchedule;
 use auction_application::settlement::{
     SettlementFulfillmentCustodyReader, SettlementFulfillmentEvidenceReader,
 };
-use auction_config::{AppConfig, StandardCronSchedule};
+use auction_config::{
+    AppConfig, CONSIGNMENT_COMPLETE, ConsignmentActivation, StandardCronSchedule,
+    consignment_activation,
+};
 use auction_integrations::mooglemail::{
     MoogleMailClient, MoogleMailClientConfig, MoogleMailGateway, MoogleMailWorld,
 };
@@ -25,6 +28,7 @@ use url::Url;
 use super::SystemClock;
 use super::fulfillment::MoogleMailFulfillmentEvidenceReader;
 
+pub(super) mod consignment;
 mod credentials;
 mod diagnostics;
 mod mapping;
@@ -136,6 +140,15 @@ pub(super) async fn configure_mail_poll(
             mail_scan: Arc::clone(&mail_scan_observer),
             switches: switches.clone(),
             external_metrics: Arc::clone(&external_metrics),
+            consignment_activated: matches!(
+                consignment_activation(
+                    config.consignment.enabled(),
+                    CONSIGNMENT_COMPLETE,
+                    cfg!(feature = "consignment-dev-preview"),
+                    cfg!(debug_assertions),
+                ),
+                Ok(ConsignmentActivation::Enabled)
+            ),
         },
     )
     .await?;

@@ -251,6 +251,7 @@ where
             store: Arc::clone(&runtime.store),
             gateway: Arc::clone(&runtime.gateway),
             processor: runtime.processor.clone(),
+            consignment: runtime.consignment.clone(),
             diagnostics: runtime.diagnostics.clone(),
             progress_observer: runtime.progress_observer.clone(),
             clock: Arc::clone(&worker.clock),
@@ -287,6 +288,7 @@ pub(super) struct MailPollProcessContext<C> {
     pub(super) store: Arc<dyn MailPollStore>,
     pub(super) gateway: Arc<dyn MailPollGateway>,
     pub(super) processor: Option<Arc<dyn MailProcessor>>,
+    pub(super) consignment: Option<Arc<auction_application::mail::ConsignmentIngressService>>,
     pub(super) diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
     pub(super) progress_observer:
         Option<Arc<dyn auction_application::mail::MailPollProgressObserver>>,

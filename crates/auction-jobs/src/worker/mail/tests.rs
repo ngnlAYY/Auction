@@ -250,6 +250,7 @@ fn message(external_mail_id: &str) -> MailPollFetchedMessage {
         cod: 0,
         returnable: false,
         claimable: false,
+        consignment_candidate: None,
         business: None,
     }
 }

@@ -2,6 +2,7 @@
 
 mod metrics;
 pub(in crate::worker::mail) mod observation;
+pub(crate) mod quarantine;
 mod runner;
 pub(in crate::worker::mail) mod sweep;
 

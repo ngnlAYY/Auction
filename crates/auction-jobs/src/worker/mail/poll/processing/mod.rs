@@ -15,6 +15,7 @@ use super::cycle::MailPollProcessContext;
 use crate::worker::diagnostics as worker_diagnostics;
 
 mod business;
+mod consignment;
 mod diagnostics;
 mod execute;
 mod fetch;
