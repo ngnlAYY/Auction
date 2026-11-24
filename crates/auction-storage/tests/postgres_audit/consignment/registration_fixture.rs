@@ -1,0 +1,1 @@
+../../postgres/consignment/registration_fixture.rs

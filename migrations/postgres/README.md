@@ -13,7 +13,7 @@
 5. **并发安全**：修改被运行中进程写入的表时，先 `LOCK TABLE … IN SHARE ROW EXCLUSIVE MODE` 等方式阻止并发写，再检查与改写。迁移本身只在停机门禁下执行。
 6. **约束在数据库层强制**：状态闭集、金额范围、互斥字段、只追加（触发器）等规则写成 CHECK、唯一约束或触发器，不只依赖应用代码。
 7. **同步更新**：每次新增迁移都把[ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json)的 `database_schema_version` 更新为新的最高版本（否则 `auction-cli db inventory`、`db retention-dry-run` 与 `db retention-purge` 拒绝运行）；新增表还须加入对应数据族；同步[docs/contracts/database.md](../../docs/contracts/database.md)。
-8. **运行账号授权**：迁移 `000081` 起 Public/Admin/Worker 共用的 `auction_runtime` 只有读取面与显式写入面，权限矩阵见[docs/contracts/database.md#数据库账号与权限](../../docs/contracts/database.md#数据库账号与权限)。owner 之后新建的表默认只获得 `SELECT`（序列 `USAGE`/`SELECT`），因此**新增表或新增写入面的迁移必须按该矩阵显式 `GRANT`**，授权对象固定为 `auction_runtime`。新增可变表还必须加入 `public.apply_auction_runtime_privileges()` 的可变表列表并重新执行该函数，否则 `pg_restore --no-owner` 后运行账号只有默认 `SELECT`。
+8. **运行账号授权**：迁移 `000081` 起 Public/Admin/Worker 共用的 `auction_runtime` 只有读取面与显式写入面，权限矩阵见[docs/contracts/database.md#数据库账号与权限](../../docs/contracts/database.md#数据库账号与权限)。owner 之后新建的表默认只获得 `SELECT`（序列 `USAGE`/`SELECT`），因此**新增表或新增写入面的迁移必须按该矩阵显式 `GRANT`**，授权对象固定为 `auction_runtime`。新增写入面还必须加入 `public.apply_auction_runtime_privileges()` 并重新执行该函数。普通可变表加入整表授权列表；按列控制的投影在统一撤权并恢复 `SELECT` 后单独授权。恢复不带原 ACL 时靠该函数重建写入面。
 9. **部署顺序**：迁移若要求旧 Worker 先停止（例如新增发送证明字段），在文件注释中写明；分体部署的 `service restart` 与合并部署的停服迁移都满足这一点。
 10. **兼容登记**：075 起每个文件在自身事务末尾恰好登记本版本一次；规范与默认 breaking 规则见下节，CI 静态门禁强制。
 
@@ -49,7 +49,7 @@ VALUES (76, 'breaking');
 
 ## 索引
 
-当前 head 为 `000131`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。
+当前 head 为 `000133`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。
 
 | 版本 | 主题 |
 | --- | --- |
@@ -184,3 +184,5 @@ VALUES (76, 'breaking');
 | 000129 | 新建 buyer_blacklist recovery action 必须有理由，保留历史 NULL 理由；登记 breaking |
 | 000130 | `cod_returned` disposition 绑定同一 recovery 的付款 Send 投递与 fence，身份引用写入后不可改写；登记 breaking |
 | 000131 | 资金来源累计 issue/return 由来源行原子计数并受冻结额度约束，已使用来源金额不可修改；运行账号仅可列级 INSERT 来源，不可写累计计数器，权限重放保持该限制，入口每次执行都收回授权链各函数的执行权；复合外键绑定补偿冲正的 recovery、auction 与 world，历史不一致时失败关闭；登记 breaking |
+| 000132 | 一口价挂单基础：新增挂单、只追加命令/事件/快照/基线/碰撞、可退休登记信封、重放比较密钥及持久解析工作与许可；复合外键绑定当前快照，延迟约束保护首写基线和同版事件；新投影按列授权，解析单例初始化为关闭；兼容与恢复待真实 PG 验证，登记 breaking |
+| 000133 | 新增装备世界与规范编号表达式索引、lot 装备 ID 与 lot ID 索引，供寄售历史、碰撞与有效活动额度读取，登记 compatible |

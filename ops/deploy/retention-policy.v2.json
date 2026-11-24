@@ -3,7 +3,7 @@
   "format": "auction-retention-policy.v2",
   "policy_id": "auction-retention-policy",
   "version": 2,
-  "database_schema_version": 131,
+  "database_schema_version": 133,
   "authority": "user-decisions-7-23-25-26-29-31",
   "inventory_authorizes_mutation": false,
   "deletion_requires_dry_run_and_operator_approval": true,
@@ -255,6 +255,32 @@
       ]
     },
     {
+      "dataset_family": "consignment_history",
+      "feature_owner": "consignment",
+      "policy_state": "retain_forever",
+      "candidate_class": "none",
+      "mutation_authorized": false,
+      "tables": [
+        "consignment_listings",
+        "consignment_commands",
+        "consignment_events",
+        "consignment_snapshots",
+        "consignment_listing_lot_baselines",
+        "consignment_listing_auction_conflicts"
+      ]
+    },
+    {
+      "dataset_family": "consignment_key_material",
+      "feature_owner": "consignment",
+      "policy_state": "retain_forever",
+      "candidate_class": "none",
+      "mutation_authorized": false,
+      "tables": [
+        "consignment_registration_secrets",
+        "consignment_replay_keys"
+      ]
+    },
+    {
       "dataset_family": "lot_watch",
       "feature_owner": "lotwatch",
       "policy_state": "retain_forever",
@@ -332,7 +358,9 @@
         "mail_poll_pending_reads",
         "mailbox_sweep_cursors",
         "auction_intake_targets",
-        "mail_runtime_generation"
+        "mail_runtime_generation",
+        "consignment_lookup_work",
+        "consignment_lookup_control"
       ]
     },
     {
