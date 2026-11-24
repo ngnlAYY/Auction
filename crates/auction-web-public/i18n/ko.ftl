@@ -753,3 +753,26 @@ consignment-listing-limit-reached = 진행 중인 판매 수가 한도에 도달
 consignment-invalid-price = 유효한 정수 판매가를 입력해 주세요.
 consignment-invalid-equipment-url = 장비 ID가 0으로 시작하지 않고 부호가 없는 양의 십진 정수인 장비 링크를 입력해 주세요.
 consignment-world-unavailable = 이 월드에서는 현재 새 등록을 받지 않습니다.
+
+# 고정가 등록 · 본인 배송 안내
+consignment-deposit-instructions = 배송 안내
+consignment-deposit-none = 유효한 배송 예약이 없습니다.
+consignment-deposit-not-sent = 현재 예약 코드가 있을 때만 장비를 보내세요. 코드를 공유하지 마세요.
+consignment-deposit-issue = 배송 안내 만들기
+consignment-deposit-active-title = 이 장비 보내기
+consignment-deposit-refresh = 안내 새로 고침
+consignment-deposit-world = 수신 월드
+consignment-deposit-bot = 수신 Bot
+consignment-deposit-subject = 제목
+consignment-deposit-body = 예약 코드
+consignment-deposit-expires = 예약 만료
+consignment-deposit-copy = 코드 복사
+consignment-deposit-copied = 예약 코드를 복사했습니다.
+consignment-deposit-copy-failed = 복사하지 못했습니다. 코드를 직접 선택하세요.
+consignment-deposit-reissue = 배송 안내 교체
+consignment-deposit-invalid-request = 배송 요청이 유효하지 않습니다.
+consignment-deposit-mail-unavailable = 메일함이 현재 위탁 메일을 받을 수 없습니다.
+consignment-deposit-participant-ineligible = 이 장비를 보낼 자격이 없습니다.
+consignment-deposit-bot-party = Bot 계정은 위탁 거래 당사자가 될 수 없습니다.
+consignment-deposit-season-closed = 위탁 시즌이 종료되었습니다.
+consignment-deposit-action-not-allowed = 현재 상태에서는 이 작업을 허용하지 않습니다.

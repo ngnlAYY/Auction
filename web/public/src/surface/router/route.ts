@@ -61,6 +61,11 @@ export const PUBLIC_ROUTES: readonly RouteDefinition[] = [
   { name: "ConsignmentDetail", pattern: "/consignment/listings/:listing_id" },
   { name: "ConsignmentRegistration", pattern: "/consignment/new" },
   { name: "ConsignmentMine", pattern: "/consignment/me" },
+  // Solid 版专属的本人寄件指引；必须先于通用挂单详情匹配。
+  {
+    name: "ConsignmentDepositInstructions",
+    pattern: "/consignment/me/:listing_id/deposit-instructions",
+  },
   { name: "ConsignmentOwnedDetail", pattern: "/consignment/me/:listing_id" },
 ];
 // Dioxus 的 `/:..segments` 未匹配路由由共享路由器直接返回 not-found，不重复登记 catch-all。
@@ -149,6 +154,9 @@ export const PUBLIC_PAGES: Readonly<Record<string, RoutePage>> = {
   ),
   ConsignmentMine: lazyPage(() =>
     import("../consignment/owned").then((module) => module.MyListings),
+  ),
+  ConsignmentDepositInstructions: lazyPage(() =>
+    import("../consignment/deposit-instructions").then((module) => module.DepositInstructionsPage),
   ),
   ConsignmentOwnedDetail: lazyPage(() =>
     import("../consignment/owned-detail").then((module) => module.OwnedDetail),

@@ -15,6 +15,7 @@ export type AdminRouteName =
   | "AuctionOverview"
   | "Consignment"
   | "ConsignmentListing"
+  | "ConsignmentQuarantine"
   | "Mails"
   | "MailOverview"
   | "Cookies"
@@ -50,6 +51,8 @@ export const ADMIN_ROUTES: readonly RouteDefinition[] = [
   { name: "AuctionOverview", pattern: "/auction" },
   { name: "Consignment", pattern: "/consignment" },
   { name: "ConsignmentListing", pattern: "/consignment/listings/:listing_id" },
+  // Solid 版专属的邮件隔离详情；运营人员可按隔离 ID 直接打开。
+  { name: "ConsignmentQuarantine", pattern: "/consignment/deposits/:quarantine_id" },
   { name: "Mails", pattern: "/mails" },
   { name: "MailOverview", pattern: "/mail" },
   { name: "Cookies", pattern: "/cookies" },

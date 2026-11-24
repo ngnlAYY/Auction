@@ -194,6 +194,13 @@ function ListingProjection(props: { readonly listing: OwnedListing }): JSX.Eleme
         {(reason) => <p>{t(listingReasonKey(reason()))}</p>}
       </Show>
       <Show when={lastFailure()}>{(reason) => <p>{t(listingLookupReasonKey(reason()))}</p>}</Show>
+      <Show
+        when={props.listing.mode === "consigned" && props.listing.view.kind === "awaiting_deposit"}
+      >
+        <Link href={`/consignment/me/${props.listing.listing_id}/deposit-instructions`}>
+          {t("consignment-deposit-notice")}
+        </Link>
+      </Show>
       <Show when={props.listing.view.kind === "awaiting_deposit"}>
         <p>{t("consignment-mail-unavailable")}</p>
       </Show>

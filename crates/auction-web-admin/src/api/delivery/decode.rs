@@ -207,6 +207,8 @@ fn valid_origin_kind(value: &str) -> bool {
             | "lot_watch"
             | "seller_summary"
             | "season_reminder"
+            | "consignment_notice"
+            | "consignment_disposition"
     )
 }
 
@@ -326,6 +328,20 @@ fn valid_state_fields(
             })
     };
     let claimed_has_attempt = claimed_at.is_none() || value.attempt_count > 0;
+
+    // 寄售处置链把起写许可记在 `mail_disposition_write_starts`，不伪造 sending 事实：
+    // Take/Return 只从 claimed 直接进入 succeeded/manual_reconcile。该来源在任何状态都不得有
+    // sending_at；处置链不会产生的 pending/sending/failed 也一律失败关闭。
+    if value.origin_kind == "consignment_disposition" {
+        return valid_consignment_disposition_state(
+            value,
+            created_at,
+            updated_at,
+            claimed_at,
+            sending_at,
+            completed_at,
+        );
+    }
 
     // 专用分支按存储层 valid_snapshot 的顺序选定，匹配后一起校验时间链和状态。
     // 准备失败须保留领取与完成事实，并优先校验这一终态以拒绝相冲突的原因码。
@@ -454,6 +470,70 @@ fn valid_state_fields(
     }
 }
 
+/// 寄售处置投递的专属状态与时间线：没有发送围栏，只允许 `prepared/claimed/succeeded/manual_reconcile`。
+fn valid_consignment_disposition_state(
+    value: &AdminDeliveryResponse,
+    created_at: Timestamp,
+    updated_at: Timestamp,
+    claimed_at: Option<Timestamp>,
+    sending_at: Option<Timestamp>,
+    completed_at: Option<Timestamp>,
+) -> bool {
+    // 退役/抑制标记只允许出现在 failed，本来源没有 failed；出现即不是处置链写出的形状。
+    if sending_at.is_some()
+        || value.retirement_reason.is_some()
+        || value.suppression_reason.is_some()
+    {
+        return false;
+    }
+    let has_lease = value.lease_expires_at.is_some();
+    let claimed_valid = claimed_at.is_some_and(|claimed| {
+        !is_zero_delivery_time(claimed) && claimed >= created_at && claimed <= updated_at
+    });
+    let completed_after_claim = completed_at.is_some_and(|completed| {
+        !is_zero_delivery_time(completed)
+            && claimed_at.is_some_and(|claimed| completed >= claimed)
+            && completed <= updated_at
+    });
+    match value.status.as_str() {
+        "prepared" => {
+            !has_lease
+                && claimed_at.is_none()
+                && completed_at.is_none()
+                && value.external_reference.is_none()
+                && value.failure_code.is_none()
+        }
+        "claimed" => {
+            has_lease
+                && claimed_valid
+                && completed_at.is_none()
+                && value.external_reference.is_none()
+                && value.failure_code.is_none()
+                && value.fencing_version > 0
+                && value.attempt_count > 0
+        }
+        "succeeded" => {
+            !has_lease
+                && claimed_valid
+                && completed_after_claim
+                && value.external_reference.as_deref().is_some_and(valid_trimmed_text)
+                && value.failure_code.is_none()
+                && value.fencing_version > 0
+                && value.attempt_count > 0
+        }
+        "manual_reconcile" => {
+            !has_lease
+                && claimed_valid
+                && completed_after_claim
+                && value.external_reference.is_none()
+                && value.failure_code.as_deref().is_some_and(valid_trimmed_text)
+                && value.fencing_version > 0
+                && value.attempt_count > 0
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod origin_kind_tests {
     use super::valid_origin_kind;
@@ -472,6 +552,7 @@ mod origin_kind_tests {
             "lot_watch",
             "seller_summary",
             "season_reminder",
+            "consignment_notice",
         ] {
             assert!(valid_origin_kind(kind), "{kind} 必须被接受");
         }

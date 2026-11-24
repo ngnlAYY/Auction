@@ -1,11 +1,7 @@
 // Admin 寄售行为测试的纯内存挂单与错误回执。
 
 import type { AdminListing, AdminListingDetail } from "@auction/contracts/dto/admin/consignment";
-import type {
-  CommandReceipt,
-  EquipmentView,
-  OwnedListing,
-} from "@auction/contracts/dto/public/consignment";
+import type { EquipmentView, OwnedListing } from "@auction/contracts/dto/public/consignment";
 
 import type { Reply } from "../../api/api-request-fixture";
 
@@ -19,8 +15,8 @@ export const COMMAND_ID = "10000000-0000-4000-8000-000000000003";
 export const LISTINGS = "/api/v1/admin/consignment/listings";
 /** 当前挂单的详情路径。 */
 export const DETAIL = `${LISTINGS}/${LISTING_ID}`;
-/** 当前挂单的下架路径。 */
-export const DELIST = `${DETAIL}/delist`;
+/** 当前挂单的 v2 下架/止售路径。 */
+export const DELIST = `/api/v2/admin/consignment/listings/${LISTING_ID}/delist`;
 /** 浏览器中的挂单详情路径。 */
 export const DETAIL_PAGE = `/consignment/listings/${LISTING_ID}`;
 /** 购买前可交易的脱敏装备白名单。 */
@@ -123,15 +119,52 @@ export function failure(status: number, code: string): Reply {
   };
 }
 
-/** 下架已经提交时的安全回执。 */
-export function delistReceipt(commandId: string, version = 4): CommandReceipt {
+/** 未代管件下架已经提交时的安全回执。 */
+export function delistReceipt(
+  commandId: string,
+  version = 4,
+): {
+  schema_version: 2;
+  operation: "admin_delist";
+  disposition: "closed";
+  command_id: string;
+  listing_id: string;
+  listing_version: number;
+  state: "closed";
+} {
   return {
+    schema_version: 2,
     command_id: commandId,
     operation: "admin_delist",
+    disposition: "closed",
     listing_id: LISTING_ID,
     listing_version: version,
     state: "closed",
-    disposition: "closed",
-    price: null,
+  };
+}
+
+/** 代管件设置运营止售时的安全回执。 */
+export function holdSetReceipt(
+  commandId: string,
+  version = 4,
+): {
+  schema_version: 2;
+  operation: "admin_delist";
+  disposition: "hold_set";
+  command_id: string;
+  listing_id: string;
+  listing_version: number;
+  state: "held_off_market";
+  hold_id: string;
+} {
+  return {
+    schema_version: 2,
+    command_id: commandId,
+    operation: "admin_delist",
+    disposition: "hold_set",
+    listing_id: LISTING_ID,
+    listing_version: version,
+    state: "held_off_market",
+    hold_id: "10000000-0000-4000-8000-000000000004",
   };
 }

@@ -64,8 +64,12 @@ test("delivery_origin_closed_set_covers_player_notifications", () => {
     "lot_watch",
     "seller_summary",
     "season_reminder",
+    "consignment_notice",
+    "consignment_disposition",
   ]) {
-    const candidate = delivery();
+    // 寄售处置没有发送围栏，通用夹具的 sending_at 对该来源是不可能形状。
+    const candidate =
+      kind === "consignment_disposition" ? consignmentDisposition("manual_reconcile") : delivery();
     candidate.origin_kind = kind;
     expect(deliveryProjectionDecodes(candidate)).toBe(true);
   }
@@ -74,6 +78,88 @@ test("delivery_origin_closed_set_covers_player_notifications", () => {
     candidate.origin_kind = kind;
     expect(deliveryProjectionDecodes(candidate)).toBe(false);
   }
+});
+
+test("delivery_list_decodes_consignment_notice_origin", () => {
+  const noticeId = "5b0f3a2e-7d5c-4f1a-9b8c-1d2e3f405162";
+  const row = delivery();
+  row.origin_kind = "consignment_notice";
+  row.origin_id = `consignment_notice:${noticeId}`;
+  row.recipient = "FakeSeller";
+  row.status = "pending";
+  row.template = "consignment_season_notice";
+  row.category = "settlement";
+  row.world = "isekai";
+  row.fencing_version = 0;
+  row.attempt_count = 0;
+  row.claimed_at = null;
+  row.sending_at = null;
+  row.completed_at = null;
+  row.failure_code = null;
+  const envelope = requireDecoded(
+    decode(strictDeliveryEnvelopeSchema(AdminDeliveryListResponseSchema), {
+      code: "ok",
+      message: "loaded",
+      data: {
+        deliveries: [row],
+        pagination: { page: 1, page_size: 10, total: 1 },
+      },
+    }),
+    "consignment notice list",
+  );
+  const { deliveries } = requireDecoded(
+    decodeDeliveryList(envelope, 1, 10),
+    "consignment notice list",
+  );
+  expect(deliveries[0]?.origin_kind).toBe("consignment_notice");
+});
+
+function consignmentDisposition(status: string) {
+  const row = structuredClone(delivery());
+  row.origin_kind = "consignment_disposition";
+  row.origin_id = "consignment:fake-decision:fake-work";
+  row.recipient = "FakeBot";
+  row.template = "consignment_take";
+  row.category = null;
+  row.status = status;
+  row.created_at = "2026-11-06T10:00:00.000000Z";
+  row.updated_at = "2026-11-06T10:00:05.000000Z";
+  row.lease_expires_at = null;
+  row.fencing_version = 0;
+  row.attempt_count = 0;
+  row.claimed_at = null;
+  row.sending_at = null;
+  row.completed_at = null;
+  row.external_reference = null;
+  row.failure_code = null;
+  if (status !== "prepared") {
+    row.claimed_at = "2026-11-06T10:00:01.000000Z";
+    row.fencing_version = 1;
+    row.attempt_count = 1;
+  }
+  if (status === "claimed") {
+    row.lease_expires_at = "2026-11-06T10:05:00.000000Z";
+  } else if (status === "succeeded") {
+    row.completed_at = "2026-11-06T10:00:05.000000Z";
+    row.external_reference = "ab".repeat(32);
+  } else if (status === "manual_reconcile") {
+    row.completed_at = "2026-11-06T10:00:05.000000Z";
+    row.failure_code = "remote_write_unknown";
+  }
+  return row;
+}
+
+test("delivery_decodes_consignment_disposition_without_sending_fence", () => {
+  for (const status of ["prepared", "claimed", "succeeded", "manual_reconcile"]) {
+    expect(checkBeforeSendProjection(consignmentDisposition(status))).toEqual({
+      list: true,
+      detail: true,
+    });
+  }
+
+  const sent = consignmentDisposition("succeeded");
+  sent.sending_at = "2026-11-06T10:00:02.000000Z";
+  expect(checkBeforeSendProjection(sent)).toEqual({ list: false, detail: false });
 });
 
 test("accepts_complete_detail", () => {

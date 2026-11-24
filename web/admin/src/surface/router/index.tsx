@@ -241,6 +241,9 @@ export const ADMIN_PAGES: Readonly<Record<string, RoutePage>> = {
   AuctionOverview: pageComponent(AuctionOverview),
   Consignment: consignmentPage,
   ConsignmentListing: consignmentListingPage,
+  ConsignmentQuarantine: lazyPage(() =>
+    import("../consignment/quarantine").then(({ quarantinePage }) => quarantinePage),
+  ),
   Mails: lazyPage(() => import("../mail/page").then(({ page }) => page)),
   MailOverview: pageComponent(MailOverview),
   Cookies: lazyPage(() => import("../credentials/page").then(({ page }) => page)),

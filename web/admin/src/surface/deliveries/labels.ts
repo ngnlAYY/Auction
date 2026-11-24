@@ -159,6 +159,10 @@ export function deliveryDisplayType(originKind: string): string {
       return t("delivery-type-seller-summary");
     case "season_reminder":
       return t("delivery-type-season-reminder");
+    case "consignment_notice":
+      return t("delivery-type-consignment-notice");
+    case "consignment_disposition":
+      return t("delivery-type-consignment-disposition");
     default:
       return originKind;
   }

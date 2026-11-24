@@ -13,8 +13,7 @@ import { fetchAdminListing } from "../../api/consignment/detail";
 import { useAdminSessionHost } from "../auth/shell";
 import { PendingCommandPanel } from "../pending/panel";
 import { advanceCommandReload, createCommandReload, usePendingCommands } from "../pending/sources";
-import type { AdminActionFeedback } from "../presentation";
-import { DelistAction } from "./actions";
+import { DelistAction, type DelistFeedback } from "./actions";
 import { ListingDetailSections } from "./detail-sections";
 import { consignmentErrorMessage } from "./presentation";
 
@@ -32,7 +31,7 @@ function Detail(props: { readonly listingId: string }): JSX.Element {
   const listingId = untrack(() => props.listingId);
   const refresh = createCommandReload();
   const commands = usePendingCommands(refresh, (entity) => entity === `consignment:${listingId}`);
-  const feedback = createCell<AdminActionFeedback | null>(null);
+  const feedback = createCell<DelistFeedback | null>(null);
   const detail = createTaskResource(
     () => refresh(),
     async (generation, context) => ({
@@ -73,8 +72,21 @@ function Detail(props: { readonly listingId: string }): JSX.Element {
             const current = notice();
             return current.kind === "error" ? current.code : null;
           };
+          const disposition = () => {
+            const current = notice();
+            return current.kind === "success" ? current.disposition : null;
+          };
           return (
-            <Show when={error()} fallback={<p role="status">{t("consignment-closed")}</p>}>
+            <Show
+              when={error()}
+              fallback={
+                <p role="status">
+                  {disposition() === "hold_set"
+                    ? t("consignment-hold-set")
+                    : t("consignment-closed")}
+                </p>
+              }
+            >
               {(code) => (
                 <p role="alert" class="action-feedback action-feedback--error">
                   {consignmentErrorMessage(code())}

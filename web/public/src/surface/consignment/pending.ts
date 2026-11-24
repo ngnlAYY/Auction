@@ -4,6 +4,8 @@ import type {
   CommandReceipt,
   StoredCommandResult,
 } from "@auction/contracts/dto/public/consignment";
+import type { DepositReservationReceipt } from "@auction/contracts/dto/public/consignment/deposit";
+import type { WithdrawReceiptV2 } from "@auction/contracts/dto/public/consignment/listing-v2";
 import {
   ConsignmentUuidSchema,
   ExternalEquipmentIdSchema,
@@ -24,7 +26,12 @@ import { createTaskScope } from "@auction/web-shared/reactive/tasks";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { createEffect, untrack, useContext } from "solid-js";
 import * as v from "valibot";
-
+import { commandErrorOutcomeUncertain } from "../../api/commands";
+import {
+  depositWriteRejected,
+  issueDepositReservation,
+  withdrawDepositListing,
+} from "../../api/consignment-deposit";
 import { fetchConsignmentCommand } from "../../api/consignment-owned";
 import type { ConsignmentPrivateError } from "../../api/consignment-private";
 import {
@@ -61,6 +68,8 @@ const PENDING = v.union([
     price: ListingPriceSchema,
   }),
   strictStruct({ ...IDENTITY, ...TARGET, operation: v.literal("withdraw") }),
+  strictStruct({ ...IDENTITY, ...TARGET, operation: v.literal("issue_reservation") }),
+  strictStruct({ ...IDENTITY, ...TARGET, operation: v.literal("withdraw_deposit") }),
 ]);
 
 type Pending = v.InferOutput<typeof PENDING>;
@@ -68,7 +77,10 @@ type InputOf<T> = T extends Pending ? Omit<T, keyof typeof IDENTITY> : never;
 /** 写入队列接收固定语义字段；登记链接经单独的一次性参数传入。 */
 export type ConsignmentIntent = InputOf<Pending>;
 /** 已确认的写入结果；账本拒绝沿用原有 HTTP 状态和安全码。 */
-export type ConsignmentOutcome = Result<CommandReceipt, ConsignmentPrivateError>;
+export type ConsignmentOutcome = Result<
+  CommandReceipt | DepositReservationReceipt | WithdrawReceiptV2,
+  ConsignmentPrivateError
+>;
 
 const STORAGE_FAILURE = { status: 0, code: "pending_storage_unavailable" };
 const INVALID_RECEIPT = { status: 200, code: "invalid_response" };
@@ -96,6 +108,10 @@ function matchesEquipment(record: Pending, url: string | null): boolean {
 }
 
 function originalOutcome(record: Pending, result: StoredCommandResult): ConsignmentOutcome | null {
+  if (record.operation === "issue_reservation" || record.operation === "withdraw_deposit") {
+    // 4W 尚未定义 v2 回执查询；调用方只保留原命令并原样重送。
+    return null;
+  }
   const { receipt } = result;
   if (receipt.operation !== record.operation) return null;
   if (receipt.disposition === "rejected") {
@@ -128,6 +144,24 @@ function send(
         price: record.price,
         expected_fee_bps: record.expected_fee_bps,
       },
+      signal,
+      onSessionGuardRejected,
+    );
+  }
+  if (operation === "issue_reservation") {
+    return issueDepositReservation(
+      expected_user_id,
+      record.listing_id,
+      { command_id, expected_version: record.expected_version },
+      signal,
+      onSessionGuardRejected,
+    );
+  }
+  if (operation === "withdraw_deposit") {
+    return withdrawDepositListing(
+      expected_user_id,
+      record.listing_id,
+      { command_id, expected_version: record.expected_version },
       signal,
       onSessionGuardRejected,
     );
@@ -196,6 +230,11 @@ export function useConsignmentPending(
   function check() {
     const record = pending.peek();
     if (record === null || busy.peek() || !tasks.alive() || !untrack(canUse)) return;
+    if (record.operation === "issue_reservation" || record.operation === "withdraw_deposit") {
+      // 没有 v2 回执查询端点；保留原记录并只暴露原样重送。
+      missing.set(true);
+      return;
+    }
     busy.set(true);
     missing.set(false);
     error.set(null);
@@ -233,14 +272,27 @@ export function useConsignmentPending(
       busy.set(false);
       // 不变量 1：前置拒绝只能证明本次重送被拦截，原结果仍需查账本。
       const rejected =
-        !result.ok && !retry && consignmentWriteRejected(record.operation, result.error);
+        !result.ok &&
+        (record.operation === "issue_reservation" || record.operation === "withdraw_deposit"
+          ? depositWriteRejected(record.operation, result.error) &&
+            (!retry || result.error.code !== "command_not_sent")
+          : !retry && consignmentWriteRejected(record.operation, result.error));
       const canDisplay = canApply(result);
       if (rejected) {
         // 会话守卫可立即暂停界面；仍存活的原账号宿主可以结束已确认拒绝的命令。
         finish(result, canDisplay);
       } else if (canDisplay) {
         if (result.ok) finish(result);
-        else error.set(result.error);
+        else {
+          // v2 没有回执查询入口；结果未知时直接开放同一记录的原样重送。
+          if (
+            (record.operation === "issue_reservation" || record.operation === "withdraw_deposit") &&
+            commandErrorOutcomeUncertain(result.error)
+          ) {
+            missing.set(true);
+          }
+          error.set(result.error);
+        }
       }
     });
   }
