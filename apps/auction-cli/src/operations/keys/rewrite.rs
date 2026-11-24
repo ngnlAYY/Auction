@@ -1,7 +1,7 @@
 //! 单个数据密钥域的分页扫描、重新封装与 CAS 写回。
 //!
 //! 不变量：每条信封先用旧 key 解密、以当前 key 重新封装并用新信封再解密核对，`--apply` 时
-//! 才以旧 key ID 作 CAS 条件写回。已提交的改写计数逐条累计在调用方持有的 [`DomainOutcome`]
+//! 才以原信封为 CAS 条件写回。已提交的改写计数逐条累计在调用方持有的 [`DomainOutcome`]
 //! 中，中途失败也不会丢失，调用方据此写部分回执与审计。
 
 use std::{collections::BTreeMap, sync::Arc};
@@ -13,21 +13,54 @@ use auction_application::admin::{
 };
 use auction_application::mail::{MailLoginKey, MailLoginKeyEnvelope};
 use auction_config::DataKeyDomain;
-use auction_domain::{EquipmentId, EquipmentKey, EquipmentKeyEnvelope};
 use auction_integrations::{
-    CredentialSealer, EquipmentKeyOpener, EquipmentKeySealer, Keyring, MoogleMailLoginKeyIssuer,
+    CredentialSealer, EquipmentKeyOpener, Keyring, MoogleMailLoginKeyIssuer,
     MoogleMailLoginKeyReader,
 };
-use auction_storage::DatabaseStore;
+use auction_storage::{DatabaseStore, KeyRotationError, StoredKeyEnvelope};
 use serde::Serialize;
 use uuid::Uuid;
+
+use super::equipment;
 
 /// 单个域的累计结果；`rewritten` 只计已提交的 CAS 写回。
 #[derive(Debug, Default)]
 pub(super) struct DomainOutcome {
     pub(super) scanned: i64,
     pub(super) rewritten: i64,
-    pub(super) from_keys: BTreeMap<String, i64>,
+    pub(super) sources: BTreeMap<&'static str, SourceOutcome>,
+}
+
+/// 单一来源表的计数，计入演练和部分执行的回执。
+#[derive(Debug, Default, Serialize)]
+pub(super) struct SourceOutcome {
+    pub(super) scanned: i64,
+    pub(super) rewritten: i64,
+}
+
+impl DomainOutcome {
+    /// 初始化装备域三处来源，空表也写零计数。
+    pub(super) fn new(domain: DataKeyDomain) -> Self {
+        let mut outcome = Self::default();
+        if domain == DataKeyDomain::Equipment {
+            for source in StoredKeyEnvelope::EQUIPMENT_SOURCES {
+                outcome.sources.entry(source.as_str()).or_default();
+            }
+        }
+        outcome
+    }
+
+    /// 记录一条已进入处理的候选信封。
+    pub(super) fn scanned(&mut self, source: &'static str) {
+        self.scanned += 1;
+        self.sources.entry(source).or_default().scanned += 1;
+    }
+
+    /// 只记录本进程已确认提交的写回。
+    pub(super) fn rewritten(&mut self, source: &'static str) {
+        self.rewritten += 1;
+        self.sources.entry(source).or_default().rewritten += 1;
+    }
 }
 
 /// 重加密中止的阶段；回执与审计只记录这个固定分类，完整原因只出现在 stderr。
@@ -83,7 +116,7 @@ pub(super) async fn reencrypt_domain(
     outcome: &mut DomainOutcome,
 ) -> Result<(), DomainFailure> {
     let pool = store.postgres_pool();
-    let mut after: Option<Uuid> = None;
+    let mut after = None;
     loop {
         let page = auction_storage::scan_key_envelopes(
             pool,
@@ -95,48 +128,47 @@ pub(super) async fn reencrypt_domain(
         .await
         .with_context(|| format!("扫描 {} 域信封失败", domain.as_str()))
         .at(FailureStage::Scan)?;
-        let Some(last) = page.last().map(|row| row.entity_id) else {
+        let Some(last) = page.last().map(StoredKeyEnvelope::cursor) else {
             break;
         };
         for row in page {
-            outcome.scanned += 1;
-            *outcome.from_keys.entry(row.encryption_key_id.clone()).or_default() += 1;
+            let source = row.source().as_str();
+            outcome.scanned(source);
             let rotated = reseal(store, keyring, domain, &row)
                 .await
-                .with_context(|| {
-                    format!(
-                        "{} 域实体 {} 重加密失败（旧 key {}）",
-                        domain.as_str(),
-                        row.entity_id,
-                        row.encryption_key_id
-                    )
-                })
+                .with_context(|| format!("{source} 信封重加密失败"))
                 .at(FailureStage::Reseal)?;
-            if apply {
-                let replaced = auction_storage::replace_key_envelope(
-                    pool,
-                    domain,
-                    row.entity_id,
-                    &row.encryption_key_id,
-                    &rotated,
-                )
-                .await
-                .with_context(|| format!("写入 {} 域重加密信封失败", domain.as_str()))
-                .at(FailureStage::Write)?;
-                if !replaced {
-                    return Err(DomainFailure {
-                        stage: FailureStage::Conflict,
-                        error: anyhow::anyhow!(
-                            "{} 域实体 {} 的信封在重加密期间被并发修改；请重新运行",
-                            domain.as_str(),
-                            row.entity_id
-                        ),
-                    });
+            apply_if_requested(apply, async || {
+                let result = auction_storage::replace_key_envelope(pool, &row, &rotated).await;
+                let replaced = match result {
+                    Err(KeyRotationError::Conflict) => {
+                        result.context(format!("{source} 信封冲突")).at(FailureStage::Conflict)?
+                    }
+                    _ => result
+                        .with_context(|| format!("写入 {source} 重加密信封失败"))
+                        .at(FailureStage::Write)?,
+                };
+                if replaced.was_replaced() {
+                    outcome.rewritten(source);
+                } else if let Some(current) = replaced.current_envelope() {
+                    let opener = EquipmentKeyOpener::new(Arc::clone(keyring));
+                    equipment::verify(&opener, current)
+                        .with_context(|| format!("{source} 并发换钥后的开封复核失败"))
+                        .at(FailureStage::Reseal)?;
                 }
-                outcome.rewritten += 1;
-            }
+                Ok(())
+            })
+            .await?;
         }
         after = Some(last);
+    }
+    if apply && domain == DataKeyDomain::Equipment {
+        let stored = auction_storage::stored_key_ids(pool, domain)
+            .await
+            .context("收口装备域旧钥引用失败")
+            .at(FailureStage::Scan)?;
+        equipment::require_zero_old_references(&stored, keyring.current_id())
+            .at(FailureStage::Conflict)?;
     }
     if domain == DataKeyDomain::UserLogin {
         reencrypt_admin_command_responses(store, keyring, page_size, apply, outcome).await?;
@@ -169,18 +201,13 @@ async fn reencrypt_admin_command_responses(
             break;
         };
         for row in page {
-            outcome.scanned += 1;
-            *outcome.from_keys.entry(row.encryption_key_id.clone()).or_default() += 1;
+            let source = row.source().as_str();
+            outcome.scanned(source);
             let rotated = reseal(store, keyring, DataKeyDomain::UserLogin, &row)
                 .await
-                .with_context(|| {
-                    format!(
-                        "user_login 域 Admin 命令 {} 重加密失败（旧 key {}）",
-                        row.entity_id, row.encryption_key_id
-                    )
-                })
+                .context("Admin 命令响应信封重加密失败")
                 .at(FailureStage::Reseal)?;
-            if apply {
+            apply_if_requested(apply, async || {
                 let replaced = auction_storage::replace_admin_command_key_envelope(
                     pool,
                     row.entity_id,
@@ -194,15 +221,27 @@ async fn reencrypt_admin_command_responses(
                     return Err(DomainFailure {
                         stage: FailureStage::Conflict,
                         error: anyhow::anyhow!(
-                            "user_login 域 Admin 命令 {} 的信封在重加密期间被并发修改；请重新运行",
-                            row.entity_id
+                            "Admin 命令响应信封在重加密期间被并发修改，请重新运行"
                         ),
                     });
                 }
-                outcome.rewritten += 1;
-            }
+                outcome.rewritten(source);
+                Ok(())
+            })
+            .await?;
         }
         after = Some(last);
+    }
+    Ok(())
+}
+
+/// 不变量 7、8：演练不进入实际写入边界，审计只由实际写入流程追加。
+pub(super) async fn apply_if_requested(
+    apply: bool,
+    write: impl AsyncFnOnce() -> Result<(), DomainFailure>,
+) -> Result<(), DomainFailure> {
+    if apply {
+        write().await?;
     }
     Ok(())
 }
@@ -215,33 +254,7 @@ async fn reseal(
     row: &auction_storage::StoredKeyEnvelope,
 ) -> anyhow::Result<auction_storage::RotatedKeyEnvelope> {
     match domain {
-        DataKeyDomain::Equipment => {
-            let opener = EquipmentKeyOpener::new(Arc::clone(keyring));
-            let sealer = EquipmentKeySealer::new(Arc::clone(keyring.current()));
-            let equipment_id = EquipmentId::from_uuid(row.entity_id);
-            let envelope = EquipmentKeyEnvelope::new(
-                row.ciphertext.clone(),
-                row.nonce.clone(),
-                row.encryption_key_id.clone(),
-                row.fingerprint.clone(),
-            )
-            .ok()
-            .context("装备信封结构无效")?;
-            let key = opener.open(equipment_id, &envelope).ok().context("装备 key 解密失败")?;
-            let resealed = sealer.seal(equipment_id, &key).ok().context("装备 key 重新加密失败")?;
-            let reopened =
-                opener.open(equipment_id, &resealed).ok().context("新装备信封验证失败")?;
-            anyhow::ensure!(
-                equipment_bytes(&key)? == equipment_bytes(&reopened)?,
-                "装备 key 重加密后明文不一致"
-            );
-            Ok(auction_storage::RotatedKeyEnvelope {
-                ciphertext: resealed.ciphertext().to_vec(),
-                nonce: resealed.nonce().to_vec(),
-                encryption_key_id: resealed.encryption_key_id().to_owned(),
-                fingerprint: resealed.fingerprint().to_owned(),
-            })
-        }
+        DataKeyDomain::Equipment => equipment::reseal(keyring, row),
         DataKeyDomain::UserLogin => {
             let reader = MoogleMailLoginKeyReader::new(Arc::clone(store), Arc::clone(keyring));
             let issuer = MoogleMailLoginKeyIssuer::new(Arc::clone(keyring.current()));
@@ -315,10 +328,6 @@ async fn reseal(
         }
         DataKeyDomain::MailDiagnostics => anyhow::bail!("mail_diagnostics 不支持数据库重加密"),
     }
-}
-
-fn equipment_bytes(key: &EquipmentKey) -> anyhow::Result<Vec<u8>> {
-    key.with_bytes(<[u8]>::to_vec).ok().context("装备 key 已清理")
 }
 
 fn login_key_bytes(key: &MailLoginKey) -> Vec<u8> {

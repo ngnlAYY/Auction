@@ -12,6 +12,7 @@ pub use control::{
 };
 
 pub use worker::LotWatchPmRuntime;
+pub use worker::consignment;
 pub use worker::{
     ASSET_RECONCILIATION_INTERVAL, ASSET_RECONCILIATION_TIMEOUT, AssetReconciliationRuntime,
     AuctionScheduleRuntimeConfig, AuctionWorkerRuntimeConfig, DeliveryWorkerRuntimeConfig,

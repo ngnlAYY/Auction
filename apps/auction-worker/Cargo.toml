@@ -6,6 +6,10 @@ rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
 
+[features]
+# 可选：只用于本地调试构建开启未完成的一口价挂单；发布构建即使误带也拒开。
+consignment-dev-preview = []
+
 [dependencies]
 anyhow.workspace = true
 auction-application.workspace = true
@@ -27,6 +31,8 @@ url.workspace = true
 [dev-dependencies]
 # 可选：停机排空验收在邮件替身上驱动真实 MoogleMail 客户端，不进入运行时制品。
 auction-test-support.workspace = true
+# 可选：以虚拟时钟验证寄售就绪心跳续期。
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。

@@ -28,6 +28,10 @@ tokio = { workspace = true, features = ["fs", "io-util", "process"] }
 url.workspace = true
 uuid.workspace = true
 
+[features]
+# 可选：只用于本地调试构建开启未完成的一口价挂单；发布构建即使误带也拒开。
+consignment-dev-preview = []
+
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。
 workspace = true

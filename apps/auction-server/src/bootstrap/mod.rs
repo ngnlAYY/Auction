@@ -257,7 +257,41 @@ mod tests {
 
     use super::cli::{ChildRole, Cli};
     use super::configuration::RolePlan;
-    use super::{filesystem, prepare_configuration, runtime_builder};
+    use super::{configuration, filesystem, prepare_configuration, runtime_builder};
+
+    #[test]
+    fn supervisor_load_checks_consignment_before_deriving_children() {
+        let directory = StartupDirectory::new();
+        let config_dir = directory.0.join("config");
+        first_run_config().write_managed_to(&config_dir).unwrap();
+        let common_path = config_dir.join("common.toml");
+        let common = fs::read_to_string(&common_path).unwrap();
+        let (before, remaining) = common.split_once("[consignment]\n").unwrap();
+        let (section, after) = remaining.split_once("\n[").unwrap();
+        assert!(section.contains("enabled = false\n"));
+        let enabled = section.replace("enabled = false\n", "enabled = true\n");
+        fs::write(common_path, format!("{before}[consignment]\n{enabled}\n[{after}")).unwrap();
+        let runtime = auction_config::managed_runtime_directory(&config_dir).unwrap();
+        let _ownership = filesystem::acquire_runtime(&runtime).unwrap();
+
+        let mut children = Vec::new();
+        let result = configuration::load(&config_dir).map(|plans| {
+            for plan in plans {
+                // 派生替身消费实际预检产生的角色计划。
+                children.push(plan.role.name());
+            }
+        });
+        if cfg!(all(feature = "consignment-dev-preview", debug_assertions)) {
+            result.unwrap();
+            assert_eq!(children, ChildRole::ORDER.map(ChildRole::name));
+        } else {
+            assert_eq!(children.len(), 0);
+            assert!(
+                format!("{:#}", result.unwrap_err())
+                    .contains("consignment-dev-preview 的本地调试构建")
+            );
+        }
+    }
 
     #[test]
     fn child_roles_run_multi_threaded_while_supervisor_stays_single_threaded() {

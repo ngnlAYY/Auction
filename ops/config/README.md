@@ -20,7 +20,7 @@
 | 文件 | 拥有 |
 | --- | --- |
 | 角色文件 | `common_file`、`secrets_file`（必填，相对角色文件所在目录解析）；可选 `runtime_config_file`；Admin 另有 `worker_config_file`；listener、tracing、HTTP 安全、会话（Public/Admin）、realtime（Public）、`[worker.*]`（Worker） |
-| `common.toml` | `log_filter`、`[metrics]`、`[readiness]`、`[auction.*]`、CLI 专用 `[backup]` |
+| `common.toml` | `log_filter`、`[metrics]`、`[readiness]`、`[auction.*]`、`[consignment]`、CLI 专用 `[backup]` |
 | `secrets.toml` | 数据库、外部 Cookie、Admin 登录凭据、四组数据密钥（含旧密钥环）、OTLP 导出头、R2 令牌与可选打卡/心跳/Webhook 地址 |
 | `runtime/admin.toml` | 可由 Admin 后台修改的运行参数（见下文） |
 
@@ -52,6 +52,7 @@
 | `log_filter` | tracing 过滤器，默认 `info,<服务名>=debug`；语法是逗号分隔的 `级别` 或 `target=级别`（级别为 `trace`/`debug`/`info`/`warn`/`error`/`off`，target 按前缀匹配、最长者生效），不支持按 span 或字段过滤，空值、裸 target 与含空白的写法在 `config check` 与启动时被拒绝；追加 `auction_observability::log_dedup=off` 可重启后关闭重复错误去重 |
 | `[metrics]` | 进程指标开关、转发拒绝与可选附加出口（见下） |
 | `[readiness]` | 审计失败模式、迁移兼容模式与 HTTP 就绪缓存，见[就绪策略](#就绪策略) |
+| `[consignment]` | 一口价挂单开关、登记限制与后台解析预算，见[寄售服务](#寄售服务) |
 | `[backup]`、`[backup.offsite]`、`[backup.scope]` | CLI 专用定时备份（水位另被 `alert report` 与 `deploy` 复用）、异机副本与数据库之外的范围，见[定时备份策略](#定时备份策略) |
 | `[database_roles]` | `owner` 是迁移 owner 账号名（生产严格预检必填），运行账号固定 `auction_runtime` 不可配置；两者相同则拒绝 |
 | `[auction.schedule]` · `[auction.schedule.early_bird]` | 周排期（时区、预览/开拍/结束时间、参与世界）；赛季早鸟窗口与赛季前场次 |
@@ -82,6 +83,24 @@
 | `cache_enabled` | `true` | Public/Admin `/health/ready` 与 Worker control `/v1/health/ready` 的最终就绪布尔值正负均缓存 1 秒、并发共享一次 750ms 检查；`false` 逐次执行；在线开关 `readiness_cache_enabled` 只覆盖 Public/Admin |
 
 分类口径与粘滞判定由[crates/auction-storage/README.md#审计失败与就绪](../../crates/auction-storage/README.md#审计失败与就绪)拥有，迁移判定由[docs/contracts/database.md#迁移兼容登记与就绪](../../docs/contracts/database.md#迁移兼容登记与就绪)拥有。默认基线 shadow：差异只应出现在 transient，没有样本不能解释为通过，由用户审阅后才切换 classified；迁移模式平时保持 shadow，换回旧程序前须显式设 `compatible` 并按[ops/deploy/RECOVERY.md#程序回退](../deploy/RECOVERY.md#程序回退)核对：数据库超前于回退目标时，`auction-cli rollback`（含 `--dry-run`）在停机前核对三角色有效配置都为 `compatible`，否则拒绝，不会替你修改配置。观察步骤见[ops/README.md#审计就绪影子观察](../README.md#审计就绪影子观察)。
+
+### 寄售服务
+
+三角色从同一份 `common.toml` 读取 `[consignment]`，整节和各字段均可省略。更改这节须用同一份配置重启各角色。加载时严格校验类型、数值和未知键，错误不回显配置原文。回退到尚未支持本节的制品时，须使用旧制品可加载的原配置。
+
+| 字段 | 默认值 | 范围与作用 |
+| --- | --- | --- |
+| `enabled` | `false` | 严格布尔。功能尚未完成时，`true` 仅允许显式启用 `consignment-dev-preview` 的本地调试制品；正式制品拒绝启动 |
+| `fee_bps` | `500` | 整数 0–9999，新寄售登记的手续费率，单位为基点（500 为 5%）；非寄售固定为零 |
+| `display_ttl_days` | `30` | 整数 1–90 天，非寄售挂单首次展示时冻结 |
+| `deposit_ttl_days` | `7` | 整数 1–30 天，寄售挂单进入待寄时冻结 |
+| `max_open_per_user` | `20` | 整数 1–100，每位卖家跨世界的有效活动挂单上限 |
+| `registrations_per_hour` | `10` | 整数 1–100，以数据库时刻计算每位卖家过去一小时的已接受登记数，窗口左开右闭 |
+| `lookup_timeout_seconds` | `10` | 整数 1–30 秒，一次解析的端到端预算，底层更紧的限制继续生效 |
+| `lookup_max_response_bytes` | `65536` | 整数 4096–262144，解压后响应体的字节上限 |
+| `lookup_min_interval_ms` | `1000` | 整数 250–60000 毫秒，全服务两次解析起始许可之间的最小间隔 |
+
+解析尝试次数、退避、24 小时总期限、固定来源和 schema 版本由协议定义。Public 接受登记需要 `secrets.toml` 中的 `equipment_data_key_id` 与 `equipment_data_key`，用于封装装备读取凭证及核对登记重放。Public 与 Worker 使用同一装备数据密钥环，联合预检还会核对 Admin 的装备数据密钥环。Public 缺少装备数据密钥时仍可启动，开启服务后的状态接口报告 `registration_ready=false`，有效的新登记返回 503。登记就绪还要求数据库准入开启、至少一个世界可登记及 Worker 心跳新鲜。隔离验收见[本地一口价挂单预览](../../docs/development.md#本地一口价挂单预览)。
 
 ### 定时备份策略
 

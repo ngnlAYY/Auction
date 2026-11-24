@@ -6,6 +6,7 @@ const CONFIG_FILE_ENV: &str = "AUCTION_CONFIG_FILE";
 mod app;
 mod auction;
 mod backup;
+mod consignment;
 mod database;
 pub use auction_domain::DataKeyDomain;
 pub use database::*;
@@ -25,6 +26,9 @@ pub(crate) use self::worker_validation::sender_allowlist_has_case_duplicates;
 pub use app::*;
 pub use auction::*;
 pub use backup::{BackupConfig, BackupOffsiteConfig};
+pub use consignment::{
+    CONSIGNMENT_COMPLETE, ConsignmentActivation, ConsignmentConfig, consignment_activation,
+};
 pub use errors::ConfigError;
 pub use secrets::{
     DATA_KEY_RETENTION_MONTHS, MoogleMailKeyEnv, PostgresConnectionConfig,

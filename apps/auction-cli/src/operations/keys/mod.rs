@@ -1,14 +1,12 @@
 //! 数据密钥环的只读核对与离线重加密。
 //!
-//! 重加密只改变信封的 key ID、密文、nonce 与指纹，不改变业务事实；每次写入都以旧 key ID
-//! 作 CAS 条件，并在返回前用新信封重新解密核对明文。密钥材料、明文和指纹都不会进入日志、
-//! 回执或审计。
+//! 不变量 1、7：重加密只修改密文投影，CAS 写入绑定原信封，并在写入前用新信封重新开封核对。
 //!
 //! 不变量：`--apply` 已提交的改写必须留下回执与审计。回执路径、操作者、主机身份与全部域的
 //! 密钥环都在连接数据库之前校验；改写中途失败时仍写 `outcome=partial` 回执、为已改写或最后
 //! 一次写回结果未知的域追加审计，再返回原错误。
 
-use std::{collections::BTreeMap, path::Path, sync::Arc};
+use std::{path::Path, sync::Arc};
 
 use anyhow::Context;
 use auction_application::core::CliOperatorIdentity;
@@ -26,9 +24,10 @@ use crate::cli::{KeysCommand, KeysReencryptArgs};
 use crate::config_dir::ConfigDir;
 use crate::support::{digest, files, text};
 
+mod equipment;
 mod rewrite;
 
-const RECEIPT_FORMAT: &str = "auction-key-reencrypt-receipt-v1";
+const RECEIPT_FORMAT: &str = "auction-key-reencrypt-receipt-v2";
 /// 审计的 actor_id：标明写入来自 CLI 离线重加密。
 const AUDIT_ACTOR: &str = "auction-cli:keys-reencrypt";
 
@@ -38,21 +37,34 @@ const DATABASE_DOMAINS: [DataKeyDomain; 3] =
 
 pub(crate) async fn run(config_dir: &ConfigDir, command: KeysCommand) -> anyhow::Result<()> {
     match command {
-        KeysCommand::Status { strict } => status(config_dir, strict).await,
+        KeysCommand::Status { strict, require_current_equipment } => {
+            status(config_dir, strict, require_current_equipment).await
+        }
         KeysCommand::Reencrypt(args) => reencrypt(config_dir, args).await,
     }
 }
 
-async fn status(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<()> {
-    super::with_worker_store(
-        config_dir,
+async fn status(
+    config_dir: &ConfigDir,
+    strict: bool,
+    require_current_equipment: bool,
+) -> anyhow::Result<()> {
+    let config = config_dir.load_worker()?;
+    ConfigDir::validate_consignment(&config)?;
+    super::with_config_store(
+        &config,
         auction_storage::DatabaseConnectionPurpose::CliOperations,
-        async |config, store| {
+        async |store| {
+            if require_current_equipment {
+                let keyring = keyring(&config, DataKeyDomain::Equipment)?
+                    .context("装备域缺少当前数据密钥，无法核对退休条件")?;
+                return print_json(&equipment::verify_current(store.as_ref(), &keyring).await?);
+            }
             let pool = store.postgres_pool();
             let mut domains = serde_json::Map::new();
             let mut failures = Vec::new();
             for domain in DATABASE_DOMAINS {
-                let keyring = keyring(config, domain)?;
+                let keyring = keyring(&config, domain)?;
                 let stored = auction_storage::stored_key_ids(pool, domain)
                     .await
                     .with_context(|| format!("读取 {} 域信封 key ID 失败", domain.as_str()))?;
@@ -61,7 +73,7 @@ async fn status(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<()> {
                     let resolvable = keyring.as_ref().is_some_and(|ring| ring.contains(key_id));
                     if !resolvable {
                         failures.push(format!(
-                            "{} 域仍有 {envelopes} 个信封引用未配置的 key {key_id}",
+                            "{} 域仍有 {envelopes} 个信封引用未配置的密钥",
                             domain.as_str()
                         ));
                     }
@@ -78,9 +90,8 @@ async fn status(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<()> {
                         let still_referenced = stored.iter().any(|(id, _)| id == key.id());
                         if now >= key.retain_until() && still_referenced {
                             failures.push(format!(
-                                "{} 域旧 key {} 已过 12 个月保留期但仍有信封引用；请先重加密",
-                                domain.as_str(),
-                                key.id()
+                                "{} 域有已过 12 个月保留期的旧钥仍被引用，请先重加密",
+                                domain.as_str()
                             ));
                         }
                         json!({
@@ -103,7 +114,7 @@ async fn status(config_dir: &ConfigDir, strict: bool) -> anyhow::Result<()> {
                 );
             }
             // 诊断归档使用独立域，但延用 credential/equipment 的历史文件；状态只报告配置。
-            let diagnostics = keyring(config, DataKeyDomain::MailDiagnostics)?;
+            let diagnostics = keyring(&config, DataKeyDomain::MailDiagnostics)?;
             domains.insert(
                 DataKeyDomain::MailDiagnostics.as_str().to_owned(),
                 json!({
@@ -177,6 +188,7 @@ fn plan(args: &KeysReencryptArgs) -> anyhow::Result<ReencryptPlan<'_>> {
 async fn reencrypt(config_dir: &ConfigDir, args: KeysReencryptArgs) -> anyhow::Result<()> {
     let plan = plan(&args)?;
     let config = config_dir.load_worker()?;
+    ConfigDir::validate_consignment(&config)?;
     // 全部域的密钥环在连接数据库之前装配：缺失或无效的配置不能在改写了前一个域之后才暴露。
     let mut keyrings = Vec::with_capacity(plan.domains.len());
     for domain in &plan.domains {
@@ -204,7 +216,7 @@ async fn reencrypt(config_dir: &ConfigDir, args: KeysReencryptArgs) -> anyhow::R
             let mut processed = Vec::with_capacity(keyrings.len());
             let mut failure = None;
             for (domain, ring) in &keyrings {
-                let mut outcome = DomainOutcome::default();
+                let mut outcome = DomainOutcome::new(*domain);
                 let result = reencrypt_domain(
                     store,
                     ring,
@@ -216,7 +228,6 @@ async fn reencrypt(config_dir: &ConfigDir, args: KeysReencryptArgs) -> anyhow::R
                 .await;
                 processed.push(ProcessedDomain {
                     domain: *domain,
-                    to_key_id: ring.current_id().to_owned(),
                     outcome,
                     failure_stage: result.as_ref().err().map(|failure| failure.stage),
                 });
@@ -287,11 +298,10 @@ async fn reencrypt_apply_task(
     let mut processed = Vec::with_capacity(keyrings.len());
     let mut failure = None;
     for (domain, ring) in &keyrings {
-        let mut outcome = DomainOutcome::default();
+        let mut outcome = DomainOutcome::new(*domain);
         let result = reencrypt_domain(&store, ring, *domain, page_size, true, &mut outcome).await;
         processed.push(ProcessedDomain {
             domain: *domain,
-            to_key_id: ring.current_id().to_owned(),
             outcome,
             failure_stage: result.as_ref().err().map(|failure| failure.stage),
         });
@@ -327,7 +337,6 @@ async fn reencrypt_apply_task(
 /// 一个已进入改写循环的域；`failure_stage` 为 None 表示该域处理完，否则是中途失败的阶段。
 struct ProcessedDomain {
     domain: DataKeyDomain,
-    to_key_id: String,
     outcome: DomainOutcome,
     failure_stage: Option<FailureStage>,
 }
@@ -338,8 +347,7 @@ impl ProcessedDomain {
     }
 }
 
-/// 回执只含格式、标识、是否写入、结果、时间、key ID 与计数；失败只记域与固定阶段，不含
-/// 错误原文、密钥材料或明文。
+/// 回执只含脱敏的操作结果与按来源计数；失败只记域和固定阶段。
 fn receipt_document(
     receipt_id: Uuid,
     applied: bool,
@@ -347,19 +355,14 @@ fn receipt_document(
     processed: &[ProcessedDomain],
     failure: Option<(DataKeyDomain, FailureStage)>,
 ) -> serde_json::Value {
-    let mut from_key_ids: BTreeMap<String, i64> = BTreeMap::new();
     let mut domains = serde_json::Map::new();
     for item in processed {
-        for (key_id, count) in &item.outcome.from_keys {
-            *from_key_ids.entry(key_id.clone()).or_default() += count;
-        }
         domains.insert(
             item.domain.as_str().to_owned(),
             json!({
-                "current_key_id": item.to_key_id,
                 "scanned": item.outcome.scanned,
                 "rewritten": item.outcome.rewritten,
-                "from_key_ids": item.outcome.from_keys,
+                "sources": item.outcome.sources,
                 "complete": item.complete(),
             }),
         );
@@ -375,7 +378,6 @@ fn receipt_document(
         })),
         "started_at": started_at.to_rfc3339(),
         "finished_at": Timestamp::now().to_rfc3339(),
-        "from_key_ids": from_key_ids,
         "domains": domains,
         "operator": { "os_uid": files::effective_uid() },
     })
@@ -394,7 +396,7 @@ fn audited(processed: &[ProcessedDomain]) -> impl Iterator<Item = &ProcessedDoma
 }
 
 /// 单个域的审计详情；`failure_stage` 为 `write` 时最后一次写回结果未知，`rewritten` 可能比
-/// 实际少 1。只含 key ID、计数、阶段分类与回执身份，不含密钥材料、明文或指纹。
+/// 实际少 1。只记录脱敏计数、阶段分类与回执身份。
 fn audit_details(
     item: &ProcessedDomain,
     actor: &str,
@@ -403,8 +405,7 @@ fn audit_details(
     receipt_written: bool,
 ) -> serde_json::Value {
     json!({
-        "to_key_id": item.to_key_id,
-        "from_key_ids": item.outcome.from_keys,
+        "sources": item.outcome.sources,
         "scanned": item.outcome.scanned,
         "rewritten": item.outcome.rewritten,
         "outcome": if item.complete() { "completed" } else { "partial" },

@@ -55,6 +55,12 @@ pub enum WorkerError {
     /// 常驻维护任务在未进入 drain 时退出，不能静默失去维护能力。
     #[error("MoogleMail 维护任务意外退出")]
     MailMaintenanceTaskExited,
+    /// 寄售任务故障触发持久 Worker 共享排空。
+    #[error("一口价挂单 Worker 任务执行失败")]
+    ConsignmentTaskJoin(#[source] tokio::task::JoinError),
+    /// 常驻寄售任务在未进入排空时返回。
+    #[error("一口价挂单 Worker 任务意外退出")]
+    ConsignmentTaskExited,
     #[error("forum sync configuration is invalid")]
     InvalidForumSyncConfiguration,
     #[error("forum reply configuration is invalid")]

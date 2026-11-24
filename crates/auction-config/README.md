@@ -13,6 +13,8 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 | `BackupConfig`、`BackupOffsiteConfig`、`AppConfig::validate_backup()` | CLI 专用本地策略、age 公钥/R2 目的地及成对敏感凭据和 HTTPS 打卡地址校验；不改变常驻角色的运行行为 |
 | `AppConfig` 字段 | 已合并、已校验的非敏感配置：listener、metrics、tracing、realtime、auction、worker、http_security、session、路径、`admin_runtime`、装备规则与 `bot_players` 投影 |
 | `AppConfig` getter | 敏感值只经显式 getter 暴露：`database_url()`、`admin_actor()/admin_secret()`、四组数据密钥与 `data_key_current(domain)`/`data_key_previous(domain)`、Cookie、`tracing_headers()`；`Debug` 输出已脱敏 |
+| `AppConfig::consignment`、`ConsignmentConfig` | 三角色共用的已校验寄售配置，字段见[寄售服务](../../ops/config/README.md#寄售服务) |
+| `consignment_activation`、`CONSIGNMENT_COMPLETE` | 装配根提供制品事实，启动前取得寄售开关判定或配置错误 |
 | `backup_heartbeat_success_url()/backup_heartbeat_failure_url()` | 只供 CLI 交给备份传输适配器的可选地址；省略或空字符串均表示未配置，不可写入日志或回执 |
 | `backup_r2_access_key_id()/backup_r2_secret_access_key()` | Worker 敏感文件中的 bucket 对象读写令牌，只交给备份适配器；无环境、实例元数据、age 私钥或口令入口 |
 | `TomlRuntimeFileStore` | Admin runtime 文件的读取与原子替换（临时文件 + rename + 目录同步 + 独立锁文件） |
@@ -49,6 +51,7 @@ TOML 配置的加载、合并与校验：角色文件、公共文件、敏感文
 | --- | --- |
 | `crates/auction-config/src/settings/app/` | `AppConfig` 模型、加载、最终构建与 getter |
 | `crates/auction-config/src/settings/backup/` | CLI 专用本地默认值、异机副本启用依赖、公钥/目的地/凭据与打卡 URL 校验 |
+| `crates/auction-config/src/settings/consignment/` | 寄售公共配置的默认值、范围校验与制品能力判定 |
 | `crates/auction-config/src/settings/database/` | `[database]`/`[database_pool]`/`[database_profiles]` 模型与校验、连接参数规范化 |
 | `crates/auction-config/src/settings/shutdown.rs` | 角色 `[shutdown]` 普通预算与关键段预算的范围/unit 校验 |
 | `crates/auction-config/src/settings/auction/` | 拍卖策略/排期/早鸟、HTTP listener、可观测性、角色默认值 |
