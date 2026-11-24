@@ -1,0 +1,14 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "schema_version": 2,
+    "operation": "release_quarantine",
+    "disposition": "quarantine_released",
+    "command_id": "00000000-0000-4000-8000-000000000424",
+    "quarantine_id": "00000000-0000-4000-8000-000000000401",
+    "release_id": "00000000-0000-4000-8000-000000000427",
+    "decision_id": "00000000-0000-4000-8000-000000000428",
+    "decision_kind": "archive_empty"
+  }
+}

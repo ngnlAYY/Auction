@@ -1,0 +1,26 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "schema_version": 2,
+    "operation": "release_quarantine",
+    "disposition": "quarantine_released",
+    "command_id": "00000000-0000-4000-8000-000000000422",
+    "quarantine_id": "00000000-0000-4000-8000-000000000401",
+    "release_id": "00000000-0000-4000-8000-000000000406",
+    "decision_id": "00000000-0000-4000-8000-000000000407",
+    "decision_kind": "accept",
+    "listing_changes": [
+      {
+        "listing_id": "00000000-0000-4000-8000-000000000101",
+        "listing_version": 8,
+        "state": "deposit_accepted"
+      },
+      {
+        "listing_id": "00000000-0000-4000-8000-000000000102",
+        "listing_version": 9,
+        "state": "deposit_accepted"
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "code": "ok",
+  "message": "挂单已下架",
+  "data": {
+    "schema_version": 2,
+    "operation": "admin_delist",
+    "disposition": "closed",
+    "command_id": "00000000-0000-4000-8000-000000000442",
+    "listing_id": "00000000-0000-4000-8000-000000000105",
+    "listing_version": 6,
+    "state": "closed"
+  }
+}

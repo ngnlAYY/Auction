@@ -1,0 +1,14 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "schema_version": 2,
+    "operation": "admin_delist",
+    "disposition": "hold_set",
+    "command_id": "00000000-0000-4000-8000-000000000440",
+    "listing_id": "00000000-0000-4000-8000-000000000103",
+    "listing_version": 7,
+    "state": "held_off_market",
+    "hold_id": "00000000-0000-4000-8000-000000000416"
+  }
+}

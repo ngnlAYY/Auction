@@ -1,0 +1,6 @@
+{
+  "command_id": "00000000-0000-4000-8000-000000000421",
+  "expected_version": 3,
+  "observation_id": "00000000-0000-4000-8000-000000000404",
+  "proposed_kind": "auction_return_case"
+}

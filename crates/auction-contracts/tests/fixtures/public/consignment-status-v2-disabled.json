@@ -1,0 +1,31 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "enabled": false,
+    "registration_ready": false,
+    "registration_modes": [],
+    "registration_worlds": [],
+    "fee_bps": 0,
+    "min_price": 1,
+    "max_price": 1000000000,
+    "accepts_mail": false,
+    "purchasable": false,
+    "worlds": {
+      "main": {
+        "mail_ready": false,
+        "purchase_ready": false,
+        "season_state": "not_seasonal",
+        "cutoff_at": null,
+        "season_end_at": null
+      },
+      "isekai": {
+        "mail_ready": false,
+        "purchase_ready": false,
+        "season_state": "unknown",
+        "cutoff_at": null,
+        "season_end_at": null
+      }
+    }
+  }
+}

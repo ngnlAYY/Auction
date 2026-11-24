@@ -1,0 +1,128 @@
+[
+  {
+    "code": "command_id_conflict",
+    "http_status": 409,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "stale_version",
+    "http_status": 409,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "listing_not_active",
+    "http_status": 409,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "equipment_busy",
+    "http_status": 409,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "equipment_committed",
+    "http_status": 409,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "custody_unproven",
+    "http_status": 409,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "operations_hold",
+    "http_status": 409,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "season_closed",
+    "http_status": 409,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "hold_mismatch",
+    "http_status": 409,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "source_mismatch",
+    "http_status": 409,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "fence_mismatch",
+    "http_status": 409,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "evidence_unproven",
+    "http_status": 409,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "evidence_conflict",
+    "http_status": 409,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "disposition_conflict",
+    "http_status": 409,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "participant_ineligible",
+    "http_status": 403,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "bot_party",
+    "http_status": 403,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "action_not_allowed",
+    "http_status": 403,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "listing_limit_reached",
+    "http_status": 429,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "consignment_disabled",
+    "http_status": 404,
+    "outcome_unknown": false,
+    "trusted_before_write": false
+  },
+  {
+    "code": "mail_unavailable",
+    "http_status": 503,
+    "outcome_unknown": false,
+    "trusted_before_write": true
+  },
+  {
+    "code": "outcome_unknown",
+    "http_status": 503,
+    "outcome_unknown": true,
+    "trusted_before_write": false
+  }
+]

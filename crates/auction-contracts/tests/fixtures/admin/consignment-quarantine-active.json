@@ -1,0 +1,65 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "quarantine_id": "00000000-0000-4000-8000-000000000401",
+    "version": 3,
+    "state": "active",
+    "world": "isekai",
+    "external_mid": "42",
+    "first_decision_id": "00000000-0000-4000-8000-000000000402",
+    "reason": "list_detail_conflict",
+    "observation_total": 2,
+    "observations": [
+      {
+        "observation_id": "00000000-0000-4000-8000-000000000403",
+        "observed_at": "2026-11-20T18:10:00Z",
+        "parser_version": "hvdata-equip-v1",
+        "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "attachment_count": 1,
+        "credits": 0,
+        "cod": 0,
+        "returnable": true,
+        "takeable": true,
+        "items": [
+          {
+            "ordinal": 1,
+            "kind": "equipment",
+            "external_equipment_id": "42",
+            "amount": null
+          }
+        ]
+      },
+      {
+        "observation_id": "00000000-0000-4000-8000-000000000404",
+        "observed_at": "2026-11-20T18:20:00Z",
+        "parser_version": "hvdata-equip-v1",
+        "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "attachment_count": 2,
+        "credits": null,
+        "cod": null,
+        "returnable": null,
+        "takeable": false,
+        "items": [
+          {
+            "ordinal": 1,
+            "kind": "equipment",
+            "external_equipment_id": "42",
+            "amount": null
+          },
+          {
+            "ordinal": 2,
+            "kind": "unknown",
+            "external_equipment_id": null,
+            "amount": null
+          }
+        ]
+      }
+    ],
+    "allowed_actions": [
+      "recheck",
+      "release"
+    ],
+    "release": null
+  }
+}

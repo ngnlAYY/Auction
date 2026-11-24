@@ -1,5 +1,9 @@
 //! Admin 寄售查询、碰撞记录与下架请求。
 
+mod quarantine;
+
+pub use quarantine::*;
+
 use std::fmt;
 
 use auction_time::Timestamp;

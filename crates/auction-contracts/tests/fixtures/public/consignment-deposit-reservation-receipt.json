@@ -1,0 +1,15 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "schema_version": 2,
+    "operation": "issue_reservation",
+    "disposition": "reservation_issued",
+    "command_id": "00000000-0000-4000-8000-000000000202",
+    "listing_id": "00000000-0000-4000-8000-000000000105",
+    "listing_version": 3,
+    "state": "awaiting_deposit",
+    "reservation_id": "00000000-0000-4000-8000-000000000301",
+    "expires_at": "2026-11-27T18:10:00Z"
+  }
+}

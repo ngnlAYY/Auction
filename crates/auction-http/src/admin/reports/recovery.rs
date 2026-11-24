@@ -68,6 +68,9 @@ fn map_recovery_error_code(
         "recovery_relist_unavailable" => Ok(PublicRecoveryErrorCode::RelistUnavailable),
         // 旧赛季装备已随 isekai 换季清空，属于永久不能重挂。
         "relist_season_closed" => Ok(PublicRecoveryErrorCode::RelistUnavailable),
+        // 实物正被寄售活动预约或代管 position 持有；与赛季关闭一样显示为既有
+        // recovery_relist_unavailable，不新增公开码或页面译名。
+        "relist_equipment_held" => Ok(PublicRecoveryErrorCode::RelistUnavailable),
         "evidence_mismatch" => Ok(PublicRecoveryErrorCode::EvidenceMismatch),
         // 退件不能把原投递每一次可能外达的发送逐一归属：同属证据不符，不新增公开码。
         "send_unattributed" => Ok(PublicRecoveryErrorCode::EvidenceMismatch),
@@ -431,6 +434,15 @@ mod tests {
         assert_eq!(
             map_optional_recovery_error_code(Some("send_unattributed".to_owned())),
             Ok(Some("recovery_evidence_mismatch".to_owned()))
+        );
+    }
+
+    /// 寄售实物持有阻断归并为既有公开码，Admin 报表不会因新内部码整行映射失败。
+    #[test]
+    fn equipment_hold_block_maps_to_the_published_relist_unavailable() {
+        assert_eq!(
+            map_optional_recovery_error_code(Some("relist_equipment_held".to_owned())),
+            Ok(Some("recovery_relist_unavailable".to_owned()))
         );
     }
 }

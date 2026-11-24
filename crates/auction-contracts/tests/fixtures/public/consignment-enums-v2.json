@@ -1,0 +1,167 @@
+{
+  "season_states": [
+    "not_seasonal",
+    "open",
+    "preclose",
+    "closed",
+    "unknown"
+  ],
+  "listing_states": [
+    "resolving",
+    "displayed",
+    "awaiting_deposit",
+    "deposit_accepted",
+    "available",
+    "sale_pending",
+    "held_off_market",
+    "withdrawal_pending",
+    "rejected",
+    "expired",
+    "closed"
+  ],
+  "public_listing_states": [
+    "displayed",
+    "awaiting_deposit",
+    "available"
+  ],
+  "listing_reasons": [
+    "auction_lot_created",
+    "seller_ineligible",
+    "service_disabled",
+    "seller_cancelled",
+    "admin_delisted",
+    "lookup_deadline",
+    "display_expired",
+    "deposit_expired",
+    "not_tradeable",
+    "owner_missing",
+    "owner_mismatch",
+    "history_owner_mismatch",
+    "history_alias_conflict",
+    "history_unproven",
+    "equipment_busy",
+    "equipment_not_found",
+    "source_request_rejected",
+    "source_http_invalid",
+    "source_schema_invalid",
+    "source_shape_unconfirmed",
+    "source_identity_mismatch",
+    "source_too_large",
+    "lookup_exhausted",
+    "credential_unavailable",
+    "unpaid_recovered",
+    "paid_returned",
+    "quota_blocked",
+    "operations_hold",
+    "review",
+    "sold",
+    "withdrawn_delivered",
+    "season_closed",
+    "loss_confirmed"
+  ],
+  "hold_reasons": [
+    "unpaid_recovered",
+    "paid_returned",
+    "seller_ineligible",
+    "service_disabled",
+    "quota_blocked",
+    "operations_hold",
+    "review"
+  ],
+  "listing_actions": [
+    "reprice",
+    "withdraw",
+    "relist",
+    "issue_reservation",
+    "purchase",
+    "admin_delist",
+    "release_hold"
+  ],
+  "quarantine_states": [
+    "active",
+    "released"
+  ],
+  "quarantine_reasons": [
+    "duplicate_raw_eid",
+    "canonical_alias_ambiguous",
+    "unknown_attachment",
+    "list_detail_conflict",
+    "asset_count_unknown",
+    "same_name_changed_uid",
+    "identity_unproven",
+    "amount_unproven",
+    "return_unproven",
+    "take_unproven",
+    "unsafe_return_shape",
+    "suspected_system_rts"
+  ],
+  "quarantine_actions": [
+    "recheck",
+    "release"
+  ],
+  "observation_item_kinds": [
+    "equipment",
+    "credits",
+    "cod",
+    "unknown"
+  ],
+  "decision_kinds": [
+    "accept",
+    "return",
+    "archive_empty",
+    "acquire_return",
+    "auction_return_case",
+    "auction_recovery_return"
+  ],
+  "operations": [
+    "issue_reservation",
+    "withdraw",
+    "admin_delist",
+    "release_hold",
+    "recheck_quarantine",
+    "release_quarantine"
+  ],
+  "dispositions": [
+    "reservation_issued",
+    "withdrawal_requested",
+    "closed",
+    "hold_set",
+    "hold_released",
+    "recheck_queued",
+    "quarantine_released"
+  ],
+  "rejection_codes": [
+    "command_id_conflict",
+    "stale_version",
+    "listing_not_active",
+    "equipment_busy",
+    "equipment_committed",
+    "custody_unproven",
+    "operations_hold",
+    "season_closed",
+    "hold_mismatch",
+    "source_mismatch",
+    "fence_mismatch",
+    "evidence_unproven",
+    "evidence_conflict",
+    "disposition_conflict",
+    "participant_ineligible",
+    "bot_party",
+    "action_not_allowed",
+    "listing_limit_reached",
+    "consignment_disabled",
+    "mail_unavailable",
+    "outcome_unknown"
+  ],
+  "request_error_codes": [
+    "invalid_request",
+    "invalid_command_id",
+    "invalid_listing_id",
+    "invalid_listing_request",
+    "invalid_equipment_url",
+    "invalid_price",
+    "invalid_reason",
+    "invalid_query",
+    "command_not_found"
+  ]
+}

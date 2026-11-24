@@ -1,0 +1,47 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "quarantine_id": "00000000-0000-4000-8000-000000000401",
+    "version": 4,
+    "state": "released",
+    "world": "isekai",
+    "external_mid": "42",
+    "first_decision_id": "00000000-0000-4000-8000-000000000402",
+    "reason": "suspected_system_rts",
+    "observation_total": 1,
+    "observations": [
+      {
+        "observation_id": "00000000-0000-4000-8000-000000000404",
+        "observed_at": "2026-11-20T18:20:00Z",
+        "parser_version": "hvdata-equip-v1",
+        "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "attachment_count": 1,
+        "credits": null,
+        "cod": null,
+        "returnable": true,
+        "takeable": false,
+        "items": [
+          {
+            "ordinal": 1,
+            "kind": "equipment",
+            "external_equipment_id": "42",
+            "amount": null
+          }
+        ]
+      }
+    ],
+    "allowed_actions": [],
+    "release": {
+      "release_id": "00000000-0000-4000-8000-000000000406",
+      "decision_id": "00000000-0000-4000-8000-000000000407",
+      "released_at": "2026-11-21T18:10:00Z",
+      "outcome": {
+        "decision_kind": "auction_return_case",
+        "return_mail_id": "00000000-0000-4000-8000-000000000408",
+        "return_evidence_id": "00000000-0000-4000-8000-000000000409",
+        "obligation_id": null
+      }
+    }
+  }
+}

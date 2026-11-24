@@ -89,6 +89,10 @@ async fn actual_http_traces_and_write_bodies_do_not_contain_private_reasons() {
             send(router.clone(), Method::GET, &detail_path(), headers(), Body::empty()).await;
         let detail = response(detail, StatusCode::OK).await;
         assert!(detail["data"]["record"]["admin_delist_reason"].as_str() == Some(REASON));
+        // 回调点的兴趣是进程级缓存：并行用例若先在没有订阅者的线程里触发边界日志的回调点，
+        // 兴趣会被缓存成 never，本用例的事件随之被丢弃。上面的请求已让回调点完成登记，
+        // 这里重建缓存，后面的写请求才是断言依据。
+        tracing::callsite::rebuild_interest_cache();
         for (reason, status, code) in [
             (REASON.to_owned(), StatusCode::SERVICE_UNAVAILABLE, "outcome_unknown"),
             (format!("{invalid_marker}\u{2028}第二行"), StatusCode::BAD_REQUEST, "invalid_reason"),

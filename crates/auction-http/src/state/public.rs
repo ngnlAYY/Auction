@@ -6,6 +6,7 @@ use auction_application::auction::{
     AuctionReader, CompetitionCommandPort, PublicAccountReader, PublicBidLogReader,
     PublicLotReader, PublicPriceHistoryReader, WorldReader,
 };
+use auction_application::consignment::{DepositCommandService, DepositRead};
 use auction_application::forum::PublicForumReader;
 use auction_application::operations::ProcessReadinessPort;
 use auction_application::public::{
@@ -19,6 +20,7 @@ use tokio::sync::watch;
 
 use crate::middleware::HttpBoundary;
 use crate::middleware::security::{AnonymousReadGate, PublicHttpSecurity};
+use crate::public::consignment::deposit::{DepositCapabilities, DepositState};
 use crate::public::consignment::{ConsignmentCapabilities, ConsignmentState};
 use crate::realtime_hub::{RealtimeHub, RealtimeSubscriptionError};
 
@@ -48,6 +50,7 @@ pub struct PublicApiState {
     watch_preference: Option<Arc<dyn auction_application::public::LotWatchPreferencePort>>,
     commands: Option<Arc<dyn CompetitionCommandPort>>,
     consignment: ConsignmentCapabilities,
+    deposit: DepositCapabilities,
     metrics: Option<Arc<ProcessMetrics>>,
     runtime_switch_snapshot: Option<auction_application::runtime_switches::RuntimeSwitches>,
     readiness: Option<Arc<dyn ProcessReadinessPort>>,
@@ -79,6 +82,7 @@ impl Default for PublicApiState {
             watch_preference: None,
             commands: None,
             consignment: ConsignmentCapabilities::default(),
+            deposit: DepositCapabilities::default(),
             metrics: None,
             runtime_switch_snapshot: None,
             readiness: None,
@@ -131,6 +135,7 @@ impl PublicApiState {
             watch_preference: None,
             commands,
             consignment: ConsignmentCapabilities::default(),
+            deposit: DepositCapabilities::default(),
             metrics: None,
             runtime_switch_snapshot: None,
             readiness: None,
@@ -142,6 +147,17 @@ impl PublicApiState {
     /// 注入寄售的启动配置与可选端口，停用时保留本人历史查询和原命令仲裁。
     pub fn with_consignment(mut self, capabilities: ConsignmentCapabilities) -> Self {
         self.consignment = capabilities;
+        self
+    }
+
+    /// 注入 Public v2 收件能力；停用或没有数据库时读写端口都保持缺失。
+    pub fn with_deposit(
+        mut self,
+        enabled: bool,
+        read: Option<Arc<dyn DepositRead>>,
+        commands: Option<Arc<DepositCommandService>>,
+    ) -> Self {
+        self.deposit = DepositCapabilities { enabled, read, commands };
         self
     }
 
@@ -359,5 +375,11 @@ impl ConsignmentState for PublicApiState {
 
     fn consignment(&self) -> &ConsignmentCapabilities {
         &self.consignment
+    }
+}
+
+impl DepositState for PublicApiState {
+    fn deposit(&self) -> &DepositCapabilities {
+        &self.deposit
     }
 }
