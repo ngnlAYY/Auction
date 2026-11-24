@@ -108,6 +108,36 @@ AUCTION_CONFIG_FILE=$dir/public.toml mise run run-public
 
 也可以用 `auction-server --config-dir <目录>` 一次启动三个角色（需要启用 Worker control 并允许当前 UID）。
 
+### 本地一口价挂单预览
+
+以下步骤用于 Public、Admin、Worker 和 CLI 均已接入 `consignment-dev-preview` 的集成分支。
+
+1. 新建独立 PG18 集群和空库，仅监听回环地址，按[数据库准备](#1-准备数据库)及[分体部署](../ops/README.md#分体部署)创建运行账号和迁移 owner。按[准备配置](#2-准备配置)复制模板到临时私有目录，三个角色都引用该目录内同一份 `common.toml`。使用临时数据库凭据、Admin 凭据和装备数据密钥，核对运行账号与迁移 owner 都指向这个测试库。禁用邮件、论坛、告警等外部集成。
+2. 把公共配置中已有的 `[consignment].enabled` 改为 `true`，配置两个站点的回环监听和对应的 Origin。构建 Solid 页面和四个调试程序，显式给三个服务角色和 CLI 都启用 `consignment-dev-preview`。
+
+```bash
+mise run web-prepare
+export AUCTION_WEB_STACK=solid
+mise run web-build
+AUCTION_BUILD_ID="$(bash ci/release/release.sh web-build-id public)"
+export AUCTION_BUILD_ID
+cargo build --locked -p auction-public-api -p auction-admin-api -p auction-worker -p auction-cli \
+  --features 'auction-public-api/web-solid,auction-admin-api/web-solid,auction-public-api/consignment-dev-preview,auction-admin-api/consignment-dev-preview,auction-worker/consignment-dev-preview,auction-cli/consignment-dev-preview'
+target/debug/auction-cli --config-dir "$dir" config check --strict
+target/debug/auction-cli --config-dir "$dir" db migrate --owner-secrets "$owner_secrets" --no-systemd
+```
+
+3. 使用各自的临时配置启动 Worker、Admin、Public，等 Worker 同步寄售准入并发布心跳后检查 Public 的 `/api/v1/consignment/status`。只验证空库和只读 HTTP 时保持队列为空。需要提交登记并观察解析结果时，先在测试装配注入 `ListingEquipmentLookup` 脱敏替身并限制进程出站。若通过 Admin 建立本地测试卖家并签发登录 key，另配独立的测试 `user_login_data_key` 及其标识。
+
+```bash
+# 各命令在单独终端运行，先启动 Worker。
+AUCTION_CONFIG_FILE="$dir/worker.toml" target/debug/auction-worker
+AUCTION_CONFIG_FILE="$dir/admin.toml" target/debug/auction-admin-api
+AUCTION_CONFIG_FILE="$dir/public.toml" target/debug/auction-public-api
+```
+
+验收停用时先停止三个进程，再把公共开关改回 `false`，从 Worker 开始重新启动。预览数据库及其备份不得作为生产升级输入。
+
 ## 代码约定
 
 详见 [AGENTS.md](../AGENTS.md)，要点：
@@ -144,6 +174,10 @@ mise run test-db     # 真实 PostgreSQL 18 集成测试
 
 并行复用同一外部 PG18 测试服务器时，各进程使用同一维护数据库。夹具在该库持有会话级 advisory lock，串行化运行角色初始化和失败清理。
 非 superuser 维护账号继承夹具新建的临时登录角色，以便结束该角色的测试连接。清理时随临时角色一起撤销该成员资格。
+
+会写入进程级审计健康计数的测试放在 `postgres_audit` 目标里。`mise run test-db` 在 `postgres` 之后运行该目标，两者各用一个测试进程。寄售源码内的场景分派必须先验证当前目标，再执行会记录审计失败的场景，避免影响 `postgres` 中的就绪检查。
+
+同一入口接着用 `cargo build --locked -p auction-cli` 构建默认调试二进制，再通过 `--ignored consignment::key_rotation::postgres_cli_` 运行 `postgres` 目标中的装备数据密钥轮换 CLI 用例。这一组用真实子进程和夹具创建的独立数据库，覆盖演练、实际重封和旧钥退休检查。CI 的 `test` 作业调用这一入口。
 
 本地替身由 `crates/auction-test-support` 提供，只绑定 IPv4 回环、以脱敏语料回放，绝不连接真实账号；`crates/auction-integrations/tests/` 的邮件与论坛替身用真实客户端覆盖读取、账号忙、Cookie 失效、超时、协议漂移与写入结果分类，`mooglemail_maintenance_contention.rs` 复现“完整观察与 Sent 维护共用请求门导致维护超时”，`returned_take_timing.rs` 用真实投递 transport 复现结算退件 Take 的旧 POST 迟到完成与重排后新预检的两种交错（远端附件至多取走一次，已取走时新预检失败关闭、不再发 POST），以及领取 POST 已发出后被投递 Worker 放弃时，重排后的新预检等远端回应后才读取、不与之重叠。`crates/auction-integrations/src/clients/mooglemail/sender/baseline/tests.rs` 把 Sent 页数上限设为 1，覆盖发送基线在 `full`/`shadow` 下的失败关闭、`watermark` 的边界取得与写后候选；`apps/auction-worker/src/bootstrap/shutdown/tests.rs` 在发送 POST 中途停止 Worker，验证结果落库后才退出、准备期工作立即放弃、预算耗尽只留 sending 围栏且不重发。`crates/auction-integrations/src/equipment/reader/tests.rs` 用注入的账号状态故障覆盖装备页读取与邮件请求共用同账号许可：战斗页与限流只延期不退件、熔断窗口内不发网络、物理请求不重叠（装备页本身没有语料），以及装备读取被放弃时撤销许可登记、已发出时持锁到远端回应或本次读取预算结束。`crates/auction-integrations/src/clients/mooglemail/client/request/tests.rs` 用不随断开停止处理的 `DetachedDelay` 覆盖 Worker 自身读取与写入 POST 被放弃的两段：排队中放弃不留票据与锁登记、远端收不到；已发出后被调用方或余额读取预算放弃时，紧接的请求等远端处理完前一请求，远端处理超过 HTTP 预算时在预算结束释放，被放弃的写入只发出一次；未放弃的读写节奏与写入回应不变。替身未采集的远端页面、Worker 完整投递 runtime 与论坛写入成功页仍无替身驱动的用例；存储端口方法覆盖率用 `bash ci/checks/check.sh port-coverage` 统计，该报告不并入 `mise run verify`（口径见[ci/checks/README.md#存储端口覆盖率报告不并入-mise-run-verify](../ci/checks/README.md#存储端口覆盖率报告不并入-mise-run-verify)），不能据此声称数据库覆盖完整。
 

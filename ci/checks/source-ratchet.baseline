@@ -1,5 +1,5 @@
 all:#[path] 0
-all:use_super::* 78
+all:use_super::* 77
 all:let_=_error 0
 jobs:Err(_) 1
 jobs:map_err(|_|) 9
@@ -12,5 +12,5 @@ storage:map_err(|_|) 275
 integrations:Err(_) 1
 integrations:map_err(|_|) 26
 apps:Err(_) 7
-apps:map_err(|_|) 22
+apps:map_err(|_|) 21
 service-apps:english_message 0
