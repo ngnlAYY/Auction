@@ -54,6 +54,16 @@ pub enum ListingState {
     Displayed,
     /// 寄售挂单已通过核验，平台尚未代管装备。
     AwaitingDeposit,
+    /// 整封接受已完成，平台承担取得或核对责任。
+    DepositAccepted,
+    /// 唯一可购买态；已取得实物并完成上架决策。
+    Available,
+    /// 已有成交合同，履行中。
+    SalePending,
+    /// 已取得实物但暂不上架，原因见 `HeldOffMarketReason`。
+    HeldOffMarket,
+    /// 卖家已登记撤回意愿，等待后期 Withdrawal 合同执行。
+    WithdrawalPending,
     /// 核验或解析失败，永久终结。
     Rejected,
     /// 达到本态截止，永久终结。
@@ -69,6 +79,11 @@ impl ListingState {
             Self::Resolving => "resolving",
             Self::Displayed => "displayed",
             Self::AwaitingDeposit => "awaiting_deposit",
+            Self::DepositAccepted => "deposit_accepted",
+            Self::Available => "available",
+            Self::SalePending => "sale_pending",
+            Self::HeldOffMarket => "held_off_market",
+            Self::WithdrawalPending => "withdrawal_pending",
             Self::Rejected => "rejected",
             Self::Expired => "expired",
             Self::Closed => "closed",
@@ -77,7 +92,24 @@ impl ListingState {
 
     /// 判断持久记录是否处于活动态，有效状态还须结合强制终止事实。
     pub const fn is_active(self) -> bool {
-        matches!(self, Self::Resolving | Self::Displayed | Self::AwaitingDeposit)
+        !matches!(self, Self::Rejected | Self::Expired | Self::Closed)
+    }
+
+    /// 是否属于第 4 期新增的代管状态；旧 v1 变更不对这些状态执行新语义。
+    pub const fn is_custody_managed(self) -> bool {
+        matches!(
+            self,
+            Self::DepositAccepted
+                | Self::Available
+                | Self::SalePending
+                | Self::HeldOffMarket
+                | Self::WithdrawalPending
+        )
+    }
+
+    /// 是否占用活动额度；`available` 占一个名额，`held_off_market` 与其他代管态不占。
+    pub const fn occupies_quota(self) -> bool {
+        matches!(self, Self::Resolving | Self::Displayed | Self::AwaitingDeposit | Self::Available)
     }
 }
 
@@ -89,6 +121,11 @@ impl FromStr for ListingState {
             "resolving" => Ok(Self::Resolving),
             "displayed" => Ok(Self::Displayed),
             "awaiting_deposit" => Ok(Self::AwaitingDeposit),
+            "deposit_accepted" => Ok(Self::DepositAccepted),
+            "available" => Ok(Self::Available),
+            "sale_pending" => Ok(Self::SalePending),
+            "held_off_market" => Ok(Self::HeldOffMarket),
+            "withdrawal_pending" => Ok(Self::WithdrawalPending),
             "rejected" => Ok(Self::Rejected),
             "expired" => Ok(Self::Expired),
             "closed" => Ok(Self::Closed),
@@ -197,6 +234,11 @@ mod tests {
             (ListingState::Resolving, "resolving", true),
             (ListingState::Displayed, "displayed", true),
             (ListingState::AwaitingDeposit, "awaiting_deposit", true),
+            (ListingState::DepositAccepted, "deposit_accepted", true),
+            (ListingState::Available, "available", true),
+            (ListingState::SalePending, "sale_pending", true),
+            (ListingState::HeldOffMarket, "held_off_market", true),
+            (ListingState::WithdrawalPending, "withdrawal_pending", true),
             (ListingState::Rejected, "rejected", false),
             (ListingState::Expired, "expired", false),
             (ListingState::Closed, "closed", false),
@@ -204,6 +246,27 @@ mod tests {
             assert_eq!(state.as_str(), code);
             assert_eq!(code.parse(), Ok(state));
             assert_eq!(state.is_active(), active);
+            assert_eq!(
+                state.is_custody_managed(),
+                matches!(
+                    state,
+                    ListingState::DepositAccepted
+                        | ListingState::Available
+                        | ListingState::SalePending
+                        | ListingState::HeldOffMarket
+                        | ListingState::WithdrawalPending
+                )
+            );
+            assert_eq!(
+                state.occupies_quota(),
+                matches!(
+                    state,
+                    ListingState::Resolving
+                        | ListingState::Displayed
+                        | ListingState::AwaitingDeposit
+                        | ListingState::Available
+                )
+            );
         }
         for code in ["", "Closed", "closed ", "registered_only", "awaiting-deposit"] {
             assert_eq!(

@@ -206,6 +206,10 @@ pub fn transition_listing(
     if matches!(trigger, ListingTrigger::Register { .. }) {
         return Err(invalid());
     }
+    // 不变量 6：旧 v1 变更不对第 4 期代管状态执行新语义；这些迁移由寄售 deposit 领域负责。
+    if listing.state.is_custody_managed() {
+        return Err(invalid());
+    }
 
     // 不变量 2、3、6：锁内强制事实抢先于主动操作的版本检查，已终结记录保留初次原因。
     if let Some(reason) = forced_reason(listing, now, facts) {
@@ -294,7 +298,12 @@ pub fn transition_listing(
 fn valid_snapshot(listing: ListingSnapshot) -> bool {
     let valid_mode = match listing.state {
         ListingState::Displayed => listing.mode == ListingMode::Direct,
-        ListingState::AwaitingDeposit => listing.mode == ListingMode::Consigned,
+        ListingState::AwaitingDeposit
+        | ListingState::DepositAccepted
+        | ListingState::Available
+        | ListingState::SalePending
+        | ListingState::HeldOffMarket
+        | ListingState::WithdrawalPending => listing.mode == ListingMode::Consigned,
         _ => true,
     };
     valid_mode
@@ -313,6 +322,10 @@ fn forced_reason(
     if !listing.state.is_active() {
         return None;
     }
+    // 代管状态没有旧 TTL；止售、季末与损失由第 4–7 期的专用迁移收口。
+    if listing.state.is_custody_managed() {
+        return None;
+    }
     if facts.auction_lot_created {
         return Some(ListingReason::AuctionLotCreated);
     }
@@ -327,7 +340,14 @@ fn forced_reason(
             ListingState::Resolving => Some(ListingReason::LookupDeadline),
             ListingState::Displayed => Some(ListingReason::DisplayExpired),
             ListingState::AwaitingDeposit => Some(ListingReason::DepositExpired),
-            ListingState::Rejected | ListingState::Expired | ListingState::Closed => None,
+            ListingState::DepositAccepted
+            | ListingState::Available
+            | ListingState::SalePending
+            | ListingState::HeldOffMarket
+            | ListingState::WithdrawalPending
+            | ListingState::Rejected
+            | ListingState::Expired
+            | ListingState::Closed => None,
         };
     }
     None
@@ -985,6 +1005,41 @@ mod tests {
             ),
             Ok(ListingTransition::Unchanged(listing))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn custody_managed_states_reject_every_legacy_trigger() -> Result<(), ListingError> {
+        let expected_version = ListingVersion::new(3)?;
+        let price = ListingPrice::new(101)?;
+        for state in [
+            ListingState::DepositAccepted,
+            ListingState::Available,
+            ListingState::SalePending,
+            ListingState::HeldOffMarket,
+            ListingState::WithdrawalPending,
+        ] {
+            let listing = ListingSnapshot {
+                mode: ListingMode::Consigned,
+                state,
+                state_version: expected_version,
+                price,
+                expires_at: NOW + Duration::seconds(60),
+                reason: None,
+            };
+            for trigger in [
+                ListingTrigger::Reprice { expected_version, price },
+                ListingTrigger::Withdraw { expected_version },
+                ListingTrigger::AdminDelist { expected_version },
+                ListingTrigger::AutoClose,
+                ListingTrigger::LookupAccepted(ListingPublicationTtls::default()),
+            ] {
+                assert!(
+                    decide(Some(listing), trigger, NOW).is_err(),
+                    "{state:?} 不得执行旧 v1 迁移"
+                );
+            }
+        }
         Ok(())
     }
 

@@ -4,12 +4,17 @@
 //! 这里改写，调用方只把结论用于尚未建立的下一轮。
 
 mod calendar;
+mod consignment_season;
 mod early_bird;
 mod local_wire;
 mod source;
 mod wall_clock;
 
 pub use calendar::{AuctionScheduleCalendar, AuctionScheduleSlot, AuctionWeeklySchedule};
+pub use consignment_season::{
+    CalendarVersion, ConsignmentCalendar, FrozenSeason, MAX_PRECLOSE_DAYS, SeasonError,
+    SeasonState, season_state,
+};
 pub use early_bird::{AuctionEarlyBirdCalendar, AuctionEarlyBirdConfig, AuctionEarlyBirdSeason};
 pub use source::{AuctionEarlyBirdSlot, AuctionScheduleSource, AuctionScheduleTimes};
 pub use wall_clock::{parse_clock_minute, parse_timezone};

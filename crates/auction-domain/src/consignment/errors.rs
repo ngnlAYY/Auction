@@ -101,7 +101,73 @@ pub enum ListingReason {
     SellerCancelled,
     /// 管理员下架挂单。
     AdminDelisted,
+    /// 已成交并由合同收口。
+    Sold,
+    /// 撤回原件已交付原卖家。
+    WithdrawnDelivered,
+    /// 旧季关闭。
+    SeasonClosed,
+    /// 已确认损失并转入案件。
+    LossConfirmed,
 }
+
+/// `held_off_market` 的原因闭集；第 4 期只产生运营止售与复核。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HeldOffMarketReason {
+    /// 未付款的成交原件已收回。
+    UnpaidRecovered,
+    /// 已付款但交付退回并收回原件。
+    PaidReturned,
+    /// 卖家失去资格。
+    SellerIneligible,
+    /// 寄售服务停用。
+    ServiceDisabled,
+    /// 活动名额已满。
+    QuotaBlocked,
+    /// 运营止售。
+    OperationsHold,
+    /// 等待复核或后期处置。
+    Review,
+}
+
+impl HeldOffMarketReason {
+    /// 全部原因；持久化闭集必须逐项对应。
+    pub const ALL: [Self; 7] = [
+        Self::UnpaidRecovered,
+        Self::PaidReturned,
+        Self::SellerIneligible,
+        Self::ServiceDisabled,
+        Self::QuotaBlocked,
+        Self::OperationsHold,
+        Self::Review,
+    ];
+
+    /// 稳定 wire 与数据库码。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::UnpaidRecovered => "unpaid_recovered",
+            Self::PaidReturned => "paid_returned",
+            Self::SellerIneligible => "seller_ineligible",
+            Self::ServiceDisabled => "service_disabled",
+            Self::QuotaBlocked => "quota_blocked",
+            Self::OperationsHold => "operations_hold",
+            Self::Review => "review",
+        }
+    }
+
+    /// 闭集解析，未知值失败关闭。
+    pub fn parse(value: &str) -> Result<Self, UnknownHeldOffMarketReason> {
+        Self::ALL
+            .into_iter()
+            .find(|reason| reason.as_str() == value)
+            .ok_or(UnknownHeldOffMarketReason)
+    }
+}
+
+/// `held_off_market` 原因码不在闭集中。
+#[derive(Debug, Error, PartialEq, Eq)]
+#[error("未知的 held_off_market 原因码")]
+pub struct UnknownHeldOffMarketReason;
 
 /// 挂单终态原因的字符串不在闭集中。
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -109,7 +175,8 @@ pub enum ListingReason {
 pub struct UnknownListingReason;
 
 impl ListingReason {
-    const ALL: [Self; 24] = [
+    /// 全部终态原因；持久化与旧版读模型的闭集比对以它为准。
+    pub const ALL: [Self; 28] = [
         Self::NotTradeable,
         Self::OwnerMismatch,
         Self::HistoryOwnerMismatch,
@@ -134,6 +201,10 @@ impl ListingReason {
         Self::ServiceDisabled,
         Self::SellerCancelled,
         Self::AdminDelisted,
+        Self::Sold,
+        Self::WithdrawnDelivered,
+        Self::SeasonClosed,
+        Self::LossConfirmed,
     ];
 
     /// 返回数据库和 DTO 共用的稳定原因码。
@@ -163,6 +234,10 @@ impl ListingReason {
             Self::ServiceDisabled => "service_disabled",
             Self::SellerCancelled => "seller_cancelled",
             Self::AdminDelisted => "admin_delisted",
+            Self::Sold => "sold",
+            Self::WithdrawnDelivered => "withdrawn_delivered",
+            Self::SeasonClosed => "season_closed",
+            Self::LossConfirmed => "loss_confirmed",
         }
     }
 
@@ -197,17 +272,24 @@ impl ListingReason {
             | Self::SellerIneligible
             | Self::ServiceDisabled
             | Self::SellerCancelled
-            | Self::AdminDelisted => "closed",
+            | Self::AdminDelisted
+            | Self::Sold
+            | Self::WithdrawnDelivered
+            | Self::SeasonClosed
+            | Self::LossConfirmed => "closed",
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ListingError, ListingReason, UnknownListingReason};
+    use super::{
+        HeldOffMarketReason, ListingError, ListingReason, UnknownHeldOffMarketReason,
+        UnknownListingReason,
+    };
 
     // 期望值来自合同第 2.1 节和第 5.1 节。
-    const REASON_CASES: [(ListingReason, &str, &str); 24] = [
+    const REASON_CASES: [(ListingReason, &str, &str); 28] = [
         (ListingReason::NotTradeable, "not_tradeable", "rejected"),
         (ListingReason::OwnerMismatch, "owner_mismatch", "rejected"),
         (ListingReason::HistoryOwnerMismatch, "history_owner_mismatch", "rejected"),
@@ -232,7 +314,28 @@ mod tests {
         (ListingReason::ServiceDisabled, "service_disabled", "closed"),
         (ListingReason::SellerCancelled, "seller_cancelled", "closed"),
         (ListingReason::AdminDelisted, "admin_delisted", "closed"),
+        (ListingReason::Sold, "sold", "closed"),
+        (ListingReason::WithdrawnDelivered, "withdrawn_delivered", "closed"),
+        (ListingReason::SeasonClosed, "season_closed", "closed"),
+        (ListingReason::LossConfirmed, "loss_confirmed", "closed"),
     ];
+
+    #[test]
+    fn held_off_market_reason_closure_round_trips() {
+        for (reason, code) in [
+            (HeldOffMarketReason::UnpaidRecovered, "unpaid_recovered"),
+            (HeldOffMarketReason::PaidReturned, "paid_returned"),
+            (HeldOffMarketReason::SellerIneligible, "seller_ineligible"),
+            (HeldOffMarketReason::ServiceDisabled, "service_disabled"),
+            (HeldOffMarketReason::QuotaBlocked, "quota_blocked"),
+            (HeldOffMarketReason::OperationsHold, "operations_hold"),
+            (HeldOffMarketReason::Review, "review"),
+        ] {
+            assert_eq!(reason.as_str(), code);
+            assert_eq!(HeldOffMarketReason::parse(code), Ok(reason));
+        }
+        assert_eq!(HeldOffMarketReason::parse("season_closed"), Err(UnknownHeldOffMarketReason));
+    }
 
     #[test]
     fn listing_reason_codes_round_trip() {
