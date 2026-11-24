@@ -12,6 +12,7 @@ use super::{MailDouble, MailState};
 /// 测试登记的待领取邮件：领取前/后两份页面由调用方提供，替身只记录远端状态与领取次数。
 pub(super) struct ScriptedTake {
     mid: String,
+    action: ScriptedAction,
     claimable: String,
     taken: String,
     /// 远端附件是否已被取走。
@@ -23,6 +24,14 @@ pub(super) struct ScriptedTake {
     /// 远端真正取走附件的次数；正确的协议下至多一次。
     removals: usize,
     take_posts: usize,
+    return_posts: usize,
+    returns: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScriptedAction {
+    Take,
+    Return,
 }
 
 impl MailDouble {
@@ -32,6 +41,7 @@ impl MailDouble {
     pub fn script_take_mail(&self, mid: &str, claimable: String, taken: String) {
         self.state.lock().expect("test state poisoned").scripted = Some(ScriptedTake {
             mid: mid.to_owned(),
+            action: ScriptedAction::Take,
             claimable,
             taken,
             removed: false,
@@ -39,6 +49,25 @@ impl MailDouble {
             late_post: None,
             removals: 0,
             take_posts: 0,
+            return_posts: 0,
+            returns: 0,
+        });
+    }
+
+    /// 登记一封待退回邮件：GET 在退回前/后页面间切换，Return POST 只生效一次。
+    pub fn script_return_mail(&self, mid: &str, before: String, after: String) {
+        self.state.lock().expect("test state poisoned").scripted = Some(ScriptedTake {
+            mid: mid.to_owned(),
+            action: ScriptedAction::Return,
+            claimable: before,
+            taken: after,
+            removed: false,
+            deferred: false,
+            late_post: None,
+            removals: 0,
+            take_posts: 0,
+            return_posts: 0,
+            returns: 0,
         });
     }
 
@@ -57,7 +86,10 @@ impl MailDouble {
             && !scripted.removed
         {
             scripted.removed = true;
-            scripted.removals += 1;
+            match scripted.action {
+                ScriptedAction::Take => scripted.removals += 1,
+                ScriptedAction::Return => scripted.returns += 1,
+            }
         }
     }
 
@@ -65,6 +97,12 @@ impl MailDouble {
     pub fn take_counts(&self) -> (usize, usize) {
         let state = self.state.lock().expect("test state poisoned");
         state.scripted.as_ref().map_or((0, 0), |scripted| (scripted.removals, scripted.take_posts))
+    }
+
+    /// 远端真正退回的次数与收到的 Return POST 数。
+    pub fn return_counts(&self) -> (usize, usize) {
+        let state = self.state.lock().expect("test state poisoned");
+        state.scripted.as_ref().map_or((0, 0), |scripted| (scripted.returns, scripted.return_posts))
     }
 }
 
@@ -84,14 +122,20 @@ pub(super) async fn respond(
                 if scripted.removed { scripted.taken.clone() } else { scripted.claimable.clone() };
             if std::mem::take(&mut scripted.deferred) && !scripted.removed {
                 scripted.removed = true;
-                scripted.removals += 1;
+                match scripted.action {
+                    ScriptedAction::Take => scripted.removals += 1,
+                    ScriptedAction::Return => scripted.returns += 1,
+                }
             }
             return Some(Html(page).into_response());
         }
         if *method != Method::POST {
             return Some(StatusCode::METHOD_NOT_ALLOWED.into_response());
         }
-        scripted.take_posts += 1;
+        match scripted.action {
+            ScriptedAction::Take => scripted.take_posts += 1,
+            ScriptedAction::Return => scripted.return_posts += 1,
+        }
         match scripted.late_post.take() {
             Some(delay) => {
                 scripted.deferred = !scripted.removed;
@@ -100,7 +144,10 @@ pub(super) async fn respond(
             None => {
                 if !scripted.removed {
                     scripted.removed = true;
-                    scripted.removals += 1;
+                    match scripted.action {
+                        ScriptedAction::Take => scripted.removals += 1,
+                        ScriptedAction::Return => scripted.returns += 1,
+                    }
                 }
                 return Some(Html(scripted.taken.clone()).into_response());
             }

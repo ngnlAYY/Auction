@@ -24,12 +24,20 @@ use crate::clients::mooglemail::{
 mod actions;
 mod authorization;
 mod credentials;
+mod disposition;
 mod messages;
 mod settlement_secrets;
 #[cfg(test)]
 mod tests;
 
 use actions::PreparedMoogleMailTake;
+
+pub(crate) use disposition::manifest_matches;
+pub use disposition::{
+    CONSIGNMENT_DISPOSITION_VALIDATOR_VERSION, DispositionAction, DispositionOutcome,
+    DispositionProof, DispositionRequest, DispositionTarget, ExpectedReturn, NotSentReason,
+    SentUnprovenReason, SignedProof, execute_prepared_consignment_disposition,
+};
 
 impl MoogleMailDeliveryTransport {
     /// 注入发送前基线模式与只读影子观测器；不改变持久 fence 和外写次数。

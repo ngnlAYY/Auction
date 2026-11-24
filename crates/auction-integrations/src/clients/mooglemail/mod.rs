@@ -29,15 +29,19 @@ pub use diagnostics::{
 pub use error::{MoogleMailError, MoogleMailErrorCategory};
 pub use forms::{MoogleMailForm, MoogleMailMessageFields};
 pub use gateway::{
-    MoogleMailCredentialSet, MoogleMailGateway, MoogleMailGatewayConfig,
-    MoogleMailInboundRecoveryScan, MoogleMailPage, MoogleMailRuntimeCredential,
-    MoogleMailSentLookupReport, MoogleMailSentLookupRequest, MoogleMailSentLookupStatus,
-    MoogleMailSentRecoveryScan,
+    BoundConsignmentObservation, ConsignmentReadOutcome, ConsignmentReadPending,
+    MoogleMailConsignmentCandidate, MoogleMailCredentialSet, MoogleMailGateway,
+    MoogleMailGatewayConfig, MoogleMailInboundRecoveryScan, MoogleMailPage, MoogleMailPageMessage,
+    MoogleMailRuntimeCredential, MoogleMailSentLookupReport, MoogleMailSentLookupRequest,
+    MoogleMailSentLookupStatus, MoogleMailSentRecoveryScan, PreparedConsignmentDisposition,
 };
 pub use parser::{
-    MoogleMailActionState, MoogleMailAttachment, MoogleMailBalanceSnapshot, MoogleMailInboxPage,
+    CONSIGNMENT_PARSER_VERSION, ConsignmentAttachmentObservation, ConsignmentDetailObservation,
+    ConsignmentListRow, FrozenMailAttachment, FrozenMailManifest, MoogleMailActionState,
+    MoogleMailAttachment, MoogleMailBalanceSnapshot, MoogleMailInboxPage,
     MoogleMailInventorySnapshot, MoogleMailMessage, MoogleMailParser, MoogleMailSentPage,
-    MoogleMailSentSnapshot, MoogleMailSentSummary, MoogleMailSummary,
+    MoogleMailSentSnapshot, MoogleMailSentSummary, MoogleMailSummary, TakeReceiptObservation,
+    observe_take_receipt, parse_consignment_detail, parse_consignment_list_row,
 };
 pub use protocol::MoogleMailInventoryCategory;
 pub use protocol::{
@@ -49,7 +53,14 @@ pub use sender::{
     MoogleMailSendReceipt, MoogleMailSendRequest, MoogleMailSender, MoogleMailSentListEntry,
     MoogleMailSentObservation,
 };
-pub use transport::{MoogleMailDeliveryTransport, MoogleMailNotificationTemplates};
+pub use transport::{
+    CONSIGNMENT_DISPOSITION_VALIDATOR_VERSION, DispositionAction, DispositionOutcome,
+    DispositionProof, DispositionRequest, DispositionTarget, ExpectedAttachmentPayload,
+    ExpectedMailManifestPayload, ExpectedReturn, MailDeliveryPayload, MailKeyPayload,
+    MoogleMailDeliveryTransport, MoogleMailNotificationTemplates, NotSentReason,
+    SentUnprovenReason, SignedProof, decode_consignment_disposition_request,
+    execute_prepared_consignment_disposition,
+};
 pub use writer::{MoogleMailComposeState, MoogleMailSendResponseFailure};
 
 /// 将已完成协议校验的 MoogleMail envelope 转换为应用业务 envelope。

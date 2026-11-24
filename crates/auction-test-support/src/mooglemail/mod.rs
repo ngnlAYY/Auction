@@ -44,6 +44,12 @@ pub enum Fault {
     DetachedDelay(Duration),
     /// HTML 类型正确但邮件结构缺失。
     ProtocolDrift,
+    /// 仅邮件详情结构缺失；身份页与列表照常回放，用于认证成功后的清单不明分支。
+    DetailProtocolDrift,
+    /// 仅邮件详情限流；身份页照常回放，用于区分读失败闭集。
+    DetailRateLimited,
+    /// 仅邮件详情命中战斗页；身份页照常回放。
+    DetailAccountBusy,
     /// 收到 POST 后返回无法证明成功或失败的内容；不自动重发。
     WriteResultUnknown,
     /// 仅注入客户端已识别的拒绝提示。
@@ -161,8 +167,7 @@ impl MailDouble {
         self.state.lock().expect("test state poisoned").cookies.clone()
     }
 
-    /// 此后到达的请求照常登记（计入 `requests`、`request_cookies` 与在途数）后挂起，直到返回的闸门
-    /// 释放；用来确定性地让一个物理请求停在远端处理中，不依赖延迟长短。
+    /// 此后到达的请求登记后挂起，直到闸门释放；用于确定性地让一个物理请求停在远端处理中。
     pub fn hold_responses(&self) -> ResponseHold {
         let (release, held) = watch::channel(());
         self.state.lock().expect("test state poisoned").hold = Some(held);
@@ -255,6 +260,17 @@ async fn handle(
             .into_owned()
             .collect();
     if matches!(uri.path(), "/" | "/isekai/")
+        && query.get("s").map(String::as_str) == Some("Character")
+        && query.get("ss").map(String::as_str) == Some("eq")
+    {
+        let page = if uri.path() == "/isekai/" {
+            fixtures::IDENTITY_ISEKAI
+        } else {
+            fixtures::IDENTITY_MAIN
+        };
+        return Html(page).into_response();
+    }
+    if matches!(uri.path(), "/" | "/isekai/")
         && query.get("s").map(String::as_str) == Some("Bazaar")
         && query.get("ss").map(String::as_str) == Some("is")
     {
@@ -276,6 +292,16 @@ async fn handle(
         }
         state.fault
     };
+    if matches!(fault, Some(Fault::DetailProtocolDrift)) && query.contains_key("mid") {
+        return Html("<div>injected detail protocol drift</div>").into_response();
+    }
+    if matches!(fault, Some(Fault::DetailRateLimited)) && query.contains_key("mid") {
+        return (StatusCode::TOO_MANY_REQUESTS, Html("state lock limiter in effect"))
+            .into_response();
+    }
+    if matches!(fault, Some(Fault::DetailAccountBusy)) && query.contains_key("mid") {
+        return Html("<div id=\"battle_main\"></div>").into_response();
+    }
     if let Some(response) = account_state_fault(fault).await {
         return response;
     }

@@ -16,6 +16,239 @@ use crate::clients::mooglemail::{
     MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation, MoogleMailWorld,
 };
 
+/// 寄售原观察的附件种类；与拍卖严格清单分开，未知布局也不提前报协议错误。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RawAttachmentKind {
+    /// 可识别装备。
+    Equipment,
+    /// Credits 附件。
+    Credits,
+    /// 无法归类的附件。
+    Unknown,
+}
+
+/// 详情页中的一件原始附件；保留原序和原文，不在此处做预约匹配。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RawAttachmentEntry {
+    pub(crate) kind: RawAttachmentKind,
+    pub(crate) raw_eid: Option<String>,
+    pub(crate) name: String,
+    pub(crate) amount: Option<u64>,
+}
+
+/// 详情页的原始附件清单；任一项读不出时带明确的 `unknown` 标记。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RawAttachmentManifest {
+    /// 页面声明的原始附件数；即使与清单冲突也保留。
+    pub(crate) reported_count: Option<u32>,
+    /// 只有数量与逐项清单一致时才可作为资产数。
+    pub(crate) count: Option<u32>,
+    pub(crate) cod: Option<u64>,
+    pub(crate) credits: Option<u64>,
+    pub(crate) entries: Vec<RawAttachmentEntry>,
+    pub(crate) mail_state: Option<u8>,
+    pub(crate) unknown: bool,
+}
+
+/// 保留原序解析附件清单；重复 EID、未知布局和数量冲突只标记 `unknown`，交给整封隔离。
+///
+/// 不变量 6、7：不认识的页面形状不能变成“零资产”，也不能把原文或装备 key 写进错误。
+pub(crate) fn parse_raw_attachment_manifest(
+    document: &Html,
+    world: MoogleMailWorld,
+) -> RawAttachmentManifest {
+    let Ok(panes_selector) =
+        read_selector!("#mmail_attachpanes", MoogleMailOperation::Detail, world)
+    else {
+        return unknown_manifest();
+    };
+    let Ok(list_selector) =
+        read_selector!("[id='mmail_attachlist']", MoogleMailOperation::Detail, world)
+    else {
+        return unknown_manifest();
+    };
+    let Ok(hook_selector) = read_selector!("[onmouseover]", MoogleMailOperation::Detail, world)
+    else {
+        return unknown_manifest();
+    };
+    let mut unknown = false;
+    let panes = document.select(panes_selector);
+    // 结构错误已由本清单的 unknown 标记分类，不能把页面原文带进错误或日志。
+    let panes = unique_element(panes, MoogleMailOperation::Detail, world).ok();
+    if panes.is_none() {
+        unknown = true;
+    }
+    let script = script_text(document, world, MoogleMailOperation::Detail).ok();
+    let executable = script.as_deref().and_then(executable_javascript);
+    let count_raw =
+        executable.as_deref().and_then(|source| required_script_value(source, "attach_count"));
+    let cod_raw =
+        executable.as_deref().and_then(|source| required_script_value(source, "attach_cod"));
+    let state_raw =
+        executable.as_deref().and_then(|source| required_script_value(source, "mail_state"));
+    let reported_count = count_raw.and_then(|value| {
+        (0..=MAX_ATTACHMENT_ENTRIES as i64)
+            .contains(&value)
+            .then(|| u32::try_from(value).ok())
+            .flatten()
+    });
+    let mut count = reported_count;
+    if count_raw.is_some() && count.is_none() {
+        unknown = true;
+    }
+    let cod = cod_raw.and_then(|value| u64::try_from(value).ok());
+    if cod_raw.is_some() && cod.is_none() {
+        unknown = true;
+    }
+    let mail_state = state_raw.and_then(|value| u8::try_from(value).ok()).filter(|value| {
+        let valid = matches!(value, 1 | 2);
+        if !valid {
+            unknown = true;
+        }
+        valid
+    });
+
+    let lists = document.select(list_selector).take(2).collect::<Vec<_>>();
+    if lists.len() > 1 {
+        unknown = true;
+    }
+    let mut entries = Vec::new();
+    if let Some(list) = lists.first()
+        && panes.is_some()
+    {
+        let list_text = normalize_text(list.text().collect::<String>());
+        let direct = direct_element_children(*list);
+        let child_text =
+            normalize_text(direct.iter().flat_map(scraper::ElementRef::text).collect());
+        if list_text != child_text {
+            unknown = true;
+        }
+        if direct.is_empty() {
+            unknown = true;
+        }
+        if direct.len() > MAX_ATTACHMENT_ENTRIES {
+            unknown = true;
+        }
+        for entry in direct.iter().take(MAX_ATTACHMENT_ENTRIES) {
+            let text = normalize_text(entry.text().collect::<String>());
+            if !valid_line(&text, 512, false) {
+                unknown = true;
+            }
+            let hooks = entry
+                .value()
+                .attr("onmouseover")
+                .map(|_| *entry)
+                .into_iter()
+                .chain(entry.select(hook_selector))
+                .take(2)
+                .collect::<Vec<_>>();
+            let (kind, raw_eid, amount) = match hooks.as_slice() {
+                [] => match parse_credits_text(&text) {
+                    Some(amount) => (RawAttachmentKind::Credits, None, Some(amount as u64)),
+                    None => (RawAttachmentKind::Unknown, None, None),
+                },
+                [hook] => match hook.value().attr("onmouseover").and_then(extract_raw_equipment_id)
+                {
+                    Some(raw_eid) if normalize_text(hook.text().collect::<String>()) == text => {
+                        (RawAttachmentKind::Equipment, Some(raw_eid), None)
+                    }
+                    Some(_) | None => (RawAttachmentKind::Unknown, None, None),
+                },
+                _ => (RawAttachmentKind::Unknown, None, None),
+            };
+            entries.push(RawAttachmentEntry { kind, raw_eid, name: text, amount });
+        }
+    } else if count.is_some_and(|value| value > 0) {
+        unknown = true;
+        count = None;
+    }
+
+    if let Some(expected) = count
+        && usize::try_from(expected).ok() != Some(entries.len())
+    {
+        unknown = true;
+        count = None;
+    }
+    let credits = entries
+        .iter()
+        .filter_map(|entry| (entry.kind == RawAttachmentKind::Credits).then_some(entry.amount))
+        .collect::<Option<Vec<_>>>();
+    let credits = match credits.as_deref() {
+        Some([]) => Some(0),
+        Some([amount]) => Some(*amount),
+        Some(_) => {
+            unknown = true;
+            None
+        }
+        None => {
+            unknown = true;
+            None
+        }
+    };
+    if cod.is_some_and(|value| value > 0) && count == Some(0) {
+        unknown = true;
+        count = None;
+    }
+    RawAttachmentManifest { reported_count, count, cod, credits, entries, mail_state, unknown }
+}
+
+/// 读取页面唯一的世界声明；缺失、重复或未知文案返回 `None`，由上层决定是否隔离。
+pub(crate) fn parse_world_marker(
+    document: &Html,
+    world: MoogleMailWorld,
+) -> Option<MoogleMailWorld> {
+    let selector = read_selector!("#world_text p", MoogleMailOperation::Detail, world).ok()?;
+    let mut markers = document
+        .select(selector)
+        .map(|paragraph| normalize_text(paragraph.text().collect::<String>()))
+        .filter(|text| text.starts_with("Currently playing on "));
+    let marker = markers.next()?;
+    if markers.next().is_some() {
+        return None;
+    }
+    match marker.as_str() {
+        "Currently playing on Persistent" => Some(MoogleMailWorld::Main),
+        "Currently playing on Isekai" => Some(MoogleMailWorld::Isekai),
+        _ => None,
+    }
+}
+
+/// 保留原文 EID 的数字串，不在此处去零或拒绝别名；规范判定留给寄售观察。
+fn extract_raw_equipment_id(value: &str) -> Option<String> {
+    const MARKER: &str = "equips.set(";
+    let mut matches = value.match_indices(MARKER);
+    let (marker_start, _) = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    if marker_start > 0
+        && !value[..marker_start]
+            .chars()
+            .next_back()
+            .is_some_and(|character| character.is_whitespace() || character == ';')
+    {
+        return None;
+    }
+    let start = marker_start + MARKER.len();
+    let remainder = value[start..].trim_start();
+    let end = remainder.find(|character: char| !character.is_ascii_digit())?;
+    let raw = &remainder[..end];
+    (!raw.is_empty() && raw.len() <= 64 && remainder[end..].trim_start().starts_with(','))
+        .then(|| raw.to_owned())
+}
+
+fn unknown_manifest() -> RawAttachmentManifest {
+    RawAttachmentManifest {
+        reported_count: None,
+        count: None,
+        cod: None,
+        credits: None,
+        entries: Vec::new(),
+        mail_state: None,
+        unknown: true,
+    }
+}
+
 pub(crate) fn parse_token(
     document: &Html,
     world: MoogleMailWorld,

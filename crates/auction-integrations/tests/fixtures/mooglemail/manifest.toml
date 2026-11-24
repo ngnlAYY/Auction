@@ -250,3 +250,236 @@ sanitization = "见顶层 sanitization；未复制原始页面。"
 pairs = []
 bytes = 5391
 sha256 = "1f8d60171373b4e4f2ef1e48b4235e3a652ca9963f151201fc9cc8dc9a6e4a62"
+
+# 寄售派生件（未签收）：真实成对样本取得前只用于分支测试。
+
+[[fixtures]]
+file = "consign-detail-isekai-multi.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_detail"
+world = "isekai"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 8075
+sha256 = "d043271d2cc945371c77ab7da1c6bb9bd0f7a8649e7536cc94ec29240222323f"
+
+[[fixtures]]
+file = "consign-detail-main-alias.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_detail"
+world = "main"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 8014
+sha256 = "86f71ad020232f833c263f60e2098602052ecc1e5855ade9c8277662e239455a"
+
+[[fixtures]]
+file = "consign-detail-main-bad-count.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_detail"
+world = "main"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 7753
+sha256 = "9564ddd40db9807814d0399846af2169efdaec2608b1e4c97e2666fcb9dddaf1"
+
+[[fixtures]]
+file = "consign-detail-main-cod.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_detail"
+world = "main"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 7875
+sha256 = "14d1ea8252a60e88fb578ab07cba5e6e32337d279ce98006e84f22c1b911744f"
+
+[[fixtures]]
+file = "consign-detail-main-credits.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_detail"
+world = "main"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 7608
+sha256 = "d659360615aa08549dbfb1c77d806a63a08eb6c8f6ce1dd59e0bb19ba5cb8a2c"
+
+[[fixtures]]
+file = "consign-detail-main-duplicate-eid.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_detail"
+world = "main"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 8022
+sha256 = "10bac4ca088c5260569c6d2500ff53bdf8e55196402aef71c0064b3236057bdd"
+
+[[fixtures]]
+file = "consign-detail-main-multi.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_detail"
+world = "main"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 8072
+sha256 = "1ba03ff6d58538c14b926ffcf29d2533dd09e1142f536860d8b10273926118c5"
+
+[[fixtures]]
+file = "consign-detail-main-same-name.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_detail"
+world = "main"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 8070
+sha256 = "c00c2587b153ce78a9ccb2878e2146f3653c69d3eee4b63ed323c4676db360b3"
+
+[[fixtures]]
+file = "consign-detail-main-single.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_detail"
+world = "main"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 7753
+sha256 = "faf23cf8894c7a98bab70034aa39170ccfa050ee3e30fb769fbf5b5b9914514b"
+
+[[fixtures]]
+file = "consign-detail-main-unknown.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_detail"
+world = "main"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 7607
+sha256 = "e7a7eb1266a820d3d51aa4345e6276986b9e2a31ecbeb297f870c9e154c231ce"
+
+[[fixtures]]
+file = "consign-detail-main-wrong-recipient.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_detail"
+world = "main"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 7751
+sha256 = "f2acbfc5d4022cae2e6f16e7ff1661b9d8d7aae2ba6a862554443e1c636c8fc8"
+
+[[fixtures]]
+file = "consign-detail-main-wrong-world.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_detail"
+world = "main"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 7756
+sha256 = "ccccdba352d07041098c770cc38b466bb969379ac3793d1ec47ae8f0002ac85e"
+
+[[fixtures]]
+file = "consign-identity-isekai.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_identity"
+world = "isekai"
+parser_entry_point = "parse_authenticated_uid"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 6453
+sha256 = "7d0256d799531da04cd92120e1acdf1a84ef68911c592b759ef71e5a4f2a7aa0"
+
+[[fixtures]]
+file = "consign-identity-main.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_identity"
+world = "main"
+parser_entry_point = "parse_authenticated_uid"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 9692
+sha256 = "b71a76390536362cf8287970defcc37138641c1a8d3c4af4bb8c3a293f4ca87e"
+
+[[fixtures]]
+file = "consign-list-isekai.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_list"
+world = "isekai"
+parser_entry_point = "parse_consignment_list_row"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 6380
+sha256 = "e50fef5089a3f798ad971d13c135af8a31ded4501bc74c334a1e1527263d3d10"
+
+[[fixtures]]
+file = "consign-list-main.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_list"
+world = "main"
+parser_entry_point = "parse_consignment_list_row"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 9612
+sha256 = "4699f5afbc62919bf23888bcdaf4c4e3057f36ef058b427cf5af3d9adc710afc"
+
+[[fixtures]]
+file = "consign-return-receipt-main.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_return_receipt"
+world = "main"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 7660
+sha256 = "da254444e5c6e7b06922e05b738d56bcc23c51d30d035e1f33f958df1486785a"
+
+[[fixtures]]
+file = "consign-take-after-main-duplicate.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_take_after"
+world = "main"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 7480
+sha256 = "e133896d3f3c61b2c7a1b0c6c29fedb464b6ba4bab467001534a9421f15919c7"
+
+[[fixtures]]
+file = "consign-take-after-main-missing.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_take_after"
+world = "main"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 7493
+sha256 = "62cde6e076ee587dc9856e552f6aa109e35ab77aa57fe6b6962a5cc88350b6a4"
+
+[[fixtures]]
+file = "consign-take-after-main-same-name.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_take_after"
+world = "main"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 7527
+sha256 = "f86e003779024bf68b7e23c1a3676f5deaf449a999ac0a6ca85e41a4974eb9b1"
+
+[[fixtures]]
+file = "consign-take-after-main-single.html"
+source_file = "sentdetail-3125366.html / read-main.html"
+class = "derived_unsigned_consign_take_after"
+world = "main"
+parser_entry_point = "parse_consignment_detail"
+sanitization = "派生，未签收：从已脱敏页面替换身份、主题、正文与附件清单生成；仅用于寄售分支测试，不是真实采集样本，不授处分权。"
+pairs = []
+bytes = 7446
+sha256 = "b59fc9cbde3d80de3729fd3d69c1406ea779e97759aa4e28f6bfb3a19a950a32"

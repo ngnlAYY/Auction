@@ -2,6 +2,7 @@
 
 mod attachment;
 mod client;
+mod custody;
 mod diagnostics;
 mod fetch;
 mod http;
@@ -11,6 +12,7 @@ mod snapshot;
 mod tests;
 
 pub use client::build_equipment_http_client;
+pub use custody::{CustodyEquipmentError, CustodyEquipmentObservation};
 pub(super) use snapshot::canonical_json_snapshot;
 
 use std::sync::Arc;

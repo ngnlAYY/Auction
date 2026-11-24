@@ -8,8 +8,10 @@ use std::{
 use auction_time::Timestamp;
 
 use super::MAX_HARD_PAGES;
+use super::reader::BoundConsignmentObservation;
 use crate::clients::mooglemail::parser::{
-    MoogleMailMessage, MoogleMailSentSnapshot, MoogleMailSentSummary, MoogleMailSummary,
+    ConsignmentListRow, MoogleMailMessage, MoogleMailSentSnapshot, MoogleMailSentSummary,
+    MoogleMailSummary,
 };
 use crate::clients::mooglemail::protocol::MoogleMailWorld;
 
@@ -110,11 +112,72 @@ impl MoogleMailSentLookupStatus {
     }
 }
 
+/// 一页中的一封邮件：旧消费者与寄售候选两态。
+pub enum MoogleMailPageMessage {
+    /// 走既有通用解析的旧信。
+    Legacy(MoogleMailMessage),
+    /// 寄售候选：同一份详情文档的通用解析结果与 4D1 绑定观察。
+    ConsignmentCandidate {
+        /// 同一详情文档的通用解析结果；本段仍按旧信透传。
+        message: MoogleMailMessage,
+        /// 4D1 候选。
+        candidate: Box<MoogleMailConsignmentCandidate>,
+    },
+}
+
+impl fmt::Debug for MoogleMailPageMessage {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Legacy(message) => formatter.debug_tuple("Legacy").field(message).finish(),
+            Self::ConsignmentCandidate { candidate, .. } => {
+                formatter.debug_tuple("ConsignmentCandidate").field(candidate).finish()
+            }
+        }
+    }
+}
+
+impl MoogleMailPageMessage {
+    /// 远端邮件身份；游标与完成账本仍只使用该值。
+    pub fn external_mail_id(&self) -> &str {
+        match self {
+            Self::Legacy(message) => &message.external_mail_id,
+            Self::ConsignmentCandidate { message, .. } => &message.external_mail_id,
+        }
+    }
+
+    /// 拆出通用解析结果；寄售候选同样先按旧信透传。
+    pub fn into_parts(self) -> (MoogleMailMessage, Option<MoogleMailConsignmentCandidate>) {
+        match self {
+            Self::Legacy(message) => (message, None),
+            Self::ConsignmentCandidate { message, candidate } => (message, Some(*candidate)),
+        }
+    }
+}
+
+/// 寄售候选；通用解析结果由旧信透传，4D1 观察供 I2b2 的寄售处理使用。
+pub struct MoogleMailConsignmentCandidate {
+    /// 列表原始投影（原始分钟与世界标记）。
+    pub row: ConsignmentListRow,
+    /// 绑定到认证会话的 4D1 观察。
+    pub bound: BoundConsignmentObservation,
+}
+
+impl fmt::Debug for MoogleMailConsignmentCandidate {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MoogleMailConsignmentCandidate")
+            .field("external_mail_id", &self.row.external_mail_id)
+            .field("world", &self.row.world)
+            .field("bound", &self.bound)
+            .finish()
+    }
+}
+
 /// 已完成摘要/详情交叉校验的一次有界邮件拉取。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct MoogleMailPage {
     /// 按最旧到最新顺序返回，便于应用层顺序入库。
-    pub messages: Vec<MoogleMailMessage>,
+    pub messages: Vec<MoogleMailPageMessage>,
     /// 本批最新已观测摘要的 external ID；空批由调用方保留旧 cursor。
     pub next_cursor: Option<String>,
 }

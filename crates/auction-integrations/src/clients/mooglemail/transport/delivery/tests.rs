@@ -182,6 +182,18 @@ fn notification_claims() -> Vec<DeliveryWorkClaim> {
                 body,
             ),
         ),
+        claim(
+            "consignment_notice",
+            "consignment_notice:7b0c1e2a-4d5f-4a6b-8c9d-0e1f2a3b4c5d".to_owned(),
+            Uuid::new_v4(),
+            send_payload(
+                "isekai",
+                "consignment-notice:7b0c1e2a-4d5f-4a6b-8c9d-0e1f2a3b4c5d",
+                "consignment_season_notice",
+                "season_preclose",
+                body,
+            ),
+        ),
     ]
 }
 
@@ -381,6 +393,13 @@ fn bound_claim(
             "season_reminder:1793523600:alice".to_owned(),
             "season-end:2026-11-01T09:00:00Z".to_owned(),
         ),
+        MailDeliveryOrigin::ConsignmentNotice => {
+            let notice_id = Uuid::new_v4();
+            (format!("consignment_notice:{notice_id}"), format!("consignment-notice:{notice_id}"))
+        }
+        MailDeliveryOrigin::ConsignmentDisposition => {
+            (format!("consignment:{}:{}", Uuid::new_v4(), Uuid::new_v4()), "4242".to_owned())
+        }
     };
     let body = (binding.body == MailNotificationField::Required).then_some("Frozen notice body");
     let mut payload = send_payload(world, &external_mail_id, template.as_str(), result_code, body);
@@ -617,6 +636,13 @@ fn send_decoding_rejects_shapes_outside_the_unified_judgement() {
             "season_reminder:1793523600:alice".to_owned(),
             Uuid::new_v4(),
             "season-end:2026-11-01T09:00:00Z".to_owned(),
+        ),
+        (
+            MailDeliveryOrigin::ConsignmentNotice,
+            "take",
+            "consignment_notice:7b0c1e2a-4d5f-4a6b-8c9d-0e1f2a3b4c5d".to_owned(),
+            Uuid::new_v4(),
+            "consignment-notice:7b0c1e2a-4d5f-4a6b-8c9d-0e1f2a3b4c5d".to_owned(),
         ),
         (
             MailDeliveryOrigin::OperationsAlert,

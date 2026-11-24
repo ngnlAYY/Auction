@@ -26,13 +26,17 @@ pub use credentials::{
     CredentialAcquirer, CredentialSealer, CredentialVerifier, WorkerMailCredentialVerifier,
 };
 pub use cryptobox::{
-    DataKey, EquipmentKeyOpener, EquipmentKeyOpenerError, EquipmentKeySealer,
-    EquipmentKeySealerError,
+    ConsignmentReservationCrypto, ConsignmentReservationCryptoConfigError,
+    ConsignmentSecretEnvelope, ConsignmentSecretError, ConsignmentSecretOpener,
+    ConsignmentSecretSealer, DataKey, EquipmentKeyOpener, EquipmentKeyOpenerError,
+    EquipmentKeySealer, EquipmentKeySealerError, MailEvidencePurpose,
+    consignment_reservation_crypto,
 };
 pub use equipment::hvdata::{HvDataConfigurationError, HvDataEquipmentReader};
 pub use equipment::{
-    EquipmentGameLinkResolver, EquipmentSourceAdapter, EquipmentSourcePolicy,
-    HentaiVerseListingUrlValidator, WorkerEquipmentSourceReader, build_equipment_http_client,
+    CustodyEquipmentError, CustodyEquipmentObservation, EquipmentGameLinkResolver,
+    EquipmentSourceAdapter, EquipmentSourcePolicy, HentaiVerseListingUrlValidator,
+    WorkerEquipmentSourceReader, build_equipment_http_client,
 };
 pub use forum::{ForumRenderError, ForumThreadRenderer};
 pub use heartbeat::{

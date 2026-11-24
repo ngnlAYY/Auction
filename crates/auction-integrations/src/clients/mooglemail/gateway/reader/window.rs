@@ -85,6 +85,8 @@ mod tests {
             sender: "sender".to_owned(),
             subject: format!("subject-{id}"),
             received_at: Timestamp::from_ymd_hms(2026, 11, 4, 12, minute, 0).unwrap(),
+            received_minute_raw: format!("2026-11-04 12:{minute:02}"),
+            world_marker: Some(MoogleMailWorld::Main),
         }
     }
 
