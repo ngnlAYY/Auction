@@ -4,7 +4,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
-use auction_application::mail::{MailPollStore, MailProcessor};
+use auction_application::consignment::MailReadinessGate;
+use auction_application::mail::{
+    ConsignmentIngressService, ConsignmentMailService, MailPollStore, MailProcessor,
+};
 use auction_application::scheduling::RecurringSchedule;
 use auction_config::PhasedMailSchedule;
 use auction_integrations::mooglemail::{
@@ -23,6 +26,8 @@ struct MoogleMailWorkerGateway {
     gateway: Arc<MoogleMailGateway>,
     world: MoogleMailWorld,
     journal: Arc<dyn auction_application::mail::MailPollReadJournal>,
+    consignment_activated: bool,
+    readiness: Arc<dyn MailReadinessGate>,
 }
 
 /// 同一组轮询器共享的持久化、调度与只读观测端口。
@@ -35,6 +40,8 @@ pub(super) struct MailPollRuntimePorts {
     pub(super) switches: auction_application::runtime_switches::RuntimeSwitches,
     pub(super) external_metrics:
         Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
+    /// 配置与制品门已激活；世界就绪仍须在每次 fetch 时按数据库实时读取。
+    pub(super) consignment_activated: bool,
 }
 
 pub(super) async fn build_poll_runtimes(
@@ -52,6 +59,14 @@ pub(super) async fn build_poll_runtimes(
     let mail_scan = ports.mail_scan;
     let switches = ports.switches;
     let external_metrics = ports.external_metrics;
+    let consignment_activated = ports.consignment_activated;
+    let readiness: Arc<dyn MailReadinessGate> = store.clone();
+    let consignment = consignment_activated.then(|| {
+        Arc::new(ConsignmentIngressService::new(
+            Arc::new(ConsignmentMailService::planner()),
+            store.clone(),
+        ))
+    });
     let world_configs = mail_config.configured_worlds();
     let startup = mail_config.poll_startup(schedule.as_ref(), Timestamp::now())?;
     let store_port: Arc<dyn MailPollStore> = store.clone();
@@ -110,8 +125,13 @@ pub(super) async fn build_poll_runtimes(
             .await
             .context("初始化或对齐 MoogleMail 轮询状态失败")?;
         gateways.insert(world, Arc::clone(&gateway));
-        let gateway_port: Arc<dyn MailPollGateway> =
-            Arc::new(MoogleMailWorkerGateway { gateway, world, journal: Arc::clone(&journal) });
+        let gateway_port: Arc<dyn MailPollGateway> = Arc::new(MoogleMailWorkerGateway {
+            gateway,
+            world,
+            journal: Arc::clone(&journal),
+            consignment_activated,
+            readiness: Arc::clone(&readiness),
+        });
         let mut runtime = MailPollRuntime::new(
             Arc::clone(&store_port),
             gateway_port,
@@ -148,6 +168,9 @@ pub(super) async fn build_poll_runtimes(
         if let Some(recorder) = client.diagnostic_recorder() {
             runtime = runtime.with_diagnostics(recorder);
         }
+        if let Some(consignment) = &consignment {
+            runtime = runtime.with_consignment_ingress(Arc::clone(consignment));
+        }
         runtimes.push(runtime);
     }
     Ok((runtimes, gateways))
@@ -168,6 +191,8 @@ impl MailPollGateway for MoogleMailWorkerGateway {
         let gateway = Arc::clone(&self.gateway);
         let journal = Arc::clone(&self.journal);
         let world = self.world;
+        let readiness = Arc::clone(&self.readiness);
+        let consignment_activated = self.consignment_activated;
         Box::pin(async move {
             if request.world_id != world.as_str()
                 || request.mailbox_key != claim.mailbox_key
@@ -180,6 +205,29 @@ impl MailPollGateway for MoogleMailWorkerGateway {
                     temporary: false,
                 });
             }
+            let consignment_candidates = if consignment_activated {
+                let settlement_world =
+                    auction_domain::consignment::parse_settlement_world(world.as_str())
+                        .ok_or_else(|| MailPollGatewayError {
+                            failure_code: "configuration".to_owned(),
+                            safe_detail: "MoogleMail world 无法映射到结算世界".to_owned(),
+                            temporary: false,
+                        })?;
+                match readiness.consignment_candidates_enabled(settlement_world).await {
+                    Ok(enabled) => enabled,
+                    Err(error) => {
+                        // 门控读取失败按关闭处理；旧路径继续，不能让数据库抖动放大成候选分流。
+                        tracing::warn!(
+                            error = %error,
+                            world_id = world.as_str(),
+                            "读取寄售收件门控失败，按关闭处理"
+                        );
+                        false
+                    }
+                }
+            } else {
+                false
+            };
             let page = gateway
                 .fetch_claimed(
                     world,
@@ -187,6 +235,7 @@ impl MailPollGateway for MoogleMailWorkerGateway {
                     request.deadline,
                     journal.as_ref(),
                     &claim,
+                    consignment_candidates,
                 )
                 .await
                 .map_err(|error| {

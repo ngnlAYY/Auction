@@ -58,7 +58,7 @@ fn first_run_and_legacy_common_template_load_with_consignment_disabled() {
     let mut common: toml::Table =
         toml::from_str(&fs::read_to_string(&common_path).unwrap()).unwrap();
     assert_eq!(common["consignment"]["enabled"].as_bool(), Some(false));
-    assert_eq!(common["consignment"].as_table().unwrap().len(), 9);
+    assert_eq!(common["consignment"].as_table().unwrap().len(), 11);
     let load = |role: Role| {
         AppConfig::load_from_path(role, config_dir.join(format!("{}.toml", role.name())))
             .unwrap()

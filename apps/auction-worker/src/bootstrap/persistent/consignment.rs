@@ -1,5 +1,6 @@
 //! 注入一口价挂单的持久端口、装备来源及登记就绪探针。
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::ops::AsyncFnOnce;
 use std::pin::Pin;
@@ -8,22 +9,34 @@ use std::time::Duration;
 
 use anyhow::Context;
 use auction_application::consignment::{
-    ConsignmentError, ConsignmentFuture, ListingCommandStore, ListingEquipmentLookup,
-    ListingLookupBudget, ListingMaintenance, ListingMaintenanceService, LookupWorkStore,
-    ResolveListingService, auto_close_command, lookup_reap_exhausted_identity,
+    ConsignmentError, ConsignmentFuture, DepositCommandService, LegacyAuctionOwnerResolver,
+    ListingCommandStore, ListingEquipmentLookup, ListingLookupBudget, ListingMaintenance,
+    ListingMaintenanceService, LookupWorkStore, ResolveListingService, auto_close_command,
+    lookup_reap_exhausted_identity,
 };
 use auction_application::core::ApplicationFuture;
 use auction_application::core::diagnostics::DiagnosticError;
+use auction_application::mail::{DispositionMaintenanceService, QuarantineRecheckService};
 use auction_application::runtime_switches::RuntimeSwitches;
 use auction_config::{AppConfig, DataKeyDomain};
-use auction_integrations::{EquipmentKeyOpener, HvDataEquipmentReader, Keyring, build_keyring};
-use auction_jobs::consignment::{
-    ConsignmentDependencies, ConsignmentLookupRuntime, ConsignmentReadinessProbe, ConsignmentWorker,
+use auction_domain::consignment::ConsignmentCalendar;
+use auction_integrations::mooglemail::{MoogleMailGateway, MoogleMailWorld};
+use auction_integrations::{
+    ConsignmentReservationCrypto, ConsignmentSecretOpener, ConsignmentSecretSealer,
+    EquipmentKeyOpener, HvDataEquipmentReader, Keyring, build_keyring,
 };
-use auction_storage::DatabaseStore;
+use auction_jobs::consignment::{
+    ConsignmentDependencies, ConsignmentLookupRuntime, ConsignmentReadinessProbe,
+    ConsignmentWorker, DispositionMaintenanceRuntime, MailEvidenceReadinessRuntime,
+    QuarantineRecheckRuntime, SeasonCalendarRuntime, SeasonTaskRuntime,
+};
+use auction_storage::{DatabaseStore, DepositRepository, DepositSettings};
 use tokio::sync::Notify;
 
 use crate::bootstrap::SystemClock;
+use crate::bootstrap::mail::consignment::{
+    MoogleMailConsignmentTransport, WorkerConsignmentRecheckReader,
+};
 
 #[cfg(test)]
 pub(in crate::bootstrap) use tests::consignment_test_config;
@@ -98,6 +111,130 @@ async fn prepare(
     ConsignmentWorker::prepare(enabled, true, maintenance, lookup, closed_has_stock)
         .await
         .context("一口价挂单准入同步或存量检查失败")
+}
+
+/// 寄售 Worker 启动后、任务运行前接入处置维护、隔离重检与收件就绪。
+///
+/// 关闭只停止新承诺：只要存在存量，两个循环仍启动；有存量却没有 4D1 读取器/传输时
+/// 启动失败，不能静默跳过。
+pub(super) async fn attach_loops(
+    config: &AppConfig,
+    store: &Arc<DatabaseStore>,
+    switches: &RuntimeSwitches,
+    worker_id: &str,
+    worker: Option<ConsignmentWorker>,
+    gateways: Option<&HashMap<MoogleMailWorld, Arc<MoogleMailGateway>>>,
+    mail_readiness: Vec<MailEvidenceReadinessRuntime>,
+) -> anyhow::Result<Option<ConsignmentWorker>> {
+    let Some(worker) = worker else {
+        return Ok(None);
+    };
+    let has_work = store.has_consignment_work().await.context("读取寄售存量失败")?;
+    let Some(gateways) = gateways.filter(|gateways| !gateways.is_empty()) else {
+        if has_work {
+            anyhow::bail!("寄售仍有存量工作，但 MoogleMail 读取器/处置传输未装配");
+        }
+        return Ok(Some(worker.with_mail_readiness(mail_readiness)));
+    };
+    let key_domain = DataKeyDomain::Credential;
+    let keyring = build_keyring(
+        key_domain,
+        config.data_key_current(key_domain),
+        config.data_key_previous(key_domain).iter().map(|key| (key.id(), key.material())),
+    )
+    .context("装配寄售预约数据密钥环失败")?;
+    let Some(keyring) = keyring else {
+        if has_work {
+            anyhow::bail!("寄售仍有存量工作，但未配置当前凭据数据密钥");
+        }
+        return Ok(Some(worker.with_mail_readiness(mail_readiness)));
+    };
+    let sealer = ConsignmentSecretSealer::new(Arc::clone(keyring.current()));
+    let opener = ConsignmentSecretOpener::new(keyring);
+    let crypto: Arc<dyn auction_application::consignment::ReservationSecretCrypto> =
+        Arc::new(ConsignmentReservationCrypto::new(sealer, opener));
+    // 与 Public / Admin 同一构造：价格边界取领域常量，预约有效期取公共配置。
+    let settings = DepositSettings::with_standard_price_bounds(
+        config.consignment.fee_bps(),
+        config.consignment.reservation_ttl_hours(),
+        config.consignment.max_open_per_user(),
+    )
+    .map_err(|error| anyhow::anyhow!("寄售价格边界常量无效：{error:?}"))?;
+    let repository = Arc::new(DepositRepository::new(store.as_ref().clone(), crypto, settings));
+    let commands = Arc::new(DepositCommandService::new(
+        repository.clone(),
+        repository.clone(),
+        repository.clone(),
+        repository.clone(),
+        repository.clone(),
+    ));
+    // 季窗与换季提醒同源；日历缺失/无效时只处理存量，不阻断 Worker 启动。
+    let calendar = match config.auction.schedule_calendar() {
+        Ok(Some(calendar)) if calendar.early_bird().is_some() => {
+            match ConsignmentCalendar::from_early_bird_config(&config.auction.schedule.early_bird) {
+                Ok(calendar) => Some(SeasonCalendarRuntime {
+                    calendar,
+                    timezone: config.auction.schedule.early_bird.timezone.clone(),
+                }),
+                Err(error) => {
+                    tracing::warn!(error = %error, "寄售季窗日历构造失败，不冻结新季窗");
+                    None
+                }
+            }
+        }
+        Ok(_) => {
+            tracing::warn!("寄售季窗日历未启用，不冻结新季窗");
+            None
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "读取寄售季窗日历失败，不冻结新季窗");
+            None
+        }
+    };
+    let seasons = Arc::new(SeasonTaskRuntime {
+        tasks: repository.clone(),
+        commands: commands.clone(),
+        calendar,
+        preclose_days: config.consignment.isekai_preclose_days(),
+        active: config.consignment.enabled(),
+        clock: Arc::new(SystemClock),
+        wakeup: Arc::new(Notify::new()),
+    });
+    let owners: Arc<dyn LegacyAuctionOwnerResolver> = store.clone();
+    let reader = Arc::new(WorkerConsignmentRecheckReader::new(gateways.clone(), owners));
+    let transport = Arc::new(MoogleMailConsignmentTransport::new(gateways.clone()));
+    let disposition =
+        DispositionMaintenanceService::new(commands.clone(), repository.clone(), transport);
+    let quarantine = QuarantineRecheckService::new(commands, repository, reader);
+    let lease_duration =
+        std::time::Duration::from_secs(config.worker.mooglemail.lease_duration_seconds);
+    let paused = {
+        let switches = switches.clone();
+        Arc::new(move || switches.external_access_paused())
+    };
+    let disposition_runtime = Arc::new(DispositionMaintenanceRuntime {
+        service: Arc::new(disposition),
+        clock: Arc::new(SystemClock),
+        worker_id: worker_id.to_owned(),
+        lease_duration,
+        wakeup: Arc::new(Notify::new()),
+        paused: paused.clone(),
+    });
+    let quarantine_runtime = Arc::new(QuarantineRecheckRuntime {
+        service: Arc::new(quarantine),
+        clock: Arc::new(SystemClock),
+        worker_id: worker_id.to_owned(),
+        lease_duration,
+        wakeup: Arc::new(Notify::new()),
+        paused,
+    });
+    Ok(Some(
+        worker
+            .with_disposition(disposition_runtime)
+            .with_quarantine(quarantine_runtime)
+            .with_seasons(seasons)
+            .with_mail_readiness(mail_readiness),
+    ))
 }
 
 fn lookup_runtime(

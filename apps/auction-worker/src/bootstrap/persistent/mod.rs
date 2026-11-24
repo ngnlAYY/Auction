@@ -81,7 +81,7 @@ pub(super) async fn run_worker(
         consignment::ConsignmentPorts::postgres(&store),
         &switches,
         &worker_id,
-        store.has_active_consignment_listings(),
+        store.has_consignment_work(),
         consignment::hvdata_lookup,
         async |consignment| {
             run::run_connected(config, store.clone(), worker_id.clone(), runtime, consignment).await

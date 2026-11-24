@@ -4,6 +4,8 @@
 pub(super) mod maintenance;
 pub(super) mod poll;
 
+pub use maintenance::quarantine::{QuarantineRecheckRuntime, run as run_quarantine};
+
 use tokio::sync::{MutexGuard, OwnedSemaphorePermit};
 
 use self::poll::MailPollRuntime;

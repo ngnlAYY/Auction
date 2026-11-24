@@ -1,13 +1,16 @@
 //! MoogleMail 远端消息到 Worker poll envelope 的安全字段映射。
 
 use auction_application::mail::MailDisplaySnapshot;
-use auction_integrations::mooglemail::{MoogleMailMessage, into_application_message};
-use auction_jobs::MailPollFetchedMessage;
+use auction_integrations::mooglemail::{MoogleMailPageMessage, into_application_message};
+use auction_jobs::{MailPollConsignmentCandidate, MailPollFetchedMessage};
+use uuid::Uuid;
 
 pub(super) fn map_mooglemail_message(
-    message: MoogleMailMessage,
+    page_message: MoogleMailPageMessage,
     mailbox_key: String,
 ) -> Result<MailPollFetchedMessage, auction_integrations::mooglemail::MoogleMailError> {
+    let (message, consignment_candidate) = page_message.into_parts();
+    let consignment_candidate = consignment_candidate.map(map_consignment_candidate).transpose()?;
     let external_mail_id = message.external_mail_id.clone();
     let world_id = message.world.as_str().to_owned();
     let received_at = message.received_at;
@@ -41,6 +44,44 @@ pub(super) fn map_mooglemail_message(
         cod,
         returnable,
         claimable,
+        consignment_candidate,
         business: Some(business),
+    })
+}
+
+fn map_consignment_candidate(
+    candidate: auction_integrations::mooglemail::MoogleMailConsignmentCandidate,
+) -> Result<MailPollConsignmentCandidate, auction_integrations::mooglemail::MoogleMailError> {
+    let binding = candidate.bound.binding().clone();
+    let row = candidate.row;
+    let observation_id = Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!(
+            "auction/consignment/observation-row/v1/{}/{}/{}/{}",
+            binding.authenticated_uid,
+            row.world.as_str(),
+            row.external_mail_id,
+            candidate.bound.remote_observation_id()
+        )
+        .as_bytes(),
+    );
+    let observation = candidate.bound.to_envelope_observation(observation_id, None, None);
+    let observation_details = candidate.bound.observation();
+    Ok(MailPollConsignmentCandidate {
+        world_id: row.world.as_str().to_owned(),
+        external_mail_id: row.external_mail_id.clone(),
+        world_marker: row.world_marker.map(|world| world.as_str().to_owned()),
+        sender: observation_details.sender.clone(),
+        subject: observation_details.subject.clone(),
+        received_minute_raw: row.received_minute_raw.clone(),
+        received_at: row.received_at,
+        observation,
+        binding,
+        remote_observation_id: candidate.bound.remote_observation_id(),
+        observed_at: candidate.bound.observed_at(),
+        subject_digest: observation_details.subject_digest,
+        body_digest: observation_details.body_digest,
+        raw_count: observation_details.reported_attachment_count,
+        legacy_evidence: observation_details.legacy_return_evidence(),
     })
 }

@@ -10,7 +10,7 @@ pub(super) mod types;
 pub(crate) use super::maintenance::run_loop as run_maintenance_loop;
 pub(crate) use cycle::run_loop;
 pub use types::{
-    MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway, MailPollGatewayError,
-    MailPollPage, MailPollRuntime, MailPollRuntimeBindings, MailPollRuntimeConfig,
-    MailPollSchedules,
+    MailPollConsignmentCandidate, MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway,
+    MailPollGatewayError, MailPollPage, MailPollRuntime, MailPollRuntimeBindings,
+    MailPollRuntimeConfig, MailPollSchedules,
 };

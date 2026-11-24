@@ -15,7 +15,7 @@ use auction_application::admin::{
 };
 use auction_application::auction::{AuctionLifecycleCommandPort, AuctionLifecyclePolicy};
 use auction_application::consignment::{
-    AdminListingRead, ListingCommandStore, ManageListingService,
+    AdminListingRead, DepositCommandService, ListingCommandStore, ManageListingService,
 };
 use auction_application::delivery::{DeliveryAdminPort, DeliverySentConfirmationPort};
 use auction_application::operations::{
@@ -28,11 +28,15 @@ use auction_application::recovery::{
 };
 use auction_application::sessions::AdminSessionService;
 use auction_application::settlement::SettlementReportReader;
-use auction_config::{AppConfig, TomlRuntimeFileStore};
+use auction_config::{
+    AppConfig, CONSIGNMENT_COMPLETE, ConsignmentActivation, TomlRuntimeFileStore,
+    consignment_activation,
+};
 use auction_http::{AdminApiState, AdminConsignmentCapabilities};
 use auction_integrations::{
-    CredentialSealer, CredentialVerifier, EquipmentKeySealer, MoogleMailLoginKeyIssuer,
-    MoogleMailLoginKeyReader, build_keyring,
+    ConsignmentReservationCrypto, CredentialSealer, CredentialVerifier, EquipmentKeySealer,
+    MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader, build_keyring,
+    consignment_reservation_crypto,
 };
 use auction_observability::{
     HealthReader, HealthService, HeartbeatHealthReader, HeartbeatPublisher,
@@ -40,7 +44,7 @@ use auction_observability::{
 };
 use auction_storage::{
     DatabaseAdminMailCommands, DatabaseAdminRulesCommands, DatabaseAdminRuntimeCommands,
-    DatabaseAuctionLifecycleCommands, DatabaseStore,
+    DatabaseAuctionLifecycleCommands, DatabaseStore, DepositRepository, DepositSettings,
 };
 use auction_time::TimeDelta;
 use auction_time::Timestamp;
@@ -70,9 +74,18 @@ pub(super) async fn configure_state(
 )> {
     let security = config::configure_security(config)?;
     let worker_control = config::configure_worker_control(config);
+    // 启动预检已在 service 完成；这里用同一组四要素重新取得制品决定，供能力注入使用。
+    let activation = consignment_activation(
+        config.consignment.enabled(),
+        CONSIGNMENT_COMPLETE,
+        cfg!(feature = "consignment-dev-preview"),
+        cfg!(debug_assertions),
+    )
+    .context("校验 Admin 一口价挂单制品能力失败")?;
     let Some(database_url) = config.database_url() else {
+        // 骨架模式（未配置数据库）不构造收件端口，也就不要求凭据域密钥：v2 能力返回不可用。
         return Ok((
-            super::fallback::empty_state(config, security, worker_control, switches),
+            super::fallback::empty_state(config, activation, security, worker_control, switches),
             None,
             None,
         ));
@@ -209,6 +222,8 @@ pub(super) async fn configure_state(
             .map(|key| (key.id(), key.material())),
     )
     .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+    // 不变量 7：与 Admin 凭据服务复用同一份密钥环；激活后缺失即拒绝启动，不回显密钥材料。
+    let deposit_crypto = reservation_crypto(activation, credential_keyring.clone())?;
     let admin_credentials: Option<Arc<dyn AdminCredentialPort>> = match credential_keyring {
         Some(keyring) => {
             let sealer = Arc::new(CredentialSealer::new(Arc::clone(&keyring)));
@@ -381,7 +396,8 @@ pub(super) async fn configure_state(
         )
         .with_runtime_switches(switches),
     ));
-    let state = configure_consignment(state, config, store);
+    let state = configure_consignment(state, config, Arc::clone(&store));
+    let state = configure_deposit(state, config, activation, store, deposit_crypto)?;
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "发布 Admin ready 心跳失败");
     }
@@ -398,6 +414,44 @@ fn configure_consignment<S: AdminListingRead + ListingCommandStore + 'static>(
         read: Some(store.clone()),
         manage: Some(Arc::new(ManageListingService::new(store, config.consignment.enabled()))),
     })
+}
+
+/// 寄售激活时要求预约码所需的凭据域密钥环；未激活时忽略密钥环并返回 `None`。
+fn reservation_crypto(
+    activation: ConsignmentActivation,
+    keyring: Option<Arc<auction_integrations::Keyring>>,
+) -> anyhow::Result<Option<Arc<ConsignmentReservationCrypto>>> {
+    consignment_reservation_crypto(activation == ConsignmentActivation::Enabled, keyring)
+        .map_err(anyhow::Error::from)
+}
+
+/// 构造 Admin v2 收件端口；与 Public 使用同一份由配置得出的收件设置。
+fn configure_deposit(
+    state: AdminApiState,
+    config: &AppConfig,
+    activation: ConsignmentActivation,
+    store: Arc<DatabaseStore>,
+    crypto: Option<Arc<ConsignmentReservationCrypto>>,
+) -> anyhow::Result<AdminApiState> {
+    if activation != ConsignmentActivation::Enabled {
+        return Ok(state.with_deposit(false, None, None));
+    }
+    let crypto = crypto.ok_or_else(|| anyhow::anyhow!("寄售已启用，但预约码加密能力不可用"))?;
+    let settings = DepositSettings::with_standard_price_bounds(
+        config.consignment.fee_bps(),
+        config.consignment.reservation_ttl_hours(),
+        config.consignment.max_open_per_user(),
+    )
+    .context("寄售收件设置无效")?;
+    let repository = Arc::new(DepositRepository::new((*store).clone(), crypto, settings));
+    let commands = Arc::new(DepositCommandService::new(
+        repository.clone(),
+        repository.clone(),
+        repository.clone(),
+        repository.clone(),
+        repository.clone(),
+    ));
+    Ok(state.with_deposit(true, Some(repository), Some(commands)))
 }
 
 fn database_profile(

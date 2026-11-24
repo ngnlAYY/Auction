@@ -2,16 +2,25 @@
 
 use auction_application::core::MailProcessingRetryability;
 use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
-use auction_application::mail::{MailMessage, MailProcessingDecision, MailProcessor};
+use auction_application::mail::{
+    MailMessage, MailProcessingDecision, MailProcessingRoute, MailProcessor,
+};
 use auction_observability::WorkerRetryKind;
 
 use crate::worker::diagnostics;
 use crate::worker::mail::poll::MailPollRuntimeConfig;
 use crate::worker::mail::poll::failure::{MailPollMetricContext, retry_delay};
 
+#[derive(Clone, Copy)]
 pub(super) struct MailProcessFailure {
     pub(super) failure_code: &'static str,
     pub(super) safe_detail: &'static str,
+}
+
+/// 一次旧处理器重试的结果；候选由调用方交给寄售事务，不进入 `process_unknown`。
+pub(super) enum RoutedMail {
+    Legacy(MailProcessingDecision),
+    ConsignmentCandidate(MailMessage),
 }
 
 pub(super) async fn process_with_retry(
@@ -22,6 +31,60 @@ pub(super) async fn process_with_retry(
     pending_diagnostics: &mut Vec<auction_application::mail::PendingMailEquipmentDiagnostic>,
     decision_diagnostic: &mut Option<usize>,
 ) -> Result<MailProcessingDecision, MailProcessFailure> {
+    match retry_loop(
+        processor,
+        business,
+        false,
+        config,
+        metric_context,
+        pending_diagnostics,
+        decision_diagnostic,
+    )
+    .await?
+    {
+        RoutedMail::Legacy(decision) => Ok(decision),
+        RoutedMail::ConsignmentCandidate(_) => Err(MailProcessFailure {
+            failure_code: "business_retry_state_invalid",
+            safe_detail: "MoogleMail 业务重试状态无效",
+        }),
+    }
+}
+
+/// 对带 4D1 候选的邮件先跑旧路由；只有旧路由全部无法归属才返回候选。
+pub(super) async fn route_with_retry(
+    processor: &dyn MailProcessor,
+    business: MailMessage,
+    config: MailPollRuntimeConfig,
+    metric_context: MailPollMetricContext,
+    pending_diagnostics: &mut Vec<auction_application::mail::PendingMailEquipmentDiagnostic>,
+    decision_diagnostic: &mut Option<usize>,
+) -> Result<RoutedMail, MailProcessFailure> {
+    retry_loop(
+        processor,
+        business,
+        true,
+        config,
+        metric_context,
+        pending_diagnostics,
+        decision_diagnostic,
+    )
+    .await
+}
+
+enum Attempt {
+    Legacy(Box<auction_application::mail::MailProcessingAttempt>),
+    ConsignmentCandidate(Box<MailMessage>),
+}
+
+async fn retry_loop(
+    processor: &dyn MailProcessor,
+    business: MailMessage,
+    consignment_candidate: bool,
+    config: MailPollRuntimeConfig,
+    metric_context: MailPollMetricContext,
+    pending_diagnostics: &mut Vec<auction_application::mail::PendingMailEquipmentDiagnostic>,
+    decision_diagnostic: &mut Option<usize>,
+) -> Result<RoutedMail, MailProcessFailure> {
     let mut original = Some(business);
     for attempt in 1..=config.process_attempts {
         // 非最终尝试只建立一个显式短生命周期副本；成功或失败返回时，未使用的原 envelope 会清零。
@@ -42,9 +105,26 @@ pub(super) async fn process_with_retry(
             };
             message.duplicate_for_retry()
         };
-        let result = tokio::time::timeout(config.item_timeout, processor.process(message)).await;
+        let result = tokio::time::timeout(config.item_timeout, async {
+            if consignment_candidate {
+                let routed = message.duplicate_for_retry();
+                match processor.route(routed, true).await {
+                    MailProcessingRoute::Legacy(attempt) => Attempt::Legacy(attempt),
+                    MailProcessingRoute::ConsignmentCandidate => {
+                        Attempt::ConsignmentCandidate(Box::new(message))
+                    }
+                }
+            } else {
+                Attempt::Legacy(Box::new(processor.process(message).await))
+            }
+        })
+        .await;
         let result = match result {
-            Ok(mut attempt) => {
+            Ok(Attempt::ConsignmentCandidate(message)) => {
+                return Ok(RoutedMail::ConsignmentCandidate(*message));
+            }
+            Ok(Attempt::Legacy(attempt)) => {
+                let mut attempt = *attempt;
                 // 这里只转移句柄；留证由 caller 在单封和批次两层业务 timeout 之外执行。
                 if let Some(pending) = attempt.pending_equipment_diagnostic.take() {
                     if attempt.result.is_ok() {
@@ -57,7 +137,7 @@ pub(super) async fn process_with_retry(
             Err(elapsed) => Err(elapsed),
         };
         match result {
-            Ok(Ok(decision)) => return Ok(decision),
+            Ok(Ok(decision)) => return Ok(RoutedMail::Legacy(decision)),
             Ok(Err(error)) => {
                 diagnostics::warn(
                     "mail_poll",

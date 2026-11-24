@@ -15,11 +15,18 @@ use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult};
 use tokio::sync::{Notify, watch};
 use tokio::time::Instant;
 
+mod deposits;
 mod heartbeat;
 mod maintenance;
 mod resolve;
+mod seasons;
 #[cfg(test)]
 mod tests;
+
+pub use super::mail::{QuarantineRecheckRuntime, run_quarantine};
+pub use deposits::{DispositionMaintenanceRuntime, run as run_disposition_maintenance};
+pub use heartbeat::MailEvidenceReadinessRuntime;
+pub use seasons::{SeasonCalendarRuntime, SeasonTaskRuntime, run as run_season_tasks};
 
 /// 供指标装配映射到 Worker 固定循环标签的闭集。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -30,6 +37,12 @@ pub enum ConsignmentLoop {
     Maintenance,
     /// 持久准入就绪心跳。
     Readiness,
+    /// Take / Return 处置执行。
+    Disposition,
+    /// 隔离重检。
+    Quarantine,
+    /// 季窗冻结、季前通知与季末关闭。
+    Seasons,
 }
 
 pub(crate) fn observe_worker_iteration(
@@ -43,6 +56,9 @@ pub(crate) fn observe_worker_iteration(
         ConsignmentLoop::Resolve => WorkerLoop::ConsignmentResolve,
         ConsignmentLoop::Maintenance => WorkerLoop::ConsignmentMaintenance,
         ConsignmentLoop::Readiness => WorkerLoop::ConsignmentReadiness,
+        ConsignmentLoop::Disposition | ConsignmentLoop::Quarantine | ConsignmentLoop::Seasons => {
+            WorkerLoop::ConsignmentMaintenance
+        }
     };
     metrics.observe_iteration(loop_kind, result, duration);
     for _ in 0..failed {
@@ -97,6 +113,10 @@ pub struct ConsignmentWorker {
     admission: ListingAdmission,
     maintenance: ListingMaintenanceService,
     lookup: Option<ConsignmentLookupRuntime>,
+    mail_readiness: Vec<MailEvidenceReadinessRuntime>,
+    disposition: Option<Arc<DispositionMaintenanceRuntime>>,
+    quarantine: Option<Arc<QuarantineRecheckRuntime>>,
+    seasons: Option<Arc<SeasonTaskRuntime>>,
 }
 
 impl ConsignmentWorker {
@@ -124,7 +144,42 @@ impl ConsignmentWorker {
         if !admission.admitting && !closed_has_stock.await? {
             return Ok(None);
         }
-        Ok(Some(Self { admission, maintenance, lookup }))
+        Ok(Some(Self {
+            admission,
+            maintenance,
+            lookup,
+            mail_readiness: Vec::new(),
+            disposition: None,
+            quarantine: None,
+            seasons: None,
+        }))
+    }
+
+    /// 注入已装配且就绪的收件读取器；未注入的世界不会写收件就绪。
+    pub fn with_mail_readiness(
+        mut self,
+        mail_readiness: Vec<MailEvidenceReadinessRuntime>,
+    ) -> Self {
+        self.mail_readiness = mail_readiness;
+        self
+    }
+
+    /// 注入处置维护运行时；关闭寄售但仍有存量时也会运行。
+    pub fn with_disposition(mut self, disposition: Arc<DispositionMaintenanceRuntime>) -> Self {
+        self.disposition = Some(disposition);
+        self
+    }
+
+    /// 注入隔离重检运行时；关闭寄售但仍有存量时也会运行。
+    pub fn with_quarantine(mut self, quarantine: Arc<QuarantineRecheckRuntime>) -> Self {
+        self.quarantine = Some(quarantine);
+        self
+    }
+
+    /// 注入季任务运行时；关闭寄售但仍有存量时也会运行。
+    pub fn with_seasons(mut self, seasons: Arc<SeasonTaskRuntime>) -> Self {
+        self.seasons = Some(seasons);
+        self
     }
 
     /// 在现有 Worker 任务组或任务守卫下运行。发送 drain 后等待本任务，沿用进程共享排空期限。
@@ -134,19 +189,66 @@ impl ConsignmentWorker {
         drain: watch::Receiver<bool>,
         observe: impl Fn(ConsignmentLoop, WorkerResult, Duration, u32) + Send + Sync,
     ) {
-        let epoch = self.admission.service_epoch;
-        let work = self.lookup.as_ref().map(|runtime| runtime.work.as_ref());
-        let maintain = maintenance::run(&self.maintenance, work, drain.clone(), &observe);
-        if let Some(lookup) = &self.lookup {
-            let observe_lookup = |kind, result, duration| observe(kind, result, duration, 0);
-            tokio::join!(
-                maintain,
-                resolve::run(lookup, epoch, drain.clone(), &observe_lookup),
-                heartbeat::run(lookup, epoch, drain, &observe_lookup),
-            );
-        } else {
-            maintain.await;
-        }
+        let Self {
+            admission,
+            maintenance,
+            lookup,
+            mail_readiness,
+            disposition,
+            quarantine,
+            seasons,
+        } = self;
+        let epoch = admission.service_epoch;
+        let work = lookup.as_ref().map(|runtime| runtime.work.as_ref());
+        let maintain = maintenance::run(&maintenance, work, drain.clone(), &observe);
+        let resolve_lookup = async {
+            if let Some(lookup) = &lookup {
+                let observe_lookup = |kind, result, duration| observe(kind, result, duration, 0);
+                resolve::run(lookup, epoch, drain.clone(), &observe_lookup).await;
+            }
+        };
+        // 收件就绪心跳只被 poll 门控读取，而 poll 门控本身要求寄售已激活；寄售关闭时
+        // 不续期不会阻塞处置与重检循环（它们按持久存量独立领取），因此这里随 lookup
+        // 装配一起停止即可。
+        let heartbeat_mail = async {
+            if let Some(lookup) = &lookup {
+                let observe_lookup = |kind, result, duration| observe(kind, result, duration, 0);
+                heartbeat::run(lookup, &mail_readiness, epoch, drain.clone(), &observe_lookup)
+                    .await;
+            }
+        };
+        let disposition_loop = async {
+            if let Some(runtime) = disposition {
+                deposits::run(runtime, drain.clone(), |result, duration| {
+                    observe(ConsignmentLoop::Disposition, result, duration, 0);
+                })
+                .await;
+            }
+        };
+        let quarantine_loop = async {
+            if let Some(runtime) = quarantine {
+                run_quarantine(runtime, drain.clone(), |result, duration| {
+                    observe(ConsignmentLoop::Quarantine, result, duration, 0);
+                })
+                .await;
+            }
+        };
+        let seasons_loop = async {
+            if let Some(runtime) = seasons {
+                run_season_tasks(runtime, drain.clone(), |result, duration| {
+                    observe(ConsignmentLoop::Seasons, result, duration, 0);
+                })
+                .await;
+            }
+        };
+        tokio::join!(
+            maintain,
+            resolve_lookup,
+            heartbeat_mail,
+            disposition_loop,
+            quarantine_loop,
+            seasons_loop
+        );
     }
 }
 

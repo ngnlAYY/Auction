@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use auction_application::operations::WorkerControlPort;
-use auction_config::AppConfig;
+use auction_config::{AppConfig, ConsignmentActivation};
 use auction_http::{AdminApiState, AdminConsignmentCapabilities, AdminHttpSecurity};
 
 use super::super::config;
@@ -11,6 +11,7 @@ use super::super::config;
 /// 未配置数据库时的空端口集合；安全校验仍由调用方先完成。
 pub(super) fn empty_state(
     config: &AppConfig,
+    activation: ConsignmentActivation,
     security: AdminHttpSecurity,
     worker_control: Option<Arc<dyn WorkerControlPort>>,
     switches: auction_application::runtime_switches::RuntimeSwitches,
@@ -48,4 +49,5 @@ pub(super) fn empty_state(
     .with_dashboard_mailbox_keys(config::configured_dashboard_mailbox_keys(config))
     .with_runtime_switch_snapshot(switches)
     .with_consignment(AdminConsignmentCapabilities::default())
+    .with_deposit(activation == ConsignmentActivation::Enabled, None, None)
 }
