@@ -4,13 +4,17 @@
 # 刷新方式见 ci/README.md「Web payload 体积预算」；只允许在确认增长合理时与源码改动同批更新。
 schema=auction-web-size-budget/1
 warn_growth_basis_points=500
+# 2026-11-25：第 6、7 期页面与集成接线合入后，在集成分支 5ae9fc34c 上两栈实跑 `mise run web-build` 与
+# `web_payload_sizes`，Solid 的 Public / Admin payload 超出原上限，Admin initial_js 已用到上限的 99.5%。
+# 维护者 2026-11-25 决定大幅提高预算：下列八项基线全部改为该次实测值，上限取实测 ×1.3（向上取整到千字节）；
+# 告警阈值（基线 +5%）不变。各项下方的历史注释保留原样，数值以本段为准。
 # 2026-11-18：前端审计第二波修复之后按本地 `mise run web-build` 实测刷新 Public 基线。增量来自
 # 结果未知命令的保留与原样重试、会话对账、场次参数与读取页的校验等页面逻辑（依赖与 feature 未变）；
 # 无参数 t! 的展开已收拢为一个函数，收回约 95 KB 后仍高于旧上限。上限保持在基线约 +5%。
-public_wasm_baseline_bytes=3201271
-public_wasm_max_bytes=3360000
-public_payload_baseline_bytes=3561755
-public_payload_max_bytes=3740000
+public_wasm_baseline_bytes=3258647
+public_wasm_max_bytes=4237000
+public_payload_baseline_bytes=3677886
+public_payload_max_bytes=4782000
 # 2026-11-19：在双栈构建车道的沙箱内实跑 `AUCTION_WEB_STACK=solid ci/release/web-bundle.sh public`
 # 后按 `web_payload_sizes` 实测刷新 Solid Public 基线；initial_js 是入口模块与 modulepreload 脚本的
 # 原始字节去重和，payload 是全部普通文件（不含 brotli 副本）之和。上限保持在基线约 +5%。
@@ -18,32 +22,32 @@ public_payload_max_bytes=3740000
 # 355,998（11-21 实测 349,247，+6,751 字节），超出原上限 351,000。寄件指引页按路由懒加载，增量在入口内联的
 # 默认语言译文与 v2 服务能力判断里，未逐项拆分。维护者 2026-11-24 决定 Solid 体积预算按实测放开：基线改为
 # 实测值，上限取约 +5%。同次实测 payload 1,091,729，仍在原上限内，保持不变。
-solid_public_initial_js_baseline_bytes=355998
-solid_public_initial_js_max_bytes=374000
+solid_public_initial_js_baseline_bytes=364176
+solid_public_initial_js_max_bytes=474000
 # 2026-11-21：一口价挂单的 Solid 页面（目录、公开详情、登记、本人列表与详情，均按路由懒加载）与样式加入后，
 # 在集成分支上实跑 `AUCTION_WEB_STACK=solid mise run web-build`，按 `web_payload_sizes` 实测刷新 payload
 # 基线（950,484 → 1,057,718，约 +107 KB，全部在懒加载分块里）。首屏 initial_js 不放宽：寄售代码按窄导入
 # 留在入口之外，实测 349,247，仍在原上限内（增量主要是默认语言内联的寄售译文与服务能力判断）。上限保持在基线约 +5%。
-solid_public_payload_baseline_bytes=1057718
-solid_public_payload_max_bytes=1111000
+solid_public_payload_baseline_bytes=1180183
+solid_public_payload_max_bytes=1535000
 # 2026-11-20：两套实现共有问题的修复合入前，在收口的工作树上实跑 `mise run web-build` 后按
 # `web_payload_sizes` 实测刷新 Admin 基线。增量分两段，都在各自的提交上实际构建核对过：v0.1.7 基线
 # 4,520,796 → 合入前的 main 4,700,068（此前几轮已合入的页面逻辑，已用到旧上限的 99%）→ 本轮
 # 4,923,476（会话边界状态机、未决命令按结构化证据裁定、各页面的回执核对与读取重试等，约 +223 KB；
 # 其中补测试时为可测性做的少量调整约 +11 KB，依赖与 feature 未变）。上限保持在基线约 +5%。
-admin_wasm_baseline_bytes=4923476
-admin_wasm_max_bytes=5170000
-admin_payload_baseline_bytes=5746962
-admin_payload_max_bytes=6040000
+admin_wasm_baseline_bytes=4972403
+admin_wasm_max_bytes=6465000
+admin_payload_baseline_bytes=5870413
+admin_payload_max_bytes=7632000
 # 2026-11-20：Admin 的 Solid 实现改为按路由分块后，在收口的工作树上实跑
 # `AUCTION_WEB_STACK=solid mise run web-build`，按 `web_payload_sizes admin target/web/admin` 实测刷新。
 # 入口只带认证外壳、登录页、首次设置页、未决命令宿主、导航与仪表盘，initial_js 从 1,180,043 降到
 # 570,815；payload 随本轮修复略增（1,935,094 → 1,985,056）。上限保持在基线约 +5%。
-solid_admin_initial_js_baseline_bytes=570815
-solid_admin_initial_js_max_bytes=600000
+solid_admin_initial_js_baseline_bytes=596959
+solid_admin_initial_js_max_bytes=777000
 # 2026-11-24：第 4 期（Admin 隔离详情页、止售按钮改走 v2、投递来源闭集与五语译文，页面均按路由分块）
 # 合入后实跑 `AUCTION_WEB_STACK=solid mise run web-build`，payload 实测 2,101,339，超出原上限 2,085,000；
 # initial_js 实测 585,616，仍在原上限内，保持不变。维护者 2026-11-24 决定 Solid 体积预算按实测放开：
 # 基线改为实测值，上限取约 +5%。
-solid_admin_payload_baseline_bytes=2101339
-solid_admin_payload_max_bytes=2207000
+solid_admin_payload_baseline_bytes=2208804
+solid_admin_payload_max_bytes=2872000

@@ -16,7 +16,8 @@ import { ActiveListingStateSchema } from "../../public/consignment/states";
 const MAX_AUCTION_CONFLICTS = 50;
 const EQUIPMENT_KEY = /^[0-9a-f]{10}$/i;
 
-const DELIST_REASON = v.pipe(
+/** 运营下架说明的凭据筛查；v1 与 v2 Admin 记录共用。 */
+export const DELIST_REASON = v.pipe(
   consignmentTextSchema(256),
   // consignmentTextSchema 已拒绝控制字符，其中包括 U+0085。
   v.check((reason) => !/[\u2028\u2029]/u.test(reason)),

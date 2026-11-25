@@ -236,6 +236,7 @@ fn delivery_accepts_server_preflight_retirements() {
         ("lot_watch", "recipient_renamed", "recipient_renamed"),
         ("seller_summary", "recipient_renamed", "recipient_renamed"),
         ("season_reminder", "recipient_renamed", "recipient_renamed"),
+        ("consignment_notice", "recipient_renamed", "recipient_renamed"),
         ("season_reminder", "season_boundary_passed", "season_notice_invalidated"),
         ("season_reminder", "season_reminder_resolved", "season_notice_invalidated"),
         ("mail_intake", "auction_opened", "auction_notice_invalidated"),
@@ -252,6 +253,25 @@ fn delivery_accepts_server_preflight_retirements() {
     claimed["attempt_count"] = json!(1);
     claimed["fencing_version"] = json!(2);
     check_before_send_projection(claimed, true);
+}
+
+/// 作废的寄售付款提醒（7A-3）：只接受寄售通知来源与固定失败码的组合。
+#[test]
+fn delivery_accepts_voided_payment_reminder_retirement_only_from_consignment_notice() {
+    let voided = || {
+        retired_before_send(
+            "consignment_notice",
+            "payment_reminder_voided",
+            "consignment_notice_invalidated",
+        )
+    };
+    check_before_send_projection(voided(), true);
+    let mut other_origin = voided();
+    other_origin["origin_kind"] = json!("season_reminder");
+    check_before_send_projection(other_origin, false);
+    let mut other_failure = voided();
+    other_failure["failure_code"] = json!("season_notice_invalidated");
+    check_before_send_projection(other_failure, false);
 }
 
 #[test]
@@ -334,6 +354,30 @@ fn delivery_decodes_consignment_disposition_without_sending_fence() {
     }
 
     let mut sent = consignment_disposition("succeeded");
+    sent["sending_at"] = json!("2026-11-06T10:00:02.000000Z");
+    check_before_send_projection(sent, false);
+}
+
+/// 季末关闭取消的取得投递（`failed/season_ended`）可解码，可能从未被领取；其他失败码或带发送时间的
+/// failed 仍失败关闭。
+#[test]
+fn delivery_decodes_consignment_season_ended_failure() {
+    let cancelled = |claimed: bool| {
+        let mut row = consignment_disposition(if claimed { "claimed" } else { "prepared" });
+        row["status"] = json!("failed");
+        row["lease_expires_at"] = Value::Null;
+        row["fencing_version"] = json!(if claimed { 2 } else { 1 });
+        row["completed_at"] = json!("2026-11-06T10:00:05.000000Z");
+        row["failure_code"] = json!("season_ended");
+        row
+    };
+    check_before_send_projection(cancelled(false), true);
+    check_before_send_projection(cancelled(true), true);
+
+    let mut other_failure = cancelled(true);
+    other_failure["failure_code"] = json!("send_rejected");
+    check_before_send_projection(other_failure, false);
+    let mut sent = cancelled(true);
     sent["sending_at"] = json!("2026-11-06T10:00:02.000000Z");
     check_before_send_projection(sent, false);
 }
@@ -787,6 +831,30 @@ fn accepts_unified_disposition_kinds_in_detail() {
         })
         .is_ok()
     );
+}
+
+/// 季末关闭处置（迁移 `000137`）随扩展投影输出，页面解码必须认识它，不能整页失败。
+#[test]
+fn accepts_season_closed_disposition_in_detail() {
+    let mut data = detail();
+    data.dispositions.push(AdminDeliveryDispositionResponse {
+        command_id: OTHER_ID.to_owned(),
+        kind: "season_closed".to_owned(),
+        occurred_at: time(2),
+        status: None,
+        fencing_version: Some(3),
+        failure_code: Some("season_ended".to_owned()),
+        external_reference: None,
+        actor: Some("consignment-worker".to_owned()),
+        reason: None,
+    });
+    let decoded = decode_detail(StrictDeliveryEnvelope {
+        code: "ok".to_owned(),
+        message: "loaded".to_owned(),
+        data,
+    })
+    .expect("season_closed must be decodable");
+    assert_eq!(decoded.dispositions[0].kind, "season_closed");
 }
 
 #[test]

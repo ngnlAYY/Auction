@@ -3,12 +3,14 @@
 import type {
   ListingDisposition,
   ListingMode,
-  ListingReason,
-  ListingState,
-  ListingView,
   LookupReason,
   StoredCommandCode,
 } from "@auction/contracts/dto/public/consignment";
+import type {
+  ListingReasonV2,
+  ListingStateV2,
+  ListingViewV2,
+} from "@auction/contracts/dto/public/consignment/listing-v2";
 
 const MODE_KEYS = {
   direct: "consignment-direct",
@@ -19,11 +21,16 @@ const STATE_KEYS = {
   resolving: "consignment-resolving",
   displayed: "consignment-displayed",
   awaiting_deposit: "consignment-awaiting-deposit",
+  deposit_accepted: "consignment-deposit-accepted",
+  available: "consignment-available",
+  sale_pending: "consignment-sale-pending",
+  held_off_market: "consignment-held-off-market",
+  withdrawal_pending: "consignment-withdrawal-pending",
   // 持久或有效状态的总称复用通用「已拒绝」，具体分类由 view.kind 给出。
   rejected: "admin-audit-result-rejected",
   expired: "consignment-expired",
   closed: "consignment-closed",
-} satisfies Record<ListingState, string>;
+} satisfies Record<ListingStateV2, string>;
 
 const VIEW_KEYS = {
   resolving: "consignment-resolving",
@@ -31,9 +38,14 @@ const VIEW_KEYS = {
   ineligible: "consignment-ineligible",
   displayed: "consignment-displayed",
   awaiting_deposit: "consignment-awaiting-deposit",
+  deposit_accepted: "consignment-deposit-accepted",
+  available: "consignment-available",
+  sale_pending: "consignment-sale-pending",
+  held_off_market: "consignment-held-off-market",
+  withdrawal_pending: "consignment-withdrawal-pending",
   expired: "consignment-expired",
   closed: "consignment-closed",
-} satisfies Record<ListingView["kind"], string>;
+} satisfies Record<ListingViewV2["kind"], string>;
 
 const LISTING_REASON_KEYS = {
   not_tradeable: "consignment-not-tradeable",
@@ -60,7 +72,16 @@ const LISTING_REASON_KEYS = {
   lookup_deadline: "consignment-lookup-deadline",
   display_expired: "consignment-display-expired",
   deposit_expired: "consignment-deposit-expired",
-} satisfies Record<ListingReason, string>;
+  unpaid_recovered: "consignment-unpaid-recovered",
+  paid_returned: "consignment-paid-returned",
+  quota_blocked: "consignment-quota-blocked",
+  operations_hold: "consignment-operations-hold",
+  review: "consignment-review",
+  sold: "consignment-sold",
+  withdrawn_delivered: "consignment-withdrawn-delivered",
+  season_closed: "consignment-season-closed",
+  loss_confirmed: "consignment-loss-confirmed",
+} satisfies Record<ListingReasonV2, string>;
 
 const LOOKUP_REASON_KEYS = {
   source_unavailable: "consignment-source-unavailable",
@@ -108,17 +129,17 @@ export function listingModeKey(mode: ListingMode): string {
 }
 
 /** 持久态或有效态的译文键。 */
-export function listingStateKey(state: ListingState): string {
+export function listingStateKey(state: ListingStateV2): string {
   return STATE_KEYS[state];
 }
 
 /** 挂单视图的译文键。 */
-export function listingViewKey(kind: ListingView["kind"]): string {
+export function listingViewKey(kind: ListingViewV2["kind"]): string {
   return VIEW_KEYS[kind];
 }
 
 /** 挂单的资格、解析终止、关闭与到期原因的译文键。 */
-export function listingReasonKey(reason: ListingReason): string {
+export function listingReasonKey(reason: ListingReasonV2): string {
   return LISTING_REASON_KEYS[reason];
 }
 

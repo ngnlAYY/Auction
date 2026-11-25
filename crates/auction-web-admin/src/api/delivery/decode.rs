@@ -274,7 +274,7 @@ fn preflight_retirement_reason_valid(value: &AdminDeliveryResponse) -> Option<bo
         "recipient_renamed" => (
             matches!(
                 value.origin_kind.as_str(),
-                "lot_watch" | "seller_summary" | "season_reminder"
+                "lot_watch" | "seller_summary" | "season_reminder" | "consignment_notice"
             ),
             reason,
         ),
@@ -282,6 +282,10 @@ fn preflight_retirement_reason_valid(value: &AdminDeliveryResponse) -> Option<bo
             (value.origin_kind == "season_reminder", "season_notice_invalidated")
         }
         "auction_opened" => (value.origin_kind == "mail_intake", "auction_notice_invalidated"),
+        // 寄售付款提醒在发送围栏前作废（7A-3），与存储侧校验同一组合。
+        "payment_reminder_voided" => {
+            (value.origin_kind == "consignment_notice", "consignment_notice_invalidated")
+        }
         _ => return None,
     };
     Some(origin_allowed && value.failure_code.as_deref() == Some(expected_failure))
@@ -331,7 +335,7 @@ fn valid_state_fields(
 
     // 寄售处置链把起写许可记在 `mail_disposition_write_starts`，不伪造 sending 事实：
     // Take/Return 只从 claimed 直接进入 succeeded/manual_reconcile。该来源在任何状态都不得有
-    // sending_at；处置链不会产生的 pending/sending/failed 也一律失败关闭。
+    // sending_at；季末取消（failed/season_ended）之外，处置链不会产生的 pending/sending/failed 一律失败关闭。
     if value.origin_kind == "consignment_disposition" {
         return valid_consignment_disposition_state(
             value,
@@ -470,7 +474,8 @@ fn valid_state_fields(
     }
 }
 
-/// 寄售处置投递的专属状态与时间线：没有发送围栏，只允许 `prepared/claimed/succeeded/manual_reconcile`。
+/// 寄售处置投递的专属状态与时间线：没有发送围栏，只允许 `prepared/claimed/succeeded/manual_reconcile`，
+/// 以及季末关闭从未起写的取得工作时取消的 `failed/season_ended`。
 fn valid_consignment_disposition_state(
     value: &AdminDeliveryResponse,
     created_at: Timestamp,
@@ -479,7 +484,7 @@ fn valid_consignment_disposition_state(
     sending_at: Option<Timestamp>,
     completed_at: Option<Timestamp>,
 ) -> bool {
-    // 退役/抑制标记只允许出现在 failed，本来源没有 failed；出现即不是处置链写出的形状。
+    // 本来源从不写退役/抑制标记（季末取消也不写）；出现即不是处置链写出的形状。
     if sending_at.is_some()
         || value.retirement_reason.is_some()
         || value.suppression_reason.is_some()
@@ -529,6 +534,24 @@ fn valid_consignment_disposition_state(
                 && value.failure_code.as_deref().is_some_and(valid_trimmed_text)
                 && value.fencing_version > 0
                 && value.attempt_count > 0
+        }
+        // 与存储端同一形状：季末取消从未进入发送围栏、围栏已推进，可能从未被领取。
+        "failed" => {
+            !has_lease
+                && claimed_at.is_none_or(|claimed| {
+                    !is_zero_delivery_time(claimed)
+                        && claimed >= created_at
+                        && claimed <= updated_at
+                })
+                && completed_at.is_some_and(|completed| {
+                    !is_zero_delivery_time(completed)
+                        && completed >= created_at
+                        && claimed_at.is_none_or(|claimed| completed >= claimed)
+                        && completed <= updated_at
+                })
+                && value.external_reference.is_none()
+                && value.failure_code.as_deref() == Some("season_ended")
+                && value.fencing_version > 0
         }
         _ => false,
     }

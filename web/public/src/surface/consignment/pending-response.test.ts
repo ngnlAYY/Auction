@@ -17,6 +17,8 @@ import {
   PENDING_KEY,
   receipt,
   requestBody,
+  STORED_OPERATION,
+  withdrawReceipt,
 } from "./private-fixture.test";
 import { failure, fakeFetch, response, STATUS_PATH, settle, status } from "./read-fixture.test";
 
@@ -37,9 +39,14 @@ async function assertWriteRelease(
     await settle();
     attemptWrite(page, operation);
     const recorded = storage.session.get(PENDING_KEY);
+    // v2 撤回在发包前要先动态加载解码模块，请求不是同步发出的。
+    await settle();
     const firstId = requestBody(transport.requests.find(isWrite)).command_id;
     const marker = parseJson(recorded ?? "");
-    expect(marker).toMatchObject({ ok: true, value: { operation, command_id: firstId } });
+    expect(marker).toMatchObject({
+      ok: true,
+      value: { operation: STORED_OPERATION[operation], command_id: firstId },
+    });
     expect(typeof firstId).toBe("string");
     await settle();
     expect(storage.session.get(PENDING_KEY)).toBe(releases ? "null" : recorded);
@@ -101,10 +108,11 @@ for (const operation of OPERATIONS) {
       () => failure(409, operation === "register" ? "stale_version" : "fee_changed"),
       false,
     );
+    // v1 的改价与撤回认 invalid_query；v2 撤回的拒绝表不含它，须保留未决。
     await assertWriteRelease(
       operation,
       () => failure(400, "invalid_query"),
-      operation !== "register",
+      operation === "reprice",
     );
     for (const [status, guard] of [
       [400, "invalid_expected_user_id"],
@@ -139,13 +147,15 @@ for (const operation of OPERATIONS) {
     return assertWriteRelease(
       operation,
       (commandId) => {
-        const data = receipt(commandId, {
-          operation,
-          listing_version: version,
-          disposition: registration ? "registered" : withdraw ? "closed" : "repriced",
-          state: registration ? "resolving" : withdraw ? "closed" : "displayed",
-          price: registration ? 101 : withdraw ? null : 102,
-        });
+        const data = withdraw
+          ? withdrawReceipt(commandId, version)
+          : receipt(commandId, {
+              operation,
+              listing_version: version,
+              disposition: registration ? "registered" : "repriced",
+              state: registration ? "resolving" : "displayed",
+              price: registration ? 101 : 102,
+            });
         const body = JSON.stringify({ code: registration ? "accepted" : "ok", message: "", data });
         return new Response(
           body.replace(

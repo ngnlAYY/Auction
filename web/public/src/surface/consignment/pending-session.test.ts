@@ -21,6 +21,7 @@ import {
   REPRICE,
   RETRY,
   requestBody,
+  STORED_OPERATION,
   WITHDRAW,
   writePath,
 } from "./private-fixture.test";
@@ -97,7 +98,11 @@ for (const operation of OPERATIONS) {
       expect(writes).toEqual([{ id: expect.any(String), user: ALICE.user_id }]);
       expect(parseJson(storage.session.get(PENDING_KEY) ?? "")).toMatchObject({
         ok: true,
-        value: { command_id: writes[0]?.id, expected_user_id: ALICE.user_id, operation },
+        value: {
+          command_id: writes[0]?.id,
+          expected_user_id: ALICE.user_id,
+          operation: STORED_OPERATION[operation],
+        },
       });
 
       shell.server.identity = null;

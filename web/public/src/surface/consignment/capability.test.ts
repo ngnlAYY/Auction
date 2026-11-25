@@ -4,18 +4,17 @@ import { expect, test } from "bun:test";
 import { createComponent, createRoot, type Element } from "solid-js";
 import { findElement } from "../catalog/command-scope-fixture.test";
 import { useConsignmentCapability } from "./capability";
+import { pageResponse, summary } from "./order-fixture.test";
 import {
   controlEvent,
   failure,
   fakeClock,
   fakeFetch,
   mountConsignment,
-  pageResponse,
   response,
   STATUS_PATH,
   settle,
   status,
-  summary,
 } from "./read-fixture.test";
 import { createElement, loadNavigation, requestedPageChunks } from "./render-fixture.test";
 

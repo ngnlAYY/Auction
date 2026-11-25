@@ -1,6 +1,6 @@
 // 寄售公开目录、摘要卡片与独立分页。
 
-import type { ListingSummary } from "@auction/contracts/dto/public/consignment/catalog";
+import type { ListingSummaryV2 } from "@auction/contracts/dto/public/consignment/listing-v2";
 import { MAX_PUBLIC_PAGE_SIZE } from "@auction/contracts/dto/public/pagination";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
@@ -11,12 +11,13 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { For, Match, Show, Switch, useContext } from "solid-js";
 
-import { fetchConsignmentCatalog } from "../../api/consignment-catalog";
+import { fetchConsignmentCatalogV2 } from "../../api/consignment-orders";
 import { PublicSessionResourceContext, PublicSessionView } from "..";
 import { PUBLIC_PAGE_SIZES } from "../pagination";
 import { publicOffsetLastPage } from "../pagination/parameters";
 import { consignmentEnabled, useConsignmentCapability } from "./capability";
 import { DEFAULT_CONSIGNMENT_QUERY, Filters, useConsignmentCatalogQuery } from "./filters";
+import { purchaseHref } from "./order-labels";
 import {
   ConsignmentCapabilityGate,
   ConsignmentReadNotice,
@@ -27,7 +28,7 @@ import {
 } from "./read-view";
 import { useConsignmentRefresh } from "./refresh";
 
-function ListingCard(props: { readonly listing: ListingSummary }): JSX.Element {
+function ListingCard(props: { readonly listing: ListingSummaryV2 }): JSX.Element {
   return (
     <article class="public-consignment-listing">
       <header class="public-consignment-listing__header">
@@ -44,6 +45,11 @@ function ListingCard(props: { readonly listing: ListingSummary }): JSX.Element {
       </p>
       <ListingFacts listing={props.listing} />
       <ModeNotice listing={props.listing} />
+      <Show when={props.listing.purchasable}>
+        <Link href={purchaseHref(props.listing.listing_id)}>
+          {t("consignment-purchase-action")}
+        </Link>
+      </Show>
     </article>
   );
 }
@@ -69,7 +75,7 @@ export function ConsignmentCatalog(): JSX.Element {
   const listings = createTaskResource(request, async (requested, context) =>
     requested === null
       ? null
-      : { requested, result: await fetchConsignmentCatalog(requested.query, context.signal) },
+      : { requested, result: await fetchConsignmentCatalogV2(requested.query, context.signal) },
   );
   const refresh = () => {
     capability.refresh();
@@ -93,6 +99,7 @@ export function ConsignmentCatalog(): JSX.Element {
           </Show>
           <Show when={PublicSessionView.fromSnapshot(session()).authenticated}>
             <Link href="/consignment/me">{t("consignment-mine")}</Link>
+            <Link href="/consignment/orders">{t("consignment-orders")}</Link>
           </Show>
         </nav>
         <Filters

@@ -16,6 +16,9 @@ export type AdminRouteName =
   | "Consignment"
   | "ConsignmentListing"
   | "ConsignmentQuarantine"
+  | "ConsignmentOrders"
+  | "ConsignmentOrderDetail"
+  | "ConsignmentLoss"
   | "Mails"
   | "MailOverview"
   | "Cookies"
@@ -53,6 +56,10 @@ export const ADMIN_ROUTES: readonly RouteDefinition[] = [
   { name: "ConsignmentListing", pattern: "/consignment/listings/:listing_id" },
   // Solid 版专属的邮件隔离详情；运营人员可按隔离 ID 直接打开。
   { name: "ConsignmentQuarantine", pattern: "/consignment/deposits/:quarantine_id" },
+  // Solid 版专属的订单列表、订单详情与损失案件；均在 `/consignment` 独立入口前缀下。
+  { name: "ConsignmentOrders", pattern: "/consignment/orders" },
+  { name: "ConsignmentOrderDetail", pattern: "/consignment/orders/:contract_id" },
+  { name: "ConsignmentLoss", pattern: "/consignment/positions/:position_id/loss-case" },
   { name: "Mails", pattern: "/mails" },
   { name: "MailOverview", pattern: "/mail" },
   { name: "Cookies", pattern: "/cookies" },

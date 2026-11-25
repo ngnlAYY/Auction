@@ -3,12 +3,14 @@
 import type {
   ListingDisposition,
   ListingMode,
-  ListingReason,
-  ListingState,
-  ListingView,
   LookupReason,
   StoredCommandCode,
 } from "@auction/contracts/dto/public/consignment";
+import type {
+  ListingReasonV2,
+  ListingStateV2,
+  ListingViewV2,
+} from "@auction/contracts/dto/public/consignment/listing-v2";
 
 const MODE_KEYS = {
   direct: "consignment-direct",
@@ -19,11 +21,16 @@ const STATE_KEYS = {
   resolving: "consignment-resolving",
   displayed: "consignment-displayed",
   awaiting_deposit: "consignment-awaiting-deposit",
+  deposit_accepted: "consignment-deposit-accepted",
+  available: "consignment-available",
+  sale_pending: "consignment-sale-pending",
+  held_off_market: "consignment-held-off-market",
+  withdrawal_pending: "consignment-withdrawal-pending",
   // 合同只为两种拒绝视图提供文案，聚合的 rejected 态由调用方按 view.kind 显示。
   rejected: null,
   expired: "consignment-expired",
   closed: "consignment-closed",
-} satisfies Record<ListingState, string | null>;
+} satisfies Record<ListingStateV2, string | null>;
 
 const VIEW_KEYS = {
   resolving: "consignment-resolving",
@@ -31,9 +38,14 @@ const VIEW_KEYS = {
   ineligible: "consignment-ineligible",
   displayed: "consignment-displayed",
   awaiting_deposit: "consignment-awaiting-deposit",
+  deposit_accepted: "consignment-deposit-accepted",
+  available: "consignment-available",
+  sale_pending: "consignment-sale-pending",
+  held_off_market: "consignment-held-off-market",
+  withdrawal_pending: "consignment-withdrawal-pending",
   expired: "consignment-expired",
   closed: "consignment-closed",
-} satisfies Record<ListingView["kind"], string>;
+} satisfies Record<ListingViewV2["kind"], string>;
 
 const LISTING_REASON_KEYS = {
   not_tradeable: "consignment-not-tradeable",
@@ -60,7 +72,16 @@ const LISTING_REASON_KEYS = {
   lookup_deadline: "consignment-lookup-deadline",
   display_expired: "consignment-display-expired",
   deposit_expired: "consignment-deposit-expired",
-} satisfies Record<ListingReason, string>;
+  unpaid_recovered: "consignment-unpaid-recovered",
+  paid_returned: "consignment-paid-returned",
+  quota_blocked: "consignment-quota-blocked",
+  operations_hold: "consignment-operations-hold",
+  review: "consignment-review",
+  sold: "consignment-sold",
+  withdrawn_delivered: "consignment-withdrawn-delivered",
+  season_closed: "consignment-season-closed",
+  loss_confirmed: "consignment-loss-confirmed",
+} satisfies Record<ListingReasonV2, string>;
 
 const LOOKUP_REASON_KEYS = {
   source_unavailable: "consignment-source-unavailable",
@@ -112,17 +133,17 @@ export function listingModeKey(mode: ListingMode): string {
 }
 
 /** 状态的译文键；rejected 需使用服务端的视图种类取文案。 */
-export function listingStateKey(state: ListingState): string | null {
+export function listingStateKey(state: ListingStateV2): string | null {
   return STATE_KEYS[state];
 }
 
 /** 挂单视图的译文键。 */
-export function listingViewKey(kind: ListingView["kind"]): string {
+export function listingViewKey(kind: ListingViewV2["kind"]): string {
   return VIEW_KEYS[kind];
 }
 
 /** 挂单的资格、解析终止、关闭与到期原因的译文键。 */
-export function listingReasonKey(reason: ListingReason): string {
+export function listingReasonKey(reason: ListingReasonV2): string {
   return LISTING_REASON_KEYS[reason];
 }
 
@@ -139,4 +160,30 @@ export function listingDispositionKey(disposition: ListingDisposition): string |
 /** 已知写入错误的专用译文键；返回 null 时沿用调用方的通用提示。 */
 export function listingWriteErrorKey(code: string): string | null {
   return isMappedWriteCode(code) ? WRITE_ERROR_KEYS[code] : null;
+}
+
+/** 本人重新上架页的站内地址；入口只在服务端 allowed_actions 含 relist 时出现。 */
+export function relistConsignmentHref(listingId: string): string {
+  return `/consignment/me/${listingId}/relist`;
+}
+
+/** 本人损失回执页（只读）；只在挂单带损失案件时由本人详情链接。 */
+export function lossReceiptHref(positionId: string): string {
+  return `/consignment/loss/${positionId}`;
+}
+
+// D9 §6.1 重列的拒绝码；未列出的码沿用通用写入提示。
+const RELIST_ERROR_KEYS: Readonly<Record<string, string>> = {
+  action_not_allowed: "consignment-relist-not-allowed",
+  operations_hold: "consignment-relist-hold",
+  equipment_committed: "consignment-relist-custody",
+  custody_unproven: "consignment-relist-custody",
+  season_closed: "consignment-deposit-season-closed",
+};
+
+/** 重列专用错误码的译文键；返回 null 时沿用 listingWriteErrorKey 与通用提示。 */
+export function relistErrorKey(code: string): string | null {
+  return Object.hasOwn(RELIST_ERROR_KEYS, code)
+    ? (RELIST_ERROR_KEYS[code] ?? null)
+    : listingWriteErrorKey(code);
 }

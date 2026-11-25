@@ -172,6 +172,12 @@ const CONSIGNMENT_DELIST_REJECTIONS = new Map<string, { status: number; scope: R
   ["stale_version", { status: 409, scope: "replay_checked" }],
   ["listing_not_active", { status: 409, scope: "replay_checked" }],
   ["command_id_conflict", { status: 409, scope: "replay_checked" }],
+  // 订单处置（7E-2）：确定拒绝只占该次命令 ID，不留任何资金或状态痕迹，可凭回执核对。
+  ["opposite_payment_open", { status: 409, scope: "replay_checked" }],
+  ["evidence_unproven", { status: 409, scope: "replay_checked" }],
+  ["evidence_conflict", { status: 409, scope: "replay_checked" }],
+  ["disposition_conflict", { status: 409, scope: "replay_checked" }],
+  ["action_not_allowed", { status: 403, scope: "replay_checked" }],
 ]);
 
 function consignmentDelistRejection(

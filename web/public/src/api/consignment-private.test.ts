@@ -1,7 +1,7 @@
 // 六条本人 API 的同源传输、闭集解码和错误分类。
 
 import { expect, test } from "bun:test";
-import type { OwnedListing } from "@auction/contracts/dto/public/consignment";
+import type { OwnedListingV2 } from "@auction/contracts/dto/public/consignment/listing-v2";
 
 import {
   ALICE,
@@ -23,11 +23,11 @@ import {
   LISTINGS_PATH,
   response,
 } from "../surface/consignment/read-fixture.test";
+import { fetchConsignmentCommand } from "./consignment-owned";
 import {
-  fetchConsignmentCommand,
-  fetchOwnedConsignmentListing,
-  fetchOwnedConsignmentListings,
-} from "./consignment-owned";
+  fetchOwnedConsignmentListingsV2,
+  fetchOwnedConsignmentListingV2,
+} from "./consignment-owned-v2";
 import {
   registerConsignmentListing,
   repriceConsignmentListing,
@@ -70,8 +70,8 @@ test("六条请求绑定用户、方法、无缓存及正确回执", async () =>
     return acceptedReceipt();
   });
   try {
-    expect((await fetchOwnedConsignmentListings(USER, QUERY, SIGNAL())).ok).toBe(true);
-    expect((await fetchOwnedConsignmentListing(USER, LISTING_A, SIGNAL())).ok).toBe(true);
+    expect((await fetchOwnedConsignmentListingsV2(USER, QUERY, SIGNAL())).ok).toBe(true);
+    expect((await fetchOwnedConsignmentListingV2(USER, LISTING_A, SIGNAL())).ok).toBe(true);
     expect((await fetchConsignmentCommand(USER, COMMAND_ID, SIGNAL())).ok).toBe(true);
     expect((await registerConsignmentListing(USER, REGISTER, SIGNAL())).ok).toBe(true);
     expect((await repriceConsignmentListing(USER, LISTING_A, REPRICE, SIGNAL())).ok).toBe(true);
@@ -105,7 +105,7 @@ test("查询边界、非法身份、UUID、金额和版本在发包前失败关�
       [2, 37],
     ] as const) {
       expect(
-        (await fetchOwnedConsignmentListings(USER, { ...QUERY, page, pageSize }, SIGNAL())).ok,
+        (await fetchOwnedConsignmentListingsV2(USER, { ...QUERY, page, pageSize }, SIGNAL())).ok,
       ).toBe(true);
     }
     for (const [page, pageSize] of [
@@ -116,16 +116,16 @@ test("查询边界、非法身份、UUID、金额和版本在发包前失败关�
       [1.5, 20],
     ] as const) {
       expect(
-        await fetchOwnedConsignmentListings(USER, { ...QUERY, page, pageSize }, SIGNAL()),
+        await fetchOwnedConsignmentListingsV2(USER, { ...QUERY, page, pageSize }, SIGNAL()),
       ).toEqual({ ok: false, error: { status: 400, code: "invalid_query" } });
     }
-    expect((await fetchOwnedConsignmentListing(USER, `${LISTING_A}/extra`, SIGNAL())).ok).toBe(
+    expect((await fetchOwnedConsignmentListingV2(USER, `${LISTING_A}/extra`, SIGNAL())).ok).toBe(
       false,
     );
     expect(
       (await fetchConsignmentCommand(USER, "00000000-0000-0000-0000-000000000000", SIGNAL())).ok,
     ).toBe(false);
-    expect((await fetchOwnedConsignmentListings("invalid", QUERY, SIGNAL())).ok).toBe(false);
+    expect((await fetchOwnedConsignmentListingsV2("invalid", QUERY, SIGNAL())).ok).toBe(false);
     expect((await registerConsignmentListing(USER, { ...REGISTER, price: 0 }, SIGNAL())).ok).toBe(
       false,
     );
@@ -159,12 +159,12 @@ test("严格解码拒绝含额外字段、错误筛选、错误目标、命令�
   let next = () => response(listing("displayed", { listing_id: LISTING_B }));
   const transport = fakeFetch(() => next());
   try {
-    expect((await fetchOwnedConsignmentListing(USER, LISTING_A, SIGNAL())).ok).toBe(false);
+    expect((await fetchOwnedConsignmentListingV2(USER, LISTING_A, SIGNAL())).ok).toBe(false);
     next = () => response({ ...listing("displayed"), equipment_url: EQUIPMENT_URL });
-    expect((await fetchOwnedConsignmentListing(USER, LISTING_A, SIGNAL())).ok).toBe(false);
+    expect((await fetchOwnedConsignmentListingV2(USER, LISTING_A, SIGNAL())).ok).toBe(false);
     next = () => response({ items: [listing("displayed")], total: 1, page: 1, page_size: 37 });
     expect(
-      (await fetchOwnedConsignmentListings(USER, { ...QUERY, state: "closed" }, SIGNAL())).ok,
+      (await fetchOwnedConsignmentListingsV2(USER, { ...QUERY, state: "closed" }, SIGNAL())).ok,
     ).toBe(false);
     next = () => response({ http_status: 202, code: "accepted", receipt: receipt(LISTING_B) });
     expect((await fetchConsignmentCommand(USER, COMMAND_ID, SIGNAL())).ok).toBe(false);
@@ -177,7 +177,7 @@ test("严格解码拒绝含额外字段、错误筛选、错误目标、命令�
         '{"code":"ok","message":"","data":{"items":[],"total":0,"page":1,"page":1,"page_size":37}}',
         { headers: { "content-type": "application/json" } },
       );
-    expect((await fetchOwnedConsignmentListings(USER, QUERY, SIGNAL())).ok).toBe(false);
+    expect((await fetchOwnedConsignmentListingsV2(USER, QUERY, SIGNAL())).ok).toBe(false);
     next = () => acceptedReceipt(receipt(COMMAND_ID, { price: 102 }));
     expect((await registerConsignmentListing(USER, REGISTER, SIGNAL())).ok).toBe(false);
     next = () =>
@@ -328,7 +328,7 @@ test("私有详情和列表逐个拒绝舍入为合法值的整数词法，保�
     level: { kind: "assigned", value: 101 } as const,
     stat_groups: [{ name: "Damage", stats: [{ name: "Impact", value: 2.5, base: 1.25 }] }],
   };
-  const published: OwnedListing = { ...displayed, view: { kind: "displayed", equipment } };
+  const published: OwnedListingV2 = { ...displayed, view: { kind: "displayed", equipment } };
   const fields = [
     "version",
     "price",
@@ -348,8 +348,8 @@ test("私有详情和列表逐个拒绝舍入为合法值的整数词法，保�
   });
   try {
     for (const read of [
-      () => fetchOwnedConsignmentListing(USER, LISTING_A, SIGNAL()),
-      () => fetchOwnedConsignmentListings(USER, QUERY, SIGNAL()),
+      () => fetchOwnedConsignmentListingV2(USER, LISTING_A, SIGNAL()),
+      () => fetchOwnedConsignmentListingsV2(USER, QUERY, SIGNAL()),
     ]) {
       field = null;
       expect((await read()).ok).toBe(true);
@@ -361,7 +361,7 @@ test("私有详情和列表逐个拒绝舍入为合法值的整数词法，保�
       }
     }
     for (field of ["total", "page", "page_size"]) {
-      expect(await fetchOwnedConsignmentListings(USER, QUERY, SIGNAL())).toEqual({
+      expect(await fetchOwnedConsignmentListingsV2(USER, QUERY, SIGNAL())).toEqual({
         ok: false,
         error: { status: 200, code: "invalid_response" },
       });

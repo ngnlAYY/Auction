@@ -13,6 +13,7 @@ import {
   ListingStateV2Schema,
   ListingSummaryV2Schema,
   ListingViewV2Schema,
+  OwnedListingPageV2Schema,
   OwnedListingV2Schema,
   PublicListingStateV2Schema,
   type WithdrawListingV2,
@@ -29,6 +30,8 @@ import { SeasonStateV2Schema } from "./status-v2";
 const PUBLIC = "public/consignment-listing-v2-public.json";
 const OWNED = "public/consignment-listing-v2-owned.json";
 const HELD = "public/consignment-listing-v2-held.json";
+const PAGE_V2 = "public/consignment-owned-listings-v2.json";
+const HELD_ACCEPTED = "public/consignment-listing-v2-held-accepted.json";
 const VIEWS = "public/consignment-listing-views-v2.json";
 const WITHDRAWAL = "public/consignment-withdrawal-requested-receipt.json";
 const WITHDRAW_CLOSED = "public/consignment-withdraw-closed-receipt.json";
@@ -146,10 +149,22 @@ test("本人挂单接受 available 与 held_off_market 形状", async () => {
       allowed_actions: ["withdraw", "relist"],
     }).ok,
   ).toBe(false);
+  // 本人视图不带 hold_id：运营止售的 hold_id 为空也合法。
   expect(
     decode(OwnedListingV2Schema, {
       ...heldWire,
       view: { ...view, hold_id: null },
+    }).ok,
+  ).toBe(true);
+  // 只有运营止售（对已接受未取得的件）可以没有处分代，其余原因必须有。
+  expect(decode(OwnedListingV2Schema, { ...heldWire, generation: null }).ok).toBe(true);
+  expect(
+    decode(OwnedListingV2Schema, {
+      ...heldWire,
+      generation: null,
+      view: { ...view, reason: "quota_blocked", hold_id: null },
+      effective_reason: "quota_blocked",
+      allowed_actions: ["withdraw", "relist"],
     }).ok,
   ).toBe(false);
 });
@@ -235,7 +250,7 @@ test("视图原因必须属于对应闭集", async () => {
   }
 });
 
-test("held_off_market 七个原因都能解码，运营止售必须有 hold_id", async () => {
+test("held_off_market 七个原因都能解码，hold_id 可空", async () => {
   const { data: held } = await readResponse(HELD, OwnedListingV2Schema);
   const view = record(structuredClone(held.view));
   for (const reason of [
@@ -255,7 +270,7 @@ test("held_off_market 七个原因都能解码，运营止售必须有 hold_id",
       }).ok,
     ).toBe(true);
   }
-  expect(decode(ListingViewV2Schema, { ...view, hold_id: null }).ok).toBe(false);
+  expect(decode(ListingViewV2Schema, { ...view, hold_id: null }).ok).toBe(true);
 });
 
 test("撤回意愿回执携带 L 与 intent ID", async () => {
@@ -376,4 +391,28 @@ test("公开快照字段白名单与安全 DTO 一致", () => {
       "tradeable",
     ].sort(),
   );
+});
+
+test("本人 v2 列表含代管态，服务端只宣告可执行的动作", async () => {
+  const { data: page } = await readResponse(PAGE_V2, OwnedListingPageV2Schema);
+  expect(
+    page.items.map(({ effective_state, generation, allowed_actions }) => [
+      effective_state,
+      generation,
+      allowed_actions,
+    ]),
+  ).toEqual([
+    ["available", 1, ["withdraw"]],
+    ["held_off_market", 1, ["withdraw"]],
+    ["deposit_accepted", null, ["withdraw"]],
+  ]);
+});
+
+test("对已接受件设止售后没有处分代，available 仍必须有处分代", async () => {
+  const { data: held } = await readResponse(HELD_ACCEPTED, OwnedListingV2Schema);
+  expect(held).toMatchObject({ effective_state: "held_off_market", generation: null });
+  const { data: page } = await readResponse(PAGE_V2, OwnedListingPageV2Schema);
+  const available = page.items[0];
+  if (!available) throw new Error("夹具须有 available 项");
+  expect(decode(OwnedListingV2Schema, { ...available, generation: null }).ok).toBe(false);
 });

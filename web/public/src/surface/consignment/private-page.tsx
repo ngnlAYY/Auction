@@ -2,7 +2,7 @@
 
 import "../../../../../crates/auction-web-public/assets/consignment-account.css";
 
-import type { ListingView } from "@auction/contracts/dto/public/consignment";
+import type { ListingViewV2 } from "@auction/contracts/dto/public/consignment/listing-v2";
 import { Link } from "@auction/web-shared/router";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { formatCreditAmount } from "@auction/web-shared/ui/format";
@@ -23,7 +23,7 @@ export function ownedConsignmentHref(listingId: string): string {
 }
 
 /** 提取安全装备投影；没有快照的状态仍可展示。 */
-export function ownedEquipment(view: ListingView) {
+export function ownedEquipment(view: ListingViewV2) {
   return "equipment" in view ? view.equipment : null;
 }
 

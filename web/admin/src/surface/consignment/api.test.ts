@@ -3,8 +3,7 @@
 import { expect, test } from "bun:test";
 
 import { createAdminRequestHarness, TEST_SESSION } from "../../api/api-request-fixture";
-import { fetchAdminListing } from "../../api/consignment/detail";
-import { fetchAdminListings } from "../../api/consignment/list";
+import { fetchAdminListingsV2, fetchAdminListingV2 } from "../../api/consignment/read-v2";
 import { registerAdminSessionHost } from "../../api/session";
 import {
   adminDetail,
@@ -33,7 +32,7 @@ test("列表校验有效状态与精确卖家；不会按已记录状态误筛",
         effective_reason: "service_disabled",
         view: { kind: "closed", reason: "service_disabled", equipment: null },
       },
-      { can_delist: false },
+      { admin_actions: [] },
     );
     const page = { items: [record], page: 1, page_size: 37, total: 1 };
     const requests = harness.installFetch([
@@ -43,7 +42,8 @@ test("列表校验有效状态与精确卖家；不会按已记录状态误筛",
       success({ ...page, page_size: 20 }),
     ]);
     const selected = { world: "main", mode: "direct", state: "closed", sellerUserId: SELLER_ID };
-    const list = (filters: typeof selected) => fetchAdminListings(host, filters, 1n, 37, SIGNAL());
+    const list = (filters: typeof selected) =>
+      fetchAdminListingsV2(host, filters, 1n, 37, SIGNAL());
     expect(await list(selected)).toEqual({ ok: true, value: page });
     expect(await list(selected)).toEqual({ ok: false, error: "invalid_response" });
     expect(await list({ ...selected, state: "resolving" })).toEqual({
@@ -69,7 +69,7 @@ test("列表拒绝非法筛选、201 页长和超预算偏移；接受边界与�
       success({ ...page, page: 1, page_size: 1 }),
     ]);
     const list = (page: bigint, size: number, filters = FILTERS) =>
-      fetchAdminListings(host, filters, page, size, SIGNAL());
+      fetchAdminListingsV2(host, filters, page, size, SIGNAL());
     for (const filter of [
       { world: "unsupported" },
       { mode: "wrong" },
@@ -113,8 +113,8 @@ test("详情拒绝错挂单、非整数版本、重复字段及错误截断标�
       { body: response.body.replace('"version":3', '"version":3,"version":3') },
       success({ ...ready, conflicts_truncated: true }),
     ]);
-    const fetch = () => fetchAdminListing(host, LISTING_ID, SIGNAL());
-    expect(await fetchAdminListing(host, "invalid", SIGNAL())).toEqual({
+    const fetch = () => fetchAdminListingV2(host, LISTING_ID, SIGNAL());
+    expect(await fetchAdminListingV2(host, "invalid", SIGNAL())).toEqual({
       ok: false,
       error: "invalid_listing_id",
     });
@@ -171,8 +171,8 @@ test("读错误区分挂单不存在、参数错误和 503；仅可信 401 通�
     for (const code of codes) {
       const result =
         code === "invalid_query"
-          ? await fetchAdminListings(registration.host, FILTERS, 1n, 20, SIGNAL())
-          : await fetchAdminListing(registration.host, LISTING_ID, SIGNAL());
+          ? await fetchAdminListingsV2(registration.host, FILTERS, 1n, 20, SIGNAL())
+          : await fetchAdminListingV2(registration.host, LISTING_ID, SIGNAL());
       expect(result).toEqual({ ok: false, error: code });
       expect(invalidations).toBe(code === "unauthenticated" ? 1 : 0);
     }

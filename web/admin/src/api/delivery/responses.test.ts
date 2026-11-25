@@ -192,6 +192,21 @@ test("accepts_unified_disposition_kinds_in_detail", () => {
   expect(decodeDetailFixture(data).ok).toBe(true);
 });
 
+// 季末关闭处置（迁移 000137）随扩展投影输出，页面解码必须认识它，不能整页失败。
+test("accepts_season_closed_disposition_in_detail", () => {
+  const data = detail();
+  data.dispositions.push({
+    command_id: OTHER_ID,
+    kind: "season_closed",
+    occurred_at: time(2),
+    fencing_version: 3,
+    failure_code: "season_ended",
+    actor: "consignment-worker",
+  });
+  const decoded = requireDecoded(decodeDetailFixture(data), "季末关闭处置详情");
+  expect(requireElement(decoded.detail.dispositions, 0, "处置记录").kind).toBe("season_closed");
+});
+
 test("rejects_send_attempt_without_frozen_fields", () => {
   const data = detail();
   delete requireElement(data.attempts, 0, "Send 尝试").subject;

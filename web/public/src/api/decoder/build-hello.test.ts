@@ -11,6 +11,22 @@ test("accepts_only_the_exact_build_frame：只接受精确的构建号首帧", (
   expect(decodeBuildHello('{"build":"0.1.0","type":"hello"}')).not.toBeNull();
 });
 
+test("prefers_the_optional_independent_build：独立构建号优先，缺省时与原行为一致", () => {
+  expect(
+    decodeBuildHello('{"type":"hello","build":"build_legacy","independent_build":"build_solid"}'),
+  ).toBe("build_solid");
+  expect(decodeBuildHello('{"type":"hello","build":"build_legacy"}')).toBe("build_legacy");
+  for (const message of [
+    '{"type":"hello","build":"b1","independent_build":7}',
+    '{"type":"hello","build":"b1","independent_build":""}',
+    '{"type":"hello","build":"b1","independent_build":"two words"}',
+    '{"type":"hello","independent_build":"b2"}',
+    '{"type":"hello","build":"b1","independent_build":"b2","extra":1}',
+  ]) {
+    expect(decodeBuildHello(message), message).toBeNull();
+  }
+});
+
 test("rejects_unknown_shapes_and_invalid_builds：拒绝未知形状与非法构建号", () => {
   for (const message of [
     '{"type":"hello"}',

@@ -38,6 +38,7 @@ const ADMIN_DELIVERY_DISPOSITION_KINDS = [
   "legacy_self",
   "preflight_retired",
   "operator_acknowledged",
+  "season_closed",
 ] as const;
 const ADMIN_DELIVERY_OBLIGATION_KINDS = [
   "winner_equipment_cod",
@@ -322,8 +323,9 @@ export type AdminDeliveryCustodyResponse = v.InferOutput<typeof AdminDeliveryCus
 /** 追加式处置事实；来源是 Admin 命令账本与人工 Sent 证明。 */
 export const AdminDeliveryDispositionResponseSchema = strictStruct({
   command_id: v.string(),
-  /** 处置种类。缺省详情响应只输出已发布的闭集；`recovery_equipment_recovered` 只在请求带
-   * `include=settlement_returns` 时输出，升级前的页面不会读到它不认识的值。 */
+  /** 处置种类。缺省详情响应只输出已发布的闭集；`recovery_equipment_recovered` 与
+   * `season_closed` 只在请求带 `include=settlement_returns` 时输出，升级前的页面不会读到它不认识
+   * 的值。 */
   kind: v.picklist(ADMIN_DELIVERY_DISPOSITION_KINDS),
   occurred_at: v.string(),
   status: optionalNullable(v.string()),
