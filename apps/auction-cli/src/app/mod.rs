@@ -52,6 +52,7 @@ fn failure_code(command: &Command) -> u8 {
         Command::Db(_) | Command::Backup(_) | Command::Wal(_) => EXIT_DATABASE,
         Command::Alert(_)
         | Command::Switch(_)
+        | Command::Web(_)
         | Command::Credential(_)
         | Command::Keys(_)
         | Command::Forum(_)
@@ -59,7 +60,8 @@ fn failure_code(command: &Command) -> u8 {
         | Command::Mail(_)
         | Command::Funds(_)
         | Command::Settlement(_)
-        | Command::Recovery(_) => EXIT_OPERATION,
+        | Command::Recovery(_)
+        | Command::Consignment(_) => EXIT_OPERATION,
     }
 }
 
@@ -95,5 +97,9 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             crate::operations::settlement::run(&config_dir, command).await
         }
         Command::Recovery(command) => crate::operations::recovery::run(&config_dir, command).await,
+        Command::Web(command) => crate::web::materialize::run(command).await,
+        Command::Consignment(command) => {
+            crate::operations::consignment::run(&config_dir, command).await
+        }
     }
 }

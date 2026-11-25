@@ -64,6 +64,7 @@ impl AppConfig {
             backup,
             auction,
             consignment,
+            web,
             worker,
             http_security,
             session,
@@ -73,6 +74,7 @@ impl AppConfig {
             runtime_worker_budget,
         } = input;
         let consignment = consignment.resolve()?;
+        let web = web.resolve()?;
         let shutdown = shutdown.resolve(role)?;
         let load_secrets = mode == BuildMode::Startup;
         let secrets = if load_secrets {
@@ -314,6 +316,7 @@ impl AppConfig {
             backup,
             auction,
             consignment,
+            web,
             worker,
             http_security,
             session,

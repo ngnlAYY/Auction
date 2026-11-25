@@ -30,6 +30,7 @@ fn artifact() -> Artifact {
         }],
         public_payload_sha256: "d".repeat(64),
         admin_payload_sha256: "e".repeat(64),
+        web_stack: None,
     }
 }
 

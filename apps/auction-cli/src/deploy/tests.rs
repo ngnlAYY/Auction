@@ -93,6 +93,7 @@ impl Site {
             binaries,
             public_payload_sha256: "b".repeat(64),
             admin_payload_sha256: "b".repeat(64),
+            web_stack: None,
         }
     }
 

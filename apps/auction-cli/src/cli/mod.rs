@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 mod alerts;
+mod consignment;
 mod database;
 mod deploy;
 mod keys;
@@ -12,9 +13,12 @@ mod operations;
 mod settlement;
 mod switches;
 mod wal;
+mod web;
 pub(crate) use alerts::AlertCommand;
+pub(crate) use consignment::ConsignmentCommand;
 pub(crate) use switches::SwitchCommand;
 pub(crate) use wal::WalCommand;
+pub(crate) use web::{InstallArgs, MaterializeLegacyArgs, SwitchArgs, VerifyArgs, WebCommand};
 
 pub(crate) use database::RebuildModeArg;
 pub(crate) use database::{BackupCommand, DbCommand, OwnerSecretsArg};
@@ -75,6 +79,10 @@ pub(crate) enum Command {
     /// 主机侧运维告警：读取磁盘、备份回执与 WAL 暂存事实并写入告警来源。
     #[command(subcommand)]
     Alert(AlertCommand),
+    /// 页面静态挂载：物化旧壳、安装新版页面、切换入口、只读状态与冷回切演练回执核对；
+    /// 不连接数据库、不停服务。
+    #[command(subcommand)]
+    Web(WebCommand),
     /// 外部 Cookie 凭据的安全列表与 stdin 导入。
     #[command(subcommand)]
     Credential(CredentialCommand),
@@ -99,6 +107,9 @@ pub(crate) enum Command {
     /// 恢复后外部核对：暂停状态下只读扫描并把精确 Sent 匹配隔离为人工对账。
     #[command(subcommand)]
     Recovery(RecoveryCommand),
+    /// 寄售存量合同的权利状态补刷。
+    #[command(subcommand)]
+    Consignment(ConsignmentCommand),
 }
 
 #[derive(Debug, Subcommand)]

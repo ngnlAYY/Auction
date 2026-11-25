@@ -63,6 +63,17 @@ fn assert_defaults(config: ConsignmentConfig) {
     assert_eq!(config.lookup_timeout_seconds(), 10);
     assert_eq!(config.lookup_max_response_bytes(), 65_536);
     assert_eq!(config.lookup_min_interval_ms(), 1_000);
+    let policy = config.sale_policy();
+    assert_eq!(
+        (
+            policy.payment_deadline_days,
+            policy.reminder_limit,
+            policy.cod_return_limit,
+            policy.isekai_refusal_limit,
+            policy.isekai_refusal_window_days
+        ),
+        (7, 1, 3, 3, 90)
+    );
 }
 
 #[test]
@@ -123,6 +134,9 @@ registrations_per_hour = 18
 lookup_timeout_seconds = 12
 lookup_max_response_bytes = 131072
 lookup_min_interval_ms = 2500
+payment_deadline_days = 14
+cod_return_limit = 5
+isekai_refusal_limit = 8
 ",
     );
     for role in [Role::Public, Role::Admin, Role::Worker] {
@@ -141,6 +155,12 @@ lookup_min_interval_ms = 2500
         assert_eq!(config.lookup_timeout_seconds(), 12, "{role:?}");
         assert_eq!(config.lookup_max_response_bytes(), 131_072, "{role:?}");
         assert_eq!(config.lookup_min_interval_ms(), 2_500, "{role:?}");
+        let policy = config.sale_policy();
+        assert_eq!(
+            (policy.payment_deadline_days, policy.cod_return_limit, policy.isekai_refusal_limit),
+            (14, 5, 8),
+            "{role:?}"
+        );
     }
 }
 
@@ -160,6 +180,9 @@ fn consignment_numeric_bounds_are_inclusive_and_errors_are_redacted() {
             ("lookup_timeout_seconds", 1, 30),
             ("lookup_max_response_bytes", 4_096, 262_144),
             ("lookup_min_interval_ms", 250, 60_000),
+            ("payment_deadline_days", 1, 90),
+            ("cod_return_limit", 2, 10),
+            ("isekai_refusal_limit", 2, 100),
         ] {
             for value in [min, max] {
                 fixture.write_common(&format!("{section}{key} = {value}\n"));
@@ -195,6 +218,15 @@ fn consignment_numeric_bounds_are_inclusive_and_errors_are_redacted() {
                     "lookup_min_interval_ms" => {
                         assert_eq!(config.lookup_min_interval_ms(), u64::try_from(value).unwrap());
                     }
+                    "payment_deadline_days" => {
+                        assert_eq!(i64::from(config.sale_policy().payment_deadline_days), value);
+                    }
+                    "cod_return_limit" => {
+                        assert_eq!(i64::from(config.sale_policy().cod_return_limit), value);
+                    }
+                    "isekai_refusal_limit" => {
+                        assert_eq!(i64::from(config.sale_policy().isekai_refusal_limit), value);
+                    }
                     _ => panic!("未覆盖的寄售配置键 {key}"),
                 }
             }
@@ -227,6 +259,8 @@ fn unknown_consignment_keys_are_rejected() {
         "lookup_deadline_hours = 24",
         "lookup_endpoint = 'https://example.invalid/equip'",
         "lookup_schema_version = 1",
+        "reminder_limit = 2",
+        "isekai_refusal_window_days = 30",
     ] {
         fixture.write_common(&format!("[consignment]\n{assignment}\n"));
         let error = fixture.load(Role::Public).expect_err("未知寄售键应拒绝加载");
@@ -313,4 +347,33 @@ fn current_consignment_marker_rejects_enablement_in_official_builds() {
         consignment_activation(true, CONSIGNMENT_COMPLETE, false, false),
         Err(ConfigError::ConsignmentPreviewRequired)
     ));
+}
+
+#[test]
+fn section_digest_follows_effective_values() {
+    let fixture = ConfigFixture::new();
+    let load = |contents: &str| {
+        fixture.write_common(contents);
+        fixture.load(Role::Worker).unwrap()
+    };
+    let omitted = load("");
+    assert!(!omitted.auto_relist_enabled());
+    // 示例文件经同一 loader 加载，且写出的默认值与省略整节摘要相同。
+    let example = load(include_str!("../../../../../ops/config/examples/common.toml"));
+    assert!(!example.auto_relist_enabled());
+    assert_eq!(example.section_digest(), omitted.section_digest());
+    assert_eq!(
+        load("[consignment]\nauto_relist_enabled = false\n").section_digest(),
+        omitted.section_digest()
+    );
+
+    let relist = load("[consignment]\nauto_relist_enabled = true\n");
+    assert!(relist.auto_relist_enabled());
+    assert_ne!(relist.section_digest(), omitted.section_digest());
+    assert_eq!(
+        load("[consignment]\nauto_relist_enabled = true\n").section_digest(),
+        relist.section_digest()
+    );
+    // 开关以外的字段变化同样改变摘要，自动重列决定才能辨认冻结时的整节配置。
+    assert_ne!(load("[consignment]\nfee_bps = 501\n").section_digest(), omitted.section_digest());
 }

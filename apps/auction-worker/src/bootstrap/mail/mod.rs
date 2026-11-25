@@ -13,12 +13,10 @@ use auction_application::scheduling::RecurringSchedule;
 use auction_application::settlement::{
     SettlementFulfillmentCustodyReader, SettlementFulfillmentEvidenceReader,
 };
-use auction_config::{
-    AppConfig, CONSIGNMENT_COMPLETE, ConsignmentActivation, StandardCronSchedule,
-    consignment_activation,
-};
+use auction_config::{AppConfig, ConsignmentActivation, StandardCronSchedule};
 use auction_integrations::mooglemail::{
-    MoogleMailClient, MoogleMailClientConfig, MoogleMailGateway, MoogleMailWorld,
+    MoogleMailClient, MoogleMailClientConfig, MoogleMailDeliveryTransport, MoogleMailGateway,
+    MoogleMailWorld,
 };
 use auction_integrations::{EquipmentSourceAdapter, WorkerMailCredentialVerifier};
 use auction_jobs::MailPollRuntime;
@@ -44,6 +42,9 @@ pub(super) struct MailControlRemoteReads {
     pub(super) fetch_timeout: std::time::Duration,
     /// Admin 邮件凭据在线检查的执行器；没有凭据数据密钥时为 `None`，control 路由报告能力不可用。
     pub(super) credential_check: Option<Arc<dyn AdminCredentialCheckPort>>,
+    /// 寄售权利通知的纯文本发信入口；与 delivery 循环是同一 transport 实例，凭据独占锁与发送器
+    /// 状态只有一份，不为通知另建第二套写入通道。
+    pub(super) notices: Arc<MoogleMailDeliveryTransport>,
 }
 
 /// 根据 Worker 配置装配 MoogleMail 轮询、业务处理、delivery 和履约证据读取端口。
@@ -59,6 +60,7 @@ pub(super) async fn configure_mail_poll(
     reply_policy: Arc<dyn auction_application::mail::MailReplyPolicySource>,
     switches: auction_application::runtime_switches::RuntimeSwitches,
     external_metrics: Arc<dyn auction_application::external_metrics::ExternalMetricsObserver>,
+    consignment: ConsignmentActivation,
 ) -> anyhow::Result<(
     Vec<MailPollRuntime>,
     Option<Arc<dyn DeliveryTransport>>,
@@ -140,15 +142,8 @@ pub(super) async fn configure_mail_poll(
             mail_scan: Arc::clone(&mail_scan_observer),
             switches: switches.clone(),
             external_metrics: Arc::clone(&external_metrics),
-            consignment_activated: matches!(
-                consignment_activation(
-                    config.consignment.enabled(),
-                    CONSIGNMENT_COMPLETE,
-                    cfg!(feature = "consignment-dev-preview"),
-                    cfg!(debug_assertions),
-                ),
-                Ok(ConsignmentActivation::Enabled)
-            ),
+            // 启动时已按页面栈回执判定一次（不变量 6），这里只消费同一结果。
+            consignment_activated: consignment == ConsignmentActivation::Enabled,
         },
     )
     .await?;
@@ -168,11 +163,13 @@ pub(super) async fn configure_mail_poll(
         Arc::new(super::fulfillment::MoogleMailFulfillmentCustodyReader {
             gateway: Arc::clone(&gateway),
         });
-    let delivery_transport: Arc<dyn DeliveryTransport> = Arc::new(
+    let delivery_transport = Arc::new(
         delivery_transport
             .with_cash_evidence_gateway(gateway.clone())
             .with_funding_policy_reader(store.clone()),
     );
+    let notices = Arc::clone(&delivery_transport);
+    let delivery_transport: Arc<dyn DeliveryTransport> = delivery_transport;
     // Admin 邮件凭据在线检查只在本进程执行：经同一 gateway 与邮件循环共用请求门、在途锁、账号忙
     // 熔断与运行 owner，Admin 不再直连 HV。没有凭据数据密钥时无法打开数据库信封，不装配。
     let credential_check = credentials::check_opener(config)?.map(|opener| {
@@ -188,6 +185,7 @@ pub(super) async fn configure_mail_poll(
         maximum_pages: mail_config.maximum_pages,
         fetch_timeout: std::time::Duration::from_secs(mail_config.fetch_timeout_seconds),
         credential_check,
+        notices,
     };
     let inventory_reader: Arc<dyn auction_application::reconciliation::AssetInventoryReader> =
         Arc::new(super::fulfillment::MoogleMailAssetInventoryReader { gateways: gateways.clone() });

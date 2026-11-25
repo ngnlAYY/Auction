@@ -11,12 +11,13 @@ use auction_application::admin::{
     AdminCredentialEnvelope, AdminCredentialKind, AdminCredentialOpener, AdminCredentialSealer,
     AdminLoginKeyIssuer, AdminLoginKeyOpener,
 };
+use auction_application::consignment::{ChallengeAad, RightChallengeCrypto, SealedChallengeSecret};
 use auction_application::mail::{MailLoginKey, MailLoginKeyEnvelope};
 use auction_config::DataKeyDomain;
 use auction_integrations::{
-    ConsignmentSecretEnvelope, ConsignmentSecretOpener, ConsignmentSecretSealer, CredentialSealer,
-    EquipmentKeyOpener, Keyring, MailEvidencePurpose, MoogleMailLoginKeyIssuer,
-    MoogleMailLoginKeyReader,
+    ConsignmentRightChallengeCrypto, ConsignmentSecretEnvelope, ConsignmentSecretOpener,
+    ConsignmentSecretSealer, CredentialSealer, EquipmentKeyOpener, Keyring, MailEvidencePurpose,
+    MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader,
 };
 use auction_storage::{DatabaseStore, KeyRotationError, StoredKeyEnvelope};
 use serde::Serialize;
@@ -301,6 +302,19 @@ async fn reseal(
         }
         DataKeyDomain::Credential => {
             let source = row.source().as_str();
+            if source == "consignment_right_notice_outbox" {
+                let nonce = <[u8; 12]>::try_from(row.nonce.as_slice())
+                    .ok()
+                    .context("权利通知密文 nonce 长度无效")?;
+                let sealed = SealedChallengeSecret::new(
+                    row.ciphertext.clone(),
+                    nonce,
+                    row.encryption_key_id.clone(),
+                    row.fingerprint.clone(),
+                )
+                .context("权利通知密文结构无效")?;
+                return reseal_right_notice(keyring, row.challenge_aad, &sealed);
+            }
             if matches!(source, "consignment_reservation_secrets" | "mail_evidence_envelopes") {
                 let envelope = ConsignmentSecretEnvelope::new(
                     row.ciphertext.clone(),
@@ -428,6 +442,27 @@ fn reseal_consignment_secret(
     }
 }
 
+/// 重封权利通知 outbox 的挑战码密文。AAD 只取自挑战行冻结的列，与发码时相同；缺失即失败关闭，
+/// 不以默认值拼凑 AAD（不变量 6、7）。
+fn reseal_right_notice(
+    keyring: &Arc<Keyring>,
+    aad: Option<ChallengeAad>,
+    sealed: &SealedChallengeSecret,
+) -> anyhow::Result<auction_storage::RotatedKeyEnvelope> {
+    let aad = aad.context("权利通知密文缺少挑战 AAD")?;
+    let crypto = ConsignmentRightChallengeCrypto::new(Arc::clone(keyring));
+    let code = crypto.open(sealed, aad).context("权利通知密文解密失败")?;
+    let resealed = crypto.seal(&code, aad).context("权利通知密文重新封装失败")?;
+    let verified = crypto.open(&resealed, aad).context("新权利通知密文验证失败")?;
+    anyhow::ensure!(code.as_bytes() == verified.as_bytes(), "权利通知密文重封前后不一致");
+    Ok(auction_storage::RotatedKeyEnvelope {
+        ciphertext: resealed.ciphertext().to_vec(),
+        nonce: resealed.nonce().to_vec(),
+        encryption_key_id: resealed.encryption_key_id().to_owned(),
+        fingerprint: resealed.fingerprint().to_owned(),
+    })
+}
+
 fn parse_evidence_purpose(value: &str) -> anyhow::Result<MailEvidencePurpose> {
     match value {
         "manifest" => Ok(MailEvidencePurpose::Manifest),
@@ -446,10 +481,12 @@ fn login_key_bytes(key: &MailLoginKey) -> Vec<u8> {
 mod tests {
     use std::sync::Arc;
 
+    use auction_application::consignment::{ChallengeAad, RightChallengeCrypto};
     use auction_config::DataKeyDomain;
+    use auction_domain::consignment::rights::ChallengeCode;
     use auction_integrations::{
-        ConsignmentSecretEnvelope, ConsignmentSecretOpener, ConsignmentSecretSealer, DataKey,
-        Keyring, MailEvidencePurpose,
+        ConsignmentRightChallengeCrypto, ConsignmentSecretEnvelope, ConsignmentSecretOpener,
+        ConsignmentSecretSealer, DataKey, Keyring, MailEvidencePurpose,
     };
     use auction_time::Timestamp;
     use uuid::Uuid;
@@ -458,6 +495,7 @@ mod tests {
     use super::DomainOutcome;
     use super::parse_evidence_purpose;
     use super::reseal_consignment_secret;
+    use super::reseal_right_notice;
 
     const OLD_KEY_ID: &str = "fixture-consignment-old";
     const CURRENT_KEY_ID: &str = "fixture-consignment-current";
@@ -473,14 +511,19 @@ mod tests {
         )
     }
 
-    /// 凭据域回执固定列出三处来源，即使新增表为空也不能省略计数。
+    /// 凭据域回执固定列出四处来源，即使新增表为空也不能省略计数。
     #[test]
     fn credential_receipt_initializes_all_persisted_sources() {
         let outcome = DomainOutcome::new(DataKeyDomain::Credential);
         let sources: Vec<_> = outcome.sources.keys().copied().collect();
         assert_eq!(
             sources,
-            vec!["consignment_reservation_secrets", "credential_keys", "mail_evidence_envelopes",]
+            vec![
+                "consignment_reservation_secrets",
+                "consignment_right_notice_outbox",
+                "credential_keys",
+                "mail_evidence_envelopes",
+            ]
         );
         assert!(
             outcome.sources.values().all(|source| { source.scanned == 0 && source.rewritten == 0 })
@@ -607,7 +650,49 @@ mod tests {
         );
     }
 
-    /// 凭据域回执与审计携带三处来源计数，但不携带任何 key 标识。
+    /// 旧钥封装的挑战码经重封后只能用当前钥解开，明文与 AAD 不变；缺 AAD 时失败关闭。
+    #[test]
+    fn right_notice_reencrypt_keeps_aad_and_plaintext() {
+        let aad = ChallengeAad {
+            challenge_id: Uuid::from_u128(0x920),
+            right_id: Some(Uuid::from_u128(0x921)),
+            identity_digest: [0x92; 32],
+            right_version: 3,
+        };
+        let code = ChallengeCode::from_entropy([0x93; 16]);
+        let old_key = Arc::new(DataKey::from_base64(OLD_KEY_ID, OLD_MATERIAL).expect("旧凭据钥"));
+        let old_only = ConsignmentRightChallengeCrypto::new(Arc::new(Keyring::single(
+            DataKeyDomain::Credential,
+            Arc::clone(&old_key),
+        )));
+        let sealed = old_only.seal(&code, aad).expect("旧钥封装挑战码");
+        assert_eq!(sealed.encryption_key_id(), OLD_KEY_ID);
+
+        let rotated = reseal_right_notice(&ring(), Some(aad), &sealed).expect("重封挑战码");
+        assert_eq!(rotated.encryption_key_id, CURRENT_KEY_ID);
+        assert_ne!(rotated.nonce, sealed.nonce().to_vec());
+        let reopened = auction_application::consignment::SealedChallengeSecret::new(
+            rotated.ciphertext.clone(),
+            <[u8; 12]>::try_from(rotated.nonce.as_slice()).expect("nonce"),
+            rotated.encryption_key_id.clone(),
+            rotated.fingerprint.clone(),
+        )
+        .expect("新信封形状");
+        let current_only = ConsignmentRightChallengeCrypto::new(Arc::new(Keyring::single(
+            DataKeyDomain::Credential,
+            Arc::new(DataKey::from_base64(CURRENT_KEY_ID, CURRENT_MATERIAL).expect("当前钥")),
+        )));
+        assert_eq!(
+            current_only.open(&reopened, aad).expect("当前钥按原 AAD 解开").as_bytes(),
+            code.as_bytes()
+        );
+        assert!(old_only.open(&reopened, aad).is_err(), "旧钥不得再解开新信封");
+
+        // 反例：缺挑战 AAD 时不重封。
+        assert!(reseal_right_notice(&ring(), None, &sealed).is_err());
+    }
+
+    /// 凭据域回执与审计携带四处来源计数，但不携带任何 key 标识。
     #[test]
     fn credential_receipt_and_audit_have_no_key_ids() {
         let mut outcome = DomainOutcome::new(DataKeyDomain::Credential);
@@ -635,6 +720,7 @@ mod tests {
             counts,
             &serde_json::json!({
                 "consignment_reservation_secrets": {"scanned": 1, "rewritten": 1},
+                "consignment_right_notice_outbox": {"scanned": 0, "rewritten": 0},
                 "credential_keys": {"scanned": 1, "rewritten": 1},
                 "mail_evidence_envelopes": {"scanned": 1, "rewritten": 0},
             })

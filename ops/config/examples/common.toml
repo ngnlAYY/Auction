@@ -53,6 +53,22 @@ lookup_timeout_seconds = 10
 lookup_max_response_bytes = 65536
 # 可选：全服务两次解析起始许可的最小间隔（毫秒），默认 1000，范围 250–60000；需要调整解析请求频率时修改。
 lookup_min_interval_ms = 1000
+# 可选：寄售成交后的付款期限（天），默认 7，范围 1–90；成交时冻结进合同，独立于拍卖的付款配置。
+payment_deadline_days = 7
+# 可选：寄售装备 COD 退回上限（次），默认 3，范围 2–10；成交时按合同冻结，与拍卖的同名字段无关。
+cod_return_limit = 3
+# 可选：异世界拒付上限（次），默认 3，范围 2–100；按触发的合同冻结。
+isekai_refusal_limit = 3
+# 可选：退回处置时是否自动重列被收回的寄售件，默认 false；只在启动时读取，修改须用同一份配置重启各角色。
+auto_relist_enabled = false
+
+# 可选区块：三角色与 CLI 共用的页面静态挂载根；省略整节时只用程序内嵌的页面，响应与未配置时一致。
+[web]
+# 目录内容由 auction-cli web install 写入各端 build、入口指针与 RECEIPT.v1；Public/Admin 启动时加载并
+# 逐文件核对，任何不一致即拒绝启动；切换入口指针后须重启 Public 与 Admin。
+# [consignment].enabled 为 true 时必须配置，启动时还须读到与本程序摘要和构建号一致的 RECEIPT.v1。
+# 可选：不含 .. 的绝对路径，默认不挂载。
+# mount_root = "/srv/auction/web"
 
 # 可选区块：仅 CLI 读取；backup scheduled 使用全部字段，两个水位字段另被 alert report 与 deploy 复用。
 # 省略时取以下默认值，定时备份的启停由 systemd timer 控制。

@@ -20,6 +20,7 @@ mod operations;
 mod receipt;
 mod service;
 mod support;
+mod web;
 
 // 命令一次一件事：外部工具等待全为异步，单线程 runtime 不会让备份/恢复管道抢线程；
 // 保留多线程也没有可并行的独立任务，只会增加空闲线程。

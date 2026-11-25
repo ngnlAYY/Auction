@@ -16,6 +16,7 @@ use auction_integrations::mooglemail::{
     DispositionTarget, ExpectedReturn, FrozenMailAttachment, FrozenMailManifest, MoogleMailGateway,
     MoogleMailWorld, PreparedConsignmentDisposition, execute_prepared_consignment_disposition,
 };
+use auction_jobs::consignment::{TakeExecution, TakeProof};
 
 /// 组合按世界 gateway 的寄售处置传输。
 pub struct MoogleMailConsignmentTransport {
@@ -74,6 +75,37 @@ impl ConsignmentDispositionTransport for MoogleMailConsignmentTransport {
             let outcome = execute_prepared_consignment_disposition(prepared.prepared, permit).await;
             Ok(execution_result(outcome))
         })
+    }
+}
+
+impl MoogleMailConsignmentTransport {
+    /// 退件 Take 的一次性执行：消费许可写一次，并把 4D1 证明原样投影为 Take 证明。
+    ///
+    /// 与 [`ConsignmentDispositionTransport::execute`] 共用同一执行入口；区别只在投影——未签收的证明
+    /// 也带出验证器版本与摘要，交消费事务在锁内判定并保留核对（不变量 4、6）。句柄不符、动作不是
+    /// Take、写前失败、写后待证一律未知，绝不再 Take。
+    pub(super) async fn execute_take(
+        &self,
+        prepared: Box<dyn PreparedDisposition>,
+        permit: PostPermit,
+    ) -> TakeExecution {
+        let Some(prepared) = prepared
+            .into_execution_handle()
+            .and_then(|handle| handle.downcast::<WorkerPreparedDisposition>().ok())
+        else {
+            return TakeExecution::Unknown;
+        };
+        match execute_prepared_consignment_disposition(prepared.prepared, permit).await {
+            DispositionOutcome::Proven(proof) if proof.action() == IntegrationAction::Take => {
+                let signed = proof.clone().into_signed().is_some();
+                TakeExecution::Proven(TakeProof {
+                    observation_id: disposition_proof_observation_id(proof.proof_digest(), signed),
+                    validator_version: proof.validator_version().to_owned(),
+                    proof_digest: proof.proof_digest(),
+                })
+            }
+            _ => TakeExecution::Unknown,
+        }
     }
 }
 

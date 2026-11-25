@@ -1,8 +1,10 @@
 //! Public 部署制品独占的浏览器静态资源类型；`web-solid` 选 Solid 产物，
 //! 其余显式 `web-embed` 的构建选 Dioxus 产物，缺失产物由 HTTP 路由返回 503。
 //! API-only 构建使用固定缺失目录，避免机器残留的 Web 产物被烘入二进制。
+//! 配置了 `[web].mount_root` 时，页面改由启动时加载并核对过的静态挂载提供。
 
-use auction_http::WebScriptPolicy;
+use auction_config::AppConfig;
+use auction_http::{SurfacePages, WebMountError, WebScriptPolicy};
 use rust_embed::Embed;
 
 /// `mise run web-build` 在 `AUCTION_WEB_STACK=solid` 下生成并复制到稳定目录的 Public 产物。
@@ -37,6 +39,15 @@ pub const fn web_script_policy() -> WebScriptPolicy {
         WebScriptPolicy::Dioxus
     } else {
         WebScriptPolicy::Solid
+    }
+}
+
+/// 按 `[web].mount_root` 构造 Public 页面：未配置时纯内嵌，响应与未支持挂载的程序逐字节一致；
+/// 配置时读取并完整核对 `<mount_root>/public`，任何不一致返回错误，调用方据此终止启动（E1）。
+pub(crate) fn surface_pages(config: &AppConfig) -> Result<SurfacePages, WebMountError> {
+    match config.web.mount_root() {
+        None => Ok(SurfacePages::embedded::<PublicWebAssets>(web_script_policy())),
+        Some(root) => SurfacePages::with_public_mount::<PublicWebAssets>(web_script_policy(), root),
     }
 }
 

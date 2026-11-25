@@ -36,7 +36,7 @@ use auction_config::{AppConfig, ConsignmentActivation, ConsignmentConfig, DataKe
 use auction_http::{ConsignmentCapabilities, PublicApiState, RealtimeHub, RealtimeHubSink};
 use auction_integrations::{
     ConsignmentReservationCrypto, EquipmentGameLinkResolver, EquipmentKeyOpener,
-    EquipmentKeySealer, HentaiVerseListingUrlValidator, Keyring, build_keyring,
+    EquipmentKeySealer, HentaiVerseListingUrlValidator, Keyring, KeyringError, build_keyring,
     consignment_reservation_crypto,
 };
 use auction_observability::ProcessMetrics;
@@ -51,6 +51,8 @@ use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::config;
+use super::consignment_v2;
+use super::first_dispatch;
 
 struct PublicRealtimeRelayHealth {
     healthy: AtomicBool,
@@ -149,7 +151,7 @@ fn equipment_keyring(config: &AppConfig) -> anyhow::Result<Option<Arc<Keyring>>>
     .context("Public 装备数据密钥配置无效")
 }
 
-fn credential_keyring(config: &AppConfig) -> anyhow::Result<Option<Arc<Keyring>>> {
+fn credential_keyring(config: &AppConfig) -> Result<Option<Arc<Keyring>>, KeyringError> {
     build_keyring(
         DataKeyDomain::Credential,
         config.data_key_current(DataKeyDomain::Credential),
@@ -158,16 +160,38 @@ fn credential_keyring(config: &AppConfig) -> anyhow::Result<Option<Arc<Keyring>>
             .iter()
             .map(|key| (key.id(), key.material())),
     )
-    .context("Public 凭据数据密钥配置无效")
 }
 
-/// 寄售激活时加载预约码所需的凭据域密钥环；未激活时不读取密钥，激活后缺失即拒绝启动。
-fn reservation_crypto(
+/// 每次启动只解析一次凭据域密钥环，结果同时交给预约码加密与 v2 受限权利装配。
+///
+/// 寄售激活时无效配置拒绝启动（预约码需要该密钥环）。寄售未激活时无效配置不阻止启动，
+/// 以免给既有拍卖增加启动失败条件：按“没有密钥环”处理，权利的找回、发码与核验失败关闭为 503；
+/// 告警只写 [`KeyringError`] 的固定类别，不含配置原文或密钥材料（不变量 7）。
+fn startup_credential_keyring(
     config: &AppConfig,
     activation: ConsignmentActivation,
+) -> anyhow::Result<Option<Arc<Keyring>>> {
+    match credential_keyring(config) {
+        Ok(keyring) => Ok(keyring),
+        Err(error) if activation == ConsignmentActivation::Enabled => {
+            Err(anyhow::Error::from(error).context("Public 凭据数据密钥配置无效"))
+        }
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                "Public 凭据数据密钥配置无效；寄售未激活，受限权利按无密钥环处理"
+            );
+            Ok(None)
+        }
+    }
+}
+
+/// 寄售激活时用凭据域密钥环构造预约码加密器；未激活时不使用密钥，激活后缺失即拒绝启动。
+fn reservation_crypto(
+    activation: ConsignmentActivation,
+    keyring: Option<Arc<Keyring>>,
 ) -> anyhow::Result<Option<Arc<ConsignmentReservationCrypto>>> {
     let enabled = activation == ConsignmentActivation::Enabled;
-    let keyring = if enabled { credential_keyring(config)? } else { None };
     consignment_reservation_crypto(enabled, keyring).map_err(anyhow::Error::from)
 }
 
@@ -178,6 +202,9 @@ struct DepositAssembly {
 }
 
 /// 构造 v2 收件端口；存储不回退硬编码费率、价格边界、额度或预约有效期。
+///
+/// D9 §6.3、§7：数据库可用即装配读写端口。关闭只截止新承诺，撤回、解除止售与已接受命令的重放
+/// 继续，由处理器按有效开关门控新命令；停用时可缺预约码密码，签发预约与寄件指引失败关闭。
 fn configure_deposit(
     config: &ConsignmentConfig,
     activation: ConsignmentActivation,
@@ -185,17 +212,22 @@ fn configure_deposit(
     crypto: Option<Arc<ConsignmentReservationCrypto>>,
 ) -> anyhow::Result<DepositAssembly> {
     let enabled = activation == ConsignmentActivation::Enabled;
-    let Some(store) = store.filter(|_store| enabled) else {
+    // 未配置数据库：读写能力都不可用（503）。
+    let Some(store) = store else {
         return Ok(DepositAssembly { enabled, read: None, commands: None });
     };
-    let crypto = crypto.ok_or_else(|| anyhow::anyhow!("寄售已启用，但预约码加密能力不可用"))?;
     let settings = DepositSettings::with_standard_price_bounds(
         config.fee_bps(),
         config.reservation_ttl_hours(),
         config.max_open_per_user(),
     )
     .context("寄售收件设置无效")?;
-    let repository = Arc::new(DepositRepository::new((*store).clone(), crypto, settings));
+    let repository = match crypto {
+        Some(crypto) => DepositRepository::new((*store).clone(), crypto, settings),
+        None if enabled => anyhow::bail!("寄售已启用，但预约码加密能力不可用"),
+        None => DepositRepository::without_reservation_crypto((*store).clone(), settings),
+    };
+    let repository = first_dispatch::with_withdrawal_content(repository);
     let commands = Arc::new(DepositCommandService::new(
         repository.clone(),
         repository.clone(),
@@ -292,19 +324,20 @@ pub(super) async fn configure_state(
             configure_consignment::<DatabaseStore>(&config.consignment, activation, None, None)?;
         let deposit = configure_deposit(&config.consignment, activation, None, None)?;
         return Ok((
-            state.with_consignment(consignment).with_deposit(
-                deposit.enabled,
-                deposit.read,
-                deposit.commands,
-            ),
+            state
+                .with_consignment(consignment)
+                .with_deposit(deposit.enabled, deposit.read, deposit.commands)
+                .with_purchase(deposit.enabled, None, None)
+                .with_recovery(deposit.enabled, None, None),
             None,
             None,
             None,
         ));
     };
-    // 不变量 7：凭据域密钥只用于预约码信封；配置了数据库且寄售激活时缺失或无效即启动失败，
-    // 不回显密钥材料。
-    let deposit_crypto = reservation_crypto(config, activation)?;
+    // 不变量 7：凭据域密钥用于预约码信封与受限权利挑战码；配置了数据库且寄售激活时缺失或无效
+    // 即启动失败，未激活时无效配置只告警，不回显密钥材料。
+    let credential_keyring = startup_credential_keyring(config, activation)?;
+    let deposit_crypto = reservation_crypto(activation, credential_keyring.clone())?;
 
     // 审计失败按类别向共享影子框架记样本；进程级安装一次。
     auction_storage::install_audit_shadow_recorder(metrics.shadow());
@@ -476,6 +509,7 @@ pub(super) async fn configure_state(
         Some(Arc::clone(&store)),
         deposit_crypto,
     )?;
+    let state = consignment_v2::configure(state, config, activation, &store, credential_keyring)?;
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "发布 Public ready 心跳失败");
     }
@@ -608,6 +642,7 @@ mod tests {
 
     use super::{
         ConsignmentCredentials, configure_consignment, configure_state, equipment_keyring,
+        startup_credential_keyring,
     };
     use crate::bootstrap::config::configure_security;
     use crate::bootstrap::service::configure_router;
@@ -622,6 +657,10 @@ mod tests {
     const ORIGIN: &str = "https://public.example.invalid";
 
     fn load_config(enabled: bool) -> AppConfig {
+        load_config_with_secrets(enabled, "")
+    }
+
+    fn load_config_with_secrets(enabled: bool, secrets: &str) -> AppConfig {
         let directory =
             std::env::temp_dir().join(format!("auction-public-consignment-{}", Uuid::new_v4()));
         fs::create_dir(&directory).unwrap();
@@ -635,7 +674,7 @@ mod tests {
             ),
         )
         .unwrap();
-        fs::write(directory.join("secrets.toml"), "").unwrap();
+        fs::write(directory.join("secrets.toml"), secrets).unwrap();
         let config = AppConfig::load_from_path(Role::Public, &role_path);
         fs::remove_dir_all(directory).unwrap();
         let mut config = config.unwrap();
@@ -1095,6 +1134,27 @@ mod tests {
         ) -> ConsignmentFuture<'_, ListingCommandOutcome<ListingClosed>> {
             panic!("Public 不执行下架")
         }
+    }
+
+    /// 凭据数据密钥材料不是 base64：加载通过，构造密钥环失败。
+    const INVALID_CREDENTIAL_KEY: &str =
+        "credential_data_key_id = 'fixture-credential'\ncredential_data_key = 'not-base64'\n";
+
+    #[test]
+    fn inactive_consignment_starts_without_rights_crypto_on_invalid_credential_key() {
+        let config = load_config_with_secrets(false, INVALID_CREDENTIAL_KEY);
+        let keyring = startup_credential_keyring(&config, ConsignmentActivation::Disabled)
+            .expect("寄售未激活时无效凭据密钥不阻止启动");
+        assert!(keyring.is_none(), "权利装配应得到无密码端口");
+    }
+
+    #[test]
+    fn active_consignment_rejects_invalid_credential_key() {
+        let config = load_config_with_secrets(true, INVALID_CREDENTIAL_KEY);
+        let error = startup_credential_keyring(&config, ConsignmentActivation::Enabled)
+            .expect_err("寄售激活时无效凭据密钥必须拒绝启动");
+        assert_eq!(error.to_string(), "Public 凭据数据密钥配置无效");
+        assert!(!format!("{error:#}").contains("not-base64"));
     }
 
     #[test]

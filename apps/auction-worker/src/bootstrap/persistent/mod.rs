@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use auction_application::operations::ExternalWriteLifecycle;
 use auction_application::runtime_switches::RuntimeSwitches;
-use auction_config::AppConfig;
+use auction_config::{AppConfig, ConsignmentActivation};
 use auction_observability::{ProcessMetrics, TracingHealthReader};
 use auction_storage::DatabaseStore;
 use uuid::Uuid;
@@ -19,26 +19,24 @@ mod profile;
 mod recovery;
 mod run;
 #[cfg(test)]
-pub(super) use consignment::consignment_test_config;
+pub(super) use consignment::{consignment_config_with, consignment_test_config};
 
-struct PersistentRuntime {
-    tracing_health: Arc<dyn TracingHealthReader>,
-    metrics: Arc<ProcessMetrics>,
-    switches: RuntimeSwitches,
-    runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
-    write_lifecycle: ExternalWriteLifecycle,
-    shutdown: ShutdownFuture,
+/// 持久 Worker 的进程级运行参数，由服务装配一次性交入。
+pub(in crate::bootstrap) struct PersistentRuntime {
+    /// 启动时唯一一次寄售启用判定（含页面栈回执核对）的结果。
+    pub(in crate::bootstrap) consignment: ConsignmentActivation,
+    pub(in crate::bootstrap) tracing_health: Arc<dyn TracingHealthReader>,
+    pub(in crate::bootstrap) metrics: Arc<ProcessMetrics>,
+    pub(in crate::bootstrap) switches: RuntimeSwitches,
+    pub(in crate::bootstrap) runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
+    pub(in crate::bootstrap) write_lifecycle: ExternalWriteLifecycle,
+    pub(in crate::bootstrap) shutdown: ShutdownFuture,
 }
 
 /// 装配 PostgreSQL Worker，连接后先完成寄售启动预检。
 pub(super) async fn run_worker(
     config: &AppConfig,
-    tracing_health: Arc<dyn TracingHealthReader>,
-    metrics: Arc<ProcessMetrics>,
-    switches: RuntimeSwitches,
-    runtime_failure: tokio::sync::mpsc::Sender<&'static str>,
-    write_lifecycle: ExternalWriteLifecycle,
-    shutdown: ShutdownFuture,
+    runtime: PersistentRuntime,
 ) -> anyhow::Result<()> {
     let Some(database_url) = config.database_url() else {
         if config.worker.mooglemail.enabled
@@ -48,9 +46,12 @@ pub(super) async fn run_worker(
         {
             anyhow::bail!("启用外部 Worker 功能时必须配置 PostgreSQL database_url");
         }
-        run_worker_skeleton(config, metrics, runtime_failure, shutdown).await?;
+        run_worker_skeleton(config, runtime.metrics, runtime.runtime_failure, runtime.shutdown)
+            .await?;
         return Ok(());
     };
+    let metrics = &runtime.metrics;
+    let switches = runtime.switches.clone();
     // 审计失败按类别向共享影子框架记样本；进程级安装一次。
     auction_storage::install_audit_shadow_recorder(metrics.shadow());
     let store = Arc::new(
@@ -68,19 +69,12 @@ pub(super) async fn run_worker(
             .context("配置投递发送间隔失败")?,
     );
     let worker_id = format!("auction-worker-{}", Uuid::new_v4());
-    let runtime = PersistentRuntime {
-        tracing_health,
-        metrics,
-        switches: switches.clone(),
-        runtime_failure,
-        write_lifecycle,
-        shutdown,
-    };
     consignment::start_persistent(
         config,
         consignment::ConsignmentPorts::postgres(&store),
         &switches,
         &worker_id,
+        // 存储探针已含待执行处罚工作（与 open_sanction_work 同一判据），不再另查（不变量 5、6）。
         store.has_consignment_work(),
         consignment::hvdata_lookup,
         async |consignment| {

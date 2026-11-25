@@ -17,6 +17,7 @@ mod security;
 mod shutdown;
 pub use shutdown::ShutdownSettings;
 mod validation;
+mod web;
 mod worker;
 mod worker_validation;
 
@@ -27,7 +28,9 @@ pub use app::*;
 pub use auction::*;
 pub use backup::{BackupConfig, BackupOffsiteConfig};
 pub use consignment::{
-    CONSIGNMENT_COMPLETE, ConsignmentActivation, ConsignmentConfig, consignment_activation,
+    CONSIGNMENT_COMPLETE, ConsignmentActivation, ConsignmentConfig, WebStackBinary, WebStackFacts,
+    consignment_activation, consignment_activation_with_web_stack, process_consignment_activation,
+    validate_web_stack,
 };
 pub use errors::ConfigError;
 pub use secrets::{
@@ -36,4 +39,5 @@ pub use secrets::{
     load_mooglemail_keyenv, load_postgres_maintenance_secrets, load_postgres_owner_secrets,
 };
 pub use security::*;
+pub use web::{WEB_STACK_RECEIPT_FILE, WebConfig};
 pub use worker::*;

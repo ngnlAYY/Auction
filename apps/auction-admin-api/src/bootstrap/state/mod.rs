@@ -6,13 +6,14 @@ mod database;
 mod fallback;
 mod heartbeat;
 
-use auction_config::AppConfig;
+use auction_config::{AppConfig, ConsignmentActivation};
 use auction_http::AdminApiState;
 use auction_observability::ProcessMetrics;
 
 /// 装配 Admin 状态；未配置数据库时由 `database` 回落到只含安全降级端口的空状态。
 pub(super) async fn configure_state(
     config: &AppConfig,
+    activation: ConsignmentActivation,
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
     switches: auction_application::runtime_switches::RuntimeSwitches,
@@ -21,7 +22,7 @@ pub(super) async fn configure_state(
     Option<Arc<auction_observability::HeartbeatPublisher>>,
     Option<[auction_process::TaskGuard<()>; 2]>,
 )> {
-    database::configure_state(config, tracing_health, metrics, switches).await
+    database::configure_state(config, activation, tracing_health, metrics, switches).await
 }
 
 /// 启动 Admin API 的周期 heartbeat。

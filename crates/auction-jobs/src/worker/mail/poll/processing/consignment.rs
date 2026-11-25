@@ -304,8 +304,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use auction_application::consignment::{
-        ConsignmentError, ConsignmentFuture, EnvelopeDisposition, EnvelopePreflight,
-        EnvelopeReceipt, PollEnvelopeStore, PollEnvelopeWrite,
+        ConsignmentError, ConsignmentFuture, ConsignmentRtsLocator, EnvelopeDisposition,
+        EnvelopePreflight, EnvelopeReceipt, PollEnvelopeStore, PollEnvelopeWrite,
     };
     use auction_application::mail::{
         ConsignmentIngressService, MailDiagnosticContext, MailDiagnosticError,
@@ -447,6 +447,7 @@ mod tests {
             _key: OriginalMailKey,
             _observation: EnvelopeObservation,
             _sender: Option<String>,
+            _rts: Option<ConsignmentRtsLocator>,
         ) -> ConsignmentFuture<'_, EnvelopePreflight> {
             Box::pin(async { Err(ConsignmentError::Unavailable) })
         }
@@ -468,6 +469,7 @@ mod tests {
             _key: OriginalMailKey,
             _observation: EnvelopeObservation,
             _sender: Option<String>,
+            _rts: Option<ConsignmentRtsLocator>,
         ) -> ConsignmentFuture<'_, EnvelopePreflight> {
             Box::pin(async {
                 Ok(EnvelopePreflight {
@@ -481,6 +483,7 @@ mod tests {
                     },
                     now: Timestamp::UNIX_EPOCH,
                     season_window_id: None,
+                    consignment_rts: None,
                 })
             })
         }
@@ -681,8 +684,9 @@ mod tests {
             key: OriginalMailKey,
             observation: EnvelopeObservation,
             sender: Option<String>,
+            rts: Option<ConsignmentRtsLocator>,
         ) -> ConsignmentFuture<'_, EnvelopePreflight> {
-            EmptyPreflightStore.load_envelope_preflight(key, observation, sender)
+            EmptyPreflightStore.load_envelope_preflight(key, observation, sender, rts)
         }
 
         fn decide_envelope_in_poll(

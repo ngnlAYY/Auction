@@ -28,6 +28,12 @@ tokio = { workspace = true, features = ["fs", "io-util", "process"] }
 url.workspace = true
 uuid.workspace = true
 
+[dev-dependencies]
+# 可选：静态物化测试用挂载加载器与真实 CSP 核对写出的目录；只进测试。
+auction-http.workspace = true
+axum.workspace = true
+rust-embed.workspace = true
+
 [features]
 # 可选：只用于本地调试构建开启未完成的一口价挂单；发布构建即使误带也拒开。
 consignment-dev-preview = []

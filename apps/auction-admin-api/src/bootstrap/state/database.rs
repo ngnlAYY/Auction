@@ -15,7 +15,8 @@ use auction_application::admin::{
 };
 use auction_application::auction::{AuctionLifecycleCommandPort, AuctionLifecyclePolicy};
 use auction_application::consignment::{
-    AdminListingRead, DepositCommandService, ListingCommandStore, ManageListingService,
+    AdminListingRead, DepositCommandService, ListingCommandStore, LossCaseAdminService,
+    ManageListingService, OrderAdminService, PositionLossConfirmService,
 };
 use auction_application::delivery::{DeliveryAdminPort, DeliverySentConfirmationPort};
 use auction_application::operations::{
@@ -28,10 +29,7 @@ use auction_application::recovery::{
 };
 use auction_application::sessions::AdminSessionService;
 use auction_application::settlement::SettlementReportReader;
-use auction_config::{
-    AppConfig, CONSIGNMENT_COMPLETE, ConsignmentActivation, TomlRuntimeFileStore,
-    consignment_activation,
-};
+use auction_config::{AppConfig, ConsignmentActivation, TomlRuntimeFileStore};
 use auction_http::{AdminApiState, AdminConsignmentCapabilities};
 use auction_integrations::{
     ConsignmentReservationCrypto, CredentialSealer, CredentialVerifier, EquipmentKeySealer,
@@ -51,6 +49,7 @@ use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::super::config;
+use super::super::first_dispatch;
 
 #[derive(Clone, Copy)]
 struct SystemClock;
@@ -64,6 +63,7 @@ impl auction_application::core::Clock for SystemClock {
 /// 连接数据库并组装 Admin API 的完整端口图。
 pub(super) async fn configure_state(
     config: &AppConfig,
+    activation: ConsignmentActivation,
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     metrics: Arc<auction_observability::ProcessMetrics>,
     switches: auction_application::runtime_switches::RuntimeSwitches,
@@ -74,14 +74,7 @@ pub(super) async fn configure_state(
 )> {
     let security = config::configure_security(config)?;
     let worker_control = config::configure_worker_control(config);
-    // 启动预检已在 service 完成；这里用同一组四要素重新取得制品决定，供能力注入使用。
-    let activation = consignment_activation(
-        config.consignment.enabled(),
-        CONSIGNMENT_COMPLETE,
-        cfg!(feature = "consignment-dev-preview"),
-        cfg!(debug_assertions),
-    )
-    .context("校验 Admin 一口价挂单制品能力失败")?;
+    // 制品门与页面栈回执已在 service 的启动预检一次判定，这里沿用其结果注入能力，不重复读回执。
     let Some(database_url) = config.database_url() else {
         // 骨架模式（未配置数据库）不构造收件端口，也就不要求凭据域密钥：v2 能力返回不可用。
         return Ok((
@@ -397,6 +390,7 @@ pub(super) async fn configure_state(
         .with_runtime_switches(switches),
     ));
     let state = configure_consignment(state, config, Arc::clone(&store));
+    let state = configure_orders_and_loss(state, &store);
     let state = configure_deposit(state, config, activation, store, deposit_crypto)?;
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "发布 Admin ready 心跳失败");
@@ -416,6 +410,17 @@ fn configure_consignment<S: AdminListingRead + ListingCommandStore + 'static>(
     })
 }
 
+/// 注入 Admin 订单读写与损失案件用例。
+///
+/// 不变量 1、8：订单读取、订单复核与处置、损失案件的人工结果都是对既有事实的读取与续办，不随寄售
+/// 开关关闭；写入经应用用例的原命令账本，追加审计。
+fn configure_orders_and_loss(state: AdminApiState, store: &Arc<DatabaseStore>) -> AdminApiState {
+    state
+        .with_orders(Some(store.clone()))
+        .with_order_writes(Some(Arc::new(OrderAdminService::new(store.clone()))))
+        .with_loss(Some(Arc::new(LossCaseAdminService::new(store.clone()))))
+}
+
 /// 寄售激活时要求预约码所需的凭据域密钥环；未激活时忽略密钥环并返回 `None`。
 fn reservation_crypto(
     activation: ConsignmentActivation,
@@ -433,17 +438,23 @@ fn configure_deposit(
     store: Arc<DatabaseStore>,
     crypto: Option<Arc<ConsignmentReservationCrypto>>,
 ) -> anyhow::Result<AdminApiState> {
-    if activation != ConsignmentActivation::Enabled {
-        return Ok(state.with_deposit(false, None, None));
-    }
-    let crypto = crypto.ok_or_else(|| anyhow::anyhow!("寄售已启用，但预约码加密能力不可用"))?;
     let settings = DepositSettings::with_standard_price_bounds(
         config.consignment.fee_bps(),
         config.consignment.reservation_ttl_hours(),
         config.consignment.max_open_per_user(),
     )
     .context("寄售收件设置无效")?;
-    let repository = Arc::new(DepositRepository::new((*store).clone(), crypto, settings));
+    // D9 §6.3、§7：数据库可用即装配读写端口；关闭只截止新承诺，撤回、解除止售与重放继续。
+    // 停用时可缺预约码密码，签发预约与寄件指引失败关闭；激活时缺失仍拒绝启动。
+    let repository = match crypto {
+        Some(crypto) => DepositRepository::new((*store).clone(), crypto, settings),
+        None if activation == ConsignmentActivation::Enabled => {
+            anyhow::bail!("寄售已启用，但预约码加密能力不可用")
+        }
+        None => DepositRepository::without_reservation_crypto((*store).clone(), settings),
+    };
+    // 与 Public / Worker 同一撤回件首轮内容来源（PIWX），三处装配一致。
+    let repository = first_dispatch::with_withdrawal_content(repository);
     let commands = Arc::new(DepositCommandService::new(
         repository.clone(),
         repository.clone(),
@@ -451,7 +462,16 @@ fn configure_deposit(
         repository.clone(),
         repository.clone(),
     ));
-    Ok(state.with_deposit(true, Some(repository), Some(commands)))
+    // 灭失证据录入与灭失确认办结既有代管件，不随寄售开关关闭；与收件端口共用同一仓储与命令账本
+    // （7C-4b、rulings Q4）。
+    let confirm = Arc::new(PositionLossConfirmService::new(repository.clone()));
+    Ok(state
+        .with_deposit(
+            activation == ConsignmentActivation::Enabled,
+            Some(repository),
+            Some(commands),
+        )
+        .with_loss_confirmation(Some(confirm)))
 }
 
 fn database_profile(
@@ -481,7 +501,7 @@ fn database_profile(
 mod tests {
     use std::fs;
     use std::net::SocketAddr;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     use auction_application::admin::EquipmentKeySealerPort;
     use auction_application::consignment::{
@@ -489,8 +509,9 @@ mod tests {
         AdminListingRecord, ApplyListingLookupCommand, AutoCloseListingCommand, ConsignmentFuture,
         ListingAutoCloseEffect, ListingClosed, ListingCommandOutcome, ListingCommandStore,
         ListingLookupEffect, ListingPriceReceipt, ListingReadPage, ListingRegistered,
-        RegisterListingCommand, RegistrationReplayCrypto, RepriceListingCommand,
-        StoredListingDecision, WithdrawListingCommand,
+        OrderAdminService, OrderAdminStore, OrderResolveReceipt, RecheckOrderCommand,
+        RecheckOrderReceipt, RegisterListingCommand, RegistrationReplayCrypto,
+        RepriceListingCommand, ResolveOrderCommand, StoredListingDecision, WithdrawListingCommand,
     };
     use auction_application::core::ApplicationFuture;
     use auction_application::public::{AdminLoginResult, AdminSessionIdentity, AdminSessionPort};
@@ -520,7 +541,28 @@ mod tests {
     #[tokio::test]
     async fn consignment_disabled_preserves_admin_list_and_delist_replay() {
         let config = disabled_config();
-        let state = AdminApiState::new(
+        let state = session_state(&config);
+        let app =
+            configure_router(configure_consignment(state, &config, Arc::new(ConsignmentStore)));
+        let page = send(&app, "GET", &format!("{LIST}?state=closed&page_size=37"), None).await;
+        assert_eq!(page["data"]["items"], json!([]));
+        assert_eq!(page["data"]["page_size"], 37);
+        let receipt = send(
+            &app,
+            "POST",
+            &format!("{LIST}/{LISTING}/delist"),
+            Some(json!({"command_id": COMMAND, "expected_version": 7, "reason": REASON})),
+        )
+        .await;
+        assert_eq!(receipt["data"]["command_id"], COMMAND.to_string());
+        assert_eq!(receipt["data"]["listing_id"], LISTING.to_string());
+        assert_eq!(receipt["data"]["operation"], "admin_delist");
+        assert_eq!(receipt["data"]["listing_version"], 8);
+        assert_eq!(receipt["data"]["state"], "closed");
+    }
+
+    fn session_state(config: &AppConfig) -> AdminApiState {
+        AdminApiState::new(
             Some(Arc::new(Session)),
             None,
             None,
@@ -546,25 +588,94 @@ mod tests {
             None,
             None,
             None,
-            configure_security(&config).unwrap(),
-        );
-        let app =
-            configure_router(configure_consignment(state, &config, Arc::new(ConsignmentStore)));
-        let page = send(&app, "GET", &format!("{LIST}?state=closed&page_size=37"), None).await;
-        assert_eq!(page["data"]["items"], json!([]));
-        assert_eq!(page["data"]["page_size"], 37);
-        let receipt = send(
-            &app,
-            "POST",
-            &format!("{LIST}/{LISTING}/delist"),
-            Some(json!({"command_id": COMMAND, "expected_version": 7, "reason": REASON})),
+            configure_security(config).unwrap(),
         )
-        .await;
-        assert_eq!(receipt["data"]["command_id"], COMMAND.to_string());
-        assert_eq!(receipt["data"]["listing_id"], LISTING.to_string());
-        assert_eq!(receipt["data"]["operation"], "admin_delist");
-        assert_eq!(receipt["data"]["listing_version"], 8);
-        assert_eq!(receipt["data"]["state"], "closed");
+    }
+
+    /// 订单写路由经正式 Admin 路由表挂载：会话、Origin 与 CSRF 任一缺失都不触达用例端口；
+    /// 寄售停用不关闭对既有订单的复核（不变量 1、7）。
+    #[tokio::test]
+    async fn order_writes_are_mounted_behind_admin_session_origin_and_csrf() {
+        let config = disabled_config();
+        let orders = Arc::new(Orders::default());
+        let app = configure_router(
+            session_state(&config)
+                .with_order_writes(Some(Arc::new(OrderAdminService::new(orders.clone())))),
+        );
+        let body = json!({"command_id": COMMAND, "expected_version": 3});
+        for (session, origin, csrf, expected) in [
+            (false, true, true, StatusCode::UNAUTHORIZED),
+            (true, false, true, StatusCode::FORBIDDEN),
+            (true, true, false, StatusCode::FORBIDDEN),
+        ] {
+            let status = recheck(&app, &body, session, origin, csrf).await;
+            assert_eq!(status, expected, "session={session} origin={origin} csrf={csrf}");
+        }
+        assert_eq!(orders.calls(), 0, "守卫拒绝的请求不得触达用例");
+        assert_eq!(recheck(&app, &body, true, true, true).await, StatusCode::ACCEPTED);
+        assert_eq!(orders.calls(), 1);
+    }
+
+    async fn recheck(
+        app: &Router,
+        body: &Value,
+        session: bool,
+        origin: bool,
+        csrf: bool,
+    ) -> StatusCode {
+        let cookie = if session {
+            "auction_admin_session=fixture-session; auction_admin_csrf=fixture-csrf"
+        } else {
+            "auction_admin_csrf=fixture-csrf"
+        };
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(format!("/api/v2/admin/consignment/orders/{LISTING}/recheck"))
+            .header("cookie", cookie)
+            .header("content-type", "application/json")
+            .header("origin", if origin { ORIGIN } else { "https://other.example.invalid" });
+        if csrf {
+            request = request.header("x-csrf-token", "fixture-csrf");
+        }
+        let mut request = request.body(Body::from(body.to_string())).unwrap();
+        request.extensions_mut().insert(ConnectInfo(SocketAddr::from(([192, 0, 2, 22], 3123))));
+        app.clone().oneshot(request).await.unwrap().status()
+    }
+
+    /// 只计数的订单写端口；守卫拒绝时不得被调用。
+    #[derive(Default)]
+    struct Orders {
+        calls: Mutex<usize>,
+    }
+
+    impl Orders {
+        fn calls(&self) -> usize {
+            *self.calls.lock().unwrap()
+        }
+    }
+
+    impl OrderAdminStore for Orders {
+        fn recheck_order(
+            &self,
+            command: RecheckOrderCommand,
+        ) -> ConsignmentFuture<'_, RecheckOrderReceipt> {
+            *self.calls.lock().unwrap() += 1;
+            Box::pin(async move {
+                Ok(RecheckOrderReceipt {
+                    command_id: command.command_id,
+                    contract_id: command.contract_id,
+                    contract_version: command.expected_version,
+                    work_id: COMMAND,
+                })
+            })
+        }
+
+        fn resolve_order(
+            &self,
+            _command: ResolveOrderCommand,
+        ) -> ConsignmentFuture<'_, OrderResolveReceipt> {
+            panic!("测试不处置订单")
+        }
     }
 
     fn disabled_config() -> AppConfig {

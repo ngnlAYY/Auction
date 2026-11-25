@@ -9,7 +9,7 @@ use std::{
 };
 
 use anyhow::{Context, bail};
-use auction_config::{AppConfig, CONSIGNMENT_COMPLETE, HttpListenMode, consignment_activation};
+use auction_config::{AppConfig, HttpListenMode, WebStackBinary, process_consignment_activation};
 use auction_process::{CONTROL_READY_PATH, HTTP_READY_PATH, ReadinessTarget};
 
 use super::{cli::ChildRole, filesystem};
@@ -47,7 +47,7 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
         regular(&path, false)?;
         let config =
             AppConfig::load_from_path(role.config_role(), &path).context("加载部署角色配置失败")?;
-        validate_consignment_artifact(config.consignment.enabled())?;
+        validate_consignment_artifact(&config)?;
         for path in [config.common_config_path.as_deref(), config.runtime_config_path.as_deref()]
             .into_iter()
             .flatten()
@@ -179,10 +179,13 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
     Ok(plans)
 }
 
-fn validate_consignment_artifact(enabled: bool) -> anyhow::Result<()> {
-    consignment_activation(
-        enabled,
-        CONSIGNMENT_COMPLETE,
+/// 不变量 6：合并部署与分体角色共用同一校验器（D9 §8），按 `auction-server` 自身摘要核对回执；
+/// 回执目前不登记该程序，开启寄售因此在派生子进程前失败关闭。
+fn validate_consignment_artifact(config: &AppConfig) -> anyhow::Result<()> {
+    process_consignment_activation(
+        config,
+        WebStackBinary::Server,
+        auction_observability::process_build_id(),
         cfg!(feature = "consignment-dev-preview"),
         cfg!(debug_assertions),
     )
@@ -286,12 +289,16 @@ fn same_retired_keys(
 
 #[cfg(test)]
 mod consignment_tests {
+    use std::fs;
+
+    use auction_config::{AppConfig, Role};
+
     use super::validate_consignment_artifact;
 
     #[test]
     fn supervisor_checks_consignment_before_spawning_roles() {
-        assert!(validate_consignment_artifact(false).is_ok());
-        let result = validate_consignment_artifact(true);
+        assert!(validate_consignment_artifact(&load(false)).is_ok());
+        let result = validate_consignment_artifact(&load(true));
         if cfg!(all(feature = "consignment-dev-preview", debug_assertions)) {
             assert!(result.is_ok());
         } else {
@@ -300,5 +307,23 @@ mod consignment_tests {
                     .contains("consignment-dev-preview 的本地调试构建")
             );
         }
+    }
+
+    fn load(enabled: bool) -> AppConfig {
+        // 每个开关值一个目录，同进程内只此一个测试使用该前缀。
+        let directory = std::env::temp_dir()
+            .join(format!("auction-server-consignment-{}-{enabled}", std::process::id()));
+        fs::create_dir(&directory).unwrap();
+        fs::write(directory.join("common.toml"), format!("[consignment]\nenabled = {enabled}\n"))
+            .unwrap();
+        fs::write(directory.join("secrets.toml"), "").unwrap();
+        fs::write(
+            directory.join("public.toml"),
+            "common_file = 'common.toml'\nsecrets_file = 'secrets.toml'\n",
+        )
+        .unwrap();
+        let config = AppConfig::load_from_path(Role::Public, directory.join("public.toml"));
+        fs::remove_dir_all(directory).unwrap();
+        config.unwrap()
     }
 }
