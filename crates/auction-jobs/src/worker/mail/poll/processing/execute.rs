@@ -10,7 +10,7 @@ use auction_application::mail::{
 use auction_observability::WorkerResult;
 
 use super::business::{MailProcessFailure, process_with_retry};
-use super::consignment::{CandidateStep, handle_candidate};
+use super::consignment::{CandidateStep, handle_candidate, handle_unparsed_candidate};
 use super::diagnostics;
 use super::fetch::fetch_with_retry;
 use crate::worker::diagnostics as worker_diagnostics;
@@ -275,18 +275,8 @@ where
                 .await;
                 return WorkerResult::Error;
             };
-            let Some(business) = message.business.take() else {
-                record_failure(
-                    store,
-                    clock,
-                    claim,
-                    "business_payload_missing".to_owned(),
-                    "MoogleMail 网关未提供寄售候选业务 envelope".to_owned(),
-                    failure_context,
-                )
-                .await;
-                return WorkerResult::Error;
-            };
+            // 严格通用解析失败的候选没有业务 envelope，稍后直接交寄售事务。
+            let business = message.business.take();
             if batch_deadline.checked_duration_since(std::time::Instant::now()).is_none() {
                 super::super::types::observe_budget(
                     &world_id,
@@ -312,6 +302,32 @@ where
                     Some(&candidate.external_mail_id),
                 );
             }
+            let Some(business) = business else {
+                return match handle_unparsed_candidate(
+                    service.as_ref(),
+                    candidate,
+                    &claim,
+                    polled_at,
+                    next_poll_at,
+                    batch_deadline,
+                )
+                .await
+                {
+                    Ok(()) => WorkerResult::Success,
+                    Err(failure) => {
+                        record_failure(
+                            store,
+                            clock,
+                            claim,
+                            failure.failure_code,
+                            failure.safe_detail,
+                            failure_context,
+                        )
+                        .await;
+                        WorkerResult::Error
+                    }
+                };
+            };
             let diagnostic =
                 diagnostics::MailMessageDiagnostic::prepare(diagnostics.clone(), &business);
             match handle_candidate(

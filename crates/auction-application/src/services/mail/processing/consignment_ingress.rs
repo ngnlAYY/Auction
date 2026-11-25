@@ -61,10 +61,40 @@ pub struct ConsignmentMailCandidate {
     pub legacy_evidence: LegacyReturnEvidence,
 }
 
+/// 发件人未证明时分类输入使用的占位值；不会写入任何持久事实。
+const UNPROVEN_SENDER: &str = "unproven-sender";
+
+/// 无通用解析结果的候选：以候选安全字段合成只含身份与主题的分类输入（无正文、无附件）。
+fn unparsed_candidate_message(
+    candidate: &ConsignmentMailCandidate,
+    claim: &MailPollClaim,
+) -> MailMessage {
+    MailMessage {
+        mailbox_key: claim.mailbox_key.clone(),
+        external_mail_id: candidate.external_mail_id.clone(),
+        world_id: candidate.world_id.clone(),
+        received_at: candidate.received_at,
+        sender: if candidate.sender.is_empty() {
+            UNPROVEN_SENDER.to_owned()
+        } else {
+            candidate.sender.clone()
+        },
+        subject: candidate.subject.clone(),
+        body: String::new(),
+        credits: 0,
+        cod: 0,
+        attachments: Vec::new(),
+        returnable: false,
+        claimable: false,
+        content_digest: candidate.body_digest,
+    }
+}
+
 /// 一封候选的 poll 上下文。
 pub struct ConsignmentIngressRequest<'a> {
-    /// 旧路由无法归属的业务 envelope。
-    pub message: &'a MailMessage,
+    /// 旧路由无法归属的业务 envelope；严格通用解析失败的候选（如重复原文 EID）没有该信，
+    /// 为 `None`：不经旧路由，由候选观察自身（发件人可为空）进入分类并落成待隔离决定。
+    pub message: Option<&'a MailMessage>,
     /// 同一详情文档上的 4D1 候选。
     pub candidate: &'a ConsignmentMailCandidate,
     /// 当前轮询租约。
@@ -108,12 +138,23 @@ impl ConsignmentIngressService {
         &self,
         request: ConsignmentIngressRequest<'_>,
     ) -> Result<ConsignmentIngressOutcome, ConsignmentError> {
-        let message = request.message;
         let candidate = request.candidate;
+        // 无通用解析结果时只用候选自带的安全字段合成分类输入；发件人未证明时用占位值，
+        // 占位值只参与主题/发件人文本判据，不进入卖家预读与原始观察（见下方 `sender`）。
+        let unparsed_shell;
+        let message = match request.message {
+            Some(message) => message,
+            None => {
+                unparsed_shell = unparsed_candidate_message(candidate, request.claim);
+                &unparsed_shell
+            }
+        };
         message.validate().map_err(invalid_candidate)?;
+        // 发件人只采信详情完整发件人；无通用解析结果时允许“未证明”，其观察已标记列表/详情不一致。
+        let sender = (!candidate.sender.is_empty()).then(|| candidate.sender.clone());
         if candidate.world_id != message.world_id
             || candidate.external_mail_id != message.external_mail_id
-            || candidate.sender.is_empty()
+            || sender.is_none() && request.message.is_some()
             || candidate.subject.is_empty()
             || candidate.observation.observation_id.is_nil()
             || candidate.remote_observation_id.is_nil()
@@ -135,11 +176,7 @@ impl ConsignmentIngressService {
         .map_err(invalid_candidate)?;
         let preflight = self
             .store
-            .load_envelope_preflight(
-                key.clone(),
-                candidate.observation.clone(),
-                Some(candidate.sender.clone()),
-            )
+            .load_envelope_preflight(key.clone(), candidate.observation.clone(), sender.clone())
             .await?;
         let plan = self
             .mail
@@ -187,7 +224,7 @@ impl ConsignmentIngressService {
                     evidence_ref: None,
                     subject_digest: candidate.subject_digest,
                     body_digest: candidate.body_digest,
-                    sender: Some(candidate.sender.clone()),
+                    sender,
                     recipient: None,
                     raw_count: candidate.raw_count,
                     observation: candidate.observation.clone(),
