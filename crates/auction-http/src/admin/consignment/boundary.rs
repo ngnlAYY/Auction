@@ -113,6 +113,11 @@ fn deposit_message(rejection: DepositBusinessRejection) -> &'static str {
         DepositBusinessRejection::BotParty => "认证 Bot 不能作为寄售交易当事人",
         DepositBusinessRejection::SeasonClosed => "寄售季已关闭",
         DepositBusinessRejection::FenceMismatch => "资产起写围栏已失效",
+        DepositBusinessRejection::EquipmentCommitted => "装备已被买方权利占用",
+        DepositBusinessRejection::CustodyUnproven => "代管状态未证明",
+        DepositBusinessRejection::OperationsHold => "运营止售阻止该动作",
+        DepositBusinessRejection::ListingLimitReached => "活动挂单数已达上限",
+        DepositBusinessRejection::OppositePaymentOpen => "相反方向的付款仍未了结，不能转为退款",
     }
 }
 

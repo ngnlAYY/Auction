@@ -11,7 +11,8 @@ use auction_application::admin::{
 };
 use auction_application::auction::AuctionLifecycleCommandPort;
 use auction_application::consignment::{
-    AdminListingRead, DepositCommandService, DepositRead, ManageListingService,
+    AdminListingRead, AdminOrderRead, DepositCommandService, DepositRead, LossCaseAdminService,
+    ManageListingService, OrderAdminService, PositionLossConfirmService,
 };
 use auction_application::delivery::DeliveryAdminPort;
 use auction_application::forum::PublicForumReader;
@@ -25,6 +26,10 @@ use auction_application::recovery::{RecoveryCommandPort, RecoveryReportReader};
 use auction_application::settlement::{SettlementReportReader, SettlementReturnAdminPort};
 use auction_observability::{HealthReader, ProcessMetrics};
 
+use crate::admin::consignment::loss::{AdminLossCapabilities, AdminLossState};
+use crate::admin::consignment::orders::{
+    AdminOrderCapabilities, AdminOrderReadState, AdminOrderWriteCapabilities, AdminOrderWriteState,
+};
 use crate::admin::consignment::quarantine::{AdminDepositCapabilities, AdminDepositState};
 use crate::admin::consignment::{AdminConsignmentCapabilities, AdminConsignmentState};
 use crate::middleware::HttpBoundary;
@@ -42,6 +47,9 @@ pub struct AdminApiState {
     session: Option<Arc<dyn AdminSessionPort>>,
     consignment: AdminConsignmentCapabilities,
     deposit: AdminDepositCapabilities,
+    orders: AdminOrderCapabilities,
+    order_writes: AdminOrderWriteCapabilities,
+    loss: AdminLossCapabilities,
     lifecycle: Option<Arc<dyn AuctionLifecycleCommandPort>>,
     auction_create: Option<Arc<dyn AdminAuctionCreatePort>>,
     auction_schedule: Option<Arc<dyn AdminAuctionSchedulePort>>,
@@ -156,6 +164,9 @@ impl AdminApiState {
             session,
             consignment: AdminConsignmentCapabilities::default(),
             deposit: AdminDepositCapabilities::default(),
+            orders: AdminOrderCapabilities::default(),
+            order_writes: AdminOrderWriteCapabilities::default(),
+            loss: AdminLossCapabilities::default(),
             lifecycle,
             auction_create,
             auction_schedule: None,
@@ -213,6 +224,33 @@ impl AdminApiState {
         commands: Option<Arc<DepositCommandService>>,
     ) -> Self {
         self.deposit = AdminDepositCapabilities { enabled, read, commands };
+        self
+    }
+
+    /// 注入 Admin 订单列表、详情与证据读取端口；不随寄售开关关闭。
+    pub fn with_orders(mut self, read: Option<Arc<dyn AdminOrderRead>>) -> Self {
+        self.orders = AdminOrderCapabilities { read };
+        self
+    }
+
+    /// 注入 Admin 订单复核与处置用例；办结既有订单，不随寄售开关关闭。
+    pub fn with_order_writes(mut self, admin: Option<Arc<OrderAdminService>>) -> Self {
+        self.order_writes = AdminOrderWriteCapabilities { admin };
+        self
+    }
+
+    /// 注入损失案件读取与人工结果用例；读取与续办不随寄售开关关闭。
+    pub fn with_loss(mut self, cases: Option<Arc<LossCaseAdminService>>) -> Self {
+        self.loss.cases = cases;
+        self
+    }
+
+    /// 注入灭失确认用例；办结既有代管件，不随寄售开关关闭。
+    pub fn with_loss_confirmation(
+        mut self,
+        confirm: Option<Arc<PositionLossConfirmService>>,
+    ) -> Self {
+        self.loss.confirm = confirm;
         self
     }
 
@@ -518,5 +556,23 @@ impl AdminConsignmentState for AdminApiState {
 impl AdminDepositState for AdminApiState {
     fn deposit(&self) -> &AdminDepositCapabilities {
         &self.deposit
+    }
+}
+
+impl AdminOrderReadState for AdminApiState {
+    fn orders(&self) -> &AdminOrderCapabilities {
+        &self.orders
+    }
+}
+
+impl AdminOrderWriteState for AdminApiState {
+    fn order_writes(&self) -> &AdminOrderWriteCapabilities {
+        &self.order_writes
+    }
+}
+
+impl AdminLossState for AdminApiState {
+    fn loss(&self) -> &AdminLossCapabilities {
+        &self.loss
     }
 }

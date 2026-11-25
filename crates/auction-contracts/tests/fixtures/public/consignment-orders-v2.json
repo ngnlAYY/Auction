@@ -1,0 +1,45 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "items": [
+      {
+        "contract_id": "00000000-0000-4000-8000-000000000501",
+        "kind": "sale",
+        "role": "buyer",
+        "listing_id": "00000000-0000-4000-8000-000000000101",
+        "equipment_id": "00000000-0000-4000-8000-000000000502",
+        "world": "main",
+        "order_state": "awaiting_payment",
+        "delivery_stage": "sent",
+        "payment_stage": "unpaid",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable",
+        "allowed_actions": [],
+        "version": 2,
+        "price": 101,
+        "deadline_at": "2026-11-28T18:10:00Z"
+      },
+      {
+        "contract_id": "00000000-0000-4000-8000-000000000503",
+        "kind": "withdrawal",
+        "role": "seller",
+        "listing_id": "00000000-0000-4000-8000-000000000104",
+        "equipment_id": "00000000-0000-4000-8000-000000000504",
+        "world": "isekai",
+        "order_state": "withdrawing",
+        "delivery_stage": "in_flight",
+        "payment_stage": "not_applicable",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable",
+        "allowed_actions": [],
+        "version": 3,
+        "price": null,
+        "deadline_at": null
+      }
+    ],
+    "total": 2,
+    "page": 1,
+    "page_size": 20
+  }
+}

@@ -15,10 +15,12 @@ use super::boundary::HttpBoundary;
 
 mod admin_login;
 mod headers;
+mod page_policy;
 #[cfg(test)]
 mod rotation_tests;
 use admin_login::AdminLoginDefense;
 pub use headers::{WebScriptPolicy, apply_browser_security_headers};
+pub(crate) use page_policy::PageScriptPolicy;
 
 const MAX_RATE_LIMIT_ENTRIES: usize = 4096;
 

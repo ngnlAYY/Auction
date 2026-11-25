@@ -693,3 +693,26 @@ async fn mutation_body_size_and_media_errors_use_existing_wire_codes() {
         }
     }
 }
+
+/// 受限权利会话（`hv_right`，无 Public 登录会话）不能新增 / 改价 / 取消寄售：寄售写路由都经
+/// `private_identity`，权利 Cookie 不是登录凭据，一律 401 且零端口调用（不变量 2、6）。
+/// 购买路由同样经 `input::mutation_identity`（见 `purchase.rs`）；重列与改目的地没有 Public 写路由。
+#[tokio::test]
+async fn restricted_right_session_cannot_reach_v1_consignment_write_routes() {
+    for enabled in [true, false] {
+        for command in COMMANDS {
+            let session = Arc::new(Session::default());
+            let backend = Arc::new(Backend::default());
+            let app = router(configured(enabled, &backend, Some(session.clone()), 100));
+            let mut req = command.request_with(&command.uri(), command.input().to_string());
+            req.headers_mut().insert(
+                header::COOKIE,
+                HeaderValue::from_static(
+                    "hv_right=fixture-right-token; hv_right_browser=fixture-binding",
+                ),
+            );
+            send(&app, req).await.assert(401, "unauthenticated");
+            assert!(backend.take_calls().is_empty(), "{command:?} 不得触达任何寄售端口");
+        }
+    }
+}

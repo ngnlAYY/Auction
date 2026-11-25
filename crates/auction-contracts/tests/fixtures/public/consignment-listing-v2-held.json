@@ -16,6 +16,8 @@
     "updated_at": "2026-11-20T18:20:00Z",
     "expires_at": "2026-12-20T18:10:00Z",
     "generation": 1,
+    "position_id": "00000000-0000-4000-8000-000000000c03",
+    "loss_case_id": null,
     "stored_state": "held_off_market",
     "effective_state": "held_off_market",
     "effective_reason": "operations_hold",
@@ -49,7 +51,7 @@
         "observed_at": "2026-11-20T18:10:00Z"
       },
       "reason": "operations_hold",
-      "hold_id": "00000000-0000-4000-8000-000000000416"
+      "hold_id": null
     }
   }
 }

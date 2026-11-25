@@ -7,13 +7,15 @@ use std::time::Duration;
 
 use auction_application::consignment::{
     ActiveDepositInstructions, AdminDelistListingCommand, AdminDepositDetail, AdminDepositQuery,
+    AdminListingDetailV2, AdminListingQuery, AdminListingReadV2, AdminListingRecordV2,
     AppendQuarantineObservationCommand, ApplyListingLookupCommand, ApplyMailProofCommand,
     AutoCloseListingCommand, ConsignmentError, ConsignmentFuture, CustodyControlStore,
     DecideEnvelopeCommand, DepositCommandService, DepositRead, DepositStatus, DepositWorldStatus,
     DepositWorlds, DispositionStore, EnvelopeReceipt, EnvelopeStore, IssueReservationCommand,
     ListingBusinessRejection, ListingClosed, ListingCommandOutcome, ListingCommandStore,
-    ListingPriceReceipt, ListingRegistered, ManageListingService, ObservationReceipt,
-    OwnedDepositInstructions, RecheckQuarantineCommand, RecheckReceipt, RegisterListingCommand,
+    ListingPriceReceipt, ListingReadPage, ListingRegistered, ManageListingService,
+    ObservationReceipt, OwnedDepositInstructions, OwnedListingReadV2, PrivateListingQuery,
+    PrivateListingV2, RecheckQuarantineCommand, RecheckReceipt, RegisterListingCommand,
     RegistrationReplayCrypto, ReleaseQuarantineCommand, ReleaseReceipt, RepriceListingCommand,
     ReservationReceipt, ReservationStore, SeasonCloseCommand, SeasonCloseReceipt,
     SeasonNoticeCommand, SeasonNoticeReceipt, SeasonStore, StartDispositionWriteCommand,
@@ -130,9 +132,12 @@ struct Backend {
     reservation_state_override: Mutex<Option<ListingState>>,
     withdrawals: Mutex<HashMap<Uuid, (WithdrawDepositCommand, WithdrawDepositReceipt)>>,
     withdrawal_failure: Mutex<Option<ConsignmentError>>,
+    /// 设置后撤回端口原样返回该回执（模拟 7C-2 的直接撤回或损坏回执）。
+    withdrawal_receipt: Mutex<Option<WithdrawDepositReceipt>>,
     v1_versions: Mutex<HashMap<Uuid, u64>>,
     deposit_calls: Mutex<Vec<Uuid>>,
     v1_calls: Mutex<Vec<Uuid>>,
+    v2_listings: Mutex<Vec<(Uuid, PrivateListingV2)>>,
 }
 
 impl Default for Backend {
@@ -151,9 +156,11 @@ impl Default for Backend {
             reservation_state_override: Mutex::new(None),
             withdrawals: Mutex::new(HashMap::new()),
             withdrawal_failure: Mutex::new(None),
+            withdrawal_receipt: Mutex::new(None),
             v1_versions: Mutex::new(HashMap::from([(LISTING, 3), (UNMANAGED, 1)])),
             deposit_calls: Mutex::new(Vec::new()),
             v1_calls: Mutex::new(Vec::new()),
+            v2_listings: Mutex::new(Vec::new()),
         }
     }
 }
@@ -218,6 +225,9 @@ impl Backend {
         if let Some(error) = *self.withdrawal_failure.lock().expect("撤回失败") {
             return Err(error);
         }
+        if let Some(receipt) = self.withdrawal_receipt.lock().expect("撤回回执").clone() {
+            return Ok(receipt);
+        }
         let mut records = self.withdrawals.lock().expect("撤回账本");
         if let Some((first, receipt)) = records.get(&command.command_id.as_uuid()) {
             return if first.request_hash == command.request_hash {
@@ -253,6 +263,56 @@ impl Backend {
         };
         records.insert(command.command_id.as_uuid(), (command, receipt.clone()));
         Ok(receipt)
+    }
+}
+
+impl OwnedListingReadV2 for Backend {
+    fn list_owned_v2(
+        &self,
+        seller: UserId,
+        query: PrivateListingQuery,
+    ) -> ConsignmentFuture<'_, ListingReadPage<PrivateListingV2>> {
+        let items: Vec<_> = self
+            .v2_listings
+            .lock()
+            .expect("v2 挂单")
+            .iter()
+            .filter(|(owner, _)| *owner == seller.as_uuid())
+            .map(|(_, listing)| listing.clone())
+            .collect();
+        let total = items.len() as u64;
+        Box::pin(async move { Ok(ListingReadPage { items, total, window: query.window }) })
+    }
+
+    fn owned_detail_v2(
+        &self,
+        seller: UserId,
+        listing_id: Uuid,
+    ) -> ConsignmentFuture<'_, Option<PrivateListingV2>> {
+        let found = self
+            .v2_listings
+            .lock()
+            .expect("v2 挂单")
+            .iter()
+            .find(|(owner, listing)| *owner == seller.as_uuid() && listing.listing_id == listing_id)
+            .map(|(_, listing)| listing.clone());
+        Box::pin(async move { Ok(found) })
+    }
+}
+
+impl AdminListingReadV2 for Backend {
+    fn list_admin_v2(
+        &self,
+        _query: AdminListingQuery,
+    ) -> ConsignmentFuture<'_, ListingReadPage<AdminListingRecordV2>> {
+        Box::pin(async { Err(ConsignmentError::Unavailable) })
+    }
+
+    fn admin_detail_v2(
+        &self,
+        _listing_id: Uuid,
+    ) -> ConsignmentFuture<'_, Option<AdminListingDetailV2>> {
+        Box::pin(async { Err(ConsignmentError::Unavailable) })
     }
 }
 
@@ -923,6 +983,35 @@ async fn issue_reservation_rejects_a_receipt_with_a_non_awaiting_state_as_outcom
     response.assert_no_secret();
 }
 
+/// 7C-2 直接撤回的 `withdrawal_accepted` 回执映射为 202 并带合同与装备；同一处置缺合同的
+/// 回执形状不符，仍为 503（应用层先按形状失败关闭），不伪造成功。
+#[tokio::test]
+async fn withdraw_accepted_is_202_with_contract_and_a_malformed_receipt_stays_unknown() {
+    let backend = Arc::new(Backend::default());
+    let app = router(setup(&backend, true));
+    let accepted = WithdrawDepositReceipt::withdrawal_accepted(
+        auction_domain::CommandId::from_uuid(COMMAND),
+        LISTING,
+        ListingVersion::new(4).expect("版本"),
+        fixture_uuid(0x50),
+        fixture_uuid(0x60),
+    );
+    *backend.withdrawal_receipt.lock().expect("撤回回执") = Some(accepted.clone());
+    let body = json!({"command_id": COMMAND, "expected_version": 3});
+    let ok = send(&app, post(&format!("{WRITE}/{LISTING}/withdraw"), body.clone())).await;
+    ok.assert_code(202, "accepted");
+    assert_eq!(ok.body["data"]["disposition"], "withdrawal_accepted");
+    assert_eq!(ok.body["data"]["state"], "withdrawal_pending");
+    assert_eq!(ok.body["data"]["contract_id"], fixture_uuid(0x50).to_string());
+    assert_eq!(ok.body["data"]["equipment_id"], fixture_uuid(0x60).to_string());
+    assert!(ok.body["data"].get("intent_id").is_none());
+
+    *backend.withdrawal_receipt.lock().expect("撤回回执") =
+        Some(WithdrawDepositReceipt { contract_id: None, ..accepted });
+    let unknown = send(&app, post(&format!("{WRITE}/{LISTING}/withdraw"), body)).await;
+    assert_eq!(unknown.status, 503, "{}", unknown.body);
+}
+
 #[tokio::test]
 async fn withdraw_managed_is_202_and_unmanaged_closes_with_200() {
     let backend = Arc::new(Backend::default());
@@ -1099,4 +1188,116 @@ async fn v2_success_responses_get_no_store_from_the_route_layer() {
     )
     .await;
     withdraw.assert_code(200, "ok");
+}
+
+#[tokio::test]
+async fn v2_owned_reads_are_owner_only_and_never_carry_the_code() {
+    let backend = Arc::new(Backend::default());
+    backend
+        .v2_listings
+        .lock()
+        .expect("v2 挂单")
+        .push((SELLER, crate::mapping::fixtures::available(LISTING)));
+    let app = router(setup(&backend, true));
+
+    // 同一挂单正有有效寄件指引（含预约码）；v2 本人读取绝不能带出它。
+    let list = send(&app, get(OWNED, Some(SELLER))).await;
+    list.assert_code(200, "ok");
+    assert_eq!(list.body["data"]["total"], 1);
+    let item = &list.body["data"]["items"][0];
+    assert_eq!(item["view"]["kind"], "available");
+    assert_eq!(item["generation"], 1);
+    assert_eq!(item["allowed_actions"], json!(["withdraw"]));
+    list.assert_no_secret();
+    let detail = send(&app, get(&format!("{OWNED}/{LISTING}"), Some(SELLER))).await;
+    detail.assert_code(200, "ok");
+    assert_eq!(detail.body["data"], *item);
+    detail.assert_no_secret();
+
+    // 非本人：列表为空，详情与不存在同样是 404。
+    let other_list = send(&app, get(OWNED, Some(OTHER_SELLER))).await;
+    other_list.assert_code(200, "ok");
+    assert_eq!(other_list.body["data"]["total"], 0);
+    assert_eq!(other_list.body["data"]["items"], json!([]));
+    let other = send(&app, get(&format!("{OWNED}/{LISTING}"), Some(OTHER_SELLER))).await;
+    other.assert_code(404, "listing_not_found");
+    let missing = send(&app, get(&format!("{OWNED}/{OTHER_LISTING}"), Some(SELLER))).await;
+    missing.assert_code(404, "listing_not_found");
+    assert_eq!(missing.body["message"], other.body["message"]);
+
+    let anonymous = send(&app, get(OWNED, None)).await;
+    assert_eq!(anonymous.status, 401);
+}
+
+#[tokio::test]
+async fn v2_owned_reads_get_no_store_from_the_route_layer() {
+    let backend = Arc::new(Backend::default());
+    backend
+        .v2_listings
+        .lock()
+        .expect("v2 挂单")
+        .push((SELLER, crate::mapping::fixtures::available(LISTING)));
+    let app = v2_only_router(setup(&backend, true));
+    send(&app, get(OWNED, Some(SELLER))).await.assert_code(200, "ok");
+    send(&app, get(&format!("{OWNED}/{LISTING}"), Some(SELLER))).await.assert_code(200, "ok");
+    send(&app, get(&format!("{OWNED}/{LISTING}"), Some(OTHER_SELLER)))
+        .await
+        .assert_code(404, "listing_not_found");
+}
+
+/// 不变量 1、D9 §6.3：软关闭只截止新承诺，已代管件的撤回继续；停用后新签发仍被拒且零写入。
+#[tokio::test]
+async fn withdraw_continues_after_soft_close_while_new_reservations_stay_refused() {
+    let backend = Arc::new(Backend::default());
+    let disabled = router(setup(&backend, false));
+    let managed = send(
+        &disabled,
+        post(
+            &format!("{WRITE}/{LISTING}/withdraw"),
+            json!({"command_id": COMMAND, "expected_version": 3}),
+        ),
+    )
+    .await;
+    managed.assert_code(202, "accepted");
+    assert_eq!(managed.body["data"]["disposition"], "withdrawal_requested");
+    assert_eq!(backend.deposit_calls.lock().expect("寄售端口").as_slice(), &[LISTING]);
+
+    let issue = send(
+        &disabled,
+        post(
+            &format!("{OWNED}/{LISTING}/deposit-reservations"),
+            json!({"command_id": OTHER_COMMAND, "expected_version": 3}),
+        ),
+    )
+    .await;
+    issue.assert_code(404, "consignment_disabled");
+    assert_eq!(backend.deposit_calls.lock().expect("寄售端口").as_slice(), &[LISTING]);
+}
+
+/// 受限权利会话（`hv_right`，无 Public 登录会话）不能预约、取回、读指引：v2 写 / 本人读路由都经
+/// `private_identity`，权利 Cookie 不是登录凭据，一律 401 且零寄售端口调用（不变量 2、6）。
+#[tokio::test]
+async fn restricted_right_session_cannot_reach_v2_deposit_routes() {
+    let backend = Arc::new(Backend::default());
+    let app = router(setup(&backend, true));
+    for (method, uri) in [
+        (Method::POST, format!("{OWNED}/{LISTING}/deposit-reservations")),
+        (Method::POST, format!("/api/v2/consignment/listings/{LISTING}/withdraw")),
+        (Method::GET, format!("{OWNED}/{LISTING}/deposit-instructions")),
+    ] {
+        let body = if method == Method::GET {
+            Body::empty()
+        } else {
+            Body::from(json!({"command_id": COMMAND, "expected_version": 3}).to_string())
+        };
+        let mut req = request(method, &uri, body, None);
+        req.headers_mut().insert(
+            header::COOKIE,
+            HeaderValue::from_static(
+                "hv_right=fixture-right-token; hv_right_browser=fixture-binding",
+            ),
+        );
+        send(&app, req).await.assert_code(401, "unauthenticated");
+    }
+    assert!(backend.deposit_calls.lock().expect("寄售端口").is_empty());
 }

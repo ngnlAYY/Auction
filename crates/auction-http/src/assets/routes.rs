@@ -19,6 +19,8 @@ const PUBLIC_EXACT_ROUTES: &[&str] = &[
     "/consignment",
     "/consignment/me",
     "/consignment/new",
+    "/consignment/orders",
+    "/consignment/rights",
     "/forum",
     "/fulfillment",
     "/history",
@@ -38,6 +40,7 @@ const ADMIN_EXACT_ROUTES: &[&str] = &[
     "/auctions",
     "/config",
     "/consignment",
+    "/consignment/orders",
     "/cookies",
     "/credentials",
     "/dashboard",
@@ -64,8 +67,10 @@ pub(super) enum Surface {
 }
 
 pub(super) fn browser_route(surface: Surface, path: &str) -> bool {
-    if let Some(listing_id) = path.strip_prefix("/consignment/listings/") {
-        return parse_canonical_uuid(listing_id).is_some();
+    if let Some(listing_id) = path.strip_prefix("/consignment/listings/")
+        && parse_canonical_uuid(listing_id).is_some()
+    {
+        return true;
     }
     match surface {
         Surface::Public => {
@@ -76,14 +81,35 @@ pub(super) fn browser_route(surface: Surface, path: &str) -> bool {
                     .and_then(|prefix| prefix.strip_prefix("/consignment/me/"))
                     .is_some_and(|listing_id| parse_canonical_uuid(listing_id).is_some())
                 || path
+                    .strip_suffix("/relist")
+                    .and_then(|prefix| prefix.strip_prefix("/consignment/me/"))
+                    .is_some_and(|listing_id| parse_canonical_uuid(listing_id).is_some())
+                || path
+                    .strip_suffix("/purchase")
+                    .and_then(|prefix| prefix.strip_prefix("/consignment/listings/"))
+                    .is_some_and(|listing_id| parse_canonical_uuid(listing_id).is_some())
+                || path
                     .strip_prefix("/consignment/me/")
                     .is_some_and(|listing_id| parse_canonical_uuid(listing_id).is_some())
+                || path
+                    .strip_prefix("/consignment/orders/")
+                    .is_some_and(|contract_id| parse_canonical_uuid(contract_id).is_some())
+                || path
+                    .strip_prefix("/consignment/loss/")
+                    .is_some_and(|position_id| parse_canonical_uuid(position_id).is_some())
         }
         Surface::Admin => {
             ADMIN_EXACT_ROUTES.contains(&path)
                 || path
                     .strip_prefix("/consignment/deposits/")
                     .is_some_and(|quarantine_id| parse_canonical_uuid(quarantine_id).is_some())
+                || path
+                    .strip_prefix("/consignment/orders/")
+                    .is_some_and(|contract_id| parse_canonical_uuid(contract_id).is_some())
+                || path
+                    .strip_suffix("/loss-case")
+                    .and_then(|prefix| prefix.strip_prefix("/consignment/positions/"))
+                    .is_some_and(|position_id| parse_canonical_uuid(position_id).is_some())
                 || path.strip_circumfix("/auctions/", "/lots").is_some_and(valid_parameter)
                 || path.strip_prefix("/deliveries/").is_some_and(valid_parameter)
                 || path.strip_prefix("/settlement-returns/").is_some_and(valid_parameter)
@@ -109,6 +135,37 @@ mod tests {
         assert!(browser_route(Surface::Public, "/settings"));
         assert!(!browser_route(Surface::Admin, "/settings"));
         assert!(!browser_route(Surface::Public, "/settings/"));
+    }
+
+    /// 第 6、7 期的寄售页面只给对应站点入口：购买、订单、权利、重列与损失回执在 Public，
+    /// 订单与损失案件在 Admin；参数段必须是规范 UUID。
+    #[test]
+    fn consignment_order_pages_are_surface_scoped_browser_routes() {
+        let id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        for path in [
+            "/consignment/orders".to_owned(),
+            "/consignment/rights".to_owned(),
+            format!("/consignment/orders/{id}"),
+            format!("/consignment/listings/{id}/purchase"),
+            format!("/consignment/me/{id}/relist"),
+            format!("/consignment/loss/{id}"),
+        ] {
+            assert!(browser_route(Surface::Public, &path), "{path}");
+        }
+        for path in [
+            "/consignment/orders".to_owned(),
+            format!("/consignment/orders/{id}"),
+            format!("/consignment/positions/{id}/loss-case"),
+        ] {
+            assert!(browser_route(Surface::Admin, &path), "{path}");
+        }
+        assert!(!browser_route(Surface::Admin, "/consignment/rights"));
+        assert!(!browser_route(Surface::Public, &format!("/consignment/positions/{id}/loss-case")));
+        for invalid in
+            ["/consignment/orders/x", "/consignment/listings/x/purchase", "/consignment/loss/x"]
+        {
+            assert!(!browser_route(Surface::Public, invalid), "{invalid}");
+        }
     }
 
     /// 结算退件列表与详情只给 Admin SPA 入口；参数段为空、含路径分隔或穿越时不给入口。

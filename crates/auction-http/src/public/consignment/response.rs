@@ -69,6 +69,11 @@ pub(super) fn created(message: &'static str, data: impl Serialize) -> RouteResul
     )
 }
 
+/// 返回 200 写结果；回执编码失败时写结果仍未知，客户端只能原样重放。
+pub(super) fn applied(message: &'static str, data: impl Serialize) -> RouteResult {
+    success(StatusCode::OK, ApiResponse::ok(message, data), ConsignmentError::OutcomeUnknown)
+}
+
 /// 返回 202 已接受结果；回执编码失败时写结果仍未知，客户端只能原样重放。
 pub(super) fn accepted(message: &'static str, data: impl Serialize) -> RouteResult {
     success(

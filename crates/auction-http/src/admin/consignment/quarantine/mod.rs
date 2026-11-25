@@ -57,9 +57,17 @@ pub(crate) trait AdminDepositState: AdminConsignmentState {
     fn deposit(&self) -> &AdminDepositCapabilities;
 }
 
-/// 将五条 Admin v2 路由放入给定路由器，并沿用无缓存边界。
+/// 将七条 Admin v2 路由放入给定路由器，并沿用无缓存边界。
 pub(crate) fn mount<S: AdminDepositState>(router: Router<S>) -> Router<S> {
     let routes = Router::new()
+        .route(
+            "/api/v2/admin/consignment/listings",
+            method_strict::get(super::listing_v2::list::<S>),
+        )
+        .route(
+            "/api/v2/admin/consignment/listings/{listing_id}",
+            method_strict::get(super::listing_v2::detail::<S>),
+        )
         .route(
             "/api/v2/admin/consignment/deposits/{quarantine_id}",
             method_strict::get(detail::<S>),

@@ -54,7 +54,8 @@ pub(crate) enum DeliveryProjection {
     /// 已发布的缺省投影：不含结算退件 Take 投递，处置只含已发布的种类闭集。
     Published,
     /// `include=settlement_returns`：列出结算退件 Take 投递，详情追加装备收回处置
-    /// `recovery_equipment_recovered`（迁移 `000113` 新增）。之后新增的值不随它输出。
+    /// `recovery_equipment_recovered`（迁移 `000113` 新增）与季末关闭处置 `season_closed`
+    /// （迁移 `000137` 新增）。之后新增的值不随它输出。
     SettlementReturns,
     /// `include=disposition_actions`：详情额外附带当前 fence 上的处置准入。
     DispositionActions,
@@ -101,10 +102,14 @@ impl DeliveryProjection {
         Ok(detail)
     }
 
+    /// `season_closed` 与装备收回处置一样只随扩展投影输出，缺省投影的允许清单不变。投递行本身
+    /// （来源 `consignment_disposition`、`failed/season_ended`）在两种投影里都照常列出：Admin 页面与
+    /// API 内嵌在同一发布二进制，升级后页面与读侧同版，升级前打开的旧标签页刷新即可。
     fn disposition_visible(self, kind: &str) -> bool {
         PUBLISHED_DISPOSITION_KINDS.contains(&kind)
             || (self.includes_settlement_return_actions()
-                && kind == DeliveryDispositionKind::RecoveryEquipmentRecovered.as_str())
+                && (kind == DeliveryDispositionKind::RecoveryEquipmentRecovered.as_str()
+                    || kind == DeliveryDispositionKind::SeasonClosed.as_str()))
     }
 }
 
@@ -268,7 +273,7 @@ mod tests {
         }
     }
 
-    /// 扩展投影读得到结算退件 Take 投递，并在已发布闭集之外只追加装备收回处置。
+    /// 扩展投影读得到结算退件 Take 投递，并在已发布闭集之外只追加装备收回与季末关闭处置。
     #[test]
     fn settlement_returns_projection_adds_only_this_release_values() {
         for origin in STORED_ORIGINS {
@@ -276,11 +281,12 @@ mod tests {
                 .project_detail(detail(origin))
                 .expect("扩展投影输出全部来源");
             assert_eq!(projected.delivery.origin_kind, origin);
-            assert_eq!(projected.dispositions.len(), RELEASED_DECODER_DISPOSITIONS.len() + 1);
+            assert_eq!(projected.dispositions.len(), RELEASED_DECODER_DISPOSITIONS.len() + 2);
             assert!(
                 projected.dispositions.iter().all(|item| {
                     RELEASED_DECODER_DISPOSITIONS.contains(&item.kind.as_str())
                         || item.kind == "recovery_equipment_recovered"
+                        || item.kind == "season_closed"
                 }),
                 "{:?}",
                 projected.dispositions

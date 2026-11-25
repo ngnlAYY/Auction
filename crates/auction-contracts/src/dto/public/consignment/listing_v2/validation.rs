@@ -230,6 +230,13 @@ impl OwnedListingV2 {
         if self.listing_id.is_nil() {
             return Err("挂单标识不得为零 UUID");
         }
+        // 损失案件只按 position 建立：有案件必有 position，二者都不得为零 UUID。
+        if self.position_id.is_some_and(|position_id| position_id.is_nil())
+            || self.loss_case_id.is_some_and(|case_id| case_id.is_nil())
+            || (self.loss_case_id.is_some() && self.position_id.is_none())
+        {
+            return Err("损失案件或代管 position 标识不一致");
+        }
         let (state, reason) = self.view.state_and_reason();
         let expiry_source = reason.and_then(ListingReasonV2::expiry_source_state);
         if (self.effective_state, self.effective_reason) != (state, reason)
@@ -257,20 +264,29 @@ impl OwnedListingV2 {
         if self.allowed_actions.iter().any(|action| !action.allowed_in(state, reason)) {
             return Err("挂单允许动作与有效状态不一致");
         }
-        self.validate_generation(state)?;
+        self.validate_generation(state, reason)?;
         self.validate_snapshot(expiry_source, state)?;
         self.validate_quote()
     }
 
-    fn validate_generation(&self, state: ListingStateV2) -> Result<(), &'static str> {
+    fn validate_generation(
+        &self,
+        state: ListingStateV2,
+        reason: Option<ListingReasonV2>,
+    ) -> Result<(), &'static str> {
         let expected = match state {
             ListingStateV2::Resolving
             | ListingStateV2::Displayed
             | ListingStateV2::AwaitingDeposit => Some(false),
             ListingStateV2::Available
             | ListingStateV2::SalePending
-            | ListingStateV2::HeldOffMarket
             | ListingStateV2::WithdrawalPending => Some(true),
+            // 本人视图不带 position 状态：本期只有对已接受、尚未取得的件设运营止售才会在没有
+            // 处分代时进入 held_off_market，其余原因必须有代；Admin 视图再按 position 核对。
+            ListingStateV2::HeldOffMarket if reason == Some(ListingReasonV2::OperationsHold) => {
+                None
+            }
+            ListingStateV2::HeldOffMarket => Some(true),
             ListingStateV2::DepositAccepted
             | ListingStateV2::Rejected
             | ListingStateV2::Expired

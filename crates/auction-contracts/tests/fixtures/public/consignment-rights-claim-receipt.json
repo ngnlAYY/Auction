@@ -1,0 +1,9 @@
+{
+  "code": "accepted",
+  "message": "续办已受理",
+  "data": {
+    "command_id": "00000000-0000-4000-8000-000000000504",
+    "right_id": "00000000-0000-5000-8000-000000000521",
+    "disposition": "claim_accepted"
+  }
+}

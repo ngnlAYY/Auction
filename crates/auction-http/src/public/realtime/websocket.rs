@@ -7,7 +7,7 @@ use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError}
 use auction_observability::{HttpRecorder, ProcessMetrics};
 use axum::{
     extract::{
-        ConnectInfo, State, WebSocketUpgrade,
+        ConnectInfo, Extension, State, WebSocketUpgrade,
         ws::{CloseFrame, Message, WebSocket},
     },
     http::{HeaderMap, StatusCode, Uri},
@@ -19,13 +19,15 @@ use tokio::{
 };
 
 use super::session::{RealtimeSession, SessionCheckError};
-use super::target::{WEBSOCKET_QUERY_KEYS, auction_stream_key, parse_websocket_target};
+use super::target::{
+    WEBSOCKET_QUERY_KEYS, auction_stream_key, declares_independent_build, parse_websocket_target,
+};
 use crate::diagnostics;
 use crate::diagnostics::RequestDiagnostics;
 use crate::errors::{api_error, not_found_error, query_rejection};
 use crate::query::parse_query;
 use crate::realtime_hub::{ObservedFrame, RealtimeSubscription, RealtimeSubscriptionError};
-use crate::server::build_identity::build_hello_frame;
+use crate::server::build_identity::{BuildReport, build_hello_frame};
 use crate::session::{
     authenticated_public_identity, read_public_session_cookie, realtime_connection_guard,
     session_unavailable,
@@ -52,6 +54,7 @@ const REASON_SESSION_UNAVAILABLE: &str = "会话校验暂不可用";
 pub(crate) async fn websocket(
     State(state): State<PublicApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
+    build_report: Option<Extension<BuildReport>>,
     headers: HeaderMap,
     uri: Uri,
     upgrade: WebSocketUpgrade,
@@ -135,6 +138,9 @@ pub(crate) async fn websocket(
     let session = RealtimeSession::new(session_service, raw_token, identity);
     let http_metrics = state.metrics().map_or_else(HttpRecorder::default, ProcessMetrics::http);
 
+    // 边界层总会写入报告；缺失只可能出现在不经边界的单元装配，退回进程构建号。
+    let build_report = build_report.map_or_else(BuildReport::process, |Extension(report)| report);
+    let independent_declared = declares_independent_build(&query);
     let diagnostic_context = RequestDiagnostics::capture();
     upgrade
         .max_message_size(MAX_MESSAGE_BYTES)
@@ -144,7 +150,14 @@ pub(crate) async fn websocket(
             let connection = http_metrics.websocket_connection();
             let body = async move {
                 let _connection = connection;
-                stream_events(socket, subscription, session, realtime_shutdown).await;
+                stream_events(
+                    socket,
+                    subscription,
+                    session,
+                    realtime_shutdown,
+                    (build_report, independent_declared),
+                )
+                .await;
             };
             diagnostic_context.run(body)
         })
@@ -156,6 +169,7 @@ async fn stream_events(
     mut subscription: RealtimeSubscription,
     mut session: RealtimeSession,
     mut realtime_shutdown: watch::Receiver<bool>,
+    (build_report, independent_declared): (BuildReport, bool),
 ) {
     let mut ticker = interval_at(Instant::now() + PING_PERIOD, PING_PERIOD);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -171,7 +185,12 @@ async fn stream_events(
         return;
     }
     // 首帧先报告进程构建号，部署后仍打开的旧页面据此提示刷新；事件帧形状不变。
-    if !send_message(&mut socket, Message::Text(build_hello_frame().into())).await {
+    if !send_message(
+        &mut socket,
+        Message::Text(build_hello_frame(&build_report, independent_declared).into()),
+    )
+    .await
+    {
         return;
     }
     let session_deadline = sleep(session.next_check_delay());

@@ -641,9 +641,16 @@ fn v2_owned_listing_covers_all_states_and_restricts_actions() {
     let mut operations_relist = held.clone();
     operations_relist["allowed_actions"] = json!(["withdraw", "relist"]);
     assert_rejects::<OwnedListingV2>(operations_relist, "运营止售仍公布重列");
-    let mut missing_hold = held.clone();
-    missing_hold["view"]["hold_id"] = Value::Null;
-    assert_rejects::<OwnedListingV2>(missing_hold, "运营止售缺 hold_id");
+    // 本人视图不带 hold_id：运营止售的 hold_id 为空也合法。
+    let mut owner_without_hold_id = held.clone();
+    owner_without_hold_id["view"]["hold_id"] = Value::Null;
+    assert!(serde_json::from_value::<OwnedListingV2>(owner_without_hold_id).is_ok());
+    // 只有运营止售（对已接受未取得的件）可以没有处分代，其余原因必须有。
+    let mut quota_without_generation = held.clone();
+    quota_without_generation["view"]["reason"] = json!("quota_blocked");
+    quota_without_generation["effective_reason"] = json!("quota_blocked");
+    quota_without_generation["generation"] = Value::Null;
+    assert_rejects::<OwnedListingV2>(quota_without_generation, "非运营止售的 held 无处分代");
 
     for action in [json!(["purchase"]), json!(["relist"]), json!(["reprice", "reprice"])] {
         assert_rejects::<OwnedListingV2>(

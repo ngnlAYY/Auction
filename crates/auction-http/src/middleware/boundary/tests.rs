@@ -117,7 +117,13 @@ fn replayable_responses_do_not_report_the_process_build_id() {
         response
             .headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static(cache_control));
-        let response = finish_response(response, "request-1", false, WebScriptPolicy::Dioxus);
+        let response = finish_response(
+            response,
+            "request-1",
+            false,
+            WebScriptPolicy::Dioxus,
+            &BuildReport::process(),
+        );
         assert!(
             !response.headers().contains_key(crate::server::build_identity::BUILD_ID_HEADER),
             "cache_control={cache_control}"
@@ -128,7 +134,13 @@ fn replayable_responses_do_not_report_the_process_build_id() {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=2"));
-    let response = finish_response(response, "request-1", false, WebScriptPolicy::Dioxus);
+    let response = finish_response(
+        response,
+        "request-1",
+        false,
+        WebScriptPolicy::Dioxus,
+        &BuildReport::process(),
+    );
     assert!(response.headers().contains_key(crate::server::build_identity::BUILD_ID_HEADER));
 }
 
@@ -139,6 +151,7 @@ fn non_replayable_responses_report_the_process_build_id() {
         "request-1",
         false,
         WebScriptPolicy::Dioxus,
+        &BuildReport::process(),
     );
     let reported = response
         .headers()
@@ -158,6 +171,7 @@ fn https_responses_receive_hsts() {
         "request-1",
         true,
         WebScriptPolicy::Dioxus,
+        &BuildReport::process(),
     );
     assert_eq!(
         response
@@ -173,7 +187,13 @@ fn normal_responses_use_the_selected_script_policy() {
     for (policy, expected) in
         [(WebScriptPolicy::Dioxus, DIOXUS_CSP), (WebScriptPolicy::Solid, SOLID_CSP)]
     {
-        let response = finish_response(StatusCode::OK.into_response(), "request-1", false, policy);
+        let response = finish_response(
+            StatusCode::OK.into_response(),
+            "request-1",
+            false,
+            policy,
+            &BuildReport::process(),
+        );
         assert_eq!(csp(&response), expected);
     }
 }
@@ -276,4 +296,70 @@ fn ambiguous_proxy_protocol_never_yields_hsts() {
     // 全链路都声明 https 的常见 CDN → 自建代理场景仍然发送；大小写与空白按 token 处理。
     assert!(request_is_https(&proto_request(Some("127.0.0.1:5000"), &["https, https"]), &trusted));
     assert!(request_is_https(&proto_request(Some("127.0.0.1:5000"), &["HTTPS"]), &trusted));
+}
+
+#[test]
+fn page_policy_extension_overrides_only_page_responses() {
+    // 挂载的旧壳页面自带 Dioxus 策略；没有扩展的响应仍使用 surface 默认（这里是 Solid）。
+    let mut page = StatusCode::OK.into_response();
+    page.extensions_mut().insert(PageScriptPolicy(WebScriptPolicy::Dioxus));
+    let page =
+        finish_response(page, "request-1", false, WebScriptPolicy::Solid, &BuildReport::process());
+    assert_eq!(csp(&page), DIOXUS_CSP);
+    let other = finish_response(
+        StatusCode::NOT_FOUND.into_response(),
+        "request-1",
+        false,
+        WebScriptPolicy::Solid,
+        &BuildReport::process(),
+    );
+    assert_eq!(csp(&other), SOLID_CSP);
+}
+
+#[test]
+fn without_a_mount_only_the_historical_build_header_is_written() {
+    let response = finish_response(
+        StatusCode::NO_CONTENT.into_response(),
+        "request-1",
+        false,
+        WebScriptPolicy::Solid,
+        &BuildReport::process(),
+    );
+    assert!(response.headers().contains_key(crate::server::build_identity::BUILD_ID_HEADER));
+    assert!(
+        !response
+            .headers()
+            .contains_key(crate::server::build_identity::INDEPENDENT_BUILD_ID_HEADER)
+    );
+}
+
+#[test]
+fn both_build_headers_are_written_together_on_non_replayable_responses_only() {
+    let report = BuildReport::new("legacy-1", "solid-2").expect("合法构建号");
+    let response = finish_response(
+        StatusCode::NO_CONTENT.into_response(),
+        "request-1",
+        false,
+        WebScriptPolicy::Solid,
+        &report,
+    );
+    let header_text =
+        |name: &str| response.headers().get(name).and_then(|value| value.to_str().ok());
+    assert_eq!(header_text(crate::server::build_identity::BUILD_ID_HEADER), Some("legacy-1"));
+    assert_eq!(
+        header_text(crate::server::build_identity::INDEPENDENT_BUILD_ID_HEADER),
+        Some("solid-2")
+    );
+
+    // 可被共享缓存重放的响应两个头都不带，避免部署后重放旧构建号。
+    let mut replayable = StatusCode::OK.into_response();
+    replayable.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    let replayable =
+        finish_response(replayable, "request-1", false, WebScriptPolicy::Solid, &report);
+    assert!(!replayable.headers().contains_key(crate::server::build_identity::BUILD_ID_HEADER));
+    assert!(
+        !replayable
+            .headers()
+            .contains_key(crate::server::build_identity::INDEPENDENT_BUILD_ID_HEADER)
+    );
 }

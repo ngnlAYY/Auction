@@ -1,0 +1,112 @@
+{
+  "order_kinds": [
+    "sale",
+    "withdrawal"
+  ],
+  "order_roles": [
+    "buyer",
+    "seller"
+  ],
+  "order_states": [
+    "awaiting_payment",
+    "awaiting_handoff",
+    "awaiting_payout",
+    "refunding",
+    "withdrawing",
+    "completed",
+    "cancelled",
+    "reconcile"
+  ],
+  "delivery_stages": [
+    "not_started",
+    "prepared",
+    "in_flight",
+    "sent",
+    "claimed",
+    "returned",
+    "closed",
+    "unknown"
+  ],
+  "payment_stages": [
+    "not_applicable",
+    "unpaid",
+    "certified",
+    "closed",
+    "unknown"
+  ],
+  "leg_stages": [
+    "not_applicable",
+    "blocked",
+    "ready",
+    "reserved",
+    "sent",
+    "claimed",
+    "returned",
+    "closed",
+    "unknown"
+  ],
+  "order_actions": [
+    "locate",
+    "challenge",
+    "verify",
+    "claim"
+  ],
+  "purchase_rejections": [
+    {
+      "code": "command_id_conflict",
+      "status": 409
+    },
+    {
+      "code": "stale_version",
+      "status": 409
+    },
+    {
+      "code": "price_changed",
+      "status": 409
+    },
+    {
+      "code": "listing_not_active",
+      "status": 409
+    },
+    {
+      "code": "equipment_committed",
+      "status": 409
+    },
+    {
+      "code": "custody_unproven",
+      "status": 409
+    },
+    {
+      "code": "operations_hold",
+      "status": 409
+    },
+    {
+      "code": "season_closed",
+      "status": 409
+    },
+    {
+      "code": "self_purchase",
+      "status": 403
+    },
+    {
+      "code": "bot_party",
+      "status": 403
+    },
+    {
+      "code": "participant_ineligible",
+      "status": 403
+    },
+    {
+      "code": "funding_unavailable",
+      "status": 503
+    },
+    {
+      "code": "consignment_disabled",
+      "status": 404
+    },
+    {
+      "code": "outcome_unknown",
+      "status": 503
+    }
+  ]
+}

@@ -25,7 +25,8 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::diagnostics;
-use crate::middleware::security::WebScriptPolicy;
+use crate::middleware::security::{PageScriptPolicy, WebScriptPolicy};
+use crate::server::build_identity::BuildReport;
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
@@ -39,6 +40,7 @@ pub struct HttpBoundary {
     trusted_proxy_cidrs: Arc<[IpCidr]>,
     trusted_unix_proxy: bool,
     web_script_policy: WebScriptPolicy,
+    build_report: BuildReport,
     metrics: HttpRecorder,
     runtime_switches: Option<auction_application::runtime_switches::RuntimeSwitches>,
 }
@@ -51,6 +53,7 @@ impl Default for HttpBoundary {
             trusted_unix_proxy: false,
             // 未显式选择时保持现有 Dioxus 页面的行为；装配根应经路由入口显式传入策略。
             web_script_policy: WebScriptPolicy::Dioxus,
+            build_report: BuildReport::process(),
             metrics: HttpRecorder::default(),
             runtime_switches: None,
         }
@@ -108,6 +111,12 @@ impl HttpBoundary {
         self.web_script_policy = web_script_policy;
         self
     }
+
+    /// 选择本 surface 报告给浏览器的构建号；只由路由装配根按页面挂载状态调用。
+    pub(crate) fn with_build_report(mut self, build_report: BuildReport) -> Self {
+        self.build_report = build_report;
+        self
+    }
 }
 
 /// 执行 Public/Admin 共用的协议边界。
@@ -151,6 +160,7 @@ async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Ne
             &request_id,
             hsts,
             boundary.web_script_policy,
+            &boundary.build_report,
         );
     }
     let request_id = match request_id {
@@ -166,6 +176,7 @@ async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Ne
                 &generated,
                 hsts,
                 boundary.web_script_policy,
+                &boundary.build_report,
             );
         }
     };
@@ -174,6 +185,8 @@ async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Ne
     request
         .extensions_mut()
         .insert(ConnectInfo(SocketAddr::new(client_address, peer.map_or(0, |value| value.port()))));
+    // 实时首帧与响应头必须报告同一组构建号，经请求扩展交给 WebSocket 处理器。
+    request.extensions_mut().insert(boundary.build_report.clone());
 
     let method = request.method();
     let route_pattern = request.extensions().get::<MatchedPath>().map_or("", MatchedPath::as_str);
@@ -242,7 +255,7 @@ async fn enforce_request(boundary: &HttpBoundary, mut request: Request, next: Ne
         duration_ms = started.elapsed().as_millis() as u64,
         "HTTP request completed"
     );
-    finish_response(response, &request_id, hsts, boundary.web_script_policy)
+    finish_response(response, &request_id, hsts, boundary.web_script_policy, &boundary.build_report)
 }
 
 /// 仅业务 API 路由使用：把 Path/Bytes 等默认纯文本拒绝收敛为稳定 JSON 外壳。
@@ -450,7 +463,12 @@ fn finish_response(
     request_id: &str,
     hsts: bool,
     web_script_policy: WebScriptPolicy,
+    build_report: &BuildReport,
 ) -> Response {
+    // 页面响应自带的脚本策略（挂载的旧壳 build）优先于 surface 默认；API、错误页与重定向没有
+    // 该扩展，永远使用 surface 默认，不会因旧壳而放宽。
+    let web_script_policy =
+        response.extensions().get::<PageScriptPolicy>().map_or(web_script_policy, |page| page.0);
     let cdn_policy = crate::assets::cdn_cache_policy(&response);
     // 共享缓存可以保存并重放的响应不带构建号：重放的副本只能说明生成它的那个进程，部署之后
     // 它会让已经是新版本的页面误判成“版本过期”。
@@ -468,10 +486,7 @@ fn finish_response(
     if !replayable {
         // 部署后仍打开的旧页面靠这个响应头发现前后端构建号不一致；值已限定为 HTTP 头安全字符。
         // 会话、就绪、进行中场次的读取与全部命令响应都不可重放，足以覆盖偏差检测。
-        headers.insert(
-            crate::server::build_identity::BUILD_ID_HEADER,
-            HeaderValue::from_static(crate::server::build_identity::build_id()),
-        );
+        build_report.write_headers(headers);
     }
     super::security::apply_browser_security_headers(headers, hsts, web_script_policy);
     // `Date` 由 Hyper 的 HTTP/1 与 HTTP/2 编码器按秒缓存后统一补齐，这里无需逐响应格式化。
