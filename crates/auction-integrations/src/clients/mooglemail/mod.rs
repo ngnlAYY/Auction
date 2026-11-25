@@ -54,12 +54,21 @@ pub use sender::{
     MoogleMailSentObservation,
 };
 pub use transport::{
+    CONSIGNMENT_DISPATCH_COLLECTED_VALIDATOR_VERSION, CONSIGNMENT_DISPATCH_SENT_VALIDATOR_VERSION,
+    ConsignmentCollection, ConsignmentCollectionTarget, ConsignmentDispatchMail,
+    ConsignmentDispatchOutcome, ConsignmentDispatchRecheck, ConsignmentDispatchRecheckTarget,
+    ConsignmentDispatchSent, DownstreamDispatchFacts, FirstDispatchFacts,
+    PreparedConsignmentDispatch, RenderedDispatchMail, WithdrawalDispatchFacts,
+    render_downstream_dispatch, render_first_dispatch, render_frozen_dispatch,
+    render_withdrawal_dispatch,
+};
+pub use transport::{
     CONSIGNMENT_DISPOSITION_VALIDATOR_VERSION, DispositionAction, DispositionOutcome,
     DispositionProof, DispositionRequest, DispositionTarget, ExpectedAttachmentPayload,
     ExpectedMailManifestPayload, ExpectedReturn, MailDeliveryPayload, MailKeyPayload,
-    MoogleMailDeliveryTransport, MoogleMailNotificationTemplates, NotSentReason,
-    SentUnprovenReason, SignedProof, decode_consignment_disposition_request,
-    execute_prepared_consignment_disposition,
+    MoogleMailDeliveryTransport, MoogleMailNotificationTemplates, NotSentReason, PlainNoticeMail,
+    PlainNoticeOutcome, SentUnprovenReason, SignedProof, decode_consignment_disposition_request,
+    execute_prepared_consignment_disposition, render_consignment_send,
 };
 pub use writer::{MoogleMailComposeState, MoogleMailSendResponseFailure};
 

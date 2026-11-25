@@ -21,15 +21,18 @@ mod worker_control;
 
 #[cfg(feature = "backup")]
 pub use backup::{BackupObject, BackupObjectStatus, BackupStoreError, R2BackupStore};
+pub use clients::web_fetch::{
+    WebFetchClient, WebFetchError, WebFetchPolicy, WebFetched, WebRepresentation,
+};
 pub use clients::{ehentai, mooglemail};
 pub use credentials::{
     CredentialAcquirer, CredentialSealer, CredentialVerifier, WorkerMailCredentialVerifier,
 };
 pub use cryptobox::{
     ConsignmentReservationCrypto, ConsignmentReservationCryptoConfigError,
-    ConsignmentSecretEnvelope, ConsignmentSecretError, ConsignmentSecretOpener,
-    ConsignmentSecretSealer, DataKey, EquipmentKeyOpener, EquipmentKeyOpenerError,
-    EquipmentKeySealer, EquipmentKeySealerError, MailEvidencePurpose,
+    ConsignmentRightChallengeCrypto, ConsignmentSecretEnvelope, ConsignmentSecretError,
+    ConsignmentSecretOpener, ConsignmentSecretSealer, DataKey, EquipmentKeyOpener,
+    EquipmentKeyOpenerError, EquipmentKeySealer, EquipmentKeySealerError, MailEvidencePurpose,
     consignment_reservation_crypto,
 };
 pub use equipment::hvdata::{HvDataConfigurationError, HvDataEquipmentReader};

@@ -46,6 +46,15 @@ async fn abandon_read(client: &MoogleMailClient, wait: Duration) {
     assert!(abandoned.is_err(), "读取应在 {wait:?} 内仍未完成：{abandoned:?}");
 }
 
+/// 远端已收到第 `sent` 个请求（本次读取已经发出）后立即放弃读取。以远端观察为准而不是固定时长：
+/// 负载高时读取可能迟迟未发出，按时长放弃会变成“发出前放弃”，测的就不是已发出请求的在途锁。
+async fn abandon_read_after_send(client: &MoogleMailClient, server: &MailDouble, sent: usize) {
+    tokio::select! {
+        read = inbox_read(client) => panic!("读取应在远端回应前被放弃：{read:?}"),
+        () = wait_until(|| server.requests().len() == sent) => {}
+    }
+}
+
 /// 轮询等待测试观察到的状态成立；5 秒内不成立即失败。
 async fn wait_until(condition: impl Fn() -> bool) {
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -66,7 +75,7 @@ async fn read_abandoned_after_send_keeps_the_next_read_waiting() {
     server.set_fault(Some(Fault::DetachedDelay(REMOTE_DELAY)));
     let started = Instant::now();
 
-    abandon_read(&client, Duration::from_millis(150)).await;
+    abandon_read_after_send(&client, &server, 1).await;
     assert_eq!(server.requests().len(), 1, "放弃前请求已经发出");
     // 只影响之后到达的请求：已发出的请求仍按原故障在远端处理。
     server.set_fault(None);
@@ -134,7 +143,7 @@ async fn abandoned_read_holds_the_lock_no_longer_than_its_http_budget() {
     server.set_fault(Some(Fault::DetachedDelay(remote_delay)));
     let started = Instant::now();
 
-    abandon_read(&client, Duration::from_millis(100)).await;
+    abandon_read_after_send(&client, &server, 1).await;
     server.set_fault(None);
     inbox_read(&client).await.expect("HTTP 预算结束后紧接的读取成功");
 

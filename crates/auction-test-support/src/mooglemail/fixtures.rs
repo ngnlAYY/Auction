@@ -11,6 +11,7 @@ macro_rules! fixture {
 }
 
 pub(super) const READ_MAIN: &str = fixture!("read-main");
+pub(super) const COMPOSE_MAIN: &str = fixture!("compose-main");
 pub(super) const MISSING_SENT: &str = fixture!("sentdetail-missing");
 pub(super) const IDENTITY_MAIN: &str = fixture!("consign-identity-main");
 pub(super) const IDENTITY_ISEKAI: &str = fixture!("consign-identity-isekai");
@@ -30,7 +31,7 @@ pub(super) fn page(
         ("isekai", "read", 0, None) => fixture!("read-isekai"),
         ("main", "sent", 0, None) => fixture!("sent-main"),
         ("isekai", "sent", 0, None) => fixture!("sent-isekai"),
-        ("main", "new", 0, None) => fixture!("compose-main"),
+        ("main", "new", 0, None) => COMPOSE_MAIN,
         ("isekai", "new", 0, None) => fixture!("compose-isekai"),
         ("main", "inbox", 0, Some("3125357")) => fixture!("readdetail-inbox-3125357"),
         ("main", "read", 0, Some("3125357")) => fixture!("readdetail-read-3125357"),

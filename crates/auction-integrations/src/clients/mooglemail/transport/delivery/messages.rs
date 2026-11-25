@@ -166,6 +166,15 @@ impl MoogleMailDeliveryTransport {
                 auction_application::consignment::CONSIGNMENT_SEASON_NOTICE_SUBJECT.to_owned(),
                 payload.body.take().ok_or_else(invalid_payload)?,
             )
+        } else if template == "consignment_payment_reminder"
+            && result_code
+                == auction_application::consignment::CONSIGNMENT_PAYMENT_REMINDER_RESULT_CODE
+        {
+            // 付款提醒正文在创建时冻结（暂定文案，待维护者定稿），发送前不读配置或重建正文。
+            (
+                auction_application::consignment::CONSIGNMENT_PAYMENT_REMINDER_SUBJECT.to_owned(),
+                payload.body.take().ok_or_else(invalid_payload)?,
+            )
         } else {
             render_notification(
                 &self.templates,

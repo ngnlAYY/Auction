@@ -16,12 +16,15 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::any,
 };
-use scraper::{Html as Document, Selector};
 use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
 use url::Url;
 
+use lists::{end_pagination, list_overlay};
+
 mod fixtures;
+mod lists;
 mod scripted;
+mod staged;
 
 /// 真实发送成功页；仅替换玩家/世界/收件人显示名并移除扩展 DOM。
 const WRITE_SUCCESS: &[u8] =
@@ -72,6 +75,8 @@ struct MailState {
     scripted: Option<scripted::ScriptedTake>,
     unread: BTreeSet<String>,
     removed_sent: BTreeSet<String>,
+    /// 隐藏中、待下一次成功写 POST 后重新出现的 Sent MID。
+    reveal_on_write: BTreeSet<String>,
     reads: usize,
     writes: usize,
     requests: Vec<String>,
@@ -82,6 +87,8 @@ struct MailState {
     max_active: usize,
     /// 响应闸门：发送端（[`ResponseHold`]）存活期间，新到达的请求登记后挂起。
     hold: Option<watch::Receiver<()>>,
+    /// 附 Credits 的 compose 暂存回放是否开启（见 `staged`）。
+    stage_credits: bool,
 }
 
 /// 服务与状态的 owner；Drop 中止监听，测试不会遗留后台服务。
@@ -133,6 +140,14 @@ impl MailDouble {
     /// 撤销 `remove_sent`：先隐藏最新一封、发送后再恢复，模拟新邮件在 POST 之后才出现在 Sent。
     pub fn restore_sent(&self, mid: &str) {
         self.state.lock().expect("test state poisoned").removed_sent.remove(mid);
+    }
+
+    /// 隐藏一封已采集的 Sent 邮件，直到下一次以真实成功页回应的写 POST 之后才在列表与详情中出现；
+    /// 模拟发送后才进入 Sent 的新邮件，供发后证明走完整读回。只移动已采集页面，不生成新页面。
+    pub fn reveal_sent_on_write(&self, mid: &str) {
+        let mut state = self.state.lock().expect("test state poisoned");
+        state.removed_sent.insert(mid.into());
+        state.reveal_on_write.insert(mid.into());
     }
 
     /// 已收到的写入请求数；未知结果仍计一次，不伪造成功邮件。
@@ -219,7 +234,7 @@ async fn handle(
     method: Method,
     uri: Uri,
     headers: HeaderMap,
-    _body: Bytes,
+    body: Bytes,
 ) -> Response {
     let in_flight = InFlight::enter(&state);
     // 不支持的路由也记录，便于测试指出扫描请求了哪些未采集页面。
@@ -321,6 +336,12 @@ async fn handle(
         return response;
     }
     if method == Method::POST {
+        let form: BTreeMap<String, String> =
+            url::form_urlencoded::parse(&body).into_owned().collect();
+        let staged = staged::respond(&state.lock().expect("test state poisoned"), &form);
+        if let Some(html) = staged {
+            return Html(html).into_response();
+        }
         return match fault {
             Some(Fault::WriteResultUnknown) => {
                 Html("<div>injected unknown write outcome</div>").into_response()
@@ -333,6 +354,12 @@ async fn handle(
                 Html("<div id=\"messagebox_inner\">Recipient not found</div>").into_response()
             }
             Some(Fault::WriteSucceeded | Fault::SlowWriteSucceeded(_)) => {
+                let mut current = state.lock().expect("test state poisoned");
+                let revealed = std::mem::take(&mut current.reveal_on_write);
+                for mid in revealed {
+                    current.removed_sent.remove(&mid);
+                }
+                drop(current);
                 Html(String::from_utf8_lossy(WRITE_SUCCESS).into_owned()).into_response()
             }
             _ => (StatusCode::NOT_IMPLEMENTED, "write success fixture unavailable").into_response(),
@@ -445,56 +472,4 @@ async fn account_state_fault(fault: Option<Fault>) -> Option<Response> {
         ),
         _ => None,
     }
-}
-
-/// 把指向未采集页的 Next 链接替换为真实末页的禁用结构；没有链接时原样返回。
-fn end_pagination(html: String) -> String {
-    const NEXT: &str = ">Next &gt;</a>";
-    let Some(end) = html.find(NEXT) else { return html };
-    let Some(start) = html[..end].rfind("<a ") else { return html };
-    format!("{}<span>Next &gt;</span>{}", &html[..start], &html[end + NEXT.len()..])
-}
-
-fn list_overlay(source: &str, keep: impl Fn(&str) -> bool) -> String {
-    let document = Document::parse_document(source);
-    let selector = Selector::parse("table#mmail_list tr[onclick]").expect("constant selector");
-    let mut html = document.root_element().html();
-    let mut remaining = 0;
-    for row in document.select(&selector) {
-        let onclick = row.attr("onclick").unwrap_or_default();
-        let mid = onclick
-            .split("mid=")
-            .nth(1)
-            .unwrap_or_default()
-            .split(|ch: char| !ch.is_ascii_digit())
-            .next()
-            .unwrap_or_default();
-        if keep(mid) {
-            remaining += 1;
-        } else {
-            html = html.replace(&row.html(), "");
-        }
-    }
-    if remaining == 0 {
-        // 空集合仍使用真实 Inbox 的空行结构，避免把无行表格误当协议漂移。
-        let empty = Document::parse_document(
-            fixtures::page("main", "inbox", 0, None).expect("captured inbox"),
-        );
-        let empty_selector = Selector::parse("#mmail_nnm").expect("constant selector");
-        let empty_row = empty
-            .select(&empty_selector)
-            .next()
-            .and_then(|cell| cell.parent())
-            .and_then(scraper::ElementRef::wrap)
-            .expect("captured empty row");
-        let table_selector = Selector::parse("table#mmail_list").expect("constant selector");
-        let rendered_table = Document::parse_fragment(&html);
-        let current =
-            rendered_table.select(&table_selector).next().expect("rendered mail table").html();
-        html = html.replace(
-            &current,
-            &current.replace("</tbody>", &format!("{}</tbody>", empty_row.html())),
-        );
-    }
-    html
 }
