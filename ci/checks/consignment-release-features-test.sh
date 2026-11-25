@@ -16,7 +16,7 @@ done
 fixture=$(mktemp -d)
 trap 'rm -rf -- "$fixture"' EXIT
 mkdir -p "$fixture/ci/release" "$fixture/bin"
-cp ci/release/build-identity.sh "$fixture/ci/release/"
+cp ci/release/build-identity.sh ci/release/web-stack.sh "$fixture/ci/release/"
 cat >"$fixture/bin/git" <<'FIXTURE'
 #!/usr/bin/env bash
 [[ "$*" == 'rev-parse --show-toplevel' ]] || exit 1

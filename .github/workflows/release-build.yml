@@ -6,10 +6,15 @@ on:
   workflow_call:
     inputs:
       web_stack:
-        description: 候选构建的页面技术栈
+        description: 页面技术栈；正式发行必须是 solid，候选构建缺省 dioxus
         required: false
         type: string
         default: dioxus
+      release_kind:
+        description: 调用方声明的构建类别：正式发行 formal，候选 candidate
+        required: false
+        type: string
+        default: candidate
     outputs:
       candidate-artifact:
         description: 本次发布候选包的 Actions artifact 名称
@@ -31,7 +36,7 @@ jobs:
     env:
       # 私有库 runner 的内存有限，限制并发；不放宽 Fat LTO 或 CPU 基线。
       CARGO_BUILD_JOBS: "2"
-      # 技术栈只由调用方输入决定；正式发行不传该输入，缺省仍是 dioxus。
+      # 技术栈只由调用方输入决定；正式发行由 release.yml 显式传 solid，候选缺省 dioxus。
       AUCTION_WEB_STACK: ${{ inputs.web_stack }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,8 +47,13 @@ jobs:
         id: web-stack
         env:
           AUCTION_WEB_STACK: ${{ inputs.web_stack }}
+          RELEASE_KIND: ${{ inputs.release_kind }}
         run: |
           source ci/release/build-identity.sh || exit 1
+          # 调用来源、类别与栈的断言必须先于工具安装：正式发行当且仅当声明 formal 且是 release.yml 的 tag push，
+          # 且两端都是 Solid；tag 上的手动候选没有正式身份，仍可构建，但带 -candidate 且不可部署。
+          assert_release_kind "$RELEASE_KIND" || exit 1
+          assert_formal_release_identity || exit 1
           public_stack=$(web_surface_stack public)
           admin_stack=$(web_surface_stack admin)
           stack_id="public-${public_stack}_admin-${admin_stack}"
@@ -60,10 +70,6 @@ jobs:
           else
             uses_solid=false
             suffix=
-          fi
-          if [[ ${GITHUB_REF_TYPE:-} == tag ]] && web_stack_uses_solid; then
-            printf 'Solid 的候选构建请在分支上触发；正式发行只产出 Rust 版页面。\n' >&2
-            exit 1
           fi
           candidate_artifact="release-candidate-${GITHUB_SHA}-${GITHUB_RUN_ATTEMPT}${suffix}"
           printf 'Web 技术栈：public=%s admin=%s；候选包 %s\n' \

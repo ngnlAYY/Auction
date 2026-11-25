@@ -1,0 +1,62 @@
+{
+  "format": "auction-web-switch-drill.v1",
+  "drill_id": "<本次唯一编号>",
+  "operator": "<执行人>",
+  "reviewer": "<审核人，不得与执行人相同>",
+  "started_at": null,
+  "finished_at": null,
+  "artifact": {
+    "tag": "<最终 tag>",
+    "source_commit": "<完整提交 SHA，40 位小写十六进制>",
+    "archive_sha256": "<外层 Release tarball SHA-256，64 位小写十六进制>",
+    "build_id": "<新版 build ID，等于部署回执 RECEIPT.v1 的 build_id>"
+  },
+  "surfaces": {
+    "public": {
+      "legacy_build_id": "<旧壳 build ID>",
+      "legacy_entry_sha256": "<旧壳 files/index.html 的 SHA-256>",
+      "solid_build_id": "<新版 build ID>",
+      "solid_entry_sha256": "<新版 files/index.html 的 SHA-256>"
+    },
+    "admin": {
+      "legacy_build_id": "<旧壳 build ID>",
+      "legacy_entry_sha256": "<SHA-256>",
+      "solid_build_id": "<新版 build ID>",
+      "solid_entry_sha256": "<SHA-256>"
+    }
+  },
+  "responses": [
+    {
+      "phase": "new",
+      "surface": "public",
+      "kind": "default-entry",
+      "status": 200,
+      "x_auction_build": null,
+      "x_auction_build_independent": null,
+      "body_sha256": "<入口 HTML 响应正文的 SHA-256>",
+      "csp_sha256": "<Content-Security-Policy 响应头字节的 SHA-256>",
+      "etag": "<ETag 响应头>",
+      "cache_control": "no-cache",
+      "vary": "Accept-Encoding"
+    }
+  ],
+  "manual_signoff": {
+    "wasm_started": {
+      "result": "not_run",
+      "evidence": "<证据文件名>"
+    },
+    "legacy_interaction_state_changed": {
+      "result": "not_run",
+      "evidence": "<证据文件名>"
+    },
+    "legacy_to_new_entry_read_ok": {
+      "result": "not_run",
+      "evidence": "<证据文件名>"
+    }
+  },
+  "anomalies": [],
+  "conclusion": {
+    "result": "not_run",
+    "summary": "<异常、限制、未完成项及是否可签收的结论>"
+  }
+}

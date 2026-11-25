@@ -21,6 +21,64 @@ is_formal_release() {
 		${GITHUB_REF_TYPE-} == tag ]]
 }
 
+# 工作区版本取自根 Cargo.toml；正式发行断言与装包共用。
+workspace_version() {
+	awk '
+    /^\[workspace\.package\]$/ { active = 1; next }
+    active && /^\[/ { active = 0 }
+    active && /^version[[:space:]]*=/ {
+      value = $0
+      sub(/^[^=]+=[[:space:]]*"/, "", value)
+      sub(/"[[:space:]]*$/, "", value)
+      print value
+      exit
+    }
+  ' Cargo.toml
+}
+
+# 正式发行的完整身份断言：来源工作流、tag 与栈。非正式（候选、分支、本地）一律放行，只受候选规则约束；
+# 正式发行必须由 release.yml 的 tag push 调用、tag 等于工作区版本、两端都是 Solid。
+# release-build.yml 在安装工具前、release.sh 在任何工具与目录副作用前各调用一次；失败不产生副作用。
+# 可复用工作流里 GITHUB_EVENT_NAME、GITHUB_REF_TYPE 与 GITHUB_WORKFLOW_REF 是调用方（release.yml）的值。
+assert_formal_release_identity() {
+	is_formal_release || return 0
+	if [[ ${GITHUB_WORKFLOW_REF-} != "${GITHUB_REPOSITORY-}/.github/workflows/release.yml@refs/tags/"* ]]; then
+		printf '正式发行必须由 release.yml 的 tag push 调用：%s\n' "${GITHUB_WORKFLOW_REF-}" >&2
+		return 1
+	fi
+	if [[ -z ${GITHUB_REF_NAME-} || ${GITHUB_REF_NAME-} != "v$(workspace_version)" ]]; then
+		printf '正式发行 tag 必须等于工作区版本 v%s：%s\n' "$(workspace_version)" "${GITHUB_REF_NAME-}" >&2
+		return 1
+	fi
+	if [[ $(web_surface_stack public) != solid || $(web_surface_stack admin) != solid ]]; then
+		printf '正式发行必须 Public 与 Admin 两端都使用 Solid 页面；Dioxus 与单端 Solid 只允许本地构建与手动候选构建。\n' >&2
+		return 1
+	fi
+}
+
+# 调用方声明的构建类别必须与实际调用身份一致：只允许 formal 与 candidate；
+# 正式发行当且仅当声明 formal（release.yml 的 tag push），其余调用声明 formal 一律拒绝。
+# release-build.yml 在安装工具前调用；失败不产生副作用。
+assert_release_kind() {
+	local release_kind=$1
+	case "$release_kind" in
+	formal | candidate) ;;
+	*)
+		printf 'release_kind 只允许 formal 或 candidate：%s\n' "$release_kind" >&2
+		return 1
+		;;
+	esac
+	if is_formal_release; then
+		if [[ $release_kind != formal ]]; then
+			printf '正式发行必须声明 release_kind=formal。\n' >&2
+			return 1
+		fi
+	elif [[ $release_kind == formal ]]; then
+		printf 'release_kind=formal 只允许 release.yml 的 tag push 使用。\n' >&2
+		return 1
+	fi
+}
+
 release_candidate_suffix() {
 	if is_formal_release; then
 		return 0

@@ -10,20 +10,14 @@ cd "$repository_root"
 # 工具选择与身份共用同一入口；任一发布工具缺失时不进入任何发布操作。
 source ci/release/build-identity.sh
 command_name=${1:-}
-# 正式发行只由共享身份入口判断；必须在任何工具、临时目录或制品目录操作之前完成。
-
-reject_solid_formal_release() {
-	if ! is_formal_release || ! web_stack_uses_solid; then
-		return 0
-	fi
-	printf '正式发行只产出 Rust 版页面；Solid 版页面只允许本地构建与手动候选构建。\n' >&2
-	return 1
-}
+source ci/release/web-stack.sh
+# 正式发行只由共享身份入口判断；必须在任何工具、临时目录或制品目录操作之前完成：
+# 正式发行（tag push）必须由 release.yml 调用且两端都是 Solid，否则整体拒绝。
 
 # 只打印信息的入口不参与正式发行构建判定；运行任务仍受守卫约束。
 case "$command_name" in
 web-feature | web-build-id | verify-web-size | source-fingerprint | verify-release-features) ;;
-*) reject_solid_formal_release || exit 1 ;;
+*) assert_formal_release_identity || exit 1 ;;
 esac
 # 本地运行任务按实际技术栈取当前包的 feature 名；这里不解析发布工具，也不产生任何制品。
 if [[ "$command_name" == web-feature ]]; then
@@ -638,20 +632,6 @@ verify_single_artifacts() {
 	printf '合并制品双 surface、独立 auction-cli 与分体隔离门禁通过。\n'
 }
 
-workspace_version() {
-	awk '
-    /^\[workspace\.package\]$/ { active = 1; next }
-    active && /^\[/ { active = 0 }
-    active && /^version[[:space:]]*=/ {
-      value = $0
-      sub(/^[^=]+=[[:space:]]*"/, "", value)
-      sub(/"[[:space:]]*$/, "", value)
-      print value
-      exit
-    }
-  ' Cargo.toml
-}
-
 first_version_line() {
 	"$@" 2>&1 | sed -n '1p'
 }
@@ -947,6 +927,40 @@ verify_archive() {
 	)
 }
 
+# 双端 Solid 的包附 docs/WEB-STACK.v1 与页面导出树 web-assets/<surface>/：字节取自稳定目录，
+# 路径集合与逐文件摘要必须等于已装入的 docs/WEB-*-SHA256（稳定目录陈旧时在此失败）。
+package_web_stack() {
+	local package_root=$1 scratch=$2 commit=$3 fingerprint=$4
+	local surface upper stable_root build_id first_build_id='' stage path public_sha admin_sha
+	local -a paths=()
+	for surface in public admin; do
+		upper=${surface^^}
+		stable_root=$(web_surface_root "$surface" "$repository_root") || return 1
+		build_id=$(read_build_info "$stable_root/WEB-BUILD-INFO" build_id) || return 1
+		if [[ ! $build_id =~ ^[0-9a-f]{32}$ ]]; then
+			printf '%s 页面构建号无效：%s/WEB-BUILD-INFO\n' "$surface" "$stable_root" >&2
+			return 1
+		fi
+		if [[ -n $first_build_id && $build_id != "$first_build_id" ]]; then
+			printf 'Public 与 Admin 的页面构建号不一致，请重新构建\n' >&2
+			return 1
+		fi
+		first_build_id=$build_id
+		stage="$scratch/web-assets/$surface"
+		web_stack_export_tree "$stable_root/public" "$embedded_artifact_root/WEB-$upper-SHA256" "$stage" || return 1
+		mapfile -t paths < <(web_stack_payload_paths "$embedded_artifact_root/WEB-$upper-SHA256") || return 1
+		for path in "${paths[@]}"; do
+			install_release_file "$stage/$path" "web-assets/$surface/$path" 644 "$package_root" || return 1
+		done
+	done
+	public_sha=$(web_stack_sha256_file "$embedded_artifact_root/WEB-PUBLIC-SHA256") || return 1
+	admin_sha=$(web_stack_sha256_file "$embedded_artifact_root/WEB-ADMIN-SHA256") || return 1
+	web_stack_render "$commit" "$fingerprint" "$(web_surface_stack public)" "$(web_surface_stack admin)" \
+		"$public_sha" "$admin_sha" "$first_build_id" >"$scratch/WEB-STACK.v1" || return 1
+	install_release_file "$scratch/WEB-STACK.v1" docs/WEB-STACK.v1 644 "$package_root" || return 1
+	web_stack_verify_package "$package_root" "$commit" "$fingerprint"
+}
+
 package_release() (
 	local allow_dirty=false single_binary=false argument
 	for argument in "$@"; do
@@ -1023,6 +1037,8 @@ package_release() (
 		"ops/deploy/RECOVERY.md|docs/RECOVERY.md|644" \
 		"ops/deploy/MIGRATION-DRILL.md|docs/MIGRATION-DRILL.md|644" \
 		"ops/deploy/migration-drill-receipt.template.json|docs/migration-drill-receipt.template.json|644" \
+		"ops/deploy/WEB-SWITCH-DRILL.md|docs/WEB-SWITCH-DRILL.md|644" \
+		"ops/deploy/web-switch-drill-receipt.template.json|docs/web-switch-drill-receipt.template.json|644" \
 		"apps/auction-cli/README.md|docs/CLI.md|644" \
 		"ops/deploy/retention-policy.v2.json|retention-policy.v2.json|644" \
 		"ops/deploy/caddy/Caddyfile|caddy/Caddyfile|644" \
@@ -1058,6 +1074,9 @@ package_release() (
 			"ops/deploy/systemd/auction-worker.service.example|systemd/auction-worker.service.example|644" \
 			"ops/deploy/systemd/auction-stack.service.example|systemd/auction-stack.service.example|644" \
 			"ops/deploy/tmpfiles/hv-auction.conf.example|tmpfiles/hv-auction.conf.example|644"
+	fi
+	if [[ $(web_surface_stack public) == solid && $(web_surface_stack admin) == solid ]]; then
+		package_web_stack "$package_root" "$temporary_root" "$commit" "$fingerprint"
 	fi
 	# 全部仓库文档（含 config/README.md）按安装映射重写；敏感示例的 .example 后缀也来自清单。
 	rewrite_packaged_doc_links "$package_root" "$commit"

@@ -167,11 +167,11 @@ description = "按实际技术栈只核对两端 Web payload 体积预算，不�
 run = "bash ci/release/release.sh verify-web-size"
 
 [tasks.release-check]
-description = "完整构建、制品门禁与候选装配；正式发行（发布 tag）只产出 Rust 版页面。额外参数原样转发"
+description = "完整构建、制品门禁与候选装配；正式发行（发布 tag）两端都使用 Solid 页面。额外参数原样转发"
 run = "bash ci/release/release.sh release-check"
 
 [tasks.package]
-description = "只装配已构建制品；正式发行要求 Rust 版页面与干净工作树。额外参数原样转发"
+description = "只装配已构建制品；正式发行要求两端 Solid 页面与干净工作树。额外参数原样转发"
 run = "bash ci/release/release.sh package"
 
 [tasks.verify-package]
