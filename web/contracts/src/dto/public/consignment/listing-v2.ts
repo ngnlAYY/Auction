@@ -3,7 +3,7 @@
 import * as v from "valibot";
 
 import { integer, JSON_MAX_SAFE_INTEGER, requiredNullable, strictStruct } from "../../../wire";
-import { EquipmentLevelSchema, EquipmentViewSchema } from "./catalog";
+import { EquipmentLevelSchema, EquipmentViewSchema, listingPageSchema } from "./catalog";
 import { CommandUuidV4Schema } from "./command";
 import { LookupProgressSchema } from "./owned";
 import {
@@ -196,10 +196,7 @@ export const ListingViewV2Schema = v.union([
       reason: ListingReasonV2Schema,
       hold_id: requiredNullable(ConsignmentUuidSchema),
     }),
-    v.check(
-      ({ reason, hold_id }) =>
-        HOLD_REASONS.has(reason) && (reason !== "operations_hold" || hold_id !== null),
-    ),
+    v.check(({ reason }) => HOLD_REASONS.has(reason)),
   ),
   strictStruct({ kind: v.literal("withdrawal_pending"), equipment: TRADEABLE_EQUIPMENT }),
   v.pipe(
@@ -312,18 +309,20 @@ function actionAllowedIn(
   );
 }
 
-function generationMatches(state: ListingStateV2, generation: ListingGeneration | null): boolean {
+function generationMatches(
+  state: ListingStateV2,
+  generation: ListingGeneration | null,
+  reason: ListingReasonV2 | null,
+): boolean {
   if (state === "resolving" || state === "displayed" || state === "awaiting_deposit") {
     return generation === null;
   }
-  if (
-    state === "available" ||
-    state === "sale_pending" ||
-    state === "held_off_market" ||
-    state === "withdrawal_pending"
-  ) {
+  if (state === "available" || state === "sale_pending" || state === "withdrawal_pending") {
     return generation !== null;
   }
+  // 本人视图不带 position 状态：本期只有对已接受、尚未取得的件设运营止售才会在没有处分代时
+  // 进入 held_off_market，其余原因必须有代；Admin 视图再按 position 核对。
+  if (state === "held_off_market") return generation !== null || reason === "operations_hold";
   return true;
 }
 
@@ -412,6 +411,8 @@ const OWNED_LISTING_V2_FIELDS = strictStruct({
   updated_at: ConsignmentTimestampSchema,
   expires_at: ConsignmentTimestampSchema,
   generation: requiredNullable(ListingGenerationSchema),
+  position_id: requiredNullable(ConsignmentUuidSchema),
+  loss_case_id: requiredNullable(ConsignmentUuidSchema),
   stored_state: ListingStateV2Schema,
   effective_state: ListingStateV2Schema,
   effective_reason: requiredNullable(ListingReasonV2Schema),
@@ -476,7 +477,7 @@ function isConsistentOwnedListing(listing: v.InferOutput<typeof OWNED_LISTING_V2
   if (listing.allowed_actions.some((action) => !actionAllowedIn(action, state, reason))) {
     return false;
   }
-  if (!generationMatches(state, listing.generation)) return false;
+  if (!generationMatches(state, listing.generation, reason)) return false;
   return snapshotMatches(listing.view, listing.stored_state, state, expirySource);
 }
 
@@ -484,6 +485,8 @@ function isConsistentOwnedListing(listing: v.InferOutput<typeof OWNED_LISTING_V2
 export const OwnedListingV2Schema = v.pipe(
   OWNED_LISTING_V2_FIELDS,
   v.check(isConsistentOwnedListing),
+  // 损失案件只按 position 建立：有案件必有 position。
+  v.check(({ position_id, loss_case_id }) => loss_case_id === null || position_id !== null),
   v.check(({ mode, price, fee_bps, estimated_fee, estimated_seller_amount }) => {
     // 不变量 6、10：领域 quote 负责计算。这里只核对线上冻结报价的取整和金额守恒。
     return (
@@ -496,7 +499,12 @@ export const OwnedListingV2Schema = v.pipe(
 /** 本人挂单投影。 */
 export type OwnedListingV2 = v.InferOutput<typeof OwnedListingV2Schema>;
 
-/** 本人 v2 撤回的两种合法回执：代管件登记意愿，未代管件按前三期关闭。 */
+/** 本人 v2 列表分页体。 */
+export const OwnedListingPageV2Schema = listingPageSchema(OwnedListingV2Schema);
+/** 带准确总数的本人 v2 挂单页。 */
+export type OwnedListingPageV2 = v.InferOutput<typeof OwnedListingPageV2Schema>;
+
+/** 本人 v2 撤回的三种合法回执：代管件登记意愿、已在库件直接建撤回代、未代管件按前三期关闭。 */
 export const WithdrawReceiptV2Schema = v.union([
   strictStruct({
     schema_version: v.literal(2),
@@ -505,9 +513,21 @@ export const WithdrawReceiptV2Schema = v.union([
     command_id: ConsignmentUuidSchema,
     listing_id: ConsignmentUuidSchema,
     listing_version: ListingVersionSchema,
-    // 第 4 期三个代管态都只登记撤回意愿；withdrawal_accepted 属第 7 期。
+    // 代管件登记撤回意愿：available 转入 withdrawal_pending，其余两态保留原态。
     state: v.picklist(["deposit_accepted", "withdrawal_pending", "held_off_market"]),
     intent_id: ConsignmentUuidSchema,
+  }),
+  strictStruct({
+    schema_version: v.literal(2),
+    operation: v.literal("withdraw"),
+    disposition: v.literal("withdrawal_accepted"),
+    command_id: ConsignmentUuidSchema,
+    listing_id: ConsignmentUuidSchema,
+    listing_version: ListingVersionSchema,
+    // 已在库件直接绑定撤回合同（7C-2）：合同与装备已确定。
+    state: v.literal("withdrawal_pending"),
+    contract_id: ConsignmentUuidSchema,
+    equipment_id: ConsignmentUuidSchema,
   }),
   strictStruct({
     schema_version: v.literal(2),

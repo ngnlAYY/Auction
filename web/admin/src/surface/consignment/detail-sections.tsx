@@ -1,6 +1,6 @@
 // 挂单详情的安全读模型：有效状态、解析快照、运营说明和拍卖碰撞。
 
-import type { AdminListingDetail } from "@auction/contracts/dto/admin/consignment";
+import type { AdminListingDetailV2 } from "@auction/contracts/dto/admin/consignment/listing-v2";
 import type { EquipmentLevel, EquipmentView } from "@auction/contracts/dto/public/consignment";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { Time } from "@auction/web-shared/ui/components/time";
@@ -20,7 +20,9 @@ import {
 import { ListingProgress, listingEquipment } from "./presentation";
 
 /** 安全详情按服务端的已记录状态与当前有效状态分别展示。 */
-export function ListingDetailSections(props: { readonly detail: AdminListingDetail }): JSX.Element {
+export function ListingDetailSections(props: {
+  readonly detail: AdminListingDetailV2;
+}): JSX.Element {
   const record = () => props.detail.record;
   const listing = () => record().listing;
   const view = () => listing().view;
@@ -74,6 +76,18 @@ export function ListingDetailSections(props: { readonly detail: AdminListingDeta
           <dd>
             <Time value={listing().expires_at} />
           </dd>
+          <Show when={record().hold}>
+            {(hold) => (
+              <>
+                <dt>{t("consignment-hold-id")}</dt>
+                <dd>{hold().hold_id}</dd>
+                <dt>{t("consignment-hold-since")}</dt>
+                <dd>
+                  <Time value={hold().set_at} />
+                </dd>
+              </>
+            )}
+          </Show>
           <Show when={record().admin_delist_reason}>
             {(reason) => (
               <>

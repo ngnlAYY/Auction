@@ -3,17 +3,15 @@
 import { expect, test } from "bun:test";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createComponent, flush } from "solid-js";
-
+import { detail, LISTINGS_PATH } from "./order-fixture.test";
 import {
   controlEvent,
   DOMText,
-  detail,
   failure,
   fakeClock,
   fakeFetch,
   LISTING_A,
   LISTING_B,
-  LISTINGS_PATH,
   mountConsignment,
   response,
   STATUS_PATH,

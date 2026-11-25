@@ -1,10 +1,13 @@
 // 认证运营列表：按有效状态等条件筛选并进入私有挂单详情。
 
-import type { AdminListing, AdminListingPage } from "@auction/contracts/dto/admin/consignment";
+import type {
+  AdminListingPageV2,
+  AdminListingV2,
+} from "@auction/contracts/dto/admin/consignment/listing-v2";
+import { ListingStateV2Schema } from "@auction/contracts/dto/public/consignment/listing-v2";
 import { ConsignmentUuidSchema } from "@auction/contracts/dto/public/consignment/scalar";
 import {
   ListingModeSchema,
-  ListingStateSchema,
   ListingWorldSchema,
 } from "@auction/contracts/dto/public/consignment/states";
 import { MAX_PUBLIC_PAGE_SIZE } from "@auction/contracts/dto/public/pagination";
@@ -20,7 +23,8 @@ import type { JSX } from "@solidjs/web";
 import { createEffect, For, Match, Show, Switch } from "solid-js";
 import { is } from "valibot";
 
-import { fetchAdminListings, LISTING_MAX_OFFSET } from "../../api/consignment/list";
+import { LISTING_MAX_OFFSET } from "../../api/consignment/list";
+import { fetchAdminListingsV2 } from "../../api/consignment/read-v2";
 import { useAdminSessionHost } from "../auth/shell";
 import { AdminPager, useAdminPage, useAdminPagination } from "../pagination";
 import { advanceCommandReload, createCommandReload, usePendingCommands } from "../pending/sources";
@@ -50,7 +54,7 @@ export function page(): JSX.Element {
     (request, size, signal) =>
       request.duplicate
         ? Promise.resolve(err("invalid_query"))
-        : fetchAdminListings(host, request, request.page, size, signal),
+        : fetchAdminListingsV2(host, request, request.page, size, signal),
   );
   const loadedPage = createValueMemo(() => {
     const result = listings();
@@ -105,7 +109,7 @@ export function page(): JSX.Element {
         <ListingFilter
           label={t("consignment-effective-state")}
           value={query.state().state}
-          options={ListingStateSchema.options}
+          options={ListingStateV2Schema.options}
           optionLabel={(state) => t(listingStateKey(state))}
           onChange={(state) => applyFilter({ state })}
         />
@@ -190,7 +194,7 @@ function ListingFilter<Choice extends string>(props: {
   );
 }
 
-function ListingTable(props: { readonly listingPage: AdminListingPage }): JSX.Element {
+function ListingTable(props: { readonly listingPage: AdminListingPageV2 }): JSX.Element {
   return (
     <Show
       when={props.listingPage.items.length > 0}
@@ -223,7 +227,7 @@ function ListingTable(props: { readonly listingPage: AdminListingPage }): JSX.El
   );
 }
 
-function ListingRow(props: { readonly row: AdminListing }): JSX.Element {
+function ListingRow(props: { readonly row: AdminListingV2 }): JSX.Element {
   const listing = () => props.row.listing;
   const equipment = createValueMemo(() => listingEquipment(listing().view));
   const progress = createValueMemo(() => {

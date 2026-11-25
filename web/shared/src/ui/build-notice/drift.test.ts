@@ -14,7 +14,9 @@ Object.defineProperty(globalThis, "__AUCTION_PACKAGE_VERSION__", {
 const { buildId } = await import("../bootstrap");
 const {
   SERVER_BUILD_HEADER,
+  SERVER_INDEPENDENT_BUILD_HEADER,
   buildIsStale,
+  buildReportedToSolid,
   observeServerBuildId,
   resetBuildDriftForTests,
   responseReportsCurrentBuild,
@@ -71,5 +73,25 @@ test("build_drift_notice_tracks_the_first_mismatch：首次发现构建号偏差
   expect(buildIsStale()).toBe(false);
   const pending = waitForBuildDrift();
   expect(await poll(pending)).toBe("pending");
+  resetBuildDriftForTests();
+});
+
+test("solid_compares_the_independent_build_header：回切旧壳时指针 build 不令 Solid 误提示", () => {
+  resetBuildDriftForTests();
+  expect(SERVER_INDEPENDENT_BUILD_HEADER).toBe("x-auction-build-independent");
+
+  // 正例：通用头报告旧壳 build，独立头仍是 Solid 自身构建号，不偏差。
+  const quiet = buildReportedToSolid("build_legacy_shell", buildId());
+  expect(quiet).toBe(buildId());
+  expect(observeServerBuildId(quiet ?? "")).toBe(false);
+  expect(buildIsStale()).toBe(false);
+
+  // 独立头缺失（未启用指针）时退回通用头，真实部署漂移仍然提示。
+  expect(buildReportedToSolid("build_other", null)).toBe("build_other");
+  // 反例：独立头本身与自身构建号不同，才是新的独立入口 build，必须提示。
+  expect(observeServerBuildId(buildReportedToSolid("build_other", "build_next") ?? "")).toBe(true);
+  expect(buildIsStale()).toBe(true);
+  // 两个头都缺失时没有可比较的值。
+  expect(buildReportedToSolid(null, null)).toBeNull();
   resetBuildDriftForTests();
 });

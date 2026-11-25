@@ -90,6 +90,8 @@ export function websocketUrl(auctionId: string): Result<string, string> {
   }
   const query = new URLSearchParams();
   query.append("auction_id", auctionId);
+  // 能力声明：本页面能解码 hello 的 independent_build 字段；旧壳不带该参数，服务端据此不追加。
+  query.append("independent_build", "1");
   return ok(`${websocketProtocol}//${host}/api/v1/ws?${query.toString()}`);
 }
 

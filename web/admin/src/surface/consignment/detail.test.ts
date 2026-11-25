@@ -99,7 +99,7 @@ test("已记录与有效状态同时显示；乱序 lot 原样、50 条截断标
         effective_reason: "auction_lot_created",
         view: { kind: "closed", reason: "auction_lot_created", equipment: SNAPSHOT },
       },
-      { can_delist: false },
+      { admin_actions: [] },
     );
     const conflicts = Array.from({ length: 50 }, (_, index) => ({
       lot_id: `a0000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
@@ -212,7 +212,7 @@ for (const scenario of REASONS) {
           effective_reason: scenario.reason,
           view: scenario.view,
         },
-        { can_delist: false },
+        { admin_actions: [] },
       );
       const requests = tree.requests.installFetch([success(adminDetail(record))]);
       mount();
@@ -238,9 +238,9 @@ test("待寄详情的已记录状态和有效状态都显示等待寄来装备�
         ...CONSIGNED_QUOTE,
         stored_state: "awaiting_deposit",
         effective_state: "awaiting_deposit",
-        view: { kind: "awaiting_deposit", equipment: SNAPSHOT, accepts_mail: false },
+        view: { kind: "awaiting_deposit", equipment: SNAPSHOT },
       },
-      { can_delist: false },
+      { admin_actions: [] },
     );
     const requests = tree.requests.installFetch([success(adminDetail(record))]);
     mount();
@@ -258,9 +258,9 @@ test("待寄详情的已记录状态和有效状态都显示等待寄来装备�
   });
 });
 
-test("有效活动但 can_delist=false 时仍没有下架入口", async () => {
+test("有效活动但 admin_actions 为空时仍没有下架入口", async () => {
   await withDetail(async (tree, mount) => {
-    tree.requests.installFetch([success(adminDetail(adminListing({}, { can_delist: false })))]);
+    tree.requests.installFetch([success(adminDetail(adminListing({}, { admin_actions: [] })))]);
     mount();
     await settle();
     expect(present(tree, "外部读取已暂停")).toBe(true);

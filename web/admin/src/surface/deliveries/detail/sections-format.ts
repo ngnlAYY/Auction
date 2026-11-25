@@ -86,6 +86,8 @@ export function dispositionKindLabel(kind: string): string {
       return t("delivery-detail-disposition-kind-legacy-self");
     case "preflight_retired":
       return t("delivery-detail-disposition-kind-preflight-retired");
+    case "season_closed":
+      return t("delivery-detail-disposition-kind-season-closed");
     default:
       return kind;
   }

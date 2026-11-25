@@ -12,9 +12,10 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { For, Match, Show, Switch } from "solid-js";
 
-import { fetchConsignmentDetail } from "../../api/consignment-detail";
+import { fetchConsignmentDetailV2 } from "../../api/consignment-orders";
 import { statValueLabel } from "../catalog/detail/stat-format";
 import { consignmentEnabled, useConsignmentCapability } from "./capability";
+import { purchaseHref } from "./order-labels";
 import {
   ConsignmentCapabilityGate,
   ConsignmentReadNotice,
@@ -85,7 +86,7 @@ export function PublicDetail(props: RoutePageProps): JSX.Element {
   const read = createTaskResource(request, async (requested, context) =>
     requested === null
       ? null
-      : { requested, result: await fetchConsignmentDetail(requested.listingId, context.signal) },
+      : { requested, result: await fetchConsignmentDetailV2(requested.listingId, context.signal) },
   );
   const refresh = () => {
     capability.refresh();
@@ -141,6 +142,11 @@ export function PublicDetail(props: RoutePageProps): JSX.Element {
                         </dl>
                         <ListingFacts listing={value().summary} />
                         <ModeNotice listing={value().summary} />
+                        <Show when={value().summary.purchasable}>
+                          <Link href={purchaseHref(value().summary.listing_id)}>
+                            {t("consignment-purchase-action")}
+                          </Link>
+                        </Show>
                       </article>
                     )}
                   </Show>

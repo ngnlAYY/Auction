@@ -6,12 +6,13 @@ import type {
   EquipmentLevel,
   ListingSummary,
 } from "@auction/contracts/dto/public/consignment/catalog";
+import type { PublicListingStateV2 } from "@auction/contracts/dto/public/consignment/listing-v2";
 import { unreachable } from "@auction/web-shared/result";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { formatCreditAmount } from "@auction/web-shared/ui/format";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { Match, Switch } from "solid-js";
+import { Match, Show, Switch } from "solid-js";
 
 import type { ConsignmentReadError } from "../../api/consignment-status";
 import { type ConsignmentCapability, consignmentEnabled } from "./capability";
@@ -101,7 +102,9 @@ export function consignmentLevelLabel(level: EquipmentLevel): string {
 }
 
 /** 卡片与公开详情共用的挂单事实，仅接受公开投影。 */
-export function ListingFacts(props: { readonly listing: ListingSummary }): JSX.Element {
+export function ListingFacts(props: {
+  readonly listing: Pick<ListingSummary, "price" | "seller_name" | "world_id" | "mode">;
+}): JSX.Element {
   return (
     <dl class="public-consignment-listing__facts">
       <div>
@@ -125,18 +128,23 @@ export function ListingFacts(props: { readonly listing: ListingSummary }): JSX.E
 }
 
 /** 待寄只展示尚未代管的提示，游戏内联系说明只用于非寄售。 */
-export function ModeNotice(props: { readonly listing: ListingSummary }): JSX.Element {
+export function ModeNotice(props: {
+  readonly listing: Pick<ListingSummary, "mode"> & { readonly state: PublicListingStateV2 };
+}): JSX.Element {
+  // 已代管在售的寄售件不再是“等待寄来”，不显示待寄提示。
   return (
-    <p class="public-consignment-listing__notice">
-      {props.listing.mode === "direct"
-        ? t("consignment-direct-notice")
-        : t("consignment-deposit-notice")}
-    </p>
+    <Show when={props.listing.mode === "direct" || props.listing.state === "awaiting_deposit"}>
+      <p class="public-consignment-listing__notice">
+        {props.listing.mode === "direct"
+          ? t("consignment-direct-notice")
+          : t("consignment-deposit-notice")}
+      </p>
+    </Show>
   );
 }
 
 /** 公开状态显示使用寄售闭集映射。 */
-export function publicListingStateLabel(state: ListingSummary["state"]): string {
+export function publicListingStateLabel(state: PublicListingStateV2): string {
   const key = listingStateKey(state);
   return key === null ? "" : t(key);
 }

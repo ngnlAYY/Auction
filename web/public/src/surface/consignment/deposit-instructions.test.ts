@@ -20,7 +20,7 @@ import {
   type PublicSessionResult,
 } from "../index";
 import { ALICE } from "../shell/session-fixture";
-import { listing } from "./private-fixture.test";
+import { listing, RECEIPT_V2_PATH } from "./private-fixture.test";
 import {
   controlEvent,
   DOMText,
@@ -32,7 +32,7 @@ import {
 } from "./read-fixture.test";
 
 const PATH = `/consignment/me/${LISTING_A}/deposit-instructions`;
-const OWNED = `/api/v1/me/consignment/listings/${LISTING_A}`;
+const OWNED = `/api/v2/me/consignment/listings/${LISTING_A}`;
 const INSTRUCTIONS = `/api/v2/me/consignment/listings/${LISTING_A}/deposit-instructions`;
 const RESERVATIONS = `/api/v2/me/consignment/listings/${LISTING_A}/deposit-reservations`;
 const CODE = `C1-${"A".repeat(43)}`;
@@ -317,6 +317,8 @@ test("outcome_unknown 保留同一命令与正文，只允许原样重送", asyn
       return response(listing("awaiting_deposit", { version: 3 }));
     }
     if (request.url.pathname === INSTRUCTIONS) return response(current);
+    // 重送前先查原回执：查不到才原样重送。
+    if (request.url.pathname.startsWith(RECEIPT_V2_PATH)) return failure(404, "command_not_found");
     if (request.url.pathname === RESERVATIONS) {
       writes += 1;
       bodies.push(String(request.init?.body));
@@ -373,6 +375,7 @@ test("非可信 5xx 仍只允许原命令原样重送", async () => {
       return response(listing("awaiting_deposit", { version: 3 }));
     }
     if (request.url.pathname === INSTRUCTIONS) return response(current);
+    if (request.url.pathname.startsWith(RECEIPT_V2_PATH)) return failure(404, "command_not_found");
     if (request.url.pathname === RESERVATIONS) {
       writes += 1;
       bodies.push(String(request.init?.body));

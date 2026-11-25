@@ -1,7 +1,11 @@
 // Admin 寄售行为测试的纯内存挂单与错误回执。
 
-import type { AdminListing, AdminListingDetail } from "@auction/contracts/dto/admin/consignment";
-import type { EquipmentView, OwnedListing } from "@auction/contracts/dto/public/consignment";
+import type {
+  AdminListingDetailV2,
+  AdminListingV2,
+} from "@auction/contracts/dto/admin/consignment/listing-v2";
+import type { EquipmentView } from "@auction/contracts/dto/public/consignment";
+import type { OwnedListingV2 } from "@auction/contracts/dto/public/consignment/listing-v2";
 
 import type { Reply } from "../../api/api-request-fixture";
 
@@ -12,11 +16,15 @@ export const SELLER_ID = "10000000-0000-4000-8000-000000000002";
 /** 测试中的独立命令 UUID。 */
 export const COMMAND_ID = "10000000-0000-4000-8000-000000000003";
 /** 测试读取与写入共用的 API 集合路径。 */
-export const LISTINGS = "/api/v1/admin/consignment/listings";
+export const LISTINGS = "/api/v2/admin/consignment/listings";
 /** 当前挂单的详情路径。 */
 export const DETAIL = `${LISTINGS}/${LISTING_ID}`;
 /** 当前挂单的 v2 下架/止售路径。 */
 export const DELIST = `/api/v2/admin/consignment/listings/${LISTING_ID}/delist`;
+/** 当前挂单的 v2 解除止售路径。 */
+export const RELEASE_HOLD = `/api/v2/admin/consignment/listings/${LISTING_ID}/release-hold`;
+/** 当前挂单上有效止售的 ID。 */
+export const HOLD_ID = "10000000-0000-4000-8000-000000000004";
 /** 浏览器中的挂单详情路径。 */
 export const DETAIL_PAGE = `/consignment/listings/${LISTING_ID}`;
 /** 购买前可交易的脱敏装备白名单。 */
@@ -41,9 +49,9 @@ export const CONSIGNED_QUOTE = {
 
 /** 缺省为无快照的在途解析，支持传入服务端的其他合法投影。 */
 export function adminListing(
-  listing: Partial<OwnedListing> = {},
-  record: Partial<Omit<AdminListing, "listing">> = {},
-): AdminListing {
+  listing: Partial<OwnedListingV2> = {},
+  record: Partial<Omit<AdminListingV2, "listing">> = {},
+): AdminListingV2 {
   return {
     listing: {
       listing_id: LISTING_ID,
@@ -59,6 +67,9 @@ export function adminListing(
       created_at: "2026-11-18T00:00:00Z",
       updated_at: "2026-11-18T00:15:00Z",
       expires_at: "2026-11-19T00:00:00Z",
+      generation: null,
+      position_id: null,
+      loss_case_id: null,
       stored_state: "resolving",
       effective_state: "resolving",
       effective_reason: null,
@@ -79,21 +90,23 @@ export function adminListing(
     seller_name: "Fixture seller",
     seller_user_id: SELLER_ID,
     admin_delist_reason: null,
-    can_delist: true,
+    hold: null,
+    position: null,
+    admin_actions: ["delist"],
     ...record,
   };
 }
 
 /** 只读挂单可包含关停清退或已下架的元数据。 */
 export function adminDetail(
-  record: AdminListing,
-  other: Partial<AdminListingDetail> = {},
-): AdminListingDetail {
+  record: AdminListingV2,
+  other: Partial<AdminListingDetailV2> = {},
+): AdminListingDetailV2 {
   return { record, conflicts: [], conflicts_truncated: false, ...other };
 }
 
 /** 已下架的无快照记录。 */
-export function delistedListing(reason: string): AdminListing {
+export function delistedListing(reason: string): AdminListingV2 {
   return adminListing(
     {
       version: 4,
@@ -102,7 +115,7 @@ export function delistedListing(reason: string): AdminListing {
       effective_reason: "admin_delisted",
       view: { kind: "closed", reason: "admin_delisted", equipment: null },
     },
-    { can_delist: false, admin_delist_reason: reason },
+    { admin_actions: [], admin_delist_reason: reason },
   );
 }
 
@@ -165,6 +178,60 @@ export function holdSetReceipt(
     listing_id: LISTING_ID,
     listing_version: version,
     state: "held_off_market",
-    hold_id: "10000000-0000-4000-8000-000000000004",
+    hold_id: HOLD_ID,
+  };
+}
+
+/** 带有效运营止售的代管件；动作清单由调用方决定。 */
+export function heldListing(
+  actions: AdminListingV2["admin_actions"] = ["release_hold"],
+): AdminListingV2 {
+  return adminListing(
+    {
+      ...CONSIGNED_QUOTE,
+      mode: "consigned",
+      generation: 1,
+      stored_state: "held_off_market",
+      effective_state: "held_off_market",
+      effective_reason: "operations_hold",
+      view: {
+        kind: "held_off_market",
+        equipment: SNAPSHOT,
+        reason: "operations_hold",
+        hold_id: null,
+      },
+    },
+    {
+      hold: { hold_id: HOLD_ID, set_at: "2026-11-18T00:20:00Z" },
+      position: { position_id: LISTING_ID, state: "in_custody", version: 2, generation: 1 },
+      admin_actions: actions,
+    },
+  );
+}
+
+/** 解除止售成功时的安全回执；hold_id 可被测试改成不符值。 */
+export function holdReleasedReceipt(
+  commandId: string,
+  version = 4,
+  holdId = HOLD_ID,
+): {
+  schema_version: 2;
+  operation: "release_hold";
+  disposition: "hold_released";
+  command_id: string;
+  listing_id: string;
+  listing_version: number;
+  state: "held_off_market";
+  hold_id: string;
+} {
+  return {
+    schema_version: 2,
+    command_id: commandId,
+    operation: "release_hold",
+    disposition: "hold_released",
+    listing_id: LISTING_ID,
+    listing_version: version,
+    state: "held_off_market",
+    hold_id: holdId,
   };
 }

@@ -431,6 +431,7 @@ fn disposition_kind_label(kind: &str) -> String {
         }
         "legacy_self" => t!("delivery-detail-disposition-kind-legacy-self"),
         "preflight_retired" => t!("delivery-detail-disposition-kind-preflight-retired"),
+        "season_closed" => t!("delivery-detail-disposition-kind-season-closed"),
         other => other.to_owned(),
     }
 }

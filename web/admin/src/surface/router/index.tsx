@@ -244,6 +244,13 @@ export const ADMIN_PAGES: Readonly<Record<string, RoutePage>> = {
   ConsignmentQuarantine: lazyPage(() =>
     import("../consignment/quarantine").then(({ quarantinePage }) => quarantinePage),
   ),
+  ConsignmentOrders: lazyPage(() => import("../consignment/orders").then(({ page }) => page)),
+  ConsignmentOrderDetail: lazyPage(() =>
+    import("../consignment/order-detail").then(({ detailPage }) => detailPage),
+  ),
+  ConsignmentLoss: lazyPage(() =>
+    import("../consignment/loss").then(({ lossCasePage }) => lossCasePage),
+  ),
   Mails: lazyPage(() => import("../mail/page").then(({ page }) => page)),
   MailOverview: pageComponent(MailOverview),
   Cookies: lazyPage(() => import("../credentials/page").then(({ page }) => page)),

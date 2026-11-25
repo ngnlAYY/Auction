@@ -227,6 +227,7 @@ pub(super) fn valid_disposition(
                 | "recovery_equipment_recovered"
                 | "legacy_self"
                 | "preflight_retired"
+                | "season_closed"
         )
         && parse_delivery_time(&value.occurred_at).is_some()
         && value.status.as_deref().is_none_or(valid_trimmed_text)

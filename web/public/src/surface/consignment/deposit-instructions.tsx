@@ -1,7 +1,7 @@
 // 本人寄件指引页：none/active 两态、复制预约码、签发与过期刷新。
 
-import type { OwnedListing } from "@auction/contracts/dto/public/consignment";
 import type { DepositInstructions } from "@auction/contracts/dto/public/consignment/deposit";
+import type { OwnedListingV2 } from "@auction/contracts/dto/public/consignment/listing-v2";
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
 import { Link, type RoutePageProps } from "@auction/web-shared/router";
@@ -11,7 +11,7 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { Match, Show, Switch } from "solid-js";
 import { fetchDepositInstructions } from "../../api/consignment-deposit";
-import { fetchOwnedConsignmentListing } from "../../api/consignment-owned";
+import { fetchOwnedConsignmentListingV2 } from "../../api/consignment-owned-v2";
 import { type ConsignmentPrivateError, validConsignmentUuid } from "../../api/consignment-private";
 import { consignmentWorldLabel } from "./filters";
 import { type ConsignmentIntent, useConsignmentPending } from "./pending";
@@ -20,7 +20,7 @@ import { consignmentErrorMessage, PrivateConsignmentPage, PrivateReadError } fro
 import { useConsignmentRefresh } from "./refresh";
 
 interface Loaded {
-  readonly listing: OwnedListing;
+  readonly listing: OwnedListingV2;
   readonly instructions: DepositInstructions;
 }
 
@@ -52,7 +52,7 @@ function Instructions(props: {
 }): JSX.Element {
   const read = createTaskResource(props.canUse, async (authorized, context) => {
     if (!authorized) return null;
-    const listing = await fetchOwnedConsignmentListing(
+    const listing = await fetchOwnedConsignmentListingV2(
       props.userId,
       props.listingId,
       context.signal,

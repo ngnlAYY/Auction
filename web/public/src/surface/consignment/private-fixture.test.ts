@@ -3,11 +3,11 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { PUBLIC_EXPECTED_USER_ID_HEADER } from "@auction/contracts/dto/public/commands";
+import type { CommandReceipt } from "@auction/contracts/dto/public/consignment";
 import type {
-  CommandReceipt,
-  ListingView,
-  OwnedListing,
-} from "@auction/contracts/dto/public/consignment";
+  ListingViewV2,
+  OwnedListingV2,
+} from "@auction/contracts/dto/public/consignment/listing-v2";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { ok } from "@auction/web-shared/result";
 import { createRouter, RouterContext } from "@auction/web-shared/router";
@@ -46,8 +46,12 @@ export {
 export { createElement, createTextNode, ref, spread } from "../shell/navigation-fixture.test";
 export { ALICE, BOB };
 
-export const OWNED_PATH = "/api/v1/me/consignment/listings";
+export const OWNED_PATH = "/api/v2/me/consignment/listings";
+/** 新撤回走的 v2 命令路由；v1 的 withdraw 只剩磁盘上遗留记录的重放。 */
+export const WITHDRAW_PATH = "/api/v2/consignment/listings";
 export const COMMAND_PATH = "/api/v1/me/consignment/commands";
+/** 预约与 v2 撤回的本人命令回执查询；未决记录重送前先查这里。 */
+export const RECEIPT_V2_PATH = "/api/v2/me/consignment/commands";
 export const FIXTURE_KEY = "012345abcd";
 export const EQUIPMENT_URL = `https://hentaiverse.org/equip/42/${FIXTURE_KEY}`;
 export const ISEKAI_URL = `https://hentaiverse.org/isekai/equip/42/${FIXTURE_KEY}`;
@@ -61,13 +65,19 @@ export const PENDING_KEY = `hv.consignment.pending.${ALICE.user_id}`;
 export const OPERATIONS = ["register", "reprice", "withdraw"] as const;
 /** 寄售卖家的三种写操作。 */
 export type Operation = (typeof OPERATIONS)[number];
+/** 页面上的撤回按钮登记的是 v2 的 withdraw_deposit，其余与页面操作同名。 */
+export const STORED_OPERATION: Record<Operation, string> = {
+  register: "register",
+  reprice: "reprice",
+  withdraw: "withdraw_deposit",
+};
 export const TIMES = {
   created: "2026-11-19T00:00:00Z",
   updated: "2026-11-20T00:00:00Z",
   expires: "2026-11-21T00:00:00Z",
 };
 
-export const VIEWS: Record<ListingView["kind"], ListingView> = {
+export const VIEWS: Record<ListingViewV2["kind"], ListingViewV2> = {
   resolving: {
     kind: "resolving",
     progress: {
@@ -97,23 +107,47 @@ export const VIEWS: Record<ListingView["kind"], ListingView> = {
   awaiting_deposit: {
     kind: "awaiting_deposit",
     equipment: detail().equipment,
-    accepts_mail: false,
   },
+  deposit_accepted: { kind: "deposit_accepted", equipment: detail().equipment },
+  available: { kind: "available", equipment: detail().equipment },
+  sale_pending: { kind: "sale_pending", equipment: detail().equipment },
+  held_off_market: {
+    kind: "held_off_market",
+    equipment: detail().equipment,
+    reason: "operations_hold",
+    hold_id: null,
+  },
+  withdrawal_pending: { kind: "withdrawal_pending", equipment: detail().equipment },
   closed: { kind: "closed", reason: "service_disabled", equipment: detail().equipment },
   expired: { kind: "expired", reason: "lookup_deadline", equipment: null },
 };
 
+const CONSIGNED_KINDS = new Set<string>([
+  "awaiting_deposit",
+  "deposit_accepted",
+  "available",
+  "sale_pending",
+  "held_off_market",
+  "withdrawal_pending",
+]);
+const GENERATED_KINDS = new Set<string>([
+  "available",
+  "sale_pending",
+  "held_off_market",
+  "withdrawal_pending",
+]);
+
 export function listing(
-  kind: ListingView["kind"],
-  update: Partial<OwnedListing> = {},
-): OwnedListing {
+  kind: ListingViewV2["kind"],
+  update: Partial<OwnedListingV2> = {},
+): OwnedListingV2 {
   const view = VIEWS[kind];
   const state = kind === "lookup_failed" || kind === "ineligible" ? "rejected" : kind;
   return {
     listing_id: LISTING_A,
     version: 3,
     world_id: "main",
-    mode: kind === "awaiting_deposit" ? "consigned" : "direct",
+    mode: CONSIGNED_KINDS.has(kind) ? "consigned" : "direct",
     external_equipment_id: "42",
     price: 101,
     pricing_version: 1,
@@ -123,6 +157,9 @@ export function listing(
     created_at: TIMES.created,
     updated_at: TIMES.updated,
     expires_at: TIMES.expires,
+    generation: GENERATED_KINDS.has(kind) ? 1 : null,
+    position_id: null,
+    loss_case_id: null,
     stored_state: state,
     effective_state: state,
     effective_reason: "reason" in view ? view.reason : null,
@@ -161,7 +198,22 @@ export function isWrite({ init }: RequestRecord): boolean {
 }
 
 export function writePath({ url }: RequestRecord): boolean {
-  return url.pathname === LISTINGS_PATH || url.pathname.startsWith(`${LISTINGS_PATH}/`);
+  return [LISTINGS_PATH, WITHDRAW_PATH].some(
+    (base) => url.pathname === base || url.pathname.startsWith(`${base}/`),
+  );
+}
+
+/** v2 撤回的 200 closed 回执。 */
+export function withdrawReceipt(commandId: string, version = 4) {
+  return {
+    schema_version: 2,
+    operation: "withdraw",
+    disposition: "closed",
+    command_id: commandId,
+    listing_id: LISTING_A,
+    listing_version: version,
+    state: "closed",
+  };
 }
 
 export function requestBody(request: RequestRecord | undefined): Record<string, unknown> {
@@ -170,7 +222,7 @@ export function requestBody(request: RequestRecord | undefined): Record<string, 
   return JSON.parse(text);
 }
 
-export function pageData(url: URL, items: OwnedListing[], total = items.length) {
+export function pageData(url: URL, items: OwnedListingV2[], total = items.length) {
   return {
     items,
     total,

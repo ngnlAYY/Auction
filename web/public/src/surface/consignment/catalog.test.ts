@@ -2,7 +2,7 @@
 
 import { expect, test } from "bun:test";
 import { createComponent } from "solid-js";
-
+import { LISTINGS_PATH, pageResponse, summary } from "./order-fixture.test";
 import {
   controlEvent,
   DOMText,
@@ -11,14 +11,11 @@ import {
   fakeFetch,
   LISTING_A,
   LISTING_B,
-  LISTINGS_PATH,
   mountConsignment,
-  pageResponse,
   response,
   STATUS_PATH,
   settle,
   status,
-  summary,
 } from "./read-fixture.test";
 import { loadCatalog } from "./render-fixture.test";
 

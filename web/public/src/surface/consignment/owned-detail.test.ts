@@ -1,7 +1,10 @@
 // 本人详情七种投影、服务端授权动作、陈旧版本与重读生命周期。
 
 import { expect, test } from "bun:test";
-import type { ListingAction, ListingView } from "@auction/contracts/dto/public/consignment";
+import type {
+  ListingActionV2,
+  ListingViewV2,
+} from "@auction/contracts/dto/public/consignment/listing-v2";
 
 import {
   ALICE,
@@ -11,8 +14,11 @@ import {
   listing,
   mountPrivate,
   OWNED_PATH,
+  RECEIPT_V2_PATH,
   receipt,
   requestBody,
+  WITHDRAW_PATH,
+  withdrawReceipt,
 } from "./private-fixture.test";
 import {
   controlEvent,
@@ -28,6 +34,9 @@ import {
 } from "./read-fixture.test";
 
 const DETAIL = `/consignment/me/${LISTING_A}`;
+// 明显的假标识，不对应任何真实 position 或损失案件。
+const POSITION = "00000000-0000-4000-8000-0000000000c3";
+const LOSS_CASE = "00000000-0000-4000-8000-0000000000d4";
 const REPRICE = "Change asking price";
 const WITHDRAW = "Cancel listing";
 
@@ -63,7 +72,7 @@ const CASES = [
   ],
   ["closed", ["Closed", "service was disabled"], true],
   ["expired", ["Expired", "lookup deadline has passed"], false],
-] as const satisfies readonly (readonly [ListingView["kind"], readonly string[], boolean])[];
+] as const satisfies readonly (readonly [ListingViewV2["kind"], readonly string[], boolean])[];
 
 test.each(CASES)("本人详情 %s 只展示本视图的数据与原因", async (view, labels, hasEquipment) => {
   const row = listing(
@@ -101,9 +110,14 @@ test.each([
   ["displayed", ["reprice"], true, false],
   ["displayed", [], false, false],
   ["awaiting_deposit", ["reprice", "withdraw"], true, true],
+  ["available", ["reprice", "withdraw"], true, true],
+  ["held_off_market", ["withdraw"], false, true],
+  ["deposit_accepted", [], false, false],
+  ["sale_pending", [], false, false],
+  ["withdrawal_pending", [], false, false],
 ] as const satisfies readonly (readonly [
-  ListingView["kind"],
-  readonly ListingAction[],
+  ListingViewV2["kind"],
+  readonly ListingActionV2[],
   boolean,
   boolean,
 ])[])("动作由 %s 的 allowed_actions 单独决定", async (view, actions, reprice, withdraw) => {
@@ -205,15 +219,7 @@ test("取消打开既有确认对话框，返回不发包；确认后以原版�
   const transport = fakeFetch((request) => {
     if (isWrite(request)) {
       withdrawn = true;
-      return response(
-        receipt(String(requestBody(request).command_id), {
-          operation: "withdraw",
-          listing_version: 4,
-          state: "closed",
-          disposition: "closed",
-          price: null,
-        }),
-      );
+      return response(withdrawReceipt(String(requestBody(request).command_id)));
     }
     return response(
       withdrawn ? listing("closed") : listing("resolving", { allowed_actions: ["withdraw"] }),
@@ -274,33 +280,23 @@ test("解析中每 30 秒重读，离开时取消请求与后续定时器", asyn
   }
 });
 
-test("已完成详情不轮询；发生未决命令后每 30 秒重读，回执落定后停止", async () => {
+test("已完成详情不轮询；撤回未决后每 30 秒重读，原样重送的回执落定后停止", async () => {
   const clock = fakeClock();
-  let commandId = "";
-  let checks = 0;
+  let writes = 0;
   let reads = 0;
   const transport = fakeFetch((request) => {
     if (isWrite(request)) {
-      commandId = String(requestBody(request).command_id);
-      return failure(503, "outcome_unknown");
+      writes += 1;
+      // 首次结果未知：重送前先查 v2 回执，查不到才原样重送同一条命令。
+      return writes === 1
+        ? failure(503, "outcome_unknown")
+        : response(withdrawReceipt(String(requestBody(request).command_id)));
     }
-    if (request.url.pathname.startsWith(COMMAND_PATH)) {
-      checks += 1;
-      return response({
-        code: "ok",
-        http_status: 200,
-        receipt: receipt(commandId, {
-          operation: "withdraw",
-          listing_version: 4,
-          state: "closed",
-          disposition: "closed",
-          price: null,
-        }),
-      });
-    }
+    if (request.url.pathname.startsWith(COMMAND_PATH)) return failure(404, "command_not_found");
+    if (request.url.pathname.startsWith(RECEIPT_V2_PATH)) return failure(404, "command_not_found");
     reads += 1;
     return response(
-      checks === 0 ? listing("displayed", { allowed_actions: ["withdraw"] }) : listing("closed"),
+      writes < 2 ? listing("displayed", { allowed_actions: ["withdraw"] }) : listing("closed"),
     );
   });
   const page = await mountPrivate(DETAIL);
@@ -314,8 +310,11 @@ test("已完成详情不轮询；发生未决命令后每 30 秒重读，回执�
     await settle();
     expect(clock.activeIn(30_000)).toBe(1);
     await clock.advance(30_000);
-    expect(checks).toBe(1);
     expect(reads).toBeGreaterThan(1);
+    expect(writes).toBe(1);
+    controlEvent(page.button("Retry original request"), "onClick");
+    await settle();
+    expect(writes).toBe(2);
     expect(page.text()).toContain("Closed");
     expect(clock.activeIn(30_000)).toBe(0);
   } finally {
@@ -340,6 +339,173 @@ test("更换详情目标立即撤下旧投影，非本人或不存在的 404 只
     await settle();
     expect(page.text()).toContain("This listing does not exist");
     expect(page.text()).not.toContain("Fake Oak Staff");
+  } finally {
+    page.dispose();
+    transport.restore();
+  }
+});
+
+test("代管件撤回走 v2 路由登记意愿，回执后重读为撤回处理中且不再出现撤回入口", async () => {
+  let requested = false;
+  const transport = fakeFetch((request) => {
+    if (isWrite(request)) {
+      requested = true;
+      return response({
+        schema_version: 2,
+        operation: "withdraw",
+        disposition: "withdrawal_requested",
+        command_id: String(requestBody(request).command_id),
+        listing_id: LISTING_A,
+        listing_version: 4,
+        state: "withdrawal_pending",
+        intent_id: "00000000-0000-4000-8000-0000000000c3",
+      });
+    }
+    return response(
+      requested
+        ? listing("withdrawal_pending", { version: 4 })
+        : listing("available", { allowed_actions: ["withdraw"] }),
+    );
+  });
+  const page = await mountPrivate(DETAIL);
+  try {
+    await settle();
+    controlEvent(page.button(WITHDRAW), "onClick");
+    controlEvent(page.form(WITHDRAW), "onSubmit");
+    await settle();
+    const writes = transport.requests.filter(isWrite);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.url.pathname).toBe(`${WITHDRAW_PATH}/${LISTING_A}/withdraw`);
+    expect(requestBody(writes[0])).toEqual({
+      command_id: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      expected_version: 3,
+    });
+    expect(page.text()).toContain("Withdrawal pending");
+    expect(page.button(WITHDRAW)).toBeNull();
+  } finally {
+    page.dispose();
+    transport.restore();
+  }
+});
+
+/** 已在库件直接建撤回代的 202 回执；合同与装备 ID 是固定假值。 */
+function acceptedWithdrawal(commandId: string): Response {
+  return Response.json(
+    {
+      code: "accepted",
+      message: "",
+      data: {
+        schema_version: 2,
+        operation: "withdraw",
+        disposition: "withdrawal_accepted",
+        command_id: commandId,
+        listing_id: LISTING_A,
+        listing_version: 4,
+        state: "withdrawal_pending",
+        contract_id: "00000000-0000-4000-8000-0000000000c4",
+        equipment_id: "00000000-0000-4000-8000-0000000000c5",
+      },
+    },
+    { status: 202 },
+  );
+}
+
+test("已在库件撤回得 202 withdrawal_accepted：只写一次，提示已受理并重读为撤回处理中", async () => {
+  let writes = 0;
+  const transport = fakeFetch((request) => {
+    if (isWrite(request)) {
+      writes += 1;
+      return acceptedWithdrawal(String(requestBody(request).command_id));
+    }
+    return response(
+      writes > 0
+        ? listing("withdrawal_pending", { version: 4 })
+        : listing("available", { allowed_actions: ["withdraw"] }),
+    );
+  });
+  const page = await mountPrivate(DETAIL);
+  try {
+    await settle();
+    controlEvent(page.button(WITHDRAW), "onClick");
+    controlEvent(page.form(WITHDRAW), "onSubmit");
+    await settle();
+    expect(writes).toBe(1);
+    expect(page.text()).toContain("Withdrawal accepted. The equipment will be mailed back to you.");
+    expect(page.text()).toContain("Withdrawal pending");
+    expect(page.button(WITHDRAW)).toBeNull();
+    expect(page.button("Retry original request")).toBeNull();
+  } finally {
+    page.dispose();
+    transport.restore();
+  }
+});
+
+test("202 回执与命令不符按结果未知：不提示受理，只开放原样重送且请求体逐字节相同", async () => {
+  const bodies: string[] = [];
+  const transport = fakeFetch((request) => {
+    if (isWrite(request)) {
+      bodies.push(String(request.init?.body));
+      const commandId = String(requestBody(request).command_id);
+      // 首次回执属于另一条命令：页面不能据此宣告受理，也不能换新命令 ID。
+      return acceptedWithdrawal(
+        bodies.length === 1 ? "00000000-0000-4000-8000-0000000000c6" : commandId,
+      );
+    }
+    if (request.url.pathname.startsWith(RECEIPT_V2_PATH)) return failure(404, "command_not_found");
+    return response(
+      bodies.length > 1
+        ? listing("withdrawal_pending", { version: 4 })
+        : listing("available", { allowed_actions: ["withdraw"] }),
+    );
+  });
+  const page = await mountPrivate(DETAIL);
+  try {
+    await settle();
+    controlEvent(page.button(WITHDRAW), "onClick");
+    controlEvent(page.form(WITHDRAW), "onSubmit");
+    await settle();
+    expect(bodies).toHaveLength(1);
+    expect(page.text()).not.toContain("Withdrawal accepted");
+    controlEvent(page.button("Retry original request"), "onClick");
+    await settle();
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toBe(bodies[0]);
+    expect(page.text()).toContain("Withdrawal accepted. The equipment will be mailed back to you.");
+  } finally {
+    page.dispose();
+    transport.restore();
+  }
+});
+
+test("本人视图不展示止售 hold_id", async () => {
+  const transport = fakeFetch(() =>
+    response(listing("held_off_market", { allowed_actions: ["withdraw"] })),
+  );
+  const page = await mountPrivate(DETAIL);
+  try {
+    await settle();
+    expect(page.text()).toContain("Held off market");
+    expect(page.text().toLowerCase()).not.toContain("hold id");
+  } finally {
+    page.dispose();
+    transport.restore();
+  }
+});
+
+test.each([
+  ["有损失案件", LOSS_CASE, true],
+  ["没有损失案件", null, false],
+] as const)("本人详情%s时损失回执链接是否出现", async (_name, lossCaseId, linked) => {
+  const transport = fakeFetch(() =>
+    response(listing("closed", { position_id: POSITION, loss_case_id: lossCaseId })),
+  );
+  const page = await mountPrivate(DETAIL);
+  try {
+    await settle();
+    expect(page.errors).toEqual([]);
+    const link = page.find((node) => node.attributes.href === `/consignment/loss/${POSITION}`);
+    expect(link !== null).toBe(linked);
+    expect(page.text().includes("Loss case")).toBe(linked);
   } finally {
     page.dispose();
     transport.restore();

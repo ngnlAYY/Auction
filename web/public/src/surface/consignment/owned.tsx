@@ -1,9 +1,11 @@
 // 本人挂单列表，按有效态查询并呈现各类挂单的摘要。
 
-import type { OwnedListing } from "@auction/contracts/dto/public/consignment";
+import {
+  ListingStateV2Schema,
+  type OwnedListingV2,
+} from "@auction/contracts/dto/public/consignment/listing-v2";
 import {
   ListingModeSchema,
-  ListingStateSchema,
   ListingWorldSchema,
 } from "@auction/contracts/dto/public/consignment/states";
 import { MAX_PUBLIC_PAGE_SIZE } from "@auction/contracts/dto/public/pagination";
@@ -20,14 +22,20 @@ import type { JSX } from "@solidjs/web";
 import { For, Match, Show, Switch } from "solid-js";
 
 import {
-  fetchOwnedConsignmentListings,
-  type OwnedConsignmentQuery,
-} from "../../api/consignment-owned";
+  fetchOwnedConsignmentListingsV2,
+  type OwnedConsignmentQueryV2,
+} from "../../api/consignment-owned-v2";
 import type { ConsignmentPrivateError } from "../../api/consignment-private";
 import { PUBLIC_PAGE_SIZES } from "../pagination";
 import { publicOffsetLastPage } from "../pagination/parameters";
 import { consignmentWorldLabel } from "./filters";
-import { listingModeKey, listingReasonKey, listingStateKey, listingViewKey } from "./labels";
+import {
+  listingModeKey,
+  listingReasonKey,
+  listingStateKey,
+  listingViewKey,
+  relistConsignmentHref,
+} from "./labels";
 import { useOwnedConsignmentQuery } from "./owned-query";
 import { useConsignmentPending } from "./pending";
 import { PendingCommand } from "./pending-view";
@@ -62,7 +70,7 @@ function OwnedListings(props: {
       ? null
       : {
           requested,
-          result: await fetchOwnedConsignmentListings(props.userId, requested, context.signal),
+          result: await fetchOwnedConsignmentListingsV2(props.userId, requested, context.signal),
         },
   );
   const recoveryError = createCell<ConsignmentPrivateError | null>(null);
@@ -151,8 +159,8 @@ function OwnedListings(props: {
 }
 
 function StateFilter(props: {
-  readonly query: OwnedConsignmentQuery;
-  readonly onChange: (query: OwnedConsignmentQuery) => void;
+  readonly query: OwnedConsignmentQueryV2;
+  readonly onChange: (query: OwnedConsignmentQueryV2) => void;
 }): JSX.Element {
   return (
     <div class="public-consignment-account__filters">
@@ -198,13 +206,13 @@ function StateFilter(props: {
           value={props.query.state ?? ""}
           onChange={(event) => {
             const state =
-              ListingStateSchema.options.find((state) => state === event.currentTarget.value) ??
+              ListingStateV2Schema.options.find((state) => state === event.currentTarget.value) ??
               null;
             props.onChange({ ...props.query, state, page: 1 });
           }}
         >
           <option value="">{t("filter-all")}</option>
-          <For each={ListingStateSchema.options}>
+          <For each={ListingStateV2Schema.options}>
             {(state) => {
               const key = listingStateKey(state);
               // 聚合拒绝态包含两个服务端视图，合同未定义独立的 Public 文案。
@@ -223,7 +231,7 @@ function StateFilter(props: {
   );
 }
 
-function OwnedRow(props: { readonly listing: OwnedListing }): JSX.Element {
+function OwnedRow(props: { readonly listing: OwnedListingV2 }): JSX.Element {
   const view = () => props.listing.view;
   const reason = () => {
     const current = view();
@@ -240,14 +248,19 @@ function OwnedRow(props: { readonly listing: OwnedListing }): JSX.Element {
       <span>{formatCreditAmount(props.listing.price)}</span>
       <Time value={props.listing.updated_at} />
       <Show when={reason()}>{(reason) => <span>{t(listingReasonKey(reason()))}</span>}</Show>
+      <Show when={props.listing.allowed_actions.includes("relist")}>
+        <Link href={relistConsignmentHref(props.listing.listing_id)}>
+          {t("consignment-relist")}
+        </Link>
+      </Show>
     </li>
   );
 }
 
 function OwnedPager(props: {
-  readonly query: OwnedConsignmentQuery;
+  readonly query: OwnedConsignmentQueryV2;
   readonly total: number;
-  readonly onChange: (query: OwnedConsignmentQuery) => void;
+  readonly onChange: (query: OwnedConsignmentQueryV2) => void;
 }): JSX.Element {
   // 与 PublicPager 及 3C 复用底层控件；PublicPager 自身会写拍卖 URL 与偏好。
   return (

@@ -1,16 +1,16 @@
 // 本人挂单的寄售专属书签与有效状态筛选。
 
+import { ListingStateV2Schema } from "@auction/contracts/dto/public/consignment/listing-v2";
 import {
   ListingModeSchema,
-  ListingStateSchema,
   ListingWorldSchema,
 } from "@auction/contracts/dto/public/consignment/states";
 import { type QueryPair, useQueryState } from "@auction/web-shared/net/query";
 
 import {
-  type OwnedConsignmentQuery,
-  validOwnedConsignmentQuery,
-} from "../../api/consignment-owned";
+  type OwnedConsignmentQueryV2,
+  validOwnedConsignmentQueryV2,
+} from "../../api/consignment-owned-v2";
 import { DEFAULT_PAGE_SIZE } from "../pagination";
 
 const KEYS = [
@@ -20,7 +20,7 @@ const KEYS = [
   "consignment_page",
   "consignment_page_size",
 ];
-const DEFAULT_QUERY: OwnedConsignmentQuery = {
+const DEFAULT_QUERY: OwnedConsignmentQueryV2 = {
   world: null,
   mode: null,
   state: null,
@@ -32,7 +32,7 @@ function positiveQueryNumber(text: string): number {
   return text !== "" && !/[^0-9]/u.test(text) ? Number(text) : 0;
 }
 
-function parse(pairs: readonly QueryPair[]): OwnedConsignmentQuery | null {
+function parse(pairs: readonly QueryPair[]): OwnedConsignmentQueryV2 | null {
   const relevant = pairs.filter(([key]) => KEYS.includes(key));
   const values = new Map(relevant);
   if (values.size !== relevant.length) return null;
@@ -44,7 +44,7 @@ function parse(pairs: readonly QueryPair[]): OwnedConsignmentQuery | null {
   const query = {
     world: ListingWorldSchema.options.find((value) => value === world) ?? null,
     mode: ListingModeSchema.options.find((value) => value === mode) ?? null,
-    state: ListingStateSchema.options.find((value) => value === state) ?? null,
+    state: ListingStateV2Schema.options.find((value) => value === state) ?? null,
     page: positiveQueryNumber(page),
     pageSize: positiveQueryNumber(pageSize),
   };
@@ -52,13 +52,13 @@ function parse(pairs: readonly QueryPair[]): OwnedConsignmentQuery | null {
     (world !== undefined && query.world === null) ||
     (mode !== undefined && query.mode === null) ||
     (state !== undefined && query.state === null) ||
-    !validOwnedConsignmentQuery(query)
+    !validOwnedConsignmentQueryV2(query)
   )
     return null;
   return query;
 }
 
-function serialize(query: OwnedConsignmentQuery | null): readonly QueryPair[] {
+function serialize(query: OwnedConsignmentQueryV2 | null): readonly QueryPair[] {
   if (query === null) return [];
   const pairs: QueryPair[] = [];
   if (query.world !== null) pairs.push(["consignment_world", query.world]);

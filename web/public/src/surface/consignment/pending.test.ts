@@ -20,11 +20,13 @@ import {
   mountPrivate,
   NEW,
   PENDING_KEY,
+  RECEIPT_V2_PATH,
   REPRICE,
   RETRY,
   receipt,
   requestBody,
   submitRegistration,
+  withdrawReceipt,
 } from "./private-fixture.test";
 import {
   controlEvent,
@@ -253,6 +255,9 @@ test.each(["reprice", "withdraw"] as const)(
     let first = true;
     const transport = fakeFetch((request) => {
       if (request.url.pathname.startsWith(COMMAND_PATH)) return failure(404, "command_not_found");
+      if (request.url.pathname.startsWith(RECEIPT_V2_PATH)) {
+        return failure(404, "command_not_found");
+      }
       if (!isWrite(request))
         return response(listing("displayed", { allowed_actions: [operation] }));
       if (first) {
@@ -261,24 +266,15 @@ test.each(["reprice", "withdraw"] as const)(
       }
       const command = requestBody(request);
       return response(
-        receipt(
-          String(command.command_id),
-          operation === "reprice"
-            ? {
-                operation,
-                listing_version: 4,
-                state: "displayed",
-                disposition: "repriced",
-                price: 102,
-              }
-            : {
-                operation,
-                listing_version: 4,
-                state: "closed",
-                disposition: "closed",
-                price: null,
-              },
-        ),
+        operation === "reprice"
+          ? receipt(String(command.command_id), {
+              operation,
+              listing_version: 4,
+              state: "displayed",
+              disposition: "repriced",
+              price: 102,
+            })
+          : withdrawReceipt(String(command.command_id)),
       );
     });
     let page = await mountPrivate(DETAIL, ALICE, storage);

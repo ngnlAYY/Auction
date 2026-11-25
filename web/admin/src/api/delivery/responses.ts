@@ -55,6 +55,7 @@ const DISPOSITION_KINDS: readonly string[] = [
   "recovery_equipment_recovered",
   "legacy_self",
   "preflight_retired",
+  "season_closed",
 ];
 
 const PREVIEW_BLOCKERS: readonly string[] = [

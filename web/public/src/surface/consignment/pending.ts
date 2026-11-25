@@ -1,4 +1,5 @@
 // 寄售未决命令的同身份宿主、会话级安全记录与回执恢复。
+// v1 命令查 v1 账本；预约与 v2 撤回查本人 v2 命令回执（D9 §6.3）：有回执即结案，404 才允许原样重送。
 
 import type {
   CommandReceipt,
@@ -6,6 +7,7 @@ import type {
 } from "@auction/contracts/dto/public/consignment";
 import type { DepositReservationReceipt } from "@auction/contracts/dto/public/consignment/deposit";
 import type { WithdrawReceiptV2 } from "@auction/contracts/dto/public/consignment/listing-v2";
+import type { OwnedCommandReceiptV2 } from "@auction/contracts/dto/public/consignment/receipt-v2";
 import {
   ConsignmentUuidSchema,
   ExternalEquipmentIdSchema,
@@ -34,6 +36,10 @@ import {
 } from "../../api/consignment-deposit";
 import { fetchConsignmentCommand } from "../../api/consignment-owned";
 import type { ConsignmentPrivateError } from "../../api/consignment-private";
+import {
+  commandReceiptMissing,
+  fetchOwnedCommandReceiptV2,
+} from "../../api/consignment-receipt-v2";
 import {
   consignmentReceiptMatches,
   consignmentWriteRejected,
@@ -73,6 +79,7 @@ const PENDING = v.union([
 ]);
 
 type Pending = v.InferOutput<typeof PENDING>;
+type DepositPending = Extract<Pending, { operation: "issue_reservation" | "withdraw_deposit" }>;
 type InputOf<T> = T extends Pending ? Omit<T, keyof typeof IDENTITY> : never;
 /** 写入队列接收固定语义字段；登记链接经单独的一次性参数传入。 */
 export type ConsignmentIntent = InputOf<Pending>;
@@ -108,8 +115,8 @@ function matchesEquipment(record: Pending, url: string | null): boolean {
 }
 
 function originalOutcome(record: Pending, result: StoredCommandResult): ConsignmentOutcome | null {
+  // v2 记录只查 v2 回执（depositOutcome）；出现在这里说明调用方配错，保留记录。
   if (record.operation === "issue_reservation" || record.operation === "withdraw_deposit") {
-    // 4W 尚未定义 v2 回执查询；调用方只保留原命令并原样重送。
     return null;
   }
   const { receipt } = result;
@@ -124,6 +131,40 @@ function originalOutcome(record: Pending, result: StoredCommandResult): Consignm
     return err({ status: result.http_status, code: result.code });
   }
   return consignmentReceiptMatches(receipt, record.command_id, record) ? ok(receipt) : null;
+}
+
+/** v2 回执须回答原记录：同一操作、同一命令与挂单、版本恰好推进一；答非所问返回 null 保留记录。 */
+function depositOutcome(
+  record: DepositPending,
+  receipt: OwnedCommandReceiptV2,
+): ConsignmentOutcome | null {
+  const operation = record.operation === "withdraw_deposit" ? "withdraw" : "issue_reservation";
+  if (receipt.disposition === "rejected") {
+    return receipt.operation === operation
+      ? err({ status: receipt.http_status, code: receipt.code })
+      : null;
+  }
+  if (receipt.operation !== "issue_reservation" && receipt.operation !== "withdraw") return null;
+  return receipt.operation === operation &&
+    receipt.command_id === record.command_id &&
+    receipt.listing_id === record.listing_id &&
+    receipt.listing_version === record.expected_version + 1
+    ? ok(receipt)
+    : null;
+}
+
+/** 按记录所属账本查原回执：结案结果、答非所问（null）或查询失败。 */
+async function lookup(
+  record: Pending,
+  userId: string,
+  signal: AbortSignal,
+): Promise<Result<ConsignmentOutcome | null, ConsignmentPrivateError>> {
+  if (record.operation === "issue_reservation" || record.operation === "withdraw_deposit") {
+    const result = await fetchOwnedCommandReceiptV2(userId, record.command_id, signal);
+    return result.ok ? ok(depositOutcome(record, result.value)) : result;
+  }
+  const result = await fetchConsignmentCommand(userId, record.command_id, signal);
+  return result.ok ? ok(originalOutcome(record, result.value)) : result;
 }
 
 function send(
@@ -227,29 +268,25 @@ export function useConsignmentPending(
     return false;
   }
 
-  function check() {
+  /** 查原回执；`replay` 为真时查询 404 后才原样重送同一记录（只用于 v2 记录的人工重送）。 */
+  function check(replay = false) {
     const record = pending.peek();
     if (record === null || busy.peek() || !tasks.alive() || !untrack(canUse)) return;
-    if (record.operation === "issue_reservation" || record.operation === "withdraw_deposit") {
-      // 没有 v2 回执查询端点；保留原记录并只暴露原样重送。
-      missing.set(true);
-      return;
-    }
     busy.set(true);
     missing.set(false);
     error.set(null);
     tasks.spawn(async (context) => {
-      const result = await fetchConsignmentCommand(userId, record.command_id, context.signal);
+      const result = await lookup(record, userId, context.signal);
       if (!context.alive()) return;
       busy.set(false);
       if (!canApply(result)) return;
       if (result.ok) {
-        const original = originalOutcome(record, result.value);
-        if (original === null) error.set(INVALID_RECEIPT);
-        else finish(original);
-      } else if (result.error.status === 404 && result.error.code === "command_not_found") {
-        // 404 仅授权原样重送；记录仍占用本账号的提交入口。
+        if (result.value === null) error.set(INVALID_RECEIPT);
+        else finish(result.value);
+      } else if (commandReceiptMissing(result.error)) {
+        // 不变量 1：404 只代表当次未见，仅授权原样重送；记录仍占用本账号的提交入口。
         missing.set(true);
+        if (replay) transmit(record, null, true);
       } else {
         error.set(result.error);
       }
@@ -284,7 +321,7 @@ export function useConsignmentPending(
       } else if (canDisplay) {
         if (result.ok) finish(result);
         else {
-          // v2 没有回执查询入口；结果未知时直接开放同一记录的原样重送。
+          // v2 结果未知时开放重送入口；重送前仍先查原回执，404 才真正重送（见 retry）。
           if (
             (record.operation === "issue_reservation" || record.operation === "withdraw_deposit") &&
             commandErrorOutcomeUncertain(result.error)
@@ -334,7 +371,12 @@ export function useConsignmentPending(
         error.set({ status: 400, code: "invalid_equipment_url" });
         return false;
       }
-      transmit(record, url, true);
+      // 不变量 1：v2 记录每次重送前都先查原回执，已有回执即结案、零写入。
+      if (record.operation === "issue_reservation" || record.operation === "withdraw_deposit") {
+        check(true);
+      } else {
+        transmit(record, url, true);
+      }
       return true;
     },
   };

@@ -1,10 +1,7 @@
 // 运营挂单共用的解析进度、快照选取与安全错误文案。
 
-import type {
-  EquipmentView,
-  ListingView,
-  LookupProgress,
-} from "@auction/contracts/dto/public/consignment";
+import type { EquipmentView, LookupProgress } from "@auction/contracts/dto/public/consignment";
+import type { ListingViewV2 } from "@auction/contracts/dto/public/consignment/listing-v2";
 import { Time } from "@auction/web-shared/ui/components/time";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
@@ -14,7 +11,7 @@ import { adminApiErrorMessage } from "../presentation";
 import { listingLookupReasonKey, listingWriteErrorKey } from "./labels";
 
 /** 只从服务端指定带快照的视图读取装备信息。 */
-export function listingEquipment(view: ListingView): EquipmentView | null {
+export function listingEquipment(view: ListingViewV2): EquipmentView | null {
   return "equipment" in view ? view.equipment : null;
 }
 

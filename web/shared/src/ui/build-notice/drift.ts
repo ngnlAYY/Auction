@@ -7,6 +7,20 @@ import { buildId } from "../bootstrap";
 /** 服务端报告构建号的响应头；与 auction-http 的契约保持一致。 */
 export const SERVER_BUILD_HEADER = "x-auction-build";
 
+/**
+ * 独立入口（Solid）构建号的响应头。入口指针回切到旧壳时，`x-auction-build` 报告指针 build
+ * 以免旧壳误提示；Solid 页面改比这个头，旧壳报告的构建号不会让它误提示。
+ */
+export const SERVER_INDEPENDENT_BUILD_HEADER = "x-auction-build-independent";
+
+/** 选出 Solid 页面应比较的服务端构建号：独立入口头优先，缺失（未启用指针）时用通用头。 */
+export function buildReportedToSolid(
+  reported: string | null,
+  independent: string | null,
+): string | null {
+  return independent ?? reported;
+}
+
 /** 一次性的构建号偏差等待句柄。 */
 export interface BuildDriftWait {
   readonly promise: Promise<void>;

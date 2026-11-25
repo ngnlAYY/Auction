@@ -1,6 +1,6 @@
 // 确认并下架挂单；v2 对代管件改设运营止售，未决命令由认证外壳持有，可用原正文恢复。
 
-import type { AdminListing } from "@auction/contracts/dto/admin/consignment";
+import type { AdminListingV2 } from "@auction/contracts/dto/admin/consignment/listing-v2";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { Dialog } from "@auction/web-shared/ui/components/dialog";
 import { t } from "@auction/web-shared/ui/i18n";
@@ -14,14 +14,14 @@ import { useAdminSessionHost } from "../auth/shell";
 import type { PendingCommands } from "../pending";
 import { consignmentErrorMessage } from "./presentation";
 
-/** 下架成功的两种服务端处置；详情页据此选择成功文案。 */
+/** 下架或解除止售成功的服务端处置；详情页据此选择成功文案。 */
 export type DelistFeedback =
-  | { readonly kind: "success"; readonly disposition: "closed" | "hold_set" }
+  | { readonly kind: "success"; readonly disposition: "closed" | "hold_set" | "hold_released" }
   | { readonly kind: "error"; readonly code: string };
 
 /** 读取只提供下架资格，写入仍须确认版本和私有说明。 */
 export function DelistAction(props: {
-  readonly record: AdminListing;
+  readonly record: AdminListingV2;
   readonly commands: PendingCommands;
   readonly currentRead: () => boolean;
   readonly onFeedback: (feedback: DelistFeedback | null) => void;
@@ -42,7 +42,7 @@ export function DelistAction(props: {
   // Admin 无寄售回执查询入口，整页重载会丢失内存未决记录；此时重读详情，再按当前版本提交。
   const canSubmit = (): boolean =>
     props.currentRead() &&
-    props.record.can_delist &&
+    props.record.admin_actions.includes("delist") &&
     adminSessionWritesAllowed(host) &&
     !props.commands.contains(entity()) &&
     !props.commands.anyBusy() &&
@@ -85,7 +85,7 @@ export function DelistAction(props: {
   };
 
   return (
-    <Show when={props.record.can_delist}>
+    <Show when={props.record.admin_actions.includes("delist")}>
       <div class="admin-consignment-actions">
         <button
           type="button"

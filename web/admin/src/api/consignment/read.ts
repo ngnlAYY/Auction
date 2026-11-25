@@ -9,9 +9,6 @@ import { decodeAdminReceipt, invalidResponseError, responseError } from "../fail
 import type { AdminSessionHost } from "../session";
 import { sendGet } from "../transport";
 
-/** Admin 会话下的挂单集合端点。 */
-export const LISTINGS_URL = "/api/v1/admin/consignment/listings";
-
 const INTEGER_FIELDS = [
   ["version"],
   ["price"],

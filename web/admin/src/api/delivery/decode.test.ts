@@ -162,6 +162,28 @@ test("delivery_decodes_consignment_disposition_without_sending_fence", () => {
   expect(checkBeforeSendProjection(sent)).toEqual({ list: false, detail: false });
 });
 
+// 季末关闭取消的取得投递（failed/season_ended）可解码，可能从未被领取；其他失败码或带发送时间的 failed 仍失败关闭。
+test("delivery_decodes_consignment_season_ended_failure", () => {
+  const cancelled = (claimed: boolean) => {
+    const row = consignmentDisposition(claimed ? "claimed" : "prepared");
+    row.status = "failed";
+    row.lease_expires_at = null;
+    row.fencing_version = claimed ? 2 : 1;
+    row.completed_at = "2026-11-06T10:00:05.000000Z";
+    row.failure_code = "season_ended";
+    return row;
+  };
+  for (const claimed of [false, true]) {
+    expect(checkBeforeSendProjection(cancelled(claimed))).toEqual({ list: true, detail: true });
+  }
+  const otherFailure = cancelled(true);
+  otherFailure.failure_code = "send_rejected";
+  expect(checkBeforeSendProjection(otherFailure)).toEqual({ list: false, detail: false });
+  const sent = cancelled(true);
+  sent.sending_at = "2026-11-06T10:00:02.000000Z";
+  expect(checkBeforeSendProjection(sent)).toEqual({ list: false, detail: false });
+});
+
 test("accepts_complete_detail", () => {
   const decoded = requireDecoded(decodeDetailFixture(detail()), "完整详情");
   expect(decoded.detail.attempts).toHaveLength(1);
@@ -173,6 +195,7 @@ test("delivery_accepts_server_preflight_retirements", () => {
     ["lot_watch", "recipient_renamed", "recipient_renamed"],
     ["seller_summary", "recipient_renamed", "recipient_renamed"],
     ["season_reminder", "recipient_renamed", "recipient_renamed"],
+    ["consignment_notice", "recipient_renamed", "recipient_renamed"],
     ["season_reminder", "season_boundary_passed", "season_notice_invalidated"],
     ["season_reminder", "season_reminder_resolved", "season_notice_invalidated"],
     ["mail_intake", "auction_opened", "auction_notice_invalidated"],
@@ -192,6 +215,23 @@ test("delivery_accepts_server_preflight_retirements", () => {
   claimed.attempt_count = 1;
   claimed.fencing_version = 2;
   expect(checkBeforeSendProjection(claimed)).toEqual({ list: true, detail: true });
+});
+
+/** 作废的寄售付款提醒（7A-3）：只接受寄售通知来源与固定失败码的组合。 */
+test("delivery_accepts_voided_payment_reminder_retirement_only_from_consignment_notice", () => {
+  const voided = () =>
+    retiredBeforeSend(
+      "consignment_notice",
+      "payment_reminder_voided",
+      "consignment_notice_invalidated",
+    );
+  expect(checkBeforeSendProjection(voided())).toEqual({ list: true, detail: true });
+  const otherOrigin = voided();
+  otherOrigin.origin_kind = "season_reminder";
+  expect(checkBeforeSendProjection(otherOrigin)).toEqual({ list: false, detail: false });
+  const otherFailure = voided();
+  otherFailure.failure_code = "season_notice_invalidated";
+  expect(checkBeforeSendProjection(otherFailure)).toEqual({ list: false, detail: false });
 });
 
 test("delivery_rejects_malformed_preflight_retirements", () => {

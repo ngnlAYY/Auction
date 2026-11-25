@@ -4,9 +4,11 @@
 // 本层只负责发送、超时取消与错误分类。
 
 import {
+  buildReportedToSolid,
   observeServerBuildId,
   responseReportsCurrentBuild,
   SERVER_BUILD_HEADER,
+  SERVER_INDEPENDENT_BUILD_HEADER,
 } from "@auction/web-shared/ui/build-notice";
 import { createTimeoutFuture } from "../../platform/timer";
 import { err, ok, type Result, unreachable } from "../../result";
@@ -98,7 +100,11 @@ function observeResponseBuild(headers: Headers): void {
   if (!responseReportsCurrentBuild(headers.get("cache-control"))) {
     return;
   }
-  const build = headers.get(SERVER_BUILD_HEADER);
+  // 回切旧壳时通用头报告指针 build；Solid 只比独立入口头，旧壳构建号不会令它误提示。
+  const build = buildReportedToSolid(
+    headers.get(SERVER_BUILD_HEADER),
+    headers.get(SERVER_INDEPENDENT_BUILD_HEADER),
+  );
   if (build !== null) {
     observeServerBuildId(build);
   }

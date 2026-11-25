@@ -66,7 +66,15 @@ export const PUBLIC_ROUTES: readonly RouteDefinition[] = [
     name: "ConsignmentDepositInstructions",
     pattern: "/consignment/me/:listing_id/deposit-instructions",
   },
+  // Solid 版专属的重列页；必须先于通用本人挂单详情登记。
+  { name: "ConsignmentRelist", pattern: "/consignment/me/:listing_id/relist" },
   { name: "ConsignmentOwnedDetail", pattern: "/consignment/me/:listing_id" },
+  // 第 6、7 期的 Solid 版专属页面：购买确认、本人订单、受限权利与损失回执，全部在独立入口前缀下。
+  { name: "ConsignmentPurchase", pattern: "/consignment/listings/:listing_id/purchase" },
+  { name: "ConsignmentOrders", pattern: "/consignment/orders" },
+  { name: "ConsignmentOrderDetail", pattern: "/consignment/orders/:contract_id" },
+  { name: "ConsignmentRights", pattern: "/consignment/rights" },
+  { name: "ConsignmentLossReceipt", pattern: "/consignment/loss/:position_id" },
 ];
 // Dioxus 的 `/:..segments` 未匹配路由由共享路由器直接返回 not-found，不重复登记 catch-all。
 
@@ -158,8 +166,26 @@ export const PUBLIC_PAGES: Readonly<Record<string, RoutePage>> = {
   ConsignmentDepositInstructions: lazyPage(() =>
     import("../consignment/deposit-instructions").then((module) => module.DepositInstructionsPage),
   ),
+  ConsignmentRelist: lazyPage(() =>
+    import("../consignment/relist").then((module) => module.RelistPage),
+  ),
   ConsignmentOwnedDetail: lazyPage(() =>
     import("../consignment/owned-detail").then((module) => module.OwnedDetail),
+  ),
+  ConsignmentPurchase: lazyPage(() =>
+    import("../consignment/purchase-confirm").then((module) => module.PurchaseConfirm),
+  ),
+  ConsignmentOrders: lazyPage(() =>
+    import("../consignment/orders").then((module) => module.MyOrders),
+  ),
+  ConsignmentOrderDetail: lazyPage(() =>
+    import("../consignment/order-detail").then((module) => module.OrderDetail),
+  ),
+  ConsignmentRights: lazyPage(() =>
+    import("../consignment/rights").then((module) => module.RightsPage),
+  ),
+  ConsignmentLossReceipt: lazyPage(() =>
+    import("../consignment/loss-receipt").then((module) => module.LossReceiptPage),
   ),
 };
 

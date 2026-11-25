@@ -1,7 +1,7 @@
 // 登记表单的能力、验证、报价、私密输入和提交接线。
 
 import { expect, test } from "bun:test";
-import type { OwnedListing } from "@auction/contracts/dto/public/consignment";
+import type { OwnedListingV2 } from "@auction/contracts/dto/public/consignment/listing-v2";
 
 import {
   ALICE,
@@ -20,6 +20,8 @@ import {
   receipt,
   requestBody,
   submitRegistration,
+  WITHDRAW_PATH,
+  withdrawReceipt,
 } from "./private-fixture.test";
 import {
   controlEvent,
@@ -163,8 +165,8 @@ test.each([
 ] as const)("%s / %s 同一挂单从登记 202 到改价、取消后只读", async (world, mode, url, fee) => {
   const clock = fakeClock();
   const lookup = Promise.withResolvers<Response>();
-  const reads: OwnedListing[] = [];
-  const fixture: { listing: OwnedListing | null } = { listing: null };
+  const reads: OwnedListingV2[] = [];
+  const fixture: { listing: OwnedListingV2 | null } = { listing: null };
   const detailPath = `${OWNED_PATH}/${LISTING_A}`;
   const worldLabel = world === "main" ? "Main" : "Isekai";
   const modeLabel = mode === "direct" ? "Direct sale" : "Consignment";
@@ -217,7 +219,7 @@ test.each([
       );
     }
 
-    expect(pathname).toBe(`${LISTINGS_PATH}/${current.listing_id}/withdraw`);
+    expect(pathname).toBe(`${WITHDRAW_PATH}/${current.listing_id}/withdraw`);
     if (current.view.kind !== active) throw new Error("取消前缺少发布投影");
     fixture.listing = {
       ...current,
@@ -228,16 +230,7 @@ test.each([
       allowed_actions: [],
       view: { kind: "closed", reason: "seller_cancelled", equipment: current.view.equipment },
     };
-    return response(
-      receipt(String(body.command_id), {
-        operation: "withdraw",
-        listing_id: fixture.listing.listing_id,
-        listing_version: fixture.listing.version,
-        state: "closed",
-        disposition: "closed",
-        price: null,
-      }),
-    );
+    return response(withdrawReceipt(String(body.command_id), fixture.listing.version));
   });
   const page = await mountPrivate(NEW);
   try {
@@ -316,7 +309,7 @@ test.each([
     expect(writes.map((request) => request.url.pathname)).toEqual([
       LISTINGS_PATH,
       `${LISTINGS_PATH}/${LISTING_A}/price`,
-      `${LISTINGS_PATH}/${LISTING_A}/withdraw`,
+      `${WITHDRAW_PATH}/${LISTING_A}/withdraw`,
     ]);
     expect(writes.map((request) => requestBody(request).expected_version)).toEqual([
       undefined,

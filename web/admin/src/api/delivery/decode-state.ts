@@ -90,7 +90,8 @@ export function preflightRetirementReasonValid(value: AdminDeliveryResponse): bo
       originAllowed =
         value.origin_kind === "lot_watch" ||
         value.origin_kind === "seller_summary" ||
-        value.origin_kind === "season_reminder";
+        value.origin_kind === "season_reminder" ||
+        value.origin_kind === "consignment_notice";
       expectedFailure = reason;
       break;
     case "season_boundary_passed":
@@ -101,6 +102,11 @@ export function preflightRetirementReasonValid(value: AdminDeliveryResponse): bo
     case "auction_opened":
       originAllowed = value.origin_kind === "mail_intake";
       expectedFailure = "auction_notice_invalidated";
+      break;
+    // 寄售付款提醒在发送围栏前作废（7A-3），与存储侧校验同一组合。
+    case "payment_reminder_voided":
+      originAllowed = value.origin_kind === "consignment_notice";
+      expectedFailure = "consignment_notice_invalidated";
       break;
     default:
       return null;
@@ -134,7 +140,7 @@ function validConsignmentDispositionState(
   sendingAt: bigint | null,
   completedAt: bigint | null,
 ): boolean {
-  // 退役/抑制标记只允许出现在 failed，本来源没有 failed；出现即不是处置链写出的形状。
+  // 本来源从不写退役/抑制标记（季末取消也不写）；出现即不是处置链写出的形状。
   if (sendingAt !== null || value.retirement_reason !== null || value.suppression_reason !== null) {
     return false;
   }
@@ -191,6 +197,21 @@ function validConsignmentDispositionState(
         value.fencing_version > 0 &&
         value.attempt_count > 0
       );
+    // 与存储端同一形状：季末取消从未进入发送围栏、围栏已推进，可能从未被领取。
+    case "failed":
+      return (
+        !hasLease &&
+        (claimedAt === null ||
+          (!isZeroDeliveryTime(claimedAt) && claimedAt >= createdAt && claimedAt <= updatedAt)) &&
+        completedAt !== null &&
+        !isZeroDeliveryTime(completedAt) &&
+        completedAt >= createdAt &&
+        (claimedAt === null || completedAt >= claimedAt) &&
+        completedAt <= updatedAt &&
+        value.external_reference === null &&
+        value.failure_code === "season_ended" &&
+        value.fencing_version > 0
+      );
     default:
       return false;
   }
@@ -222,7 +243,7 @@ export function validStateFields(
 
   // 寄售处置链把起写许可记在 `mail_disposition_write_starts`，不伪造 sending 事实：
   // Take/Return 只从 claimed 直接进入 succeeded/manual_reconcile。该来源在任何状态都不得有
-  // sending_at；处置链不会产生的 pending/sending/failed 也一律失败关闭。
+  // sending_at；季末取消（failed/season_ended）之外，处置链不会产生的 pending/sending/failed 一律失败关闭。
   if (value.origin_kind === "consignment_disposition") {
     return validConsignmentDispositionState(
       value,

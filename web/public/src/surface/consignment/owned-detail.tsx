@@ -1,10 +1,10 @@
 // 本人详情的解析进度、七种安全投影和卖家动作。
 
+import type { LookupProgress } from "@auction/contracts/dto/public/consignment";
 import type {
-  ListingAction,
-  LookupProgress,
-  OwnedListing,
-} from "@auction/contracts/dto/public/consignment";
+  ListingActionV2,
+  OwnedListingV2,
+} from "@auction/contracts/dto/public/consignment/listing-v2";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
 import { Link, type RoutePageProps, useRouter } from "@auction/web-shared/router";
@@ -16,11 +16,18 @@ import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { Match, Show, Switch } from "solid-js";
 
-import { fetchOwnedConsignmentListing } from "../../api/consignment-owned";
+import { fetchOwnedConsignmentListingV2 } from "../../api/consignment-owned-v2";
 import { type ConsignmentPrivateError, validConsignmentUuid } from "../../api/consignment-private";
 import { EquipmentPanel } from "./detail";
 import { consignmentWorldLabel } from "./filters";
-import { listingLookupReasonKey, listingModeKey, listingReasonKey, listingViewKey } from "./labels";
+import {
+  listingLookupReasonKey,
+  listingModeKey,
+  listingReasonKey,
+  listingViewKey,
+  lossReceiptHref,
+  relistConsignmentHref,
+} from "./labels";
 import { type ConsignmentIntent, useConsignmentPending } from "./pending";
 import { PendingCommand } from "./pending-view";
 import {
@@ -62,10 +69,16 @@ function Detail(props: {
 }): JSX.Element {
   const router = useRouter();
   const read = createTaskResource(props.canUse, async (authorized, context) =>
-    authorized ? fetchOwnedConsignmentListing(props.userId, props.listingId, context.signal) : null,
+    authorized
+      ? fetchOwnedConsignmentListingV2(props.userId, props.listingId, context.signal)
+      : null,
   );
   const feedback = createCell<ConsignmentPrivateError | null>(null);
+  // 已在库件的撤回由服务端直接建撤回代（202 withdrawal_accepted），挂单重读后只显示撤回处理中，
+  // 这里另行说明装备将寄回；任何后续结果都会撤下该提示。
+  const accepted = createCell(false);
   const pending = useConsignmentPending(props.canUse, (result) => {
+    accepted.set(result.ok && result.value.disposition === "withdrawal_accepted");
     if (
       result.ok &&
       result.value.disposition === "registered" &&
@@ -112,6 +125,9 @@ function Detail(props: {
       <Show when={feedback()}>
         {(error) => <p role="alert">{consignmentErrorMessage(error())}</p>}
       </Show>
+      <Show when={accepted()}>
+        <p role="status">{t("consignment-withdrawal-accepted")}</p>
+      </Show>
       <Switch fallback={<AsyncState kind="loading" title={t("data-loading")} detail="" />}>
         <Match when={projection()}>
           {(listing) => (
@@ -121,7 +137,10 @@ function Detail(props: {
                 listing={listing()}
                 disabled={!props.canUse() || pending.blocked() || read.state() !== "ready"}
                 submit={(input) => {
-                  if (pending.submit(input)) feedback.set(null);
+                  if (pending.submit(input)) {
+                    feedback.set(null);
+                    accepted.set(false);
+                  }
                 }}
                 refresh={() => {
                   feedback.set({ code: "stale_version", status: 409 });
@@ -150,7 +169,7 @@ function Detail(props: {
   );
 }
 
-function ListingProjection(props: { readonly listing: OwnedListing }): JSX.Element {
+function ListingProjection(props: { readonly listing: OwnedListingV2 }): JSX.Element {
   const equipment = () => ownedEquipment(props.listing.view);
   const progress = () => {
     const view = props.listing.view;
@@ -160,6 +179,9 @@ function ListingProjection(props: { readonly listing: OwnedListing }): JSX.Eleme
     const view = props.listing.view;
     return view.kind === "lookup_failed" ? view.last_lookup_reason : null;
   };
+  // 损失回执按 position 查询；只有服务端给出损失案件时才链接（D9 §6.1）。
+  const lossPosition = () =>
+    props.listing.loss_case_id === null ? null : props.listing.position_id;
   return (
     <section class="public-consignment-account__detail">
       <h2>{t(listingViewKey(props.listing.view.kind))}</h2>
@@ -207,6 +229,11 @@ function ListingProjection(props: { readonly listing: OwnedListing }): JSX.Eleme
       <Show when={props.listing.view.kind === "closed" || props.listing.view.kind === "expired"}>
         <Link href="/consignment/new">{t("consignment-register-again")}</Link>
       </Show>
+      <Show when={lossPosition()}>
+        {(position) => (
+          <Link href={lossReceiptHref(position())}>{t("consignment-loss-title")}</Link>
+        )}
+      </Show>
     </section>
   );
 }
@@ -241,20 +268,20 @@ function Progress(props: { readonly progress: LookupProgress }): JSX.Element {
 }
 
 interface ActionDraft {
-  readonly action: ListingAction;
+  readonly action: ListingActionV2;
   readonly version: number;
 }
 
 function SellerActions(props: {
-  readonly listing: OwnedListing;
+  readonly listing: OwnedListingV2;
   readonly disabled: boolean;
   readonly submit: (input: ConsignmentIntent) => void;
   readonly refresh: () => void;
 }): JSX.Element {
   const draft = createCell<ActionDraft | null>(null);
   const price = createCell("");
-  const allowed = (action: ListingAction) => props.listing.allowed_actions.includes(action);
-  const begin = (action: ListingAction) => {
+  const allowed = (action: ListingActionV2) => props.listing.allowed_actions.includes(action);
+  const begin = (action: ListingActionV2) => {
     if (props.disabled || !allowed(action)) return;
     price.set(String(props.listing.price));
     draft.set({ action, version: props.listing.version });
@@ -269,7 +296,9 @@ function SellerActions(props: {
     }
     const target = { listing_id: props.listing.listing_id, expected_version: current.version };
     if (current.action === "withdraw") {
-      props.submit({ ...target, operation: "withdraw" });
+      // 新撤回一律走 v2 路由：未代管件回 closed，代管件登记意愿回 withdrawal_requested，
+      // 已在库件直接建撤回代回 202 withdrawal_accepted。
+      props.submit({ ...target, operation: "withdraw_deposit" });
     } else {
       const amount = listingPrice(price.peek());
       if (amount === null) return;
@@ -290,6 +319,11 @@ function SellerActions(props: {
           <button type="button" disabled={props.disabled} onClick={() => begin("withdraw")}>
             {t("consignment-withdraw")}
           </button>
+        </Show>
+        <Show when={allowed("relist")}>
+          <Link href={relistConsignmentHref(props.listing.listing_id)}>
+            {t("consignment-relist")}
+          </Link>
         </Show>
       </div>
       <Show when={draft()}>

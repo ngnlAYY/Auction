@@ -8,9 +8,11 @@ import { createCell } from "../../reactive/cell";
 import { buildIsStale, waitForBuildDrift } from "./drift";
 
 export {
+  buildReportedToSolid,
   observeServerBuildId,
   responseReportsCurrentBuild,
   SERVER_BUILD_HEADER,
+  SERVER_INDEPENDENT_BUILD_HEADER,
 } from "./drift";
 
 /** 订阅构建号偏差；已偏差时立即为 true，之后保持到页面刷新。 */
