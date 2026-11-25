@@ -16,6 +16,7 @@ mod reads_v2;
 pub(crate) mod recovery;
 mod returns;
 pub(crate) mod rights;
+mod scan;
 mod work;
 
 pub use commands::*;
@@ -34,6 +35,7 @@ pub use reads_v2::*;
 pub use recovery::*;
 pub use returns::*;
 pub use rights::*;
+pub use scan::*;
 pub use work::*;
 
 #[cfg(test)]

@@ -25,7 +25,7 @@ async fn postgres_consignment_recovery_resolve_return_audit_failure_rolls_back_t
     seed_consumed(pool, &store, Rts { n: 1 }).await;
     let port: Arc<dyn ReturnDispositionStore> = store.clone();
     let service = ReturnDispositionService::new(port);
-    let pending = service.pending(10).await.expect("待处置");
+    let pending = service.pending(None, 10).await.expect("待处置").items;
     assert_eq!(pending.len(), 1);
     let before = facts(pool).await;
     let audits = audit_rows(pool).await;

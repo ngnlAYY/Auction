@@ -162,7 +162,10 @@ async fn postgres_consignment_recovery_sanction_handoff_applies_original_sanctio
     let orders_before = orders_snapshot(&env).await;
     insert_buyer_session(&env).await;
     assert!(env.purchase_blocked(900).await, "执行前已由待执行处罚阻断");
-    assert_eq!(env.store.open_sanction_work(10).await.expect("待执行工作"), vec![env.work()]);
+    assert_eq!(
+        env.store.open_sanction_work(None, 10).await.expect("待执行工作").items,
+        vec![env.work()]
+    );
 
     // 三个并发领取：买家锁串行化，恰一个落效果，其余只重放。
     let (a, b, c) = tokio::join!(
@@ -188,7 +191,7 @@ async fn postgres_consignment_recovery_sanction_handoff_applies_original_sanctio
         restarted.execute_sanction_work(env.work()).await.expect("重启后重放"),
         SanctionWorkOutcome::Replayed
     );
-    assert!(restarted.open_sanction_work(10).await.expect("待执行工作").is_empty());
+    assert!(restarted.open_sanction_work(None, 10).await.expect("待执行工作").items.is_empty());
 
     assert_eq!(count(env.pool(), "consignment_sanctions").await, 1, "处罚累计恰一项");
     assert_eq!(env.scalar("SELECT state FROM public.consignment_sanctions").await, "applied");
@@ -434,7 +437,10 @@ async fn postgres_consignment_recovery_sanction_handoff_completed_work_without_e
         .await
         .expect("造不可能的存量");
     }
-    assert_eq!(env.store.open_sanction_work(10).await.expect("待执行工作"), vec![env.work()]);
+    assert_eq!(
+        env.store.open_sanction_work(None, 10).await.expect("待执行工作").items,
+        vec![env.work()]
+    );
     assert_eq!(
         env.store.execute_sanction_work(env.work()).await.expect("执行"),
         SanctionWorkOutcome::Inconsistent
@@ -457,10 +463,13 @@ async fn postgres_consignment_recovery_sanction_handoff_loop_closes_claimed_work
     .execute(env.pool())
     .await
     .expect("工作停在 claimed");
-    assert_eq!(env.store.open_sanction_work(10).await.expect("待执行工作"), vec![env.work()]);
+    assert_eq!(
+        env.store.open_sanction_work(None, 10).await.expect("待执行工作").items,
+        vec![env.work()]
+    );
 
     assert_eq!(run_loop_one_round(&env).await.first(), Some(&false), "第一轮成功");
     assert_eq!(env.scalar("SELECT state FROM public.consignment_sanctions").await, "applied");
     assert_eq!(count(env.pool(), "consignment_sanction_effects").await, 1);
-    assert!(env.store.open_sanction_work(10).await.expect("待执行工作").is_empty());
+    assert!(env.store.open_sanction_work(None, 10).await.expect("待执行工作").items.is_empty());
 }

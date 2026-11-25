@@ -8,6 +8,7 @@ use auction_domain::consignment::recovery::ReturnDispositionDecision;
 use uuid::Uuid;
 
 use crate::ports::consignment::errors::ConsignmentFuture;
+use crate::ports::consignment::scan::{ScanCursor, ScanPage};
 use crate::ports::core::RequestHash;
 
 /// 恢复处置系统命令的操作闭集；账本 `operation` 码。
@@ -123,6 +124,10 @@ pub trait ReturnDispositionStore: Send + Sync {
     /// 锁内重读事实、按矩阵作出处置并落库；证据不足或矛盾时失败关闭，不写处置。
     fn resolve_return(&self, command: ResolveReturn) -> ConsignmentFuture<'_, ResolveReceipt>;
 
-    /// 列出尚无处置的消费，最早的在前。
-    fn pending_resolutions(&self, limit: u32) -> ConsignmentFuture<'_, Vec<PendingResolution>>;
+    /// 列出游标之后至多 `limit` 项尚无处置的消费，按 `(consumed_at, 消费 ID)` 升序；读满一页才给出下一页游标。
+    fn pending_resolutions(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<PendingResolution>>;
 }

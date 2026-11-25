@@ -15,7 +15,9 @@
 
 use std::sync::Arc;
 
-use auction_application::consignment::{PreparedRedispatch, QueuedRedispatch, RedispatchPrepared};
+use auction_application::consignment::{
+    PreparedRedispatch, QueuedRedispatch, RedispatchPrepared, ScanCursor, ScanPage,
+};
 use auction_domain::consignment::dispatch::{
     DispatchRoundKey, FrozenDispatchIdentity, dispatch_ref, dispatch_round_id,
 };
@@ -37,6 +39,7 @@ use crate::database::consignment::commands::session::DepositTransaction;
 use crate::database::consignment::commands::{LockKeys, with_deposit_transaction};
 use crate::database::consignment::deposit::primitives::database_now;
 use crate::database::consignment::purchase::{FirstDispatchContentSource, FirstDispatchRequest};
+use crate::database::consignment::scan::{cursor_binds, full_page_cursor, row_cursor};
 use crate::database::delivery::audit::{DeliveryAudit, PREPARE, append as append_delivery_audit};
 
 /// 补寄只放行未付 COD 原件腿（D9 §5.1；统筹方裁定的保守读法）。
@@ -44,6 +47,7 @@ const UNPAID_ORIGINAL_KIND: &str = "winner_equipment_cod";
 
 /// 一条已排队、尚未建轮的补寄处置及其封闭的上一轮。
 struct QueuedRow {
+    scan: ScanCursor,
     dispatch_id: Uuid,
     contract_id: Uuid,
     intake_id: Uuid,
@@ -71,13 +75,17 @@ struct Basis {
 }
 
 impl DatabaseStore {
-    /// 列出已排队、尚未建轮的补寄处置（见模块说明）。只读。
+    /// 列出游标之后已排队、尚未建轮的补寄处置（见模块说明），按 `(resolved_at, dispatch_id)` 升序一页。
+    /// 来源不符的行（不写任何行，下一轮仍会被选中）不列入但计入游标，异常行不会饿死后面的补寄；读满一页
+    /// 才给出下一页游标。只读。
     pub(super) async fn load_queued_redispatches(
         &self,
+        after: Option<ScanCursor>,
         limit: u32,
-    ) -> Result<Vec<QueuedRedispatch>, WriteError> {
+    ) -> Result<ScanPage<QueuedRedispatch>, WriteError> {
         let mut transaction = self.pool().begin_with("BEGIN READ ONLY").await?;
-        let rows = queued_rows(&mut transaction, None, i64::from(limit)).await?;
+        let rows = queued_rows(&mut transaction, None, after, i64::from(limit)).await?;
+        let next = full_page_cursor(rows.len(), limit, rows.last().map(|row| row.scan));
         let mut queued = Vec::with_capacity(rows.len());
         for row in rows {
             let Some(basis) = basis_of(&mut transaction, &row).await? else {
@@ -96,7 +104,7 @@ impl DatabaseStore {
             });
         }
         transaction.commit().await?;
-        Ok(queued)
+        Ok(ScanPage { items: queued, next })
     }
 
     /// 为已排队的补寄新轮备好 `prepared` 投递（见模块说明）。命令锁键取新轮 ID，使同一新轮的
@@ -118,11 +126,14 @@ impl DatabaseStore {
 async fn queued_rows(
     connection: &mut PgConnection,
     dispatch_id: Option<Uuid>,
+    after: Option<ScanCursor>,
     limit: i64,
 ) -> Result<Vec<QueuedRow>, WriteError> {
+    let (after_at, after_id) = cursor_binds(after);
     let rows = sqlx::query(
         "SELECT resolution.dispatch_id, resolution.contract_id, resolution.evidence_id,
-                consumption.obligation_id, consumption.original_round, obligation.obligation_kind
+                consumption.obligation_id, consumption.original_round, obligation.obligation_kind,
+                resolution.resolved_at AS scan_at, resolution.dispatch_id AS scan_id
          FROM public.consignment_order_resolutions AS resolution
          JOIN public.consignment_return_consumptions AS consumption
            ON consumption.intake_id = resolution.evidence_id
@@ -135,16 +146,21 @@ async fn queued_rows(
            AND ($1::uuid IS NULL OR resolution.dispatch_id = $1)
            AND NOT EXISTS (SELECT 1 FROM public.consignment_dispatch_rounds AS opened
                            WHERE opened.round_id = resolution.dispatch_id)
+           AND ($3::timestamptz IS NULL
+                OR (resolution.resolved_at, resolution.dispatch_id) > ($3::timestamptz, $4::uuid))
          ORDER BY resolution.resolved_at, resolution.dispatch_id
          LIMIT $2",
     )
     .bind(dispatch_id)
     .bind(limit)
+    .bind(after_at)
+    .bind(after_id)
     .fetch_all(connection)
     .await?;
     rows.iter()
         .map(|row| {
             Ok(QueuedRow {
+                scan: row_cursor(row)?,
                 dispatch_id: row.try_get("dispatch_id")?,
                 contract_id: row.try_get("contract_id")?,
                 intake_id: row.try_get("evidence_id")?,
@@ -347,7 +363,8 @@ async fn prepare_in_tx(
     tx: &mut DepositTransaction<'_, '_>,
 ) -> Result<Option<RedispatchPrepared>, WriteError> {
     let (dispatch_id, content) = input;
-    let Some(row) = queued_rows(tx.connection(), Some(*dispatch_id), 1).await?.into_iter().next()
+    let Some(row) =
+        queued_rows(tx.connection(), Some(*dispatch_id), None, 1).await?.into_iter().next()
     else {
         return Ok(None);
     };

@@ -15,3 +15,4 @@ pub(crate) mod recovery;
 pub(crate) mod refusal;
 pub(crate) mod returns;
 pub(crate) mod rights;
+pub(crate) mod scan;

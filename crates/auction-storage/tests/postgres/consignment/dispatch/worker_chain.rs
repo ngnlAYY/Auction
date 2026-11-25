@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use auction_application::consignment::{
     ConsignmentError, ConsignmentFuture, DispatchService, DispatchWorkStore, OrderResolveAction,
-    OrderResolveReceipt, PostPermit,
+    OrderResolveReceipt, PostPermit, ScanCursor, ScanPage,
 };
 use auction_domain::consignment::dispatch::{AttemptKey, dispatch_round_id};
 use auction_jobs::consignment::{
@@ -86,10 +86,15 @@ impl DispatchWorkSource for Chain {
 struct Queued(DispatchWorkRepository);
 
 impl RedispatchWorkSource for Queued {
-    fn pending_redispatches(&self, limit: u32) -> ConsignmentFuture<'_, Vec<PendingRedispatch>> {
+    fn pending_redispatches(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<PendingRedispatch>> {
         Box::pin(async move {
+            let queued = self.0.queued_redispatches(after, limit).await?;
             let mut pending = Vec::new();
-            for item in self.0.queued_redispatches(limit).await? {
+            for item in queued.items {
                 let prepared = match item.prepared {
                     Some(prepared) => (prepared.delivery_id, prepared.frozen),
                     None => match self.0.prepare_redispatch(item.dispatch_id).await? {
@@ -105,7 +110,7 @@ impl RedispatchWorkSource for Queued {
                     frozen: prepared.1,
                 });
             }
-            Ok(pending)
+            Ok(ScanPage { items: pending, next: queued.next })
         })
     }
 }
@@ -278,7 +283,7 @@ async fn postgres_consignment_redispatch_consumer_and_executor_send_the_new_roun
     let source = work_store(&runtime, CONTENT);
     let mut authorized = false;
     for _ in 0..100 {
-        if source.queued_redispatches(10).await.expect("补寄待办").is_empty() {
+        if source.queued_redispatches(None, 10).await.expect("补寄待办").items.is_empty() {
             authorized = true;
             break;
         }

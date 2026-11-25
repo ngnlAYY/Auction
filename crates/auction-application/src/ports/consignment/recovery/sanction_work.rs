@@ -6,6 +6,7 @@
 use uuid::Uuid;
 
 use crate::ports::consignment::errors::ConsignmentFuture;
+use crate::ports::consignment::scan::{ScanCursor, ScanPage};
 
 /// 一项待处理的账号工作；只含固定业务键。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,8 +39,13 @@ pub enum SanctionWorkOutcome {
 
 /// 处罚账号工作的持久仓库。
 pub trait SanctionWorkStore: Send + Sync {
-    /// 尚未收口的账号工作（待执行、执行中，或已取消但没有结果行），按创建时间升序，至多 `limit` 项。
-    fn open_sanction_work(&self, limit: u32) -> ConsignmentFuture<'_, Vec<SanctionWorkRef>>;
+    /// 游标之后尚未收口的账号工作（待执行、执行中，或已取消但没有结果行），按 `(创建时间, 工作 ID)` 升序，
+    /// 至多 `limit` 项；读满一页才给出下一页游标。
+    fn open_sanction_work(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<SanctionWorkRef>>;
 
     /// 在买家互斥下执行一项工作；账号命令外部不可见地先于效果提交，重复调用复用原命令。
     fn execute_sanction_work(

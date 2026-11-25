@@ -11,7 +11,7 @@ use std::time::Duration;
 use auction_application::consignment::{
     AttemptReceipt, AuthorizeDispatch, ConsignmentError, ConsignmentFuture, DispatchService,
     DispatchStore, EvidenceReceipt, MarkWriteStarted, PostPermit, RecordEvidence, RoundReceipt,
-    StartAttempt, StartReceipt, WriteStartOutcome,
+    ScanCursor, ScanPage, StartAttempt, StartReceipt, WriteStartOutcome,
 };
 use auction_application::delivery::DeliverySendCredentialBinding;
 use auction_domain::SettlementWorld;
@@ -24,8 +24,9 @@ use uuid::Uuid;
 
 use crate::worker::consignment::{
     ConsignmentDispatchRuntime, DispatchExecution, DispatchLease, DispatchRound, DispatchTransport,
-    DispatchWork, DispatchWorkSource, PendingRedispatch, PreparedDispatch, RedispatchRuntime,
-    RedispatchWorkSource, SentObservation, run_dispatch, run_redispatch,
+    DispatchWork, DispatchWorkSource, DownstreamRoundRuntime, DownstreamRoundSource,
+    PendingDownstreamRound, PendingRedispatch, PreparedDispatch, RedispatchRuntime,
+    RedispatchWorkSource, SentObservation, run_dispatch, run_downstream_rounds, run_redispatch,
 };
 
 const DELIVERY: Uuid = Uuid::from_u128(0xd1);
@@ -325,9 +326,13 @@ async fn restart_after_a_crash_mid_post_never_posts_again() {
 struct Pending(Vec<PendingRedispatch>);
 
 impl RedispatchWorkSource for Pending {
-    fn pending_redispatches(&self, _limit: u32) -> ConsignmentFuture<'_, Vec<PendingRedispatch>> {
+    fn pending_redispatches(
+        &self,
+        _after: Option<ScanCursor>,
+        _limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<PendingRedispatch>> {
         let pending = self.0.clone();
-        Box::pin(async move { Ok(pending) })
+        Box::pin(async move { Ok(ScanPage::last(pending)) })
     }
 }
 
@@ -359,4 +364,103 @@ async fn redispatch_authorizes_only_the_round_id_queued_by_the_resolution() {
     task.await.unwrap();
     let rounds = ledger.rounds.lock().unwrap().clone();
     assert_eq!(rounds, HashSet::from([dispatch_round_id(&queued)]));
+}
+
+/// 按页给出待办的来源：第一页带游标，第二页起没有后续；两页的内容由测试给定。
+struct Paged<T> {
+    first: Vec<T>,
+    second: Vec<T>,
+}
+
+impl<T: Clone> Paged<T> {
+    fn page(&self, after: Option<ScanCursor>) -> ScanPage<T> {
+        match after {
+            None => ScanPage {
+                items: self.first.clone(),
+                next: Some(ScanCursor {
+                    sort_at: Timestamp::from_timestamp(0, 0).unwrap(),
+                    tie_id: Uuid::from_u128(1),
+                }),
+            },
+            Some(_) => ScanPage::last(self.second.clone()),
+        }
+    }
+}
+
+impl RedispatchWorkSource for Paged<PendingRedispatch> {
+    fn pending_redispatches(
+        &self,
+        after: Option<ScanCursor>,
+        _limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<PendingRedispatch>> {
+        let page = self.page(after);
+        Box::pin(async move { Ok(page) })
+    }
+}
+
+impl DownstreamRoundSource for Paged<PendingDownstreamRound> {
+    fn pending_downstream_rounds(
+        &self,
+        after: Option<ScanCursor>,
+        _limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<PendingDownstreamRound>> {
+        let page = self.page(after);
+        Box::pin(async move { Ok(page) })
+    }
+}
+
+/// 不变量 5：第一页的补寄项不写任何行（轮键与处置不符）、下一轮仍会被选中时，一次扫描按键集分页走完
+/// 全部待办，第二页里排在后面的补寄同一轮被授权，不会被前面的项饿死；不符项仍不授权。
+#[tokio::test(start_paused = true)]
+async fn redispatch_scan_reaches_items_behind_a_full_page_of_unauthorizable_ones() {
+    let queued = DispatchRoundKey { round: 2, ..key() };
+    let stray = DispatchRoundKey { obligation_id: Uuid::from_u128(0xb2), ..queued };
+    let item = |key: DispatchRoundKey, dispatch_id| PendingRedispatch {
+        dispatch_id,
+        key,
+        closed_by_return_intake: Uuid::from_u128(0xf1),
+        delivery_id: DELIVERY,
+        frozen: frozen(&key),
+    };
+    let ledger = Arc::new(Ledger::default());
+    let runtime = Arc::new(RedispatchRuntime {
+        source: Arc::new(Paged {
+            first: vec![item(stray, dispatch_round_id(&queued))],
+            second: vec![item(queued, dispatch_round_id(&queued))],
+        }),
+        service: service(&ledger),
+        wakeup: Arc::new(Notify::new()),
+    });
+    let (drain, receiver) = watch::channel(false);
+    let task = tokio::spawn(run_redispatch(runtime, receiver, |_, _| {}));
+    idle_rounds().await;
+    drain.send_replace(true);
+    task.await.unwrap();
+    let rounds = ledger.rounds.lock().unwrap().clone();
+    assert_eq!(rounds, HashSet::from([dispatch_round_id(&queued)]));
+}
+
+/// 不变量 5：同上，下游首轮第一页里轮号不是 1 的项（来源被改坏、不授权）不会挡住第二页的首轮。
+#[tokio::test(start_paused = true)]
+async fn downstream_scan_reaches_items_behind_a_full_page_of_unauthorizable_ones() {
+    let first = key();
+    let wrong_round = DispatchRoundKey { round: 2, ..first };
+    let item = |key: DispatchRoundKey| PendingDownstreamRound {
+        key,
+        delivery_id: DELIVERY,
+        frozen: frozen(&key),
+    };
+    let ledger = Arc::new(Ledger::default());
+    let runtime = Arc::new(DownstreamRoundRuntime {
+        source: Arc::new(Paged { first: vec![item(wrong_round)], second: vec![item(first)] }),
+        service: service(&ledger),
+        wakeup: Arc::new(Notify::new()),
+    });
+    let (drain, receiver) = watch::channel(false);
+    let task = tokio::spawn(run_downstream_rounds(runtime, receiver, |_, _| {}));
+    idle_rounds().await;
+    drain.send_replace(true);
+    task.await.unwrap();
+    let rounds = ledger.rounds.lock().unwrap().clone();
+    assert_eq!(rounds, HashSet::from([dispatch_round_id(&first)]));
 }

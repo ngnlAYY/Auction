@@ -7,7 +7,8 @@
 
 use auction_application::consignment::{
     ConsignmentError, DepositBusinessRejection, RecoveryOperation, RemindContract, ReminderOutcome,
-    ReminderReceipt, payment_reminder_delivery_command, payment_reminder_delivery_id,
+    ReminderReceipt, ScanCursor, ScanPage, payment_reminder_delivery_command,
+    payment_reminder_delivery_id,
 };
 use auction_application::notification_metrics::NotificationRecorder;
 use auction_domain::CommandId;
@@ -28,6 +29,7 @@ use crate::database::consignment::commands::errors::WriteError;
 use crate::database::consignment::commands::session::DepositTransaction;
 use crate::database::consignment::commands::{LockKeys, with_deposit_transaction};
 use crate::database::consignment::deposit::primitives::database_now;
+use crate::database::consignment::scan::{cursor_binds, page_of};
 use crate::database::mail::delivery::{
     MailDeliveryTransactionError, enqueue_in_transaction_with_id,
 };
@@ -408,18 +410,30 @@ macro_rules! due_reminder_source {
 }
 pub(crate) use due_reminder_source;
 
+/// 键集分页（不变量 5）：提醒写端判“尚不需要”或确定拒绝时不写任何行，下一轮仍会被选中；若总取排序最前的
+/// 一页，这些项会占满整页、饿死后面真正要提醒的合同。一次扫描内按 `(payment_deadline_at, contract_id)`
+/// 走完全部待办，游标不持久、不跨轮、不作事实来源。
 pub(super) async fn due_reminders(
     store: &DatabaseStore,
+    after: Option<ScanCursor>,
     limit: u32,
-) -> Result<Vec<Uuid>, ConsignmentError> {
-    sqlx::query_scalar(concat!(
-        "SELECT sale.contract_id ",
+) -> Result<ScanPage<Uuid>, ConsignmentError> {
+    let (after_at, after_id) = cursor_binds(after);
+    let rows = sqlx::query(concat!(
+        "SELECT sale.contract_id, sale.payment_deadline_at AS scan_at,
+                sale.contract_id AS scan_id ",
         due_reminder_source!(),
-        " ORDER BY sale.payment_deadline_at, sale.contract_id
+        " AND ($2::timestamptz IS NULL
+                OR (sale.payment_deadline_at, sale.contract_id) > ($2::timestamptz, $3::uuid))
+         ORDER BY sale.payment_deadline_at, sale.contract_id
          LIMIT $1",
     ))
     .bind(i64::from(limit))
+    .bind(after_at)
+    .bind(after_id)
     .fetch_all(store.pool())
     .await
-    .map_err(|error| WriteError::from(error).into_application())
+    .map_err(|error| WriteError::from(error).into_application())?;
+    page_of(&rows, limit, |row| row.try_get("contract_id"))
+        .map_err(|error| WriteError::from(error).into_application())
 }

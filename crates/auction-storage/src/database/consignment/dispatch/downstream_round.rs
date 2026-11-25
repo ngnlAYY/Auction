@@ -19,7 +19,7 @@
 
 use std::sync::Arc;
 
-use auction_application::consignment::ConsignmentError;
+use auction_application::consignment::{ConsignmentError, ScanCursor, ScanPage};
 use auction_domain::SettlementObligationKind;
 use auction_domain::SettlementWorld;
 use auction_domain::consignment::dispatch::{
@@ -28,6 +28,7 @@ use auction_domain::consignment::dispatch::{
 use auction_domain::consignment::{ConsignmentObligation, parse_settlement_world};
 use auction_time::Timestamp;
 use serde_json::{Value, json};
+use sqlx::postgres::PgRow;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
@@ -39,6 +40,7 @@ use crate::database::consignment::commands::session::DepositTransaction;
 use crate::database::consignment::commands::{LockKeys, with_deposit_transaction};
 use crate::database::consignment::deposit::primitives::database_now;
 use crate::database::consignment::purchase::FirstDispatchContent;
+use crate::database::consignment::scan::{cursor_binds, next_cursor};
 use crate::database::delivery::audit::{DeliveryAudit, PREPARE, append as append_delivery_audit};
 
 /// 义务本身已放行（`o` 为义务行）：`ready` 且前置履约已满足。
@@ -121,13 +123,16 @@ impl DownstreamRoundRepository {
         Self { store, content }
     }
 
-    /// 为至多 `limit` 项已就绪、尚未建轮的下游义务备好首轮投递（已备好的原样重放），按放行先后返回。
-    /// 单项来源不符或内容不可得只记安全码并跳过，不影响其余项；读取待办失败返回错误。
+    /// 为游标之后至多 `limit` 项已就绪、尚未建轮的下游义务备好首轮投递（已备好的原样重放），按
+    /// `(updated_at, 义务 ID)` 升序返回一页。单项来源不符或内容不可得只记安全码并跳过（不写任何行，下一轮仍会
+    /// 被选中），但同样推进游标，异常项不会饿死后面的义务；读满一页才给出下一页游标。读取待办失败返回错误。
     pub async fn prepare_pending(
         &self,
+        after: Option<ScanCursor>,
         limit: u32,
-    ) -> Result<Vec<PreparedDownstreamRound>, ConsignmentError> {
-        let pending = self.pending(limit).await.map_err(WriteError::into_application)?;
+    ) -> Result<ScanPage<PreparedDownstreamRound>, ConsignmentError> {
+        let (pending, next) =
+            self.pending(after, limit).await.map_err(WriteError::into_application)?;
         let mut prepared = Vec::with_capacity(pending.len());
         for (contract_id, obligation_id) in pending {
             match self.prepare(contract_id, obligation_id).await {
@@ -144,14 +149,23 @@ impl DownstreamRoundRepository {
                 }
             }
         }
-        Ok(prepared)
+        Ok(ScanPage { items: prepared, next })
     }
 
-    async fn pending(&self, limit: u32) -> Result<Vec<(Uuid, Uuid)>, WriteError> {
+    /// 一页待办的 `(合同, 义务)` 与下一页游标（读满一页才有）。
+    async fn pending(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> Result<(Vec<(Uuid, Uuid)>, Option<ScanCursor>), WriteError> {
         let mut transaction = self.store.pool().begin_with("BEGIN READ ONLY").await?;
-        let ids = pending_ids(&mut transaction, None, i64::from(limit)).await?;
+        let rows = pending_rows(&mut transaction, None, after, i64::from(limit)).await?;
         transaction.commit().await?;
-        Ok(ids)
+        let ids = rows
+            .iter()
+            .map(|row| Ok((row.try_get("contract_id")?, row.try_get("obligation_id")?)))
+            .collect::<Result<Vec<_>, sqlx::Error>>()?;
+        Ok((ids, next_cursor(&rows, limit)?))
     }
 
     /// 命令锁键取首轮 ID（与补寄备好同口径）：同一义务的并发备好者在会话锁上排队；一个顶层 Serializable 事务。
@@ -193,13 +207,16 @@ pub(super) async fn downstream_ready(
 }
 
 /// 已就绪、尚未建轮、履约行仍是初始 `pending` 且未衔接投递的下游义务。
-async fn pending_ids(
+async fn pending_rows(
     connection: &mut PgConnection,
     obligation_id: Option<Uuid>,
+    after: Option<ScanCursor>,
     limit: i64,
-) -> Result<Vec<(Uuid, Uuid)>, WriteError> {
-    let ids = sqlx::query_as(concat!(
-        "SELECT o.contract_id, o.id FROM public.settlement_obligations AS o
+) -> Result<Vec<PgRow>, WriteError> {
+    let (after_at, after_id) = cursor_binds(after);
+    let rows = sqlx::query(concat!(
+        "SELECT o.contract_id, o.id AS obligation_id, o.updated_at AS scan_at, o.id AS scan_id
+         FROM public.settlement_obligations AS o
          JOIN public.settlement_obligation_fulfillments AS f ON f.obligation_id = o.id
          WHERE o.contract_id IS NOT NULL AND o.obligation_kind IN ",
         downstream_kinds!(),
@@ -211,13 +228,16 @@ async fn pending_ids(
         obligation_ready!(),
         " AND ",
         funded_matches!(),
-        " ORDER BY o.updated_at, o.id LIMIT $2"
+        " AND ($3::timestamptz IS NULL OR (o.updated_at, o.id) > ($3::timestamptz, $4::uuid))
+           ORDER BY o.updated_at, o.id LIMIT $2"
     ))
     .bind(obligation_id)
     .bind(limit)
+    .bind(after_at)
+    .bind(after_id)
     .fetch_all(connection)
     .await?;
-    Ok(ids)
+    Ok(rows)
 }
 
 /// 首轮冻结身份中由合同事实确定的部分。
@@ -313,7 +333,7 @@ async fn prepare_in_tx(
 ) -> Result<Option<PreparedDownstreamRound>, WriteError> {
     let (obligation_id, content) = input;
     // 锁内重核待办：已建轮、已衔接或不再就绪时不备。
-    if pending_ids(tx.connection(), Some(*obligation_id), 1).await?.is_empty() {
+    if pending_rows(tx.connection(), Some(*obligation_id), None, 1).await?.is_empty() {
         return Ok(None);
     }
     let obligation = load_payment(tx.connection(), *obligation_id).await?;

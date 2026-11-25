@@ -12,8 +12,8 @@
 use auction_application::admin::{RecoveryBuyerBlacklistCommand, RecoveryBuyerBlacklister};
 use auction_application::consignment::{
     ConsignmentError, ConsignmentFuture, ConsignmentSanctionAccountWork, RecoveryOperation,
-    SanctionWorkOutcome, SanctionWorkRef, SanctionWorkStore, apply_sanction_command,
-    consignment_sanction_blacklist_command,
+    SanctionWorkOutcome, SanctionWorkRef, SanctionWorkStore, ScanCursor, ScanPage,
+    apply_sanction_command, consignment_sanction_blacklist_command,
 };
 use auction_domain::consignment::recovery::{
     SanctionExecution, SanctionExecutionFacts, SanctionWorkState, UserStatusFact,
@@ -23,7 +23,7 @@ use auction_domain::consignment::refusal::SanctionRule;
 use auction_time::Timestamp;
 use futures_util::future::BoxFuture;
 use sqlx::postgres::Postgres;
-use sqlx::{Connection, PgConnection};
+use sqlx::{Connection, PgConnection, Row};
 use uuid::Uuid;
 
 use crate::database::DatabaseStore;
@@ -33,6 +33,7 @@ use crate::database::consignment::deposit::primitives::database_now;
 use crate::database::consignment::recovery::ledger::{
     Arbitration, LedgerCommand, Step, Target, arbitrate, insert_success,
 };
+use crate::database::consignment::scan::{cursor_binds, page_of};
 use crate::database::pool::TrackedConnection;
 
 /// 每个阶段遇到序列化冲突时的有界重试次数；阶段本身幂等。
@@ -521,33 +522,46 @@ impl DatabaseStore {
 }
 
 impl SanctionWorkStore for DatabaseStore {
-    fn open_sanction_work(&self, limit: u32) -> ConsignmentFuture<'_, Vec<SanctionWorkRef>> {
+    /// 键集分页（不变量 5）：持久事实自相矛盾（`Inconsistent`）或执行失败的工作不会收口，仍留在待办里；
+    /// 若总取排序最前的一页，它们会占满整页、饿死后面可执行的工作。一次扫描内按 `(created_at, id)` 走完
+    /// 全部待办，游标不持久、不跨轮、不作事实来源。
+    fn open_sanction_work(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<SanctionWorkRef>> {
         Box::pin(async move {
-            let rows: Vec<(Uuid, Uuid, Uuid)> = sqlx::query_as(
-                "SELECT work.id, work.sanction_id, work.buyer_user_id
+            let (after_at, after_id) = cursor_binds(after);
+            let rows = sqlx::query(
+                "SELECT work.id, work.sanction_id, work.buyer_user_id,
+                        work.created_at AS scan_at, work.id AS scan_id
                  FROM public.consignment_account_work AS work
-                 WHERE work.state IN ('pending', 'claimed')
+                 WHERE (work.state IN ('pending', 'claimed')
                     OR (work.state = 'cancelled' AND NOT EXISTS (
                         SELECT 1 FROM public.consignment_sanction_work_results AS result
                         WHERE result.work_id = work.id))
                     -- completed 却没有效果回执是不可能的状态：列出来让执行器失败关闭、转人工（7B-1 裁定）。
                     OR (work.state = 'completed' AND NOT EXISTS (
                         SELECT 1 FROM public.consignment_sanction_effects AS effect
-                        WHERE effect.sanction_id = work.sanction_id))
+                        WHERE effect.sanction_id = work.sanction_id)))
+                   AND ($2::timestamptz IS NULL
+                        OR (work.created_at, work.id) > ($2::timestamptz, $3::uuid))
                  ORDER BY work.created_at, work.id LIMIT $1",
             )
             .bind(i64::from(limit))
+            .bind(after_at)
+            .bind(after_id)
             .fetch_all(self.pool())
             .await
             .map_err(|error| WriteError::from(error).into_application())?;
-            Ok(rows
-                .into_iter()
-                .map(|(work_id, sanction_id, buyer_user_id)| SanctionWorkRef {
-                    work_id,
-                    sanction_id,
-                    buyer_user_id,
+            page_of(&rows, limit, |row| {
+                Ok(SanctionWorkRef {
+                    work_id: row.try_get("id")?,
+                    sanction_id: row.try_get("sanction_id")?,
+                    buyer_user_id: row.try_get("buyer_user_id")?,
                 })
-                .collect())
+            })
+            .map_err(|error| WriteError::from(error).into_application())
         })
     }
 

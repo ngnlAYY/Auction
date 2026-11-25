@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::ports::consignment::{
     AutoRelistSetting, ConsignmentError, DepositActor, PendingResolution, RecoveryOperation,
-    ResolveReceipt, ResolveReturn, ReturnDispositionStore,
+    ResolveReceipt, ResolveReturn, ReturnDispositionStore, ScanCursor, ScanPage,
 };
 use crate::ports::core::RequestHash;
 use crate::services::consignment::deposit::encoding::COMMAND_PREFIX_V2;
@@ -109,9 +109,13 @@ impl ReturnDispositionService {
             .await
     }
 
-    /// 尚无处置的消费。
-    pub async fn pending(&self, limit: u32) -> Result<Vec<PendingResolution>, ConsignmentError> {
-        self.store.pending_resolutions(limit).await
+    /// 游标之后尚无处置的消费（一页）。
+    pub async fn pending(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> Result<ScanPage<PendingResolution>, ConsignmentError> {
+        self.store.pending_resolutions(after, limit).await
     }
 }
 

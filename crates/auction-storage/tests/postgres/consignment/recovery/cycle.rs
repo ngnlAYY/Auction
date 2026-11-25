@@ -28,7 +28,17 @@ async fn postgres_consignment_recovery_sanction_cycle_closed_work_is_closed_with
         .expect("解禁关闭旧周期");
     assert_eq!(transition.closed_sanction_id, Some(env.stock.sanction_id));
     // 解禁路径已把旧工作取消；执行器仍须把它收口成不可改写的 cycle_closed 事实。
-    assert_eq!(env.store.open_sanction_work(10).await.expect("未收口工作"), vec![env.work()]);
+    assert_eq!(
+        env.store.open_sanction_work(None, 10).await.expect("未收口工作").items,
+        vec![env.work()]
+    );
+    // 键集分页：读满一页给出游标，游标之后没有更多待办（正例）；读不满一页没有游标（反例）。
+    let page = env.store.open_sanction_work(None, 1).await.expect("满页");
+    assert_eq!(page.items, vec![env.work()]);
+    let next = page.next.expect("读满一页应给出游标");
+    let after = env.store.open_sanction_work(Some(next), 1).await.expect("游标之后");
+    assert!((after.items.is_empty(), after.next.is_none()) == (true, true), "{after:?}");
+    assert_eq!(env.store.open_sanction_work(None, 10).await.expect("未满页").next, None);
 
     assert_eq!(
         env.store.execute_sanction_work(env.work()).await.expect("收口"),
@@ -38,7 +48,7 @@ async fn postgres_consignment_recovery_sanction_cycle_closed_work_is_closed_with
         env.store.execute_sanction_work(env.work()).await.expect("重放"),
         SanctionWorkOutcome::Replayed
     );
-    assert!(env.store.open_sanction_work(10).await.expect("未收口工作").is_empty());
+    assert!(env.store.open_sanction_work(None, 10).await.expect("未收口工作").items.is_empty());
 
     assert_eq!(
         env.scalar("SELECT state FROM public.consignment_sanction_effects").await,
@@ -79,7 +89,7 @@ async fn postgres_consignment_recovery_sanction_unban_opens_new_cycle_and_keeps_
         env.scalar("SELECT state FROM public.consignment_sanction_effects").await,
         "applied"
     );
-    assert!(env.store.open_sanction_work(10).await.expect("未收口工作").is_empty());
+    assert!(env.store.open_sanction_work(None, 10).await.expect("未收口工作").items.is_empty());
 
     let fresh = submit(&env.store, 4).await;
     assert_eq!(fresh.qualification, Qualification::Qualified);

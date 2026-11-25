@@ -10,7 +10,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use auction_application::consignment::{ConsignmentError, ConsignmentFuture, DispatchService};
+use auction_application::consignment::{
+    ConsignmentError, ConsignmentFuture, DispatchService, ScanCursor, ScanPage,
+};
 use auction_domain::consignment::dispatch::{
     DispatchRoundKey, FrozenDispatchIdentity, RoundOrigin,
 };
@@ -19,13 +21,14 @@ use tokio::sync::{Notify, watch};
 use tokio::time::Instant;
 use uuid::Uuid;
 
-use super::stopped;
+use super::{next_scan_cursor, stopped};
 
 const IDLE_POLL: Duration = Duration::from_secs(30);
 const BACKOFF_INITIAL: Duration = Duration::from_secs(1);
 const BACKOFF_MAXIMUM: Duration = Duration::from_secs(30);
 /// 单轮最多处理的待办数，之后让出调度。
-const PER_ROUND: u32 = 64;
+/// 每页读取的待办数；一次扫描按页走完全部待办。
+const PAGE_SIZE: u32 = 64;
 
 /// 一项已备好首轮投递、待授权的下游义务。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,11 +43,12 @@ pub struct PendingDownstreamRound {
 
 /// 下游首轮待办的持久来源；实现方只委托存储（备好投递在存储事务里完成）。
 pub trait DownstreamRoundSource: Send + Sync {
-    /// 列出已放行、尚未建轮的下游义务，并为其备好首轮投递。
+    /// 列出游标之后已放行、尚未建轮的下游义务，并为其备好首轮投递；读满一页才给出下一页游标。
     fn pending_downstream_rounds(
         &self,
+        after: Option<ScanCursor>,
         limit: u32,
-    ) -> ConsignmentFuture<'_, Vec<PendingDownstreamRound>>;
+    ) -> ConsignmentFuture<'_, ScanPage<PendingDownstreamRound>>;
 }
 
 /// 下游首轮消费端的运行参数。
@@ -65,39 +69,51 @@ struct Round {
 }
 
 impl DownstreamRoundRuntime {
+    /// 一次扫描：按 `(updated_at, 义务 ID)` 键集分页走完全部待办。被确定拒绝或轮号不符的项不写任何行、下一轮
+    /// 仍会被选中，分页让它们不会占满整页、饿死排在后面的义务；游标只活在本次扫描里，不跨轮、不作事实来源。
     async fn round(&self) -> Round {
         let mut round = Round::default();
-        let pending = match self.source.pending_downstream_rounds(PER_ROUND).await {
-            Ok(pending) => pending,
-            Err(error) => {
-                tracing::warn!(%error, "读取下游首轮待办失败，稍后重试");
-                round.failed = true;
-                return round;
-            }
-        };
-        for item in pending {
-            // 生产者只建首轮；其他轮号说明来源被改坏，失败关闭、不授权。
-            if item.key.round != 1 {
-                tracing::warn!(code = "downstream_round_number", "下游首轮轮号不是 1");
-                continue;
-            }
-            match self
-                .service
-                .authorize(item.key, RoundOrigin::First, item.delivery_id, item.frozen)
-                .await
-            {
-                // 重放不是进展：已有轮的义务，来源下一次不应再返回它。
-                Ok(receipt) => round.worked |= !receipt.replayed,
-                Err(ConsignmentError::Deposit(rejection)) => {
-                    tracing::warn!(code = rejection.code(), "下游首轮授权被确定拒绝，等待人工核对");
-                }
+        let mut after = None;
+        loop {
+            let page = match self.source.pending_downstream_rounds(after, PAGE_SIZE).await {
+                Ok(page) => page,
                 Err(error) => {
-                    tracing::warn!(%error, "下游首轮授权失败，稍后重试");
+                    tracing::warn!(%error, "读取下游首轮待办失败，稍后重试");
                     round.failed = true;
+                    return round;
                 }
+            };
+            for item in page.items {
+                self.authorize(item, &mut round).await;
+            }
+            match next_scan_cursor(after, page.next) {
+                Some(next) => after = Some(next),
+                None => return round,
             }
         }
-        round
+    }
+
+    async fn authorize(&self, item: PendingDownstreamRound, round: &mut Round) {
+        // 生产者只建首轮；其他轮号说明来源被改坏，失败关闭、不授权。
+        if item.key.round != 1 {
+            tracing::warn!(code = "downstream_round_number", "下游首轮轮号不是 1");
+            return;
+        }
+        match self
+            .service
+            .authorize(item.key, RoundOrigin::First, item.delivery_id, item.frozen)
+            .await
+        {
+            // 重放不是进展：已有轮的义务，来源下一次不应再返回它。
+            Ok(receipt) => round.worked |= !receipt.replayed,
+            Err(ConsignmentError::Deposit(rejection)) => {
+                tracing::warn!(code = rejection.code(), "下游首轮授权被确定拒绝，等待人工核对");
+            }
+            Err(error) => {
+                tracing::warn!(%error, "下游首轮授权失败，稍后重试");
+                round.failed = true;
+            }
+        }
     }
 }
 

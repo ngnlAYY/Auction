@@ -8,6 +8,7 @@ use uuid::Uuid;
 use super::resolve::{Stream, system_id};
 use crate::ports::consignment::{
     ConsignmentError, PaymentReminderStore, RecoveryOperation, RemindContract, ReminderReceipt,
+    ScanCursor, ScanPage,
 };
 use crate::ports::core::RequestHash;
 
@@ -40,8 +41,12 @@ impl PaymentReminderService {
         self.store.remind(RemindContract { command_id, request_hash, contract_id }).await
     }
 
-    /// 已到期、已证寄出且尚无提醒决定的合同。
-    pub async fn due(&self, limit: u32) -> Result<Vec<Uuid>, ConsignmentError> {
-        self.store.due_reminders(limit).await
+    /// 游标之后已到期、已证寄出且尚无提醒决定的合同（一页）。
+    pub async fn due(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> Result<ScanPage<Uuid>, ConsignmentError> {
+        self.store.due_reminders(after, limit).await
     }
 }

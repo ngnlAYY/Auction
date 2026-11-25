@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use auction_application::consignment::{
     ConsignmentError, ConsignmentFuture, ListingAdmission, ListingLookupBudget,
-    ListingMaintenanceService, LookupWorkStore, ResolveListingService,
+    ListingMaintenanceService, LookupWorkStore, ResolveListingService, ScanCursor,
 };
 use auction_application::core::Clock;
 use auction_domain::valid_text;
@@ -416,6 +416,11 @@ impl ConsignmentWorker {
             collections_loop
         );
     }
+}
+
+/// 一次扫描的下一页游标；来源给出不严格前进的游标说明实现有误，结束本次扫描而不是空转。
+fn next_scan_cursor(after: Option<ScanCursor>, next: Option<ScanCursor>) -> Option<ScanCursor> {
+    next.filter(|next| after != Some(*next))
 }
 
 fn stopped(drain: &watch::Receiver<bool>) -> bool {

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use auction_application::consignment::{
-    ConsignmentError, ConsignmentFuture, DispatchWorkStore, QueuedRedispatch,
+    ConsignmentError, ConsignmentFuture, DispatchWorkStore, QueuedRedispatch, ScanCursor, ScanPage,
 };
 use auction_application::core::Clock;
 use auction_application::mail::{ReturnTakeClaim, ReturnTakeWorkStore};
@@ -77,16 +77,21 @@ pub struct StoreRedispatchWork {
 }
 
 impl RedispatchWorkSource for StoreRedispatchWork {
-    fn pending_redispatches(&self, limit: u32) -> ConsignmentFuture<'_, Vec<PendingRedispatch>> {
+    fn pending_redispatches(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<PendingRedispatch>> {
         Box::pin(async move {
-            let queued = self.work.queued_redispatches(limit).await?;
-            let mut pending = Vec::with_capacity(queued.len());
-            for item in queued {
+            let queued = self.work.queued_redispatches(after, limit).await?;
+            let mut pending = Vec::with_capacity(queued.items.len());
+            for item in queued.items {
                 if let Some(ready) = self.prepared(item).await? {
                     pending.push(ready);
                 }
             }
-            Ok(pending)
+            // 备好被拒的项本页跳过，但游标取存储给出的页游标：被拒项不会占住后面的补寄。
+            Ok(ScanPage { items: pending, next: queued.next })
         })
     }
 }
@@ -129,18 +134,23 @@ pub struct StoreDownstreamRounds {
 impl DownstreamRoundSource for StoreDownstreamRounds {
     fn pending_downstream_rounds(
         &self,
+        after: Option<ScanCursor>,
         limit: u32,
-    ) -> ConsignmentFuture<'_, Vec<PendingDownstreamRound>> {
+    ) -> ConsignmentFuture<'_, ScanPage<PendingDownstreamRound>> {
         Box::pin(async move {
-            let prepared = self.repository.prepare_pending(limit).await?;
-            Ok(prepared
-                .into_iter()
-                .map(|round| PendingDownstreamRound {
-                    key: round.key,
-                    delivery_id: round.delivery_id,
-                    frozen: round.frozen,
-                })
-                .collect())
+            let prepared = self.repository.prepare_pending(after, limit).await?;
+            Ok(ScanPage {
+                items: prepared
+                    .items
+                    .into_iter()
+                    .map(|round| PendingDownstreamRound {
+                        key: round.key,
+                        delivery_id: round.delivery_id,
+                        frozen: round.frozen,
+                    })
+                    .collect(),
+                next: prepared.next,
+            })
         })
     }
 }

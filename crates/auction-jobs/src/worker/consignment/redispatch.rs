@@ -12,7 +12,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use auction_application::consignment::{ConsignmentError, ConsignmentFuture, DispatchService};
+use auction_application::consignment::{
+    ConsignmentError, ConsignmentFuture, DispatchService, ScanCursor, ScanPage,
+};
 use auction_domain::consignment::dispatch::{
     DispatchRoundKey, FrozenDispatchIdentity, RoundOrigin, dispatch_round_id,
 };
@@ -21,11 +23,14 @@ use tokio::sync::{Notify, watch};
 use tokio::time::Instant;
 use uuid::Uuid;
 
+use super::next_scan_cursor;
+
 const IDLE_POLL: Duration = Duration::from_secs(30);
 const BACKOFF_INITIAL: Duration = Duration::from_secs(1);
 const BACKOFF_MAXIMUM: Duration = Duration::from_secs(30);
 /// 单轮最多读取的待办数，之后让出调度。
-const PER_ROUND: u32 = 64;
+/// 每页读取的待办数；一次扫描按页走完全部待办。
+const PAGE_SIZE: u32 = 64;
 
 /// 一条已排队、尚未建轮的补寄处置。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,8 +49,12 @@ pub struct PendingRedispatch {
 
 /// 补寄待办的持久来源；实现方只委托存储。
 pub trait RedispatchWorkSource: Send + Sync {
-    /// 列出已排队、尚未建轮的补寄处置。
-    fn pending_redispatches(&self, limit: u32) -> ConsignmentFuture<'_, Vec<PendingRedispatch>>;
+    /// 列出游标之后已排队、尚未建轮的补寄处置；读满一页才给出下一页游标。
+    fn pending_redispatches(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<PendingRedispatch>>;
 }
 
 /// 补寄消费端的运行参数。
@@ -66,39 +75,48 @@ struct Round {
 }
 
 impl RedispatchRuntime {
+    /// 一次扫描：按 `(resolved_at, 新轮 ID)` 键集分页走完全部待办。被确定拒绝或轮键不符的项不写任何行、下一轮
+    /// 仍会被选中，分页让它们不会占满整页、饿死排在后面的补寄；游标只活在本次扫描里，不跨轮、不作事实来源。
     async fn round(&self) -> Round {
         let mut round = Round::default();
-        let pending = match self.source.pending_redispatches(PER_ROUND).await {
-            Ok(pending) => pending,
-            Err(error) => {
-                tracing::warn!(%error, "读取补寄待办失败，稍后重试");
-                round.failed = true;
-                return round;
-            }
-        };
-        for item in pending {
-            if dispatch_round_id(&item.key) != item.dispatch_id {
-                tracing::warn!(
-                    code = "redispatch_round_mismatch",
-                    "补寄轮键与处置记下的轮 ID 不符"
-                );
-                continue;
-            }
-            let origin =
-                RoundOrigin::Redispatch { closed_by_return_intake: item.closed_by_return_intake };
-            match self.service.authorize(item.key, origin, item.delivery_id, item.frozen).await {
-                // 重放不是进展：待办已有轮，来源下一次不应再返回它。
-                Ok(receipt) => round.worked |= !receipt.replayed,
-                Err(ConsignmentError::Deposit(rejection)) => {
-                    tracing::warn!(code = rejection.code(), "补寄授权被确定拒绝，等待人工核对");
-                }
+        let mut after = None;
+        loop {
+            let page = match self.source.pending_redispatches(after, PAGE_SIZE).await {
+                Ok(page) => page,
                 Err(error) => {
-                    tracing::warn!(%error, "补寄授权失败，稍后重试");
+                    tracing::warn!(%error, "读取补寄待办失败，稍后重试");
                     round.failed = true;
+                    return round;
                 }
+            };
+            for item in page.items {
+                self.authorize(item, &mut round).await;
+            }
+            match next_scan_cursor(after, page.next) {
+                Some(next) => after = Some(next),
+                None => return round,
             }
         }
-        round
+    }
+
+    async fn authorize(&self, item: PendingRedispatch, round: &mut Round) {
+        if dispatch_round_id(&item.key) != item.dispatch_id {
+            tracing::warn!(code = "redispatch_round_mismatch", "补寄轮键与处置记下的轮 ID 不符");
+            return;
+        }
+        let origin =
+            RoundOrigin::Redispatch { closed_by_return_intake: item.closed_by_return_intake };
+        match self.service.authorize(item.key, origin, item.delivery_id, item.frozen).await {
+            // 重放不是进展：待办已有轮，来源下一次不应再返回它。
+            Ok(receipt) => round.worked |= !receipt.replayed,
+            Err(ConsignmentError::Deposit(rejection)) => {
+                tracing::warn!(code = rejection.code(), "补寄授权被确定拒绝，等待人工核对");
+            }
+            Err(error) => {
+                tracing::warn!(%error, "补寄授权失败，稍后重试");
+                round.failed = true;
+            }
+        }
     }
 }
 
