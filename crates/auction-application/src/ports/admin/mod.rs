@@ -128,10 +128,11 @@ pub use users::{
     AdminUserListRequest, AdminUserMutationAction, AdminUserMutationCommand,
     AdminUserMutationResult, AdminUserMutationWrite, AdminUserPage, AdminUserPort, AdminUserStatus,
     AdminUserStore, MAX_ADMIN_USER_OFFSET, MAX_ADMIN_USER_PAGE_SIZE,
-    RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_LEGACY_PUBLIC_REASON,
-    RECOVERY_BUYER_BLACKLIST_PROOF_KIND, RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON,
-    RecoveryBuyerBlacklistCommand, RecoveryBuyerBlacklistResult, RecoveryBuyerBlacklister,
-    is_recovery_buyer_blacklist_reason, recovery_buyer_blacklist_reason,
+    RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_CONSIGNMENT_ACTOR,
+    RECOVERY_BUYER_BLACKLIST_LEGACY_PUBLIC_REASON, RECOVERY_BUYER_BLACKLIST_PROOF_KIND,
+    RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON, RecoveryBuyerBlacklistCommand,
+    RecoveryBuyerBlacklistResult, RecoveryBuyerBlacklister, is_recovery_buyer_blacklist_reason,
+    recovery_buyer_blacklist_reason,
 };
 pub use worlds::{
     ADMIN_WORLD_SET_ENABLED_COMMAND_KIND, AdminWorldError, AdminWorldPort,

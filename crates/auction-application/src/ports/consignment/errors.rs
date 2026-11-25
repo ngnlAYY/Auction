@@ -100,6 +100,21 @@ pub enum DepositBusinessRejection {
     /// 起写 fence 已失效。
     #[error("资产起写 fence 不匹配")]
     FenceMismatch,
+    /// 装备已被买方权利或资金责任占用，不能取回或灭失办结。
+    #[error("装备已被买方权利占用")]
+    EquipmentCommitted,
+    /// 原件的代管状态未证明。
+    #[error("代管状态未证明")]
+    CustodyUnproven,
+    /// 独立运营止售阻止本动作。
+    #[error("运营止售阻止该动作")]
+    OperationsHold,
+    /// 活动挂单额度已满。
+    #[error("活动挂单数已达上限")]
+    ListingLimitReached,
+    /// 相反方向的付款（卖款）可能已发，退款类处置不得转换。
+    #[error("相反方向的付款仍未了结")]
+    OppositePaymentOpen,
 }
 
 impl DepositBusinessRejection {
@@ -120,6 +135,11 @@ impl DepositBusinessRejection {
             Self::HoldMismatch => "hold_mismatch",
             Self::ActionNotAllowed => "action_not_allowed",
             Self::FenceMismatch => "fence_mismatch",
+            Self::EquipmentCommitted => "equipment_committed",
+            Self::CustodyUnproven => "custody_unproven",
+            Self::OperationsHold => "operations_hold",
+            Self::ListingLimitReached => "listing_limit_reached",
+            Self::OppositePaymentOpen => "opposite_payment_open",
         }
     }
 
@@ -128,6 +148,7 @@ impl DepositBusinessRejection {
         match self {
             Self::ParticipantIneligible | Self::BotParty | Self::ActionNotAllowed => 403,
             Self::MailUnavailable => 503,
+            Self::ListingLimitReached => 429,
             Self::StaleVersion
             | Self::ListingNotActive
             | Self::EquipmentBusy
@@ -137,7 +158,11 @@ impl DepositBusinessRejection {
             | Self::EvidenceConflict
             | Self::DispositionConflict
             | Self::HoldMismatch
-            | Self::FenceMismatch => 409,
+            | Self::FenceMismatch
+            | Self::EquipmentCommitted
+            | Self::CustodyUnproven
+            | Self::OperationsHold
+            | Self::OppositePaymentOpen => 409,
         }
     }
 }
@@ -434,5 +459,24 @@ mod tests {
             .api_error(),
             Some((503, "consignment_unavailable"))
         );
+    }
+}
+
+#[cfg(test)]
+mod deposit_rejection_tests {
+    use super::DepositBusinessRejection;
+
+    /// 第 7 期新增拒绝码的 wire 码与状态码是合同值：账本 `result_code` 与 HTTP 都依赖它们。
+    #[test]
+    fn phase_seven_rejections_have_frozen_codes_and_statuses() {
+        let table = [
+            (DepositBusinessRejection::EquipmentCommitted, "equipment_committed", 409),
+            (DepositBusinessRejection::CustodyUnproven, "custody_unproven", 409),
+            (DepositBusinessRejection::OperationsHold, "operations_hold", 409),
+            (DepositBusinessRejection::ListingLimitReached, "listing_limit_reached", 429),
+        ];
+        for (rejection, code, status) in table {
+            assert_eq!((rejection.code(), rejection.status()), (code, status));
+        }
     }
 }

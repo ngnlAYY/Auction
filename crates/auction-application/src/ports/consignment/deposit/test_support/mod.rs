@@ -5,6 +5,7 @@
 
 mod control;
 mod ports;
+mod reads_v2;
 mod records;
 mod replay;
 

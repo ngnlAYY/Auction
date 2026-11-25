@@ -5,7 +5,8 @@ use std::sync::Arc;
 use auction_domain::CommandId;
 use auction_domain::UserId;
 use auction_domain::consignment::deposit::{
-    EnvelopeObservation, EnvelopeRoute, LockedEnvelopeFacts, ReleaseKind, decide_envelope,
+    EnvelopeObservation, EnvelopeRoute, LockedEnvelopeFacts, ReleaseKind, TrustedConsignmentRts,
+    decide_envelope_with_origin,
 };
 use auction_domain::consignment::{FrozenSeason, ListingVersion};
 use auction_time::Timestamp;
@@ -206,7 +207,7 @@ impl DepositCommandService {
         &self,
         facts: LockedEnvelopeFacts,
     ) -> Result<Option<crate::ports::consignment::EnvelopeReceipt>, ConsignmentError> {
-        let Some(command) = Self::prepare_decide_envelope(facts)? else {
+        let Some(command) = Self::prepare_decide_envelope(facts, None)? else {
             return Ok(None);
         };
         let receipt = self.envelopes.decide_envelope(command).await?;
@@ -218,11 +219,13 @@ impl DepositCommandService {
 
     /// 纯构造首次整封决定命令；规范编码与系统 UUIDv5 只在这里产生。
     ///
-    /// 旧拍卖 owner、临时读取失败与已有决定不生成命令，调用方按原路径或恢复处理。
+    /// 旧拍卖 owner、临时读取失败与已有决定不生成命令，调用方按原路径或恢复处理。`origin` 是预读按
+    /// RTS 线索定位的寄售原轮，只用于把“疑似系统 RTS”改交退件接管；写端锁内复判来源（不变量 6）。
     pub fn prepare_decide_envelope(
         facts: LockedEnvelopeFacts,
+        origin: Option<TrustedConsignmentRts>,
     ) -> Result<Option<DecideEnvelopeCommand>, ConsignmentError> {
-        let route = decide_envelope(&facts);
+        let route = decide_envelope_with_origin(&facts, origin);
         let decision = match route {
             EnvelopeRoute::LegacyAuction(_) | EnvelopeRoute::Pending(_) => return Ok(None),
             EnvelopeRoute::Consignment(decision) => decision,

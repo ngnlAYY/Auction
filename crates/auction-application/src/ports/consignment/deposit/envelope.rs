@@ -29,7 +29,7 @@ pub struct DecideEnvelopeCommand {
     pub decision: EnvelopeDecision,
 }
 
-/// 整封决定的四种处置；wire 码统一由 [`ReceiptDisposition`] 表达。
+/// 整封决定的五种处置；wire 码统一由 [`ReceiptDisposition`] 表达。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EnvelopeDisposition {
     /// 整封接受。
@@ -40,6 +40,8 @@ pub enum EnvelopeDisposition {
     ArchivedEmpty,
     /// 持久隔离。
     Quarantined,
+    /// 可信寄售 RTS 已被接管（intake 与唯一 Take 工作同提交）。
+    ReturnAcquired,
 }
 
 impl EnvelopeDisposition {
@@ -50,6 +52,7 @@ impl EnvelopeDisposition {
             Self::ReturnDecided => "return_decided",
             Self::ArchivedEmpty => "archived_empty",
             Self::Quarantined => "quarantined",
+            Self::ReturnAcquired => "return_acquired",
         }
     }
 }
@@ -61,6 +64,19 @@ pub struct QuarantineReference {
     pub quarantine_id: Uuid,
     /// 首次隔离版本。
     pub version: u64,
+}
+
+/// 接管引用：与直接接管的 `return_acquired` 回执同形（D9 §6.2）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReturnIntakeReference {
+    /// 退件接管 UUID。
+    pub return_intake_id: Uuid,
+    /// 被退回的原轮。
+    pub original_round: u32,
+    /// 唯一 Take 工作。
+    pub take_work_id: Uuid,
+    /// Take 投递。
+    pub take_delivery_id: Uuid,
 }
 
 /// 整封决定回执。
@@ -80,6 +96,8 @@ pub struct EnvelopeReceipt {
     pub listing_changes: Vec<ListingStateChange>,
     /// 隔离时必有的引用。
     pub quarantine: Option<QuarantineReference>,
+    /// 接管时必有的引用。
+    pub return_intake: Option<ReturnIntakeReference>,
 }
 
 impl EnvelopeReceipt {
@@ -97,11 +115,13 @@ impl EnvelopeReceipt {
                 EnvelopeDisposition::ReturnDecided => ReceiptDisposition::ReturnDecided,
                 EnvelopeDisposition::ArchivedEmpty => ReceiptDisposition::ArchivedEmpty,
                 EnvelopeDisposition::Quarantined => ReceiptDisposition::Quarantined,
+                EnvelopeDisposition::ReturnAcquired => ReceiptDisposition::ReturnAcquired,
             },
             command_id,
             decision_id,
             listing_changes: Vec::new(),
             quarantine: None,
+            return_intake: None,
         }
     }
 
@@ -111,6 +131,8 @@ impl EnvelopeReceipt {
         if self.schema_version != DEPOSIT_SCHEMA_VERSION
             || self.operation != DepositOperation::DecideEnvelope
             || self.decision_id.is_nil()
+            || (self.disposition == ReceiptDisposition::ReturnAcquired)
+                != self.return_intake.is_some()
         {
             return Err(DepositError::InvalidRequest);
         }
@@ -125,7 +147,9 @@ impl EnvelopeReceipt {
                     return Err(DepositError::InvalidRequest);
                 }
             }
-            ReceiptDisposition::ReturnDecided | ReceiptDisposition::ArchivedEmpty => {
+            ReceiptDisposition::ReturnDecided
+            | ReceiptDisposition::ArchivedEmpty
+            | ReceiptDisposition::ReturnAcquired => {
                 if self.quarantine.is_some() || !self.listing_changes.is_empty() {
                     return Err(DepositError::InvalidRequest);
                 }

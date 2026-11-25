@@ -30,10 +30,12 @@ pub use envelope::{
     AppendQuarantineObservationCommand, AutoReleaseBinding, DecideEnvelopeCommand,
     EnvelopeDisposition, EnvelopeReceipt, EnvelopeStore, ObservationReceipt, QuarantineReference,
     RecheckQuarantineCommand, RecheckReceipt, ReleaseQuarantineCommand, ReleaseReceipt,
+    ReturnIntakeReference,
 };
 pub use owner::LegacyAuctionOwnerResolver;
 pub use poll::{
-    EnvelopePreflight, MailReadinessGate, PollEnvelopeStore, PollEnvelopeWrite, PollRawObservation,
+    ConsignmentRtsLocator, EnvelopePreflight, MailReadinessGate, PollEnvelopeStore,
+    PollEnvelopeWrite, PollRawObservation,
 };
 pub use readiness::{
     MailEvidenceReadinessRecord, MailEvidenceReadinessStore, MailEvidenceSessionDraft,

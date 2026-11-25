@@ -14,10 +14,13 @@ use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::consignment::{
-    ConsignmentError, EnvelopeReceipt, PollEnvelopeStore, PollEnvelopeWrite, PollRawObservation,
+    ConsignmentError, ConsignmentRtsLocator, EnvelopeReceipt, PollEnvelopeStore, PollEnvelopeWrite,
+    PollRawObservation,
 };
 use crate::ports::mail::{MailMessage, MailPollClaim};
-use crate::ports::settlement::MailAccountEvidenceBinding;
+use crate::ports::settlement::{
+    MailAccountEvidenceBinding, system_returned_consignment_obligation_id,
+};
 use crate::services::mail::processing::consignment::{
     ConsignmentMailInput, ConsignmentMailPlan, ConsignmentMailService,
 };
@@ -174,23 +177,39 @@ impl ConsignmentIngressService {
             &candidate.external_mail_id,
         )
         .map_err(invalid_candidate)?;
+        // 系统 RTS 的寄售主题与正文派发引用只是定位线索：存储据此唯一定位原轮，接管写端锁内复判（不变量 6）。
+        let rts = system_returned_consignment_obligation_id(&message.sender, &message.subject).map(
+            |(_, obligation_id)| ConsignmentRtsLocator {
+                obligation_id,
+                dispatch_reference: candidate.legacy_evidence.dispatch_reference.clone(),
+            },
+        );
         let preflight = self
             .store
-            .load_envelope_preflight(key.clone(), candidate.observation.clone(), sender.clone())
+            .load_envelope_preflight(
+                key.clone(),
+                candidate.observation.clone(),
+                sender.clone(),
+                rts,
+            )
             .await?;
+        let origin = preflight.consignment_rts;
         let plan = self
             .mail
-            .plan(ConsignmentMailInput {
-                message,
-                mail_key: Some(key.clone()),
-                observation: candidate.observation.clone(),
-                reservations: preflight.reservations,
-                envelope_seller_user_id: preflight.seller_user_id,
-                capabilities: preflight.capabilities,
-                read_failure: false,
-                existing_decision: preflight.existing_decision.clone(),
-                now: preflight.now,
-            })
+            .plan_with_origin(
+                ConsignmentMailInput {
+                    message,
+                    mail_key: Some(key.clone()),
+                    observation: candidate.observation.clone(),
+                    reservations: preflight.reservations,
+                    envelope_seller_user_id: preflight.seller_user_id,
+                    capabilities: preflight.capabilities,
+                    read_failure: false,
+                    existing_decision: preflight.existing_decision.clone(),
+                    now: preflight.now,
+                },
+                origin,
+            )
             .await?;
         match plan {
             ConsignmentMailPlan::NotApplicable(_) => Ok(ConsignmentIngressOutcome::NotApplicable),

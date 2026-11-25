@@ -78,6 +78,8 @@ closed_names! {
         IsekaiSeasonReminder => "isekai_season_reminder",
         /// 寄售季前撤回通知：正文绑定冻结季窗，提示卖家在季末前从寄售页面撤回。
         ConsignmentSeasonNotice => "consignment_season_notice",
+        /// 寄售付款提醒：买家在付款期限后仍未付款时的一次性提醒；正文冻结，main 与 isekai 皆有。
+        ConsignmentPaymentReminder => "consignment_payment_reminder",
         UserAssetsRejected => "user_assets_rejected",
         RegisterKey => "register_key",
         RegisterResult => "register_result",
@@ -136,6 +138,13 @@ impl MailNotificationTemplate {
                 ..MailNotificationBinding::plain(
                     MailDeliveryOrigin::ConsignmentNotice,
                     &["season_preclose"],
+                )
+            },
+            Self::ConsignmentPaymentReminder => MailNotificationBinding {
+                body: MailNotificationField::Required,
+                ..MailNotificationBinding::plain(
+                    MailDeliveryOrigin::ConsignmentNotice,
+                    &["payment_reminder"],
                 )
             },
             Self::UserAssetsRejected => MailNotificationBinding::plain(

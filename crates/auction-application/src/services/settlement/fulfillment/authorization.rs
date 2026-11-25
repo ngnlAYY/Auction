@@ -321,6 +321,8 @@ async fn resolve_recipient(
     {
         return manual(store, claim, "invalid_fulfillment_fact").await;
     }
+    // 这里的 eligible 只约束拍卖义务：寄售义务被通用领取以 contract_id IS NULL 排除、也无法装入
+    // 本 claim 的拍卖字段，只经寄售派发轮执行，其收件人授权（黑名单不剥夺既有订单权利）在派发起写处。
     if require_eligible && !snapshot.eligible {
         record_error(
             DiagnosticLevel::Info,

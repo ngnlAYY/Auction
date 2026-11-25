@@ -17,11 +17,12 @@ const END: &str = "<!-- notification-catalog:end -->";
 
 /// 目录中不需要可编辑模板的渠道：投稿回执、卖方汇总、换季提醒与寄售季前通知的正文由代码冻结。
 /// MM/PM 被超提醒也有可编辑模板（`lot_watch`、`lot_watch_pm`）。
-const NON_TEMPLATE_KINDS: [NotificationKind; 4] = [
+const NON_TEMPLATE_KINDS: [NotificationKind; 5] = [
     NotificationKind::AuctionSubmissionReceipt,
     NotificationKind::AuctionSellerSummary,
     NotificationKind::IsekaiSeasonReminder,
     NotificationKind::ConsignmentSeasonNotice,
+    NotificationKind::ConsignmentPaymentReminder,
 ];
 
 /// 提取目录表第一列的模板键 / 身份。

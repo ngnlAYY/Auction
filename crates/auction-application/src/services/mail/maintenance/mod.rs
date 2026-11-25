@@ -13,6 +13,7 @@ mod disposition;
 mod frozen_manifest;
 mod matching;
 mod quarantine_recheck;
+mod return_take;
 mod sent;
 mod sweep;
 mod write_transport;
@@ -31,6 +32,7 @@ pub use quarantine_recheck::{
     QuarantineRecheckReader, QuarantineRecheckRound, QuarantineRecheckService,
     QuarantineRecheckStore, QuarantineReobservation,
 };
+pub use return_take::{ReturnTakeClaim, ReturnTakeLease, ReturnTakeWorkStore};
 pub use write_transport::{
     ConsignmentDispositionExecution, ConsignmentDispositionProof, ConsignmentDispositionTransport,
     PreparedDisposition, SignedConsignmentProof, disposition_proof_observation_id,

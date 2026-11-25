@@ -35,11 +35,21 @@ pub enum DepositOperation {
     SeasonNotice,
     /// 关闭旧季。
     SeasonClose,
+    /// 卖家重列：把已止售的原件重新上架，新增 g+1 处分代（第 7 期）。
+    Relist,
+    /// Admin 确认代管件灭失（第 7 期）。
+    ConfirmPositionLoss,
+    /// Admin 追加损失案件的人工结果（第 7 期）。
+    RecordLossCaseOutcome,
+    /// 系统追加灭失证据（第 7 期）。
+    RecordPositionLossProof,
+    /// 系统履行取得之前登记的撤回意愿（第 7 期）。
+    FulfillWithdrawIntent,
 }
 
 impl DepositOperation {
     /// 全部操作；wire 与持久账本闭集必须逐项对应。
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 18] = [
         Self::IssueReservation,
         Self::ExpireReservation,
         Self::DecideEnvelope,
@@ -53,6 +63,11 @@ impl DepositOperation {
         Self::ReleaseOperationsHold,
         Self::SeasonNotice,
         Self::SeasonClose,
+        Self::Relist,
+        Self::ConfirmPositionLoss,
+        Self::RecordLossCaseOutcome,
+        Self::RecordPositionLossProof,
+        Self::FulfillWithdrawIntent,
     ];
 
     /// 稳定 wire 与账本码。
@@ -71,6 +86,11 @@ impl DepositOperation {
             Self::ReleaseOperationsHold => "release_hold",
             Self::SeasonNotice => "season_notice",
             Self::SeasonClose => "season_close",
+            Self::Relist => "relist",
+            Self::ConfirmPositionLoss => "confirm_position_loss",
+            Self::RecordLossCaseOutcome => "record_loss_case_outcome",
+            Self::RecordPositionLossProof => "record_position_loss_proof",
+            Self::FulfillWithdrawIntent => "fulfill_withdraw_intent",
         }
     }
 
@@ -125,12 +145,24 @@ pub enum ReceiptDisposition {
     NoticeQueued,
     /// 旧季已关闭。
     SeasonClosed,
+    /// 直接撤回已被接受，合同与装备已绑定（第 7 期）。
+    WithdrawalAccepted,
+    /// 重列完成，新处分代已上架（第 7 期）。
+    Relisted,
+    /// 代管件灭失已按 position 办结（第 7 期）。
+    PositionLossRecorded,
+    /// 损失案件的人工结果已追加（第 7 期）。
+    CaseOutcomeRecorded,
+    /// 灭失证据已追加（第 7 期）。
+    LossProofRecorded,
+    /// 可信寄售 RTS 已被接管：intake、唯一 Take 工作与终局同提交（整封首次决定的接管分支）。
+    ReturnAcquired,
 }
 
 impl ReceiptDisposition {
     /// 全部成功处置；顺序为本闭集的稳定声明顺序，取值与 `c4_valid_v2_receipt` 的
     /// CASE 分支逐字一致。
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 25] = [
         Self::ReservationIssued,
         Self::WithdrawalRequested,
         Self::Closed,
@@ -150,6 +182,12 @@ impl ReceiptDisposition {
         Self::EvidenceQuarantined,
         Self::NoticeQueued,
         Self::SeasonClosed,
+        Self::WithdrawalAccepted,
+        Self::Relisted,
+        Self::PositionLossRecorded,
+        Self::CaseOutcomeRecorded,
+        Self::LossProofRecorded,
+        Self::ReturnAcquired,
     ];
 
     /// 稳定 wire 与账本码。
@@ -174,6 +212,12 @@ impl ReceiptDisposition {
             Self::EvidenceQuarantined => "evidence_quarantined",
             Self::NoticeQueued => "notice_queued",
             Self::SeasonClosed => "season_closed",
+            Self::WithdrawalAccepted => "withdrawal_accepted",
+            Self::Relisted => "relisted",
+            Self::PositionLossRecorded => "position_loss_recorded",
+            Self::CaseOutcomeRecorded => "case_outcome_recorded",
+            Self::LossProofRecorded => "loss_proof_recorded",
+            Self::ReturnAcquired => "return_acquired",
         }
     }
 }
@@ -189,6 +233,16 @@ pub enum DepositActor {
     Worker,
     /// 自动复判等系统变体。
     System,
+    /// 受限权利流程里的原浏览器；稳定引用是浏览器绑定摘要的小写十六进制。
+    Browser {
+        /// `hv_right_browser` 随机量的 SHA-256 摘要。
+        binding_digest: [u8; 32],
+    },
+    /// 已验证的受限权利人；稳定引用是 `right_id`。
+    RightHolder {
+        /// 权利 UUID。
+        right_id: Uuid,
+    },
 }
 
 impl DepositActor {
@@ -199,6 +253,8 @@ impl DepositActor {
             Self::Admin(_) => "admin",
             Self::Worker => "worker",
             Self::System => "system",
+            Self::Browser { .. } => "browser",
+            Self::RightHolder { .. } => "right_holder",
         }
     }
 
@@ -208,7 +264,7 @@ impl DepositActor {
 
 #[cfg(test)]
 mod tests {
-    use super::ReceiptDisposition;
+    use super::{DepositOperation, ReceiptDisposition};
 
     /// 000134 `c4_valid_v2_receipt` 的每个成功分支都必须能由 4A 的闭集命名；新增分支只能
     /// 同时扩这两处，避免账本与领域再次分叉。
@@ -235,8 +291,39 @@ mod tests {
             "notice_queued",
             "season_closed",
         ];
-        let actual = ReceiptDisposition::ALL.map(ReceiptDisposition::as_str);
-        assert_eq!(actual, expected);
+        let actual = ReceiptDisposition::ALL[..19].iter().map(|item| item.as_str());
+        assert!(actual.eq(expected));
+    }
+
+    /// 第 7 期新增的处置码与操作码是 7M-2 要放进 000137 `c4_valid_v2_receipt` 与账本闭集的
+    /// 逐字值；在迁移合入前由本测试钉住 wire 码，改名必须同时改迁移。
+    #[test]
+    fn phase_seven_wire_codes_are_frozen() {
+        let dispositions =
+            ReceiptDisposition::ALL[19..].iter().map(|item| item.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            dispositions,
+            [
+                "withdrawal_accepted",
+                "relisted",
+                "position_loss_recorded",
+                "case_outcome_recorded",
+                "loss_proof_recorded",
+                "return_acquired",
+            ]
+        );
+        let operations =
+            DepositOperation::ALL[13..].iter().map(|item| item.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            operations,
+            [
+                "relist",
+                "confirm_position_loss",
+                "record_loss_case_outcome",
+                "record_position_loss_proof",
+                "fulfill_withdraw_intent",
+            ]
+        );
     }
 }
 

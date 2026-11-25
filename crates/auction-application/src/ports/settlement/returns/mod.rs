@@ -5,6 +5,7 @@
 
 mod body;
 mod cases;
+mod consignment_source;
 mod evidence;
 mod source;
 mod work;
@@ -16,6 +17,10 @@ pub use cases::{
     SettlementReturnCommandResult, SettlementReturnCustody, SettlementReturnDetail,
     SettlementReturnDispatch, SettlementReturnError, SettlementReturnEvent,
     SettlementReturnListRequest, SettlementReturnPage, SettlementReturnTake,
+};
+pub use consignment_source::{
+    ConsignmentSubjectKind, canonical_consignment_subject,
+    system_returned_consignment_obligation_id,
 };
 pub use evidence::{
     RecoveryReturnEvidence, SettlementReturnAssets, SettlementReturnConsumption,

@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use crate::ports::consignment::deposit::commands::ListingStateChange;
 use crate::ports::consignment::errors::ConsignmentFuture;
+use crate::ports::consignment::reads_v2::{AdminListingReadV2, OwnedListingReadV2};
 
 /// 一个世界的 v2 收件与购买能力。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,8 +251,10 @@ pub struct AdminDepositDetail {
     pub final_decision: Option<AdminFinalDecision>,
 }
 
-/// v2 状态、本人指引与 Admin 隔离读取端口。
-pub trait DepositRead: Send + Sync {
+/// v2 状态、本人指引、Admin 隔离与本人 / Admin 挂单读取端口。
+///
+/// 挂单读取并入这里，Public 与 Admin 的 v2 装配沿用同一个读端口，不新增装配字段。
+pub trait DepositRead: OwnedListingReadV2 + AdminListingReadV2 + Send + Sync {
     /// 汇总各世界真实收件能力；第 4 期 `purchase_ready` 固定 false。
     fn status(&self) -> ConsignmentFuture<'_, DepositStatus>;
 
