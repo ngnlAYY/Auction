@@ -10,6 +10,7 @@ license.workspace = true
 anyhow.workspace = true
 auction-application.workspace = true
 auction-config.workspace = true
+auction-domain.workspace = true
 auction-http.workspace = true
 auction-jobs.workspace = true
 auction-integrations.workspace = true
@@ -24,7 +25,6 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-auction-domain.workspace = true
 serde_json.workspace = true
 tower.workspace = true
 

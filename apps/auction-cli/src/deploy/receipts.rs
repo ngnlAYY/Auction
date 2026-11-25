@@ -123,6 +123,7 @@ pub(super) fn artifact_projection(artifact: &artifact::Artifact) -> serde_json::
         })).collect::<Vec<_>>(),
         "public_payload_sha256": artifact.public_payload_sha256,
         "admin_payload_sha256": artifact.admin_payload_sha256,
+        "web_stack": artifact.web_stack.as_ref().map(artifact::WebStackIdentity::projection),
     })
 }
 

@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use anyhow::Context;
 use auction_config::{
-    AppConfig, CONSIGNMENT_COMPLETE, ConsignmentActivation, Role, consignment_activation,
+    AppConfig, ConsignmentActivation, Role, WebStackBinary, process_consignment_activation,
 };
-use auction_http::PublicApiState;
+use auction_http::{PublicApiState, SurfacePages};
 use auction_observability::{DiagnosticLogOwner, ProcessMetrics, TracingConfig, TracingRuntime};
 use auction_process::{
     DrainOutcome, TaskGuard, TerminationSignals, join_error_kind, wait_for_drain,
@@ -16,7 +16,6 @@ use axum::Router;
 use tokio::sync::oneshot;
 
 use super::{listener, state};
-use crate::web_assets::web_script_policy;
 
 pub async fn run() -> anyhow::Result<()> {
     let config = AppConfig::load(Role::Public).context("加载 public-api 配置失败")?;
@@ -66,7 +65,9 @@ fn startup_preflight(
     preview: bool,
     debug: bool,
 ) -> anyhow::Result<ConsignmentActivation> {
-    consignment_activation(config.consignment.enabled(), CONSIGNMENT_COMPLETE, preview, debug)
+    // 不变量 6：制品门之后核对页面栈回执，回执与本程序不符即拒绝启动（D9 §8）。
+    let build = auction_observability::process_build_id();
+    process_consignment_activation(config, WebStackBinary::Public, build, preview, debug)
         .context("校验 Public 一口价挂单制品能力失败")
 }
 
@@ -88,6 +89,9 @@ async fn run_service(
         .context("初始化 Prometheus 指标失败")?,
     );
     let shutdown_metrics = metrics.shutdown();
+    // 挂载在启动时一次性加载并核对，失败即拒绝启动，不退回内嵌页面（E1）。
+    let pages =
+        Arc::new(crate::web_assets::surface_pages(config).context("加载 Public 静态挂载页面失败")?);
     let switches = auction_application::runtime_switches::RuntimeSwitches::new(
         auction_application::runtime_switches::RuntimeSwitchRole::Public,
         config.readiness.audit_failure_mode,
@@ -136,7 +140,7 @@ async fn run_service(
             )
         })
         .map(TaskGuard::new);
-    let app = configure_router(state);
+    let app = configure_router_with_pages(state, pages);
 
     tracing::info!(listener = %listener_description, "public-api 开始监听");
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -255,13 +259,27 @@ async fn run_service(
     result
 }
 
+/// 测试用纯内嵌页面的路由。
+#[cfg(test)]
 pub(super) fn configure_router(state: PublicApiState) -> Router {
+    configure_router_with_pages(
+        state,
+        Arc::new(SurfacePages::embedded::<crate::web_assets::PublicWebAssets>(
+            crate::web_assets::web_script_policy(),
+        )),
+    )
+}
+
+pub(super) fn configure_router_with_pages(
+    state: PublicApiState,
+    pages: Arc<SurfacePages>,
+) -> Router {
     // 使用运行进程的版本。边界与读闸在注入指标后取得，才能记录请求拒绝。
-    auction_http::public_router_with_web_script_policy::<crate::web_assets::PublicWebAssets>(
+    auction_http::public_router_with_pages(
         env!("CARGO_PKG_VERSION"),
         state.http_boundary(),
         state.anonymous_read_gate(),
-        web_script_policy(),
+        pages,
     )
     .with_state(state)
 }
@@ -343,15 +361,24 @@ fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::net::SocketAddr;
+    use std::sync::Arc;
 
     use auction_config::{AppConfig, ConfigError, ConsignmentActivation, Role};
+    use auction_http::PublicApiState;
+    use axum::Router;
+    use axum::body::{Body, to_bytes};
+    use axum::extract::ConnectInfo;
+    use axum::http::Request;
+    use tower::ServiceExt;
     use uuid::Uuid;
 
-    use super::startup_preflight;
+    use super::{configure_router_with_pages, startup_preflight};
+    use crate::web_assets::{PublicWebAssets, surface_pages, web_script_policy};
 
     #[test]
     fn consignment_startup_requires_debug_preview() {
-        let enabled = load_consignment_config(true);
+        let enabled = load_config("[consignment]\nenabled = true\n");
         for (preview, debug) in [(false, false), (true, false), (false, true)] {
             let error = startup_preflight(&enabled, preview, debug).unwrap_err();
             assert!(matches!(
@@ -363,22 +390,74 @@ mod tests {
             startup_preflight(&enabled, true, true).unwrap(),
             ConsignmentActivation::Enabled
         );
-        let disabled = load_consignment_config(false);
+        let disabled = load_config("[consignment]\nenabled = false\n");
         assert_eq!(
             startup_preflight(&disabled, false, false).unwrap(),
             ConsignmentActivation::Disabled
         );
     }
 
-    fn load_consignment_config(enabled: bool) -> AppConfig {
+    /// 未配置挂载根时，装配出的页面与改造前的纯内嵌路由逐字节一致（状态、响应头与正文）。
+    #[tokio::test]
+    async fn unmounted_pages_answer_byte_for_byte_like_the_embedded_router() {
+        let config = load_config("");
+        let pages = Arc::new(surface_pages(&config).unwrap());
+        let assembled = configure_router_with_pages(PublicApiState::default(), pages);
+        let state = PublicApiState::default();
+        let embedded = auction_http::public_router_with_web_script_policy::<PublicWebAssets>(
+            env!("CARGO_PKG_VERSION"),
+            state.http_boundary(),
+            state.anonymous_read_gate(),
+            web_script_policy(),
+        )
+        .with_state(state);
+        for path in ["/", "/consignment", "/favicon.ico", "/assets/missing.js", "/health"] {
+            let response = snapshot(&assembled, path).await;
+            // 未配置挂载时不发独立构建号头，与支持挂载之前的响应一致（E3 再补充）。
+            assert!(response.1.iter().all(|(name, _)| name != "x-auction-build-independent"));
+            assert_eq!(response, snapshot(&embedded, path).await, "{path}");
+        }
+    }
+
+    /// 配置了挂载根却无法核对（没有入口指针与清单）时返回错误，启动随之失败，不退回内嵌页面。
+    #[test]
+    fn configured_mount_that_cannot_be_verified_stops_startup() {
+        let mount = std::env::temp_dir().join(format!("auction-public-mount-{}", Uuid::new_v4()));
+        fs::create_dir_all(mount.join("public")).unwrap();
+        fs::write(mount.join("public/ENTRY.v1"), "schema=auction-web-entry/1\n").unwrap();
+        let config = load_config(&format!("[web]\nmount_root = '{}'\n", mount.display()));
+        let result = surface_pages(&config);
+        fs::remove_dir_all(&mount).unwrap();
+        assert!(result.is_err());
+    }
+
+    async fn snapshot(app: &Router, path: &str) -> (u16, Vec<(String, Vec<u8>)>, Vec<u8>) {
+        let mut request = Request::builder()
+            .uri(path)
+            .header("x-request-id", "0123456789abcdef0123456789abcdef")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(ConnectInfo(SocketAddr::from(([192, 0, 2, 9], 4321))));
+        let response = app.clone().oneshot(request).await.unwrap();
+        let status = response.status().as_u16();
+        let mut headers: Vec<_> = response
+            .headers()
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.as_bytes().to_vec()))
+            .collect();
+        headers.sort();
+        let body = to_bytes(response.into_body(), 1 << 20).await.unwrap().to_vec();
+        (status, headers, body)
+    }
+
+    fn load_config(common: &str) -> AppConfig {
         let directory =
             std::env::temp_dir().join(format!("auction-public-startup-{}", Uuid::new_v4()));
         fs::create_dir(&directory).unwrap();
         let role_path = directory.join("public.toml");
         fs::write(&role_path, "common_file = 'common.toml'\nsecrets_file = 'secrets.toml'\n")
             .unwrap();
-        fs::write(directory.join("common.toml"), format!("[consignment]\nenabled = {enabled}\n"))
-            .unwrap();
+        fs::write(directory.join("common.toml"), common).unwrap();
         fs::write(directory.join("secrets.toml"), "").unwrap();
         let config = AppConfig::load_from_path(Role::Public, role_path);
         fs::remove_dir_all(directory).unwrap();

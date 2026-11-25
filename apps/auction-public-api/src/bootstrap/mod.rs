@@ -1,6 +1,8 @@
 //! Public API 的装配入口。
 
 mod config;
+mod consignment_v2;
+mod first_dispatch;
 mod listener;
 mod service;
 mod state;

@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::Context;
 use auction_application::operations::MigrationCompatibilityMode;
-use auction_config::{AppConfig, CONSIGNMENT_COMPLETE, Role, consignment_activation};
+use auction_config::{AppConfig, Role, WebStackBinary, process_consignment_activation};
 use auction_storage::{DatabaseBackend, strict_deployment_database_identity};
 use serde::Serialize;
 
@@ -182,15 +182,17 @@ impl ConfigDir {
     /// 已加载的配置须通过同一个 CLI 制品门，调用方在连接数据库前校验。
     pub(crate) fn validate_consignment(config: &AppConfig) -> anyhow::Result<()> {
         validate_consignment(
-            config.consignment.enabled(),
+            config,
             cfg!(feature = "consignment-dev-preview"),
             cfg!(debug_assertions),
         )
     }
 }
 
-fn validate_consignment(enabled: bool, preview: bool, debug: bool) -> anyhow::Result<()> {
-    consignment_activation(enabled, CONSIGNMENT_COMPLETE, preview, debug)
+/// 不变量 6：`config check` 与 `keys` 系列以 CLI 自身摘要核对页面栈回执（E9 补充），开启寄售时缺回执即拒绝。
+fn validate_consignment(config: &AppConfig, preview: bool, debug: bool) -> anyhow::Result<()> {
+    let build = auction_observability::process_build_id();
+    process_consignment_activation(config, WebStackBinary::Cli, build, preview, debug)
         .context("校验 auction-cli 一口价挂单制品能力失败")?;
     Ok(())
 }
@@ -409,7 +411,7 @@ mod tests {
     use std::fs;
     use std::os::unix::fs::DirBuilderExt;
 
-    use auction_config::{ConfigError, Role};
+    use auction_config::{AppConfig, ConfigError, Role};
     use uuid::Uuid;
 
     use super::{check, validate_consignment};
@@ -417,15 +419,33 @@ mod tests {
 
     #[test]
     fn consignment_config_check_requires_debug_preview() {
+        let enabled = load_public("[consignment]\nenabled = true\n");
         for (preview, debug) in [(false, false), (true, false), (false, true)] {
-            let error = validate_consignment(true, preview, debug).unwrap_err();
+            let error = validate_consignment(&enabled, preview, debug).unwrap_err();
             assert!(matches!(
                 error.downcast_ref::<ConfigError>(),
                 Some(ConfigError::ConsignmentPreviewRequired)
             ));
         }
-        validate_consignment(true, true, true).unwrap();
-        validate_consignment(false, false, false).unwrap();
+        validate_consignment(&enabled, true, true).unwrap();
+        validate_consignment(&load_public("[consignment]\nenabled = false\n"), false, false)
+            .unwrap();
+    }
+
+    fn load_public(common: &str) -> AppConfig {
+        let directory =
+            std::env::temp_dir().join(format!("auction-cli-activation-{}", Uuid::new_v4()));
+        fs::DirBuilder::new().mode(0o700).create(&directory).unwrap();
+        fs::write(directory.join("common.toml"), common).unwrap();
+        fs::write(directory.join("secrets.toml"), "").unwrap();
+        fs::write(
+            directory.join("public.toml"),
+            "common_file = 'common.toml'\nsecrets_file = 'secrets.toml'\n",
+        )
+        .unwrap();
+        let config = AppConfig::load_from_path(Role::Public, directory.join("public.toml"));
+        fs::remove_dir_all(directory).unwrap();
+        config.unwrap()
     }
 
     #[test]

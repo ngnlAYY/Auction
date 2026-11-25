@@ -54,6 +54,8 @@ cargo build --locked --release -p auction-cli
 | `funds` | `preview`、`open-record-only`、`reconcile` | 后两者写入 |
 | `settlement` | `equipment-loss <LOT_UUID>`、`confirm-sent <DELIVERY_UUID> --evidence <JSON>` | 默认只读；`--execute` 记录相应人工处置或 Sent 证明 |
 | `recovery` | `external-reconcile` | 默认只读扫描；`--apply` 把精确 Sent 匹配隔离为人工对账，见[恢复后外部核对](#恢复后外部核对) |
+| `web` | `verify`、`materialize-legacy`、`install`、`switch`、`status`、`drill-verify` | install/switch/materialize-legacy 写静态挂载根；verify、status、drill-verify 只读；都不连接数据库、不停服务，见[页面静态挂载](#页面静态挂载) |
+| `consignment` | `refresh-rights` | 追加寄售权利状态版本，见[寄售权利补刷](#寄售权利补刷) |
 
 ### 数据密钥环
 
@@ -294,6 +296,17 @@ root 与 postgres 都会执行安装目录中的 `auction-cli`（`auction-stack`
 `deploy` 段描述本次操作要安装的目标，回执的 `artifacts` 记录实际运行或安装程序的观测：成功回执经运行摘要核对；失败回执按安装目录实际可读文件记录摘要与字节数，无法读取时只记录路径、摘要与字节数为 `null`，不能据此认定身份。失败回执的 `deploy` 段仍是尝试安装的目标，不能证明任何组件的身份。
 
 v1 回执的 `deploy` 段是平铺字段（`artifact_directory`、`package`、`source_commit`、`source_fingerprint`、`cli_sha256`、`install_directory`、两个 payload 摘要与同名证据字段），原样兼容读取；其中 v1 `rollback` 回执的平铺段混有被回退版本的制品证据，不被当作已安装程序的身份。`deploy` 保留旧程序、`rollback` 保留反向记录时，都按保留副本的程序摘要在全部“成功且含部署身份”的回执中（先过滤再取最新，大量 `service start/restart` 回执不会把它挤出窗口）查找身份，失败回执从不作为来源，跳过这类 v1 回执继续向前，找不到时为 `null`。`service start/restart` 回执不得出现 `deploy` 字段。
+
+### 页面静态挂载
+
+`auction-cli web` 维护 `[web].mount_root` 下的页面静态挂载，不读配置、不连接数据库、不停服务；字段与服务启动时的核对见[ops/config/README.md#寄售服务](../../ops/config/README.md#寄售服务)。磁盘布局：每个 surface 的 build 是只读目录 `<web_root>/<surface>/<build_id>/`（`files/` 与 `MANIFEST.v1`；文件 0444、目录 0555，先写同级暂存目录并 `fsync`，再整体 `rename` 到位），每个 surface 一个入口指针 `ENTRY.v1`，页面栈回执为 `<web_root>/RECEIPT.v1`（`auction-web-stack-receipt/1`）。
+
+- `verify`：核对新版正式包、外层 tarball 摘要与 `ci/release/verify-deployment-package.sh --receipt` 写出的验证回执的绑定。
+- `install`：核对通过后把正式包的页面导出树装成只读 build，首次安装时建立入口指针；回执按 `--install-dir` 登记各程序的服务路径与摘要，并写入 `installed_at`。
+- `materialize-legacy`：从旧正式二进制的回环源站按旧包清单逐文件取回旧 Dioxus 壳，全部核对通过才安装，不改指针。
+- `switch --surface <surface> --to old|new --build-id <id>`：两边 build 逐文件复核后原子替换入口指针并重写回执；回切旧壳只改默认入口，独立入口始终是 Solid。服务只在启动时读取挂载与回执，切换后须重启 Public 与 Admin。
+- `status`：只读输出各 surface 的入口指针与各 build 的逐文件核对结果。
+- `drill-verify`：按 `RECEIPT.v1` 核对冷回切演练回执，浏览器步骤与签收见[页面栈冷回切演练](../../ops/deploy/WEB-SWITCH-DRILL.md)。
 
 ## 停机门禁
 
@@ -636,6 +649,14 @@ auction-cli --config-dir /etc/auction recovery external-reconcile   --cutoff <BA
 - `apply_outcome`：演练为 `null`；`completed` 表示隔离与阻塞都已提交；`block_failed` 表示隔离事务已提交而阻塞事务返回错误（结果可能未知），此时先写回执（`blocked` 为空）再以错误退出。隔离、阻塞与回执写入的错误都带 `scan_id`：结果未知时用同一 `--scan-id` 与新的 `--receipt` 路径原样重放，已处理项幂等跳过。
 - 完成后按核对结果恢复外部访问；隔离只表示“备份后可能已寄出”，对应义务仍需 Admin/Worker 用真实 Sent 证据或人工证明收口。
 
+### 寄售权利补刷
+
+```bash
+auction-cli --config-dir /etc/auction consignment refresh-rights
+```
+
+读取 Worker 角色的数据库配置，经 Admin 订单读口逐页（每页 200）列出全部寄售合同，对每个合同按当前订单事实补刷买卖双方的权利状态。只追加状态版本，与续办共用权利锁；已与事实一致的权利不追加，重复执行安全。补刷不发码、不需要挑战码密钥。stdout 输出 JSON 字段 `orders_total`、`contracts_refreshed`、`states_appended`、`complete`；遍历超出订单分页上限时 `complete=false` 并以非零退出，不静默跳过。何时执行见[ops/README.md#升级](../../ops/README.md#升级)，状态刷新规则见[docs/contracts/database.md#寄售损失受限权利与通知迁移-000137](../../docs/contracts/database.md#寄售损失受限权利与通知迁移-000137)。
+
 ## 源码结构
 
 | 路径 | 职责 |
@@ -652,7 +673,8 @@ auction-cli --config-dir /etc/auction recovery external-reconcile   --cutoff <BA
 | `apps/auction-cli/src/backup/scheduled/` | 定时编排、磁盘门禁、独占锁/回执、保留清理与打卡装配；私有目录句柄由 `support/files` 提供 |
 | `apps/auction-cli/src/backup/scheduled/offsite/` | age、同盘暂存、待上传检查点、日/月副本编排与追加完成事实 |
 | `apps/auction-cli/src/backup/wal/` | WAL 归档与每周 `pg_basebackup`（zstd+age+fsync 暂存）、暂存 manifest 与重复判定、R2 `wal/`+`base/` 上传器与本地保留 |
-| `apps/auction-cli/src/operations/` | 凭据、规则、论坛、PM、邮件、资金与结算异常 |
+| `apps/auction-cli/src/operations/` | 凭据、规则、论坛、PM、邮件、资金、结算异常与寄售权利补刷 |
+| `apps/auction-cli/src/web/` | 页面静态挂载：正式包核对、旧壳物化、只读 build 安装、入口指针与页面栈回执、冷回切演练回执核对 |
 | `apps/auction-cli/src/support/` | 命令共用的本地边界，不含业务规则：`files/` 负责私有目录（绝对路径、当前账号所有、禁止 group/other）、`O_NOFOLLOW` 锁文件、有界普通文件读取、`create_new`+`0600` 一次性证据，以及以目录描述符固定的 `PrivateDirectory`（定时备份状态与部署状态目录共用的无覆盖/可替换发布、按身份删除与相对描述符派生子目录）、祖先目录信任的纯判定与文件系统容量读取；`digest.rs` 负责 SHA-256 摘要与小写十六进制判定；`process.rs` 负责子进程有界 stderr 捕获、退出状态描述与暂存/临时文件清理；`text.rs` 负责单行文本、操作者、命令 ID、确认短语与摘要等输入校验 |
 
 排空配置和外层预算见[ops/config/README.md#排空与停止预算](../../ops/config/README.md#排空与停止预算)。systemctl 停止前只读取指定的 TimeoutStopUSec 属性，拒绝无限或无法解析的时长；不会把客户端超时视为 unit 已停止。

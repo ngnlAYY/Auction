@@ -14,6 +14,7 @@ use crate::settings::consignment::{ConsignmentConfig, ConsignmentFileConfig};
 use crate::settings::errors::ConfigError;
 use crate::settings::secrets::model::AppSecrets;
 use crate::settings::shutdown::{ShutdownFileConfig, ShutdownSettings};
+use crate::settings::web::{WebConfig, WebFileConfig};
 use crate::settings::{
     AuctionConfig, DatabasePoolConfig, DatabaseProfilesConfig, DatabaseRolesConfig,
     HttpListenerConfig, HttpSecurityConfig, MetricsConfig, PublicSessionSettings, ReadinessConfig,
@@ -113,6 +114,8 @@ pub(super) struct CommonFileConfig {
     pub(super) auction: AuctionConfig,
     /// 三角色共用的寄售启动配置；整节省略时保持关闭。
     pub(super) consignment: ConsignmentFileConfig,
+    /// 三角色共用的页面静态挂载根；整节省略时只用内嵌页面。
+    pub(super) web: WebFileConfig,
 }
 
 pub(super) struct BuildInput {
@@ -132,6 +135,7 @@ pub(super) struct BuildInput {
     pub(super) backup: BackupConfig,
     pub(super) auction: AuctionConfig,
     pub(super) consignment: ConsignmentFileConfig,
+    pub(super) web: WebFileConfig,
     pub(super) worker: WorkerConfig,
     pub(super) http_security: Option<HttpSecurityConfig>,
     pub(super) session: Option<RoleSessionConfig>,
@@ -170,6 +174,8 @@ pub struct AppConfig {
     pub auction: AuctionConfig,
     /// 已校验的寄售启动配置；启用资格由装配根按制品能力判定。
     pub consignment: ConsignmentConfig,
+    /// 已校验的页面静态挂载根；挂载与回执由装配根在启动时读取。
+    pub web: WebConfig,
     pub worker: WorkerConfig,
     pub http_security: HttpSecurityConfig,
     /// 当前角色的会话策略；Public 只包含并发上限，不拥有账号登录时长。
@@ -209,6 +215,7 @@ impl fmt::Debug for AppConfig {
             .field("admin_credentials_configured", &self.admin_credentials_configured())
             .field("auction", &self.auction)
             .field("consignment", &self.consignment)
+            .field("web", &self.web)
             .field("worker", &self.worker)
             .field("http_security", &self.http_security)
             .field("session", &self.session)

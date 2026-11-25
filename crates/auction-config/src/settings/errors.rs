@@ -161,6 +161,14 @@ pub enum ConfigError {
     )]
     ConsignmentPreviewRequired,
 
+    /// 静态挂载根不是规范绝对路径；诊断不回显配置原文。
+    #[error("[web].mount_root 必须是不含 .. 的绝对路径，且不能是根目录")]
+    InvalidWebMountRoot,
+
+    /// Web 栈回执缺失或与当前程序不符；文本为固定原因，不含回执内容。
+    #[error("寄售启用被拒绝：{0}")]
+    ConsignmentWebStack(&'static str),
+
     #[error(
         "enabled E-Hentai forum Worker requires sensitive ehentai_cookie or credential data key"
     )]

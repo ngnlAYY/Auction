@@ -60,6 +60,7 @@ pub(super) async fn run_connected(
     mut consignment: Option<ConsignmentWorker>,
 ) -> anyhow::Result<()> {
     let PersistentRuntime {
+        consignment: activation,
         tracing_health,
         metrics,
         switches,
@@ -127,6 +128,7 @@ pub(super) async fn run_connected(
         Arc::new(hot_config.clone()),
         switches.clone(),
         metrics.external_metrics(),
+        activation,
     )
     .await?;
     if consignment.is_some() {
@@ -146,7 +148,7 @@ pub(super) async fn run_connected(
             &switches,
             &worker_id,
             consignment,
-            mail_control_reads.as_ref().map(|reads| &reads.gateways),
+            mail_control_reads.as_ref(),
             mail_readiness,
         )
         .await?;

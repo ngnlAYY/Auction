@@ -1,6 +1,5 @@
 //! 注入一口价挂单的持久端口、装备来源及登记就绪探针。
 
-use std::collections::HashMap;
 use std::future::Future;
 use std::ops::AsyncFnOnce;
 use std::pin::Pin;
@@ -9,10 +8,11 @@ use std::time::Duration;
 
 use anyhow::Context;
 use auction_application::consignment::{
-    ConsignmentError, ConsignmentFuture, DepositCommandService, LegacyAuctionOwnerResolver,
-    ListingCommandStore, ListingEquipmentLookup, ListingLookupBudget, ListingMaintenance,
-    ListingMaintenanceService, LookupWorkStore, ResolveListingService, auto_close_command,
-    lookup_reap_exhausted_identity,
+    AutoRelistService, AutoRelistSetting, ConsignmentError, ConsignmentFuture,
+    DepositCommandService, LegacyAuctionOwnerResolver, ListingCommandStore, ListingEquipmentLookup,
+    ListingLookupBudget, ListingMaintenance, ListingMaintenanceService, LookupWorkStore,
+    PaymentReminderService, ResolveListingService, ReturnDispositionService, RightChallengeCrypto,
+    auto_close_command, lookup_reap_exhausted_identity,
 };
 use auction_application::core::ApplicationFuture;
 use auction_application::core::diagnostics::DiagnosticError;
@@ -20,26 +20,29 @@ use auction_application::mail::{DispositionMaintenanceService, QuarantineRecheck
 use auction_application::runtime_switches::RuntimeSwitches;
 use auction_config::{AppConfig, DataKeyDomain};
 use auction_domain::consignment::ConsignmentCalendar;
-use auction_integrations::mooglemail::{MoogleMailGateway, MoogleMailWorld};
 use auction_integrations::{
-    ConsignmentReservationCrypto, ConsignmentSecretOpener, ConsignmentSecretSealer,
-    EquipmentKeyOpener, HvDataEquipmentReader, Keyring, build_keyring,
+    ConsignmentReservationCrypto, ConsignmentRightChallengeCrypto, ConsignmentSecretOpener,
+    ConsignmentSecretSealer, EquipmentKeyOpener, HvDataEquipmentReader, Keyring, build_keyring,
 };
 use auction_jobs::consignment::{
     ConsignmentDependencies, ConsignmentLookupRuntime, ConsignmentReadinessProbe,
     ConsignmentWorker, DispositionMaintenanceRuntime, MailEvidenceReadinessRuntime,
-    QuarantineRecheckRuntime, SeasonCalendarRuntime, SeasonTaskRuntime,
+    QuarantineRecheckRuntime, RecoveryRuntime, RightNoticeRuntime, SanctionExecutionRuntime,
+    SeasonCalendarRuntime, SeasonTaskRuntime,
 };
-use auction_storage::{DatabaseStore, DepositRepository, DepositSettings};
+use auction_storage::{DatabaseStore, DepositRepository, DepositSettings, PgRightNoticeStore};
 use tokio::sync::Notify;
 
 use crate::bootstrap::SystemClock;
+use crate::bootstrap::mail::MailControlRemoteReads;
 use crate::bootstrap::mail::consignment::{
-    MoogleMailConsignmentTransport, WorkerConsignmentRecheckReader,
+    ExecutorInputs, FrozenFirstDispatchContent, MoogleMailConsignmentTransport,
+    MoogleMailRightNoticeTransport, SealedNoticeDeliverer, WorkerConsignmentRecheckReader,
+    executor_runtimes,
 };
 
 #[cfg(test)]
-pub(in crate::bootstrap) use tests::consignment_test_config;
+pub(in crate::bootstrap) use tests::{consignment_config_with, consignment_test_config};
 
 /// 持久启动预检使用的寄售端口。
 pub(super) struct ConsignmentPorts {
@@ -113,24 +116,47 @@ async fn prepare(
         .context("一口价挂单准入同步或存量检查失败")
 }
 
-/// 寄售 Worker 启动后、任务运行前接入处置维护、隔离重检与收件就绪。
+/// 寄售 Worker 启动后、任务运行前接入处罚执行、恢复处置、处置维护、隔离重检、季任务、权利通知、
+/// 派发 / 补寄 / 退件 Take 三个 executor、订单复核与收件就绪。
 ///
-/// 关闭只停止新承诺：只要存在存量，两个循环仍启动；有存量却没有 4D1 读取器/传输时
-/// 启动失败，不能静默跳过。
+/// 关闭只停止新承诺：只要存在存量，维护循环仍启动；有存量却没有 4D1 读取器/传输时
+/// 启动失败，不能静默跳过。处罚执行与恢复处置只依赖数据库，总是接入；权利通知是否运行由持久
+/// 准入决定。
 pub(super) async fn attach_loops(
     config: &AppConfig,
     store: &Arc<DatabaseStore>,
     switches: &RuntimeSwitches,
     worker_id: &str,
     worker: Option<ConsignmentWorker>,
-    gateways: Option<&HashMap<MoogleMailWorld, Arc<MoogleMailGateway>>>,
+    mail: Option<&MailControlRemoteReads>,
     mail_readiness: Vec<MailEvidenceReadinessRuntime>,
 ) -> anyhow::Result<Option<ConsignmentWorker>> {
     let Some(worker) = worker else {
         return Ok(None);
     };
+    // 不变量 1、5：处罚账号工作只依赖数据库，幂等由存储端口保证；关闭寄售或未启用邮件时也要
+    // 收口存量处罚，因此在任何邮件依赖检查之前接入。
+    let worker = worker.with_sanctions(Arc::new(SanctionExecutionRuntime {
+        store: store.clone(),
+        wakeup: Arc::new(Notify::new()),
+    }));
+    // 不变量 4、5、10：退回处置、自动重列与付款提醒只写数据库（提醒经通用投递正规入队，外发不在
+    // 本循环），关闭寄售也要收口已接受的订单。自动重列开关与配置段摘要只在装配根读取一次、重启
+    // 生效，决定时冻结落库，之后改配置不影响已作的决定（J12）。
+    let worker = worker.with_recovery(Arc::new(RecoveryRuntime {
+        resolve: ReturnDispositionService::new(store.clone()),
+        relist: AutoRelistService::new(store.clone()),
+        reminders: PaymentReminderService::new(store.clone()),
+        auto_relist: AutoRelistSetting {
+            enabled: config.consignment.auto_relist_enabled(),
+            config_digest: config.consignment.section_digest(),
+        },
+        max_open_per_user: config.consignment.max_open_per_user(),
+        wakeup: Arc::new(Notify::new()),
+    }));
     let has_work = store.has_consignment_work().await.context("读取寄售存量失败")?;
-    let Some(gateways) = gateways.filter(|gateways| !gateways.is_empty()) else {
+    // 没有邮件装配时也没有发信传输：权利通知不接入，挑战码在过期后由领取事务抑制。
+    let Some(mail) = mail.filter(|mail| !mail.gateways.is_empty()) else {
         if has_work {
             anyhow::bail!("寄售仍有存量工作，但 MoogleMail 读取器/处置传输未装配");
         }
@@ -149,6 +175,9 @@ pub(super) async fn attach_loops(
         }
         return Ok(Some(worker.with_mail_readiness(mail_readiness)));
     };
+    // 挑战码与 Public 发码同用凭据域密钥环（不变量 7），只在发信前一刻解封。
+    let challenge_crypto: Arc<dyn RightChallengeCrypto> =
+        Arc::new(ConsignmentRightChallengeCrypto::new(Arc::clone(&keyring)));
     let sealer = ConsignmentSecretSealer::new(Arc::clone(keyring.current()));
     let opener = ConsignmentSecretOpener::new(keyring);
     let crypto: Arc<dyn auction_application::consignment::ReservationSecretCrypto> =
@@ -160,7 +189,11 @@ pub(super) async fn attach_loops(
         config.consignment.max_open_per_user(),
     )
     .map_err(|error| anyhow::anyhow!("寄售价格边界常量无效：{error:?}"))?;
-    let repository = Arc::new(DepositRepository::new(store.as_ref().clone(), crypto, settings));
+    // 取得事务兑现撤回意愿时同提撤回件首轮，内容与派发同一冻结渲染（PIWX）。
+    let repository = Arc::new(
+        DepositRepository::new(store.as_ref().clone(), crypto, settings)
+            .with_dispatch_content(Arc::new(FrozenFirstDispatchContent)),
+    );
     let commands = Arc::new(DepositCommandService::new(
         repository.clone(),
         repository.clone(),
@@ -201,10 +234,10 @@ pub(super) async fn attach_loops(
         wakeup: Arc::new(Notify::new()),
     });
     let owners: Arc<dyn LegacyAuctionOwnerResolver> = store.clone();
-    let reader = Arc::new(WorkerConsignmentRecheckReader::new(gateways.clone(), owners));
-    let transport = Arc::new(MoogleMailConsignmentTransport::new(gateways.clone()));
+    let reader = Arc::new(WorkerConsignmentRecheckReader::new(mail.gateways.clone(), owners));
+    let transport = Arc::new(MoogleMailConsignmentTransport::new(mail.gateways.clone()));
     let disposition =
-        DispositionMaintenanceService::new(commands.clone(), repository.clone(), transport);
+        DispositionMaintenanceService::new(commands.clone(), repository.clone(), transport.clone());
     let quarantine = QuarantineRecheckService::new(commands, repository, reader);
     let lease_duration =
         std::time::Duration::from_secs(config.worker.mooglemail.lease_duration_seconds);
@@ -226,6 +259,28 @@ pub(super) async fn attach_loops(
         worker_id: worker_id.to_owned(),
         lease_duration,
         wakeup: Arc::new(Notify::new()),
+        paused: paused.clone(),
+    });
+    // 不变量 4：领取提交后才发信，结果未知只记未知、不重发；收件人只取领取时的冻结身份。
+    let right_notices = Arc::new(RightNoticeRuntime {
+        store: Arc::new(PgRightNoticeStore::new(store.as_ref().clone())),
+        deliverer: Arc::new(SealedNoticeDeliverer::new(
+            challenge_crypto,
+            Arc::new(MoogleMailRightNoticeTransport::new(Arc::clone(&mail.notices))),
+        )),
+        wakeup: Arc::new(Notify::new()),
+        paused: paused.clone(),
+    });
+    // 不变量 4、5：三个 executor 与订单复核在邮件依赖检查之后接入，与通用投递、处置维护共用同一 transport 与
+    // gateway。寄售关闭时四者都照存量收口运行：已成交订单的首派与补寄是续办旧权利
+    // （D9 §355），新购买已在购买入口被关闭截止。
+    let executors = executor_runtimes(ExecutorInputs {
+        store: store.clone(),
+        mail: Arc::clone(&mail.notices),
+        disposition: transport,
+        clock: Arc::new(SystemClock),
+        worker_id: worker_id.to_owned(),
+        lease_duration,
         paused,
     });
     Ok(Some(
@@ -233,6 +288,13 @@ pub(super) async fn attach_loops(
             .with_disposition(disposition_runtime)
             .with_quarantine(quarantine_runtime)
             .with_seasons(seasons)
+            .with_right_notices(right_notices)
+            .with_dispatch(executors.dispatch)
+            .with_redispatch(executors.redispatch)
+            .with_downstream_rounds(executors.downstream_rounds)
+            .with_return_takes(executors.return_takes)
+            .with_order_rechecks(executors.order_rechecks)
+            .with_collections(executors.collections)
             .with_mail_readiness(mail_readiness),
     ))
 }
@@ -426,6 +488,14 @@ mod tests {
     const TEST_KEY_MATERIAL: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
     pub(in crate::bootstrap) fn consignment_test_config() -> AppConfig {
+        consignment_config_with(true, true)
+    }
+
+    /// 寄售开关与数据库连接可选的 Worker 测试配置；其余字段与 [`consignment_test_config`] 相同。
+    pub(in crate::bootstrap) fn consignment_config_with(
+        enabled: bool,
+        database: bool,
+    ) -> AppConfig {
         let directory =
             std::env::temp_dir().join(format!("p2j-worker-{}", Uuid::new_v4().simple()));
         fs::DirBuilder::new().mode(0o700).create(&directory).unwrap();
@@ -433,22 +503,31 @@ mod tests {
         fs::write(&worker_path, "common_file = \"common.toml\"\nsecrets_file = \"secrets.toml\"")
             .unwrap();
         fs::write(
-        directory.join("common.toml"),
-        "[consignment]\nenabled = true\nlookup_timeout_seconds = 17\nlookup_max_response_bytes = 8192",
-    )
-    .unwrap();
+            directory.join("common.toml"),
+            format!(
+                "[consignment]\nenabled = {enabled}\nlookup_timeout_seconds = 17\n\
+                 lookup_max_response_bytes = 8192"
+            ),
+        )
+        .unwrap();
         let mut secrets = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
             .open(directory.join("secrets.toml"))
             .unwrap();
+        if database {
+            writeln!(
+                secrets,
+                "database_url = \"postgresql://auction_runtime:fixture-password@127.0.0.1:5432/fixture\""
+            )
+            .unwrap();
+        }
         writeln!(
-        secrets,
-        "database_url = \"postgresql://auction_runtime:fixture-password@127.0.0.1:5432/fixture\"\n\
-         equipment_data_key_id = \"{TEST_KEY_ID}\"\nequipment_data_key = \"{TEST_KEY_MATERIAL}\""
-    )
-    .unwrap();
+            secrets,
+            "equipment_data_key_id = \"{TEST_KEY_ID}\"\nequipment_data_key = \"{TEST_KEY_MATERIAL}\""
+        )
+        .unwrap();
         let config = AppConfig::load_from_path(Role::Worker, worker_path);
         fs::remove_dir_all(directory).unwrap();
         config.unwrap()

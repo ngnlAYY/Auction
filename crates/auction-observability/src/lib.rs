@@ -3,12 +3,14 @@
 // 测试里的断言直接解包；该豁免只在测试构建生效，生产构建仍按 workspace lint 拒绝 unwrap/expect。
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+mod build_identity;
 mod health;
 mod logging;
 mod metrics;
 pub use metrics::{RealtimeRecorder, SliMetrics};
 mod telemetry;
 
+pub use build_identity::{is_valid_build_id, process_build_id};
 pub use health::{
     AdminDashboardSnapshot, DashboardSection, DashboardStatus, HealthError, HealthFuture,
     HealthReader, HealthService, HealthSummary, Heartbeat, HeartbeatCommand, HeartbeatHealthReader,

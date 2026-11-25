@@ -9,65 +9,62 @@ use auction_application::consignment::{
     ListingMaintenanceService, LookupWorkStore, ResolveListingService,
 };
 use auction_application::core::Clock;
-use auction_application::core::diagnostics::SafeErrorKind;
 use auction_domain::valid_text;
-use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult};
+use auction_observability::WorkerResult;
 use tokio::sync::{Notify, watch};
 use tokio::time::Instant;
 
+mod collection;
 mod deposits;
+mod dispatch;
+mod downstream_rounds;
 mod heartbeat;
+mod loop_kind;
 mod maintenance;
+mod order_recheck;
+mod recovery;
+mod redispatch;
 mod resolve;
+mod return_take;
+mod rights_notice;
+mod sanction;
 mod seasons;
 #[cfg(test)]
 mod tests;
 
 pub use super::mail::{QuarantineRecheckRuntime, run_quarantine};
+pub use collection::{
+    COLLECTION_PAGE_SIZE, CollectionObservation, CollectionObserver, CollectionRead,
+    CollectionRound, CollectionRuntime, CollectionSource, run as run_collections,
+};
 pub use deposits::{DispositionMaintenanceRuntime, run as run_disposition_maintenance};
+pub use dispatch::{
+    ConsignmentDispatchRuntime, DispatchExecution, DispatchLease, DispatchRound, DispatchTransport,
+    DispatchWork, DispatchWorkSource, PreparedDispatch, SentObservation, run as run_dispatch,
+};
+pub use downstream_rounds::{
+    DownstreamRoundRuntime, DownstreamRoundSource, PendingDownstreamRound,
+    run as run_downstream_rounds,
+};
 pub use heartbeat::MailEvidenceReadinessRuntime;
+pub use loop_kind::ConsignmentLoop;
+pub(crate) use loop_kind::observe_worker_iteration;
+pub use order_recheck::{
+    DispatchSentReader, OrderRecheckRuntime, RecheckRound, run as run_order_rechecks,
+};
+pub use recovery::{RecoveryRuntime, run as run_recovery};
+pub use redispatch::{
+    PendingRedispatch, RedispatchRuntime, RedispatchWorkSource, run as run_redispatch,
+};
+pub use return_take::{
+    ClaimedTake, PreparedTake, ReturnTakeRuntime, ReturnTakeTransport, ReturnTakeWorkSource,
+    TakeExecution, TakeProof, TakeRound, run as run_return_takes,
+};
+pub use rights_notice::{
+    NoticeDelivery, RightNoticeDeliverer, RightNoticeRuntime, run as run_right_notices,
+};
+pub use sanction::{SanctionExecutionRuntime, run as run_sanction_execution};
 pub use seasons::{SeasonCalendarRuntime, SeasonTaskRuntime, run as run_season_tasks};
-
-/// 供指标装配映射到 Worker 固定循环标签的闭集。
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ConsignmentLoop {
-    /// 单并发装备解析。
-    Resolve,
-    /// 本地补扫与租约回收。
-    Maintenance,
-    /// 持久准入就绪心跳。
-    Readiness,
-    /// Take / Return 处置执行。
-    Disposition,
-    /// 隔离重检。
-    Quarantine,
-    /// 季窗冻结、季前通知与季末关闭。
-    Seasons,
-}
-
-pub(crate) fn observe_worker_iteration(
-    metrics: &dyn WorkerRecorder,
-    kind: ConsignmentLoop,
-    result: WorkerResult,
-    duration: Duration,
-    failed: u32,
-) {
-    let loop_kind = match kind {
-        ConsignmentLoop::Resolve => WorkerLoop::ConsignmentResolve,
-        ConsignmentLoop::Maintenance => WorkerLoop::ConsignmentMaintenance,
-        ConsignmentLoop::Readiness => WorkerLoop::ConsignmentReadiness,
-        ConsignmentLoop::Disposition | ConsignmentLoop::Quarantine | ConsignmentLoop::Seasons => {
-            WorkerLoop::ConsignmentMaintenance
-        }
-    };
-    metrics.observe_iteration(loop_kind, result, duration);
-    for _ in 0..failed {
-        metrics.observe_unpersisted_error(
-            WorkerLoop::ConsignmentMaintenance,
-            SafeErrorKind::CONSIGNMENT_AUTO_CLOSE_FAILED,
-        );
-    }
-}
 
 /// 本次心跳检查的能力，检查失败或未知的项为 false。
 #[derive(Clone, Copy, Debug, Default)]
@@ -117,6 +114,15 @@ pub struct ConsignmentWorker {
     disposition: Option<Arc<DispositionMaintenanceRuntime>>,
     quarantine: Option<Arc<QuarantineRecheckRuntime>>,
     seasons: Option<Arc<SeasonTaskRuntime>>,
+    sanctions: Option<Arc<SanctionExecutionRuntime>>,
+    right_notices: Option<Arc<RightNoticeRuntime>>,
+    recovery: Option<Arc<RecoveryRuntime>>,
+    dispatch: Option<Arc<ConsignmentDispatchRuntime>>,
+    redispatch: Option<Arc<RedispatchRuntime>>,
+    downstream_rounds: Option<Arc<DownstreamRoundRuntime>>,
+    return_takes: Option<Arc<ReturnTakeRuntime>>,
+    order_rechecks: Option<Arc<OrderRecheckRuntime>>,
+    collections: Option<Arc<CollectionRuntime>>,
 }
 
 impl ConsignmentWorker {
@@ -152,6 +158,15 @@ impl ConsignmentWorker {
             disposition: None,
             quarantine: None,
             seasons: None,
+            sanctions: None,
+            right_notices: None,
+            recovery: None,
+            dispatch: None,
+            redispatch: None,
+            downstream_rounds: None,
+            return_takes: None,
+            order_rechecks: None,
+            collections: None,
         }))
     }
 
@@ -182,6 +197,65 @@ impl ConsignmentWorker {
         self
     }
 
+    /// 注入处罚执行运行时；关闭寄售但仍有存量时也会运行，存量处罚必须收口。
+    pub fn with_sanctions(mut self, sanctions: Arc<SanctionExecutionRuntime>) -> Self {
+        self.sanctions = Some(sanctions);
+        self
+    }
+
+    /// 注入权利通知运行时；只在持久准入同步为开放时运行，关闭寄售不再对外发码。
+    pub fn with_right_notices(mut self, right_notices: Arc<RightNoticeRuntime>) -> Self {
+        self.right_notices = Some(right_notices);
+        self
+    }
+
+    /// 注入恢复处置运行时（退回处置、自动重列、付款提醒）；关闭寄售但仍有存量时也会运行，
+    /// 已接受的订单必须收口。
+    pub fn with_recovery(mut self, recovery: Arc<RecoveryRuntime>) -> Self {
+        self.recovery = Some(recovery);
+        self
+    }
+
+    /// 注入派发 executor；关闭寄售但仍有存量时也会运行：已成交订单的首派与补寄是续办旧权利（D9 §355），
+    /// 新购买已在购买入口被关闭截止。
+    pub fn with_dispatch(mut self, dispatch: Arc<ConsignmentDispatchRuntime>) -> Self {
+        self.dispatch = Some(dispatch);
+        self
+    }
+
+    /// 注入补寄消费端；关闭寄售但仍有存量时也会运行，已排队的补寄必须收口。
+    pub fn with_redispatch(mut self, redispatch: Arc<RedispatchRuntime>) -> Self {
+        self.redispatch = Some(redispatch);
+        self
+    }
+
+    /// 注入下游首轮消费端；关闭寄售但仍有存量时也会运行，已成交订单的交割、卖款与退款是续办旧权利。
+    pub fn with_downstream_rounds(
+        mut self,
+        downstream_rounds: Arc<DownstreamRoundRuntime>,
+    ) -> Self {
+        self.downstream_rounds = Some(downstream_rounds);
+        self
+    }
+
+    /// 注入退件 Take executor；关闭寄售但仍有存量时也会运行，已接管的退件必须取回。
+    pub fn with_return_takes(mut self, return_takes: Arc<ReturnTakeRuntime>) -> Self {
+        self.return_takes = Some(return_takes);
+        self
+    }
+
+    /// 注入订单复核消费端；关闭寄售但仍有存量时也会运行，Admin 已排队的复核必须收口。
+    pub fn with_order_rechecks(mut self, order_rechecks: Arc<OrderRecheckRuntime>) -> Self {
+        self.order_rechecks = Some(order_rechecks);
+        self
+    }
+
+    /// 注入收款与确领推进循环；关闭寄售但仍有存量时也会运行，已成交订单的收款、交割与卖款是续办旧权利。
+    pub fn with_collections(mut self, collections: Arc<CollectionRuntime>) -> Self {
+        self.collections = Some(collections);
+        self
+    }
+
     /// 在现有 Worker 任务组或任务守卫下运行。发送 drain 后等待本任务，沿用进程共享排空期限。
     /// 指标回调依次接收循环、结果、耗时和本页清退失败数。非维护页迭代的失败数为零。
     pub async fn run(
@@ -197,8 +271,19 @@ impl ConsignmentWorker {
             disposition,
             quarantine,
             seasons,
+            sanctions,
+            right_notices,
+            recovery,
+            dispatch,
+            redispatch,
+            downstream_rounds,
+            return_takes,
+            order_rechecks,
+            collections,
         } = self;
         let epoch = admission.service_epoch;
+        // 权利通知按持久准入开关：关闭寄售后不再向外发码（未发的码随挑战过期在领取时被抑制）。
+        let right_notices = right_notices.filter(|_| admission.admitting);
         let work = lookup.as_ref().map(|runtime| runtime.work.as_ref());
         let maintain = maintenance::run(&maintenance, work, drain.clone(), &observe);
         let resolve_lookup = async {
@@ -241,13 +326,94 @@ impl ConsignmentWorker {
                 .await;
             }
         };
+        let sanctions_loop = async {
+            if let Some(runtime) = sanctions {
+                run_sanction_execution(runtime, drain.clone(), |result, duration| {
+                    observe(ConsignmentLoop::Sanctions, result, duration, 0);
+                })
+                .await;
+            }
+        };
+        let right_notices_loop = async {
+            if let Some(runtime) = right_notices {
+                run_right_notices(runtime, drain.clone(), |result, duration| {
+                    observe(ConsignmentLoop::RightNotices, result, duration, 0);
+                })
+                .await;
+            }
+        };
+        let recovery_loop = async {
+            if let Some(runtime) = recovery {
+                run_recovery(runtime, drain.clone(), |result, duration| {
+                    observe(ConsignmentLoop::Recovery, result, duration, 0);
+                })
+                .await;
+            }
+        };
+        let dispatch_loop = async {
+            if let Some(runtime) = dispatch {
+                run_dispatch(runtime, drain.clone(), |result, duration| {
+                    observe(ConsignmentLoop::Dispatch, result, duration, 0);
+                })
+                .await;
+            }
+        };
+        let redispatch_loop = async {
+            if let Some(runtime) = redispatch {
+                run_redispatch(runtime, drain.clone(), |result, duration| {
+                    observe(ConsignmentLoop::Redispatch, result, duration, 0);
+                })
+                .await;
+            }
+        };
+        let downstream_rounds_loop = async {
+            if let Some(runtime) = downstream_rounds {
+                run_downstream_rounds(runtime, drain.clone(), |result, duration| {
+                    observe(ConsignmentLoop::DownstreamRounds, result, duration, 0);
+                })
+                .await;
+            }
+        };
+        let return_takes_loop = async {
+            if let Some(runtime) = return_takes {
+                run_return_takes(runtime, drain.clone(), |result, duration| {
+                    observe(ConsignmentLoop::ReturnTakes, result, duration, 0);
+                })
+                .await;
+            }
+        };
+        let order_rechecks_loop = async {
+            if let Some(runtime) = order_rechecks {
+                run_order_rechecks(runtime, drain.clone(), |result, duration| {
+                    observe(ConsignmentLoop::OrderRechecks, result, duration, 0);
+                })
+                .await;
+            }
+        };
+        let collections_loop = async {
+            if let Some(runtime) = collections {
+                run_collections(runtime, drain.clone(), |result, duration| {
+                    observe(ConsignmentLoop::Collections, result, duration, 0);
+                })
+                .await;
+            }
+        };
         tokio::join!(
             maintain,
             resolve_lookup,
             heartbeat_mail,
             disposition_loop,
             quarantine_loop,
-            seasons_loop
+            seasons_loop,
+            sanctions_loop,
+            right_notices_loop,
+            recovery_loop,
+            dispatch_loop,
+            redispatch_loop,
+            downstream_rounds_loop,
+            return_takes_loop,
+            order_rechecks_loop,
+            collections_loop
         );
     }
 }

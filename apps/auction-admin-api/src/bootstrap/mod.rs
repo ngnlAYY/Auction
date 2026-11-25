@@ -1,6 +1,7 @@
 //! Admin API 的装配入口。
 
 mod config;
+mod first_dispatch;
 mod first_run;
 mod listener;
 mod service;

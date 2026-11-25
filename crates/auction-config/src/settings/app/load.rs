@@ -22,6 +22,7 @@ use crate::settings::shutdown::ShutdownFileConfig;
 use crate::settings::validation::paths::{
     resolve_config_path, resolve_secrets_path, resolve_worker_paths,
 };
+use crate::settings::web::WebFileConfig;
 use crate::settings::{
     AuctionConfig, CONFIG_FILE_ENV, DatabasePoolConfig, DatabaseProfilesConfig,
     DatabaseRolesConfig, MetricsConfig, MoogleMailWorkerConfig, ReadinessConfig, RealtimeConfig,
@@ -146,6 +147,7 @@ impl AppConfig {
                 backup: BackupConfig::default(),
                 auction: AuctionConfig::default(),
                 consignment: ConsignmentFileConfig::default(),
+                web: WebFileConfig::default(),
                 worker: WorkerConfig::default(),
                 http_security: None,
                 session: None,
@@ -228,6 +230,7 @@ impl AppConfig {
             backup,
             auction,
             consignment,
+            web,
         } = common;
         let worker = resolve_worker_paths(config_path.as_deref(), worker);
         let secrets_path = Some(resolve_secrets_path(config_path.as_deref(), secrets_file));
@@ -259,6 +262,7 @@ impl AppConfig {
                 backup,
                 auction,
                 consignment,
+                web,
                 worker,
                 http_security,
                 session: Some(session),
@@ -313,13 +317,18 @@ fn load_common_file(path: &Path) -> Result<CommonFileConfig, ConfigError> {
         .map_err(|source| ConfigError::Read { path: path.to_owned(), source })?;
     let parse_error = |_error| ConfigError::Parse { path: path.to_owned() };
     let document = toml::de::DeTable::parse(&contents).map_err(parse_error)?;
-    // Serde 的派生结构体也接受位置数组，寄售节必须在解码前确认是表。
-    if document
-        .get_ref()
-        .iter()
-        .any(|(key, value)| key.get_ref() == "consignment" && !value.get_ref().is_table())
-    {
+    // Serde 的派生结构体也接受位置数组，寄售节与挂载节都必须在解码前确认是表。
+    let not_table = |section: &str| {
+        document
+            .get_ref()
+            .iter()
+            .any(|(key, value)| key.get_ref() == section && !value.get_ref().is_table())
+    };
+    if not_table("consignment") {
         return Err(ConfigError::InvalidConsignmentShape { path: path.to_owned() });
+    }
+    if not_table("web") {
+        return Err(ConfigError::Parse { path: path.to_owned() });
     }
     CommonFileConfig::deserialize(toml::de::Deserializer::from(document)).map_err(parse_error)
 }

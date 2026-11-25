@@ -13,6 +13,16 @@ use anyhow::Context;
 use crate::support::digest::{is_lower_hex, sha256_bytes, sha256_reader};
 use crate::support::files;
 
+pub(crate) mod package_receipt;
+mod web_stack;
+
+#[cfg(test)]
+mod package_receipt_tests;
+#[cfg(test)]
+mod web_stack_tests;
+
+pub(crate) use web_stack::{FIRST_WEB_STACK_VERSION, WebStackIdentity};
+
 /// 分体发布包必须包含的四个程序；角色程序与 `auction-cli` 同属一个制品。
 pub(crate) const REQUIRED_BINARIES: [&str; 4] =
     ["auction-worker", "auction-admin-api", "auction-public-api", "auction-cli"];
@@ -43,6 +53,14 @@ pub(crate) struct Artifact {
     pub(crate) binaries: Vec<ArtifactBinary>,
     pub(crate) public_payload_sha256: String,
     pub(crate) admin_payload_sha256: String,
+    /// 新格式包（含 `docs/WEB-STACK.v1`）的页面凭据；旧格式 Rust 包为 `None`。
+    pub(crate) web_stack: Option<WebStackIdentity>,
+}
+
+/// 一个 Web surface 的摘要清单：清单原字节的摘要与逐文件摘要（路径不含 `./`）。
+pub(crate) struct WebSurface {
+    pub(crate) payload_sha256: String,
+    pub(crate) assets: BTreeMap<String, String>,
 }
 
 #[derive(Debug)]
@@ -66,6 +84,11 @@ impl Artifact {
 
 /// 校验发布包布局；任何缺失、额外文件、权限不符或摘要不符都失败关闭。
 pub(crate) fn inspect(root: &Path) -> anyhow::Result<Artifact> {
+    inspect_at(root, FIRST_WEB_STACK_VERSION)
+}
+
+/// [`inspect`] 的可参数化形式：`first_web_stack_version` 是新格式的版本硬边界。
+fn inspect_at(root: &Path, first_web_stack_version: &str) -> anyhow::Result<Artifact> {
     if !root.is_absolute() {
         anyhow::bail!("制品目录必须是绝对路径：{}", root.display());
     }
@@ -126,11 +149,33 @@ pub(crate) fn inspect(root: &Path) -> anyhow::Result<Artifact> {
         anyhow::bail!("拒绝部署工作树不干净时生成的制品");
     }
 
-    let public_payload = inspect_web_surface(root, "public")?;
-    let admin_payload = inspect_web_surface(root, "admin")?;
-    if public_payload == admin_payload {
+    // 先定页面格式再核标记：新格式按栈取 profile，旧格式固定 Rust 版（wasm-release）。
+    let web_stack = web_stack::read_identity(
+        root,
+        &manifest.package,
+        &manifest.source_commit,
+        &manifest.source_fingerprint,
+        &manifest.files,
+        first_web_stack_version,
+    )?;
+    let public_surface = inspect_web_surface(
+        root,
+        "public",
+        web_stack::surface_profile(web_stack.as_ref(), "public").profile(),
+    )?;
+    let admin_surface = inspect_web_surface(
+        root,
+        "admin",
+        web_stack::surface_profile(web_stack.as_ref(), "admin").profile(),
+    )?;
+    if public_surface.payload_sha256 == admin_surface.payload_sha256 {
         anyhow::bail!("Public 与 Admin 的 Web payload 摘要不得相同");
     }
+    if let Some(identity) = &web_stack {
+        identity.verify_surfaces(&public_surface, &admin_surface, &manifest.files, &checksums)?;
+    }
+    let (public_payload, admin_payload) =
+        (public_surface.payload_sha256, admin_surface.payload_sha256);
 
     let mut binaries = Vec::with_capacity(REQUIRED_BINARIES.len());
     for name in REQUIRED_BINARIES {
@@ -174,6 +219,7 @@ pub(crate) fn inspect(root: &Path) -> anyhow::Result<Artifact> {
         binaries,
         public_payload_sha256: public_payload,
         admin_payload_sha256: admin_payload,
+        web_stack,
     })
 }
 
@@ -333,14 +379,15 @@ fn parse_sha256sums(bytes: &[u8]) -> anyhow::Result<BTreeMap<String, String>> {
     Ok(sums)
 }
 
-/// 校验一个 Web surface 的构建清单与标记并返回清单摘要。Web 文件已嵌入对应 surface 二进制，
-/// 发布包仅携带摘要清单与标记；部署字节由二进制 SHA-256 校验。
-fn inspect_web_surface(root: &Path, surface: &str) -> anyhow::Result<String> {
+/// 校验一个 Web surface 的构建清单与标记（`profile` 须等于包格式所定的值）并返回清单摘要。
+/// 旧格式的 Web 文件已嵌入对应 surface 二进制，发布包仅携带摘要清单与标记；新格式另附导出树，
+/// 由 [`web_stack`] 逐文件核对。
+fn inspect_web_surface(root: &Path, surface: &str, profile: &str) -> anyhow::Result<WebSurface> {
     let list_path = root.join(format!("docs/WEB-{}-SHA256", surface.to_uppercase()));
     let manifest_path = root.join(format!("docs/WEB-{}-MANIFEST.v1", surface.to_uppercase()));
     let list_bytes = files::read_bounded(&list_path, MAX_MANIFEST_BYTES)?;
     let list = std::str::from_utf8(&list_bytes).context("Web payload 摘要清单不是 UTF-8")?;
-    let mut assets = BTreeSet::new();
+    let mut assets = BTreeMap::new();
     for line in list.lines() {
         let Some((digest, path)) = line.split_once("  ") else {
             anyhow::bail!("Web payload 摘要清单行格式无效：{surface}");
@@ -349,7 +396,7 @@ fn inspect_web_surface(root: &Path, surface: &str) -> anyhow::Result<String> {
             anyhow::bail!("Web payload 摘要清单行格式无效：{surface}");
         }
         validate_relative_path(&path[2..])?;
-        if !assets.insert(path.to_owned()) {
+        if assets.insert(path[2..].to_owned(), digest.to_owned()).is_some() {
             anyhow::bail!("Web payload 摘要清单重复记录：{surface} {path}");
         }
     }
@@ -375,14 +422,14 @@ fn inspect_web_surface(root: &Path, surface: &str) -> anyhow::Result<String> {
     }
     if fields.get("schema").map(String::as_str) != Some(WEB_MANIFEST_SCHEMA)
         || fields.get("surface").map(String::as_str) != Some(surface)
-        || fields.get("profile").map(String::as_str) != Some("wasm-release")
+        || fields.get("profile").map(String::as_str) != Some(profile)
     {
         anyhow::bail!("Web 资源标记的 schema、surface 或部署 profile 无效：{surface}");
     }
     if fields.get("payload_sha256").map(String::as_str) != Some(payload_sha256.as_str()) {
         anyhow::bail!("Web 资源标记的 payload_sha256 与摘要清单不一致：{surface}");
     }
-    Ok(payload_sha256)
+    Ok(WebSurface { payload_sha256, assets })
 }
 
 /// 打开并读取成员文件；返回描述符与字节数，供摘要计算与统计复用。

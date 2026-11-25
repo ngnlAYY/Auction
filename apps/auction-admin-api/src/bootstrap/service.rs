@@ -5,8 +5,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use auction_config::{AppConfig, CONSIGNMENT_COMPLETE, Role, consignment_activation};
-use auction_http::AdminApiState;
+use auction_config::{
+    AppConfig, ConsignmentActivation, Role, WebStackBinary, process_consignment_activation,
+};
+use auction_http::{AdminApiState, SurfacePages};
 use auction_observability::{DiagnosticLogOwner, ProcessMetrics, TracingConfig, TracingRuntime};
 use auction_process::{
     DrainOutcome, TaskGuard, TerminationSignals, join_error_kind, wait_for_drain,
@@ -15,7 +17,6 @@ use axum::Router;
 use tokio::sync::oneshot;
 
 use super::{listener, state};
-use crate::web_assets::web_script_policy;
 
 pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let config = match config_path {
@@ -23,7 +24,11 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
         None => AppConfig::load(Role::Admin),
     }
     .context("加载 admin-api 配置失败")?;
-    startup_preflight(&config, cfg!(feature = "consignment-dev-preview"), cfg!(debug_assertions))?;
+    let consignment = startup_preflight(
+        &config,
+        cfg!(feature = "consignment-dev-preview"),
+        cfg!(debug_assertions),
+    )?;
     let mut signals = TerminationSignals::subscribe().context("订阅 admin-api 终止信号失败")?;
     let tracing_config = tracing_config(&config.tracing);
     let telemetry = auction_observability::init_with_config(
@@ -40,7 +45,7 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let mut forced = false;
     let result = {
         let diagnostic_logs = DiagnosticLogOwner::install();
-        let body = run_service(&config, &telemetry, &mut signals, &mut forced);
+        let body = run_service(&config, consignment, &telemetry, &mut signals, &mut forced);
         diagnostic_logs.run(body).await
     };
     if !forced {
@@ -49,14 +54,20 @@ pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     result
 }
 
-fn startup_preflight(config: &AppConfig, preview: bool, debug: bool) -> anyhow::Result<()> {
-    consignment_activation(config.consignment.enabled(), CONSIGNMENT_COMPLETE, preview, debug)
-        .context("校验 Admin 一口价挂单制品能力失败")?;
-    Ok(())
+fn startup_preflight(
+    config: &AppConfig,
+    preview: bool,
+    debug: bool,
+) -> anyhow::Result<ConsignmentActivation> {
+    // 不变量 6：制品门之后核对页面栈回执，回执与本程序不符即拒绝启动（D9 §8）。
+    let build = auction_observability::process_build_id();
+    process_consignment_activation(config, WebStackBinary::Admin, build, preview, debug)
+        .context("校验 Admin 一口价挂单制品能力失败")
 }
 
 async fn run_service(
     config: &AppConfig,
+    consignment: ConsignmentActivation,
     telemetry: &TracingRuntime,
     signals: &mut TerminationSignals,
     forced: &mut bool,
@@ -72,6 +83,9 @@ async fn run_service(
         .context("初始化 Prometheus 指标失败")?,
     );
     let shutdown_metrics = metrics.shutdown();
+    // 挂载在启动时一次性加载并核对，失败即拒绝启动，不退回内嵌页面（E1）。
+    let pages =
+        Arc::new(crate::web_assets::surface_pages(config).context("加载 Admin 静态挂载页面失败")?);
     let switches = auction_application::runtime_switches::RuntimeSwitches::new(
         auction_application::runtime_switches::RuntimeSwitchRole::Admin,
         config.readiness.audit_failure_mode,
@@ -101,6 +115,7 @@ async fn run_service(
             let bound_listener = listener::bind(config).await.context("绑定 admin-api 监听失败")?;
             let (state, heartbeat, refresh_tasks) = state::configure_state(
                     config,
+                    consignment,
                     telemetry.health_reader(),
                     Arc::clone(&metrics),
                     switches.clone(),
@@ -113,7 +128,7 @@ async fn run_service(
     let state = state.with_metrics(metrics);
     let mut heartbeat_task =
         heartbeat.as_ref().map(Arc::clone).map(state::spawn_heartbeat).map(TaskGuard::new);
-    let app = configure_router(state);
+    let app = configure_router_with_pages(state, pages);
 
     tracing::info!(
         listener = %bound_listener.description(),
@@ -202,14 +217,24 @@ async fn run_service(
     result
 }
 
+/// 测试用纯内嵌页面的路由。
+#[cfg(test)]
 pub(super) fn configure_router(state: AdminApiState) -> Router {
-    // 健康检查报告运行进程的版本。
-    auction_http::admin_router_with_web_script_policy::<crate::web_assets::AdminWebAssets>(
-        env!("CARGO_PKG_VERSION"),
-        state.http_boundary(),
-        web_script_policy(),
+    configure_router_with_pages(
+        state,
+        Arc::new(SurfacePages::embedded::<crate::web_assets::AdminWebAssets>(
+            crate::web_assets::web_script_policy(),
+        )),
     )
-    .with_state(state)
+}
+
+pub(super) fn configure_router_with_pages(
+    state: AdminApiState,
+    pages: Arc<SurfacePages>,
+) -> Router {
+    // 健康检查报告运行进程的版本。
+    auction_http::admin_router_with_pages(env!("CARGO_PKG_VERSION"), state.http_boundary(), pages)
+        .with_state(state)
 }
 
 fn abort_heartbeat_task(task: &Option<TaskGuard<()>>) {

@@ -10,7 +10,7 @@ use auction_application::settlement::{
     SettlementFulfillmentStore, SettlementWorkStore,
 };
 use auction_config::{
-    AppConfig, CONSIGNMENT_COMPLETE, ConsignmentActivation, Role, consignment_activation,
+    AppConfig, ConsignmentActivation, Role, WebStackBinary, process_consignment_activation,
 };
 use auction_observability::{ProcessMetrics, TracingConfig, TracingRuntime};
 use auction_process::{TaskGuard, TerminationSignals};
@@ -26,7 +26,7 @@ mod persistent;
 mod shutdown;
 mod skeleton;
 
-use persistent::run_worker;
+use persistent::{PersistentRuntime, run_worker};
 
 type ShutdownFuture = Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>;
 
@@ -64,13 +64,20 @@ pub async fn run_from_path(path: std::path::PathBuf) -> anyhow::Result<()> {
 
 async fn run_config(
     config: AppConfig,
-    start: impl AsyncFnOnce(AppConfig) -> anyhow::Result<()>,
+    start: impl AsyncFnOnce(AppConfig, ConsignmentActivation) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
-    consignment_startup(config.consignment.enabled(), config.database_url().is_some())?;
-    start(config).await
+    let consignment = consignment_startup(
+        &config,
+        cfg!(feature = "consignment-dev-preview"),
+        cfg!(debug_assertions),
+    )?;
+    start(config, consignment).await
 }
 
-async fn run_configured_service(config: AppConfig) -> anyhow::Result<()> {
+async fn run_configured_service(
+    config: AppConfig,
+    consignment: ConsignmentActivation,
+) -> anyhow::Result<()> {
     let mut signals = TerminationSignals::subscribe().context("订阅 Worker 终止信号失败")?;
     let tracing_config = tracing_config(&config.tracing);
     let telemetry = auction_observability::init_with_config(
@@ -85,22 +92,25 @@ async fn run_configured_service(config: AppConfig) -> anyhow::Result<()> {
     auction_observability::install_safe_panic_hook();
 
     let mut forced = false;
-    let result = run_service(&config, &telemetry, &mut signals, &mut forced).await;
+    let result = run_service(&config, consignment, &telemetry, &mut signals, &mut forced).await;
     if !forced {
         auction_observability::shutdown_tracing("worker", telemetry, &mut signals).await;
     }
     result
 }
 
-fn consignment_startup(enabled: bool, has_database: bool) -> anyhow::Result<ConsignmentActivation> {
-    let activation = consignment_activation(
-        enabled,
-        CONSIGNMENT_COMPLETE,
-        cfg!(feature = "consignment-dev-preview"),
-        cfg!(debug_assertions),
-    )
-    .context("Worker 的一口价挂单配置无效")?;
-    if activation == ConsignmentActivation::Enabled && !has_database {
+/// 不变量 6：与 Public、Admin、server、CLI 同一校验器，制品门之后按 Worker 自身摘要核对页面栈回执
+/// （D9 §8），任一不符即拒绝启动。整个进程只在这里判定一次，结果向下传给邮件轮询，下游不再重算。
+fn consignment_startup(
+    config: &AppConfig,
+    preview: bool,
+    debug: bool,
+) -> anyhow::Result<ConsignmentActivation> {
+    let build = auction_observability::process_build_id();
+    let activation =
+        process_consignment_activation(config, WebStackBinary::Worker, build, preview, debug)
+            .context("Worker 的一口价挂单配置无效")?;
+    if activation == ConsignmentActivation::Enabled && config.database_url().is_none() {
         anyhow::bail!("启用一口价挂单的 Worker 必须配置 PostgreSQL database_url");
     }
     Ok(activation)
@@ -108,6 +118,7 @@ fn consignment_startup(enabled: bool, has_database: bool) -> anyhow::Result<Cons
 
 async fn run_service(
     config: &AppConfig,
+    consignment: ConsignmentActivation,
     telemetry: &TracingRuntime,
     signals: &mut TerminationSignals,
     forced: &mut bool,
@@ -156,14 +167,17 @@ async fn run_service(
         tokio::sync::mpsc::channel::<&'static str>(1);
     let worker = run_worker(
         config,
-        telemetry.health_reader(),
-        Arc::clone(&metrics),
-        switches,
-        runtime_failure_sender,
-        shutdown_runtime.lifecycle.clone(),
-        Box::pin(async move {
-            let _ = shutdown_receiver.await;
-        }),
+        PersistentRuntime {
+            consignment,
+            tracing_health: telemetry.health_reader(),
+            metrics: Arc::clone(&metrics),
+            switches,
+            runtime_failure: runtime_failure_sender,
+            write_lifecycle: shutdown_runtime.lifecycle.clone(),
+            shutdown: Box::pin(async move {
+                let _ = shutdown_receiver.await;
+            }),
+        },
     );
     tokio::pin!(worker);
     let runtime_failure = async {
@@ -265,12 +279,16 @@ mod consignment_tests {
     use auction_config::ConsignmentActivation;
 
     use super::{consignment_startup, run_config};
-    use crate::bootstrap::persistent::consignment_test_config;
+    use crate::bootstrap::persistent::{consignment_config_with, consignment_test_config};
 
+    const DEV_PREVIEW_ONLY: &str = "consignment-dev-preview 的本地调试构建";
+
+    /// 启动判定失败即不进入任何领取；通过时把同一次判定结果交给下游，不再重算。
     #[tokio::test]
     async fn run_config_checks_consignment_before_claiming_work() {
         let claims = Cell::new(0);
-        let result = run_config(consignment_test_config(), async |_| {
+        let result = run_config(consignment_test_config(), async |_, consignment| {
+            assert_eq!(consignment, ConsignmentActivation::Enabled);
             claims.set(claims.get() + 1);
             Ok(())
         })
@@ -280,23 +298,28 @@ mod consignment_tests {
             assert_eq!(claims.get(), 1);
         } else {
             assert_eq!(claims.get(), 0);
-            assert!(
-                format!("{:#}", result.unwrap_err())
-                    .contains("consignment-dev-preview 的本地调试构建")
-            );
+            assert!(format!("{:#}", result.unwrap_err()).contains(DEV_PREVIEW_ONLY));
         }
     }
 
+    /// 不变量 6：发布构型（非“预览 + 调试”）开启寄售一律失败关闭；只有本地调试预览免回执。
     #[test]
-    fn consignment_startup_requires_capable_artifact_and_database() {
-        assert_eq!(consignment_startup(false, false).unwrap(), ConsignmentActivation::Disabled);
-        if cfg!(all(feature = "consignment-dev-preview", debug_assertions)) {
-            assert_eq!(consignment_startup(true, true).unwrap(), ConsignmentActivation::Enabled);
-            let error = consignment_startup(true, false).unwrap_err();
-            assert!(error.to_string().contains("必须配置 PostgreSQL"));
-        } else {
-            let error = consignment_startup(true, true).unwrap_err();
-            assert!(format!("{error:#}").contains("consignment-dev-preview 的本地调试构建"));
+    fn consignment_startup_fails_closed_outside_the_debug_preview() {
+        let enabled = consignment_test_config();
+        assert_eq!(
+            consignment_startup(&enabled, true, true).unwrap(),
+            ConsignmentActivation::Enabled
+        );
+        for (preview, debug) in [(false, false), (true, false), (false, true)] {
+            let error = consignment_startup(&enabled, preview, debug).unwrap_err();
+            assert!(format!("{error:#}").contains(DEV_PREVIEW_ONLY), "{preview}/{debug}");
         }
+        let error =
+            consignment_startup(&consignment_config_with(true, false), true, true).unwrap_err();
+        assert!(error.to_string().contains("必须配置 PostgreSQL"));
+        assert_eq!(
+            consignment_startup(&consignment_config_with(false, false), false, false).unwrap(),
+            ConsignmentActivation::Disabled
+        );
     }
 }
