@@ -3,6 +3,7 @@
 
 pub mod ehentai;
 pub mod mooglemail;
+pub mod web_fetch;
 
 pub(crate) mod gate;
 pub(crate) mod metrics;

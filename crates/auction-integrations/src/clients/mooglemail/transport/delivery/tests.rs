@@ -690,6 +690,31 @@ async fn every_bound_notification_renders_for_send() {
     }
 }
 
+/// 付款提醒（暂定文案，待维护者定稿）经通用投递的正规入队形状能被渲染：主题固定、正文取冻结值，
+/// 不得被判为 `invalid_payload`；缺冻结正文则失败关闭。
+#[tokio::test]
+async fn consignment_payment_reminder_renders_from_the_frozen_body() {
+    let transport = MoogleMailDeliveryTransport::new(
+        offline_client(),
+        MoogleMailCredentialSet::new(COOKIE).expect("fixture cookie"),
+        Arc::new(FixtureLoginKeys),
+    );
+    let template = MailNotificationTemplate::ConsignmentPaymentReminder;
+    let binding = template.binding();
+    let code = auction_application::consignment::CONSIGNMENT_PAYMENT_REMINDER_RESULT_CODE;
+    let valid = bound_claim(template, binding.origin, code);
+    let rendered =
+        transport.render_send(&valid).await.expect("提醒必须能渲染").expect("提醒是 Send");
+    assert_eq!(
+        rendered.request.message.subject,
+        auction_application::consignment::CONSIGNMENT_PAYMENT_REMINDER_SUBJECT
+    );
+    assert_eq!(rendered.request.message.body, valid.payload["body"].as_str().expect("冻结正文"));
+    let mut without_body = valid;
+    without_body.payload["body"] = Value::Null;
+    assert!(transport.render_send(&without_body).await.is_err(), "没有冻结正文的提醒必须失败关闭");
+}
+
 /// 结算退件 Take 结果未知时只有原会话的巡检观察能收口，因此一律以持久凭据身份执行：配置 Cookie
 /// 不声明 Take 能力，准备在任何远端读取之前以凭据不可用拒绝（没有开始写出，投递 Worker 只释放
 /// claim）；数据库凭据在 owner 有效时声明能力，并只覆盖其作用域内的世界。入站 Take 仍可用配置

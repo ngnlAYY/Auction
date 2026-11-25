@@ -18,8 +18,9 @@ pub(crate) mod envelope;
 
 pub use consignment::{
     ConsignmentReservationCrypto, ConsignmentReservationCryptoConfigError,
-    ConsignmentSecretEnvelope, ConsignmentSecretError, ConsignmentSecretOpener,
-    ConsignmentSecretSealer, MailEvidencePurpose, consignment_reservation_crypto,
+    ConsignmentRightChallengeCrypto, ConsignmentSecretEnvelope, ConsignmentSecretError,
+    ConsignmentSecretOpener, ConsignmentSecretSealer, MailEvidencePurpose,
+    consignment_reservation_crypto,
 };
 
 const DATA_KEY_LENGTH: usize = 32;
