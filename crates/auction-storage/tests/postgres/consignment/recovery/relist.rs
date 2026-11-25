@@ -165,7 +165,7 @@ async fn postgres_consignment_recovery_auto_relist_never_overrides_frozen_off_or
         let port: Arc<dyn AutoRelistStore> = store;
         let service = AutoRelistService::new(port);
 
-        assert!(service.pending(10).await.expect("待办").is_empty());
+        assert!(service.pending(None, 10).await.expect("待办").items.is_empty());
         let receipt = service.relist(pending(), 5).await.expect("无可作决定时不是错误");
         assert_eq!(receipt.outcome, AutoRelistOutcome::NotReady);
         let (state, reason): (String, Option<String>) =
@@ -233,7 +233,7 @@ async fn postgres_consignment_recovery_auto_relist_frozen_off_keeps_an_unpaid_re
 
     let held = ("held_off_market".to_owned(), Some("unpaid_recovered".to_owned()), 7);
     assert_eq!(listing_row(pool).await, held);
-    assert!(service.pending(10).await.expect("待办").is_empty(), "开关为关不进待办");
+    assert!(service.pending(None, 10).await.expect("待办").items.is_empty(), "开关为关不进待办");
     let receipt = service.relist(unpaid_pending(), 5).await.expect("无可作决定时不是错误");
     assert_eq!(receipt.outcome, AutoRelistOutcome::NotReady);
     assert_eq!(listing_row(pool).await, held, "挂单不变");
@@ -267,7 +267,14 @@ async fn postgres_consignment_recovery_auto_relist_frozen_on_relists_an_unpaid_r
     let port: Arc<dyn AutoRelistStore> = store;
     let service = AutoRelistService::new(port);
 
-    assert_eq!(service.pending(10).await.expect("待办"), vec![unpaid_pending()]);
+    assert_eq!(service.pending(None, 10).await.expect("待办").items, vec![unpaid_pending()]);
+    // 键集分页：读满一页给出游标，游标之后没有更多待办（正例）；读不满一页没有游标（反例）。
+    let page = service.pending(None, 1).await.expect("满页");
+    assert_eq!(page.items, vec![unpaid_pending()]);
+    let next = page.next.expect("读满一页应给出游标");
+    let after = service.pending(Some(next), 1).await.expect("游标之后");
+    assert!((after.items.is_empty(), after.next.is_none()) == (true, true), "{after:?}");
+    assert_eq!(service.pending(None, 10).await.expect("未满页").next, None);
     let receipt = service.relist(unpaid_pending(), 5).await.expect("自动重列");
     let AutoRelistOutcome::Relisted { listing_id, listing_version, generation } = receipt.outcome
     else {
@@ -321,7 +328,7 @@ async fn postgres_consignment_recovery_auto_relist_frozen_on_relists_an_unpaid_r
         1,
         "成功回执入账"
     );
-    assert!(service.pending(10).await.expect("待办").is_empty(), "已有决定不再待办");
+    assert!(service.pending(None, 10).await.expect("待办").items.is_empty(), "已有决定不再待办");
 
     let replay = service.relist(unpaid_pending(), 5).await.expect("重放");
     assert!(replay.replayed);

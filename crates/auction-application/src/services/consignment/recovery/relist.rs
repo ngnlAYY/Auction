@@ -8,7 +8,7 @@ use uuid::Uuid;
 use super::resolve::{Stream, system_id};
 use crate::ports::consignment::{
     AutoRelist, AutoRelistReceipt, AutoRelistStore, ConsignmentError, PendingAutoRelist,
-    RecoveryOperation,
+    RecoveryOperation, ScanCursor, ScanPage,
 };
 use crate::ports::core::RequestHash;
 
@@ -48,8 +48,12 @@ impl AutoRelistService {
             .await
     }
 
-    /// 待自动重列的处置。
-    pub async fn pending(&self, limit: u32) -> Result<Vec<PendingAutoRelist>, ConsignmentError> {
-        self.store.pending_auto_relists(limit).await
+    /// 游标之后待自动重列的处置（一页）。
+    pub async fn pending(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> Result<ScanPage<PendingAutoRelist>, ConsignmentError> {
+        self.store.pending_auto_relists(after, limit).await
     }
 }

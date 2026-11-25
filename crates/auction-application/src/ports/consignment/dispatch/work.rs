@@ -11,6 +11,7 @@ use auction_time::Timestamp;
 use uuid::Uuid;
 
 use crate::ports::consignment::errors::ConsignmentFuture;
+use crate::ports::consignment::scan::{ScanCursor, ScanPage};
 
 /// 一项已领取的寄售派发工作：寄售义务的履约 claim 与该义务的当前轮。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,8 +98,13 @@ pub trait DispatchWorkStore: Send + Sync {
         delivery_id: Uuid,
     ) -> ConsignmentFuture<'_, Option<DispatchSendRequest>>;
 
-    /// 列出已排队、尚未建轮的补寄处置（最多 `limit` 条，按处置时刻）。只读。
-    fn queued_redispatches(&self, limit: u32) -> ConsignmentFuture<'_, Vec<QueuedRedispatch>>;
+    /// 列出游标之后已排队、尚未建轮的补寄处置（最多 `limit` 行，按 `(处置时刻, 新轮 ID)`）；来源不符的行
+    /// 不列入但计入游标，读满一页才给出下一页游标。只读。
+    fn queued_redispatches(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<QueuedRedispatch>>;
 
     /// 为已排队的补寄新轮备好 `prepared` 投递（带冻结身份摘要与冻结内容）。新轮冻结身份全部由
     /// 实现方在同一事务里确定：D0 = 备好时的数据库时刻 + 合同冻结的付款期限，正文按冻结模板渲染；

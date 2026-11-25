@@ -7,6 +7,7 @@ use auction_domain::CommandId;
 use uuid::Uuid;
 
 use crate::ports::consignment::errors::ConsignmentFuture;
+use crate::ports::consignment::scan::{ScanCursor, ScanPage};
 use crate::ports::core::RequestHash;
 
 /// 自动重列命令：命令 ID 由处置 ID 派生。
@@ -72,6 +73,11 @@ pub trait AutoRelistStore: Send + Sync {
     /// 锁内重读事实，与手动重列同一判定；通过则建新代并回到 `available`。
     fn auto_relist(&self, command: AutoRelist) -> ConsignmentFuture<'_, AutoRelistReceipt>;
 
-    /// 列出冻结开关为开、尚无决定、挂单已处于未付收回下架态的处置。
-    fn pending_auto_relists(&self, limit: u32) -> ConsignmentFuture<'_, Vec<PendingAutoRelist>>;
+    /// 列出游标之后至多 `limit` 项冻结开关为开、尚无决定、挂单已处于未付收回下架态的处置，按
+    /// `(decided_at, 处置 ID)` 升序；读满一页才给出下一页游标。
+    fn pending_auto_relists(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<PendingAutoRelist>>;
 }

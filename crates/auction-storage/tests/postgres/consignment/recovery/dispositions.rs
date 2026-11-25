@@ -49,15 +49,25 @@ async fn postgres_consignment_recovery_resolve_return_records_one_disposition_pe
     seed_consumed(pool, &store, Rts { n: 1 }).await;
     let service = service(&store);
 
-    let pending = service.pending(10).await.expect("待处置");
+    let pending = service.pending(None, 10).await.expect("待处置").items;
     assert_eq!(pending.len(), 1);
+    // 键集分页：读满一页给出游标，游标之后没有更多待办（正例）；读不满一页没有游标（反例）。
+    let page = service.pending(None, 1).await.expect("满页");
+    assert_eq!(page.items, pending);
+    let next = page.next.expect("读满一页应给出游标");
+    let after = service.pending(Some(next), 1).await.expect("游标之后");
+    assert!((after.items.is_empty(), after.next.is_none()) == (true, true), "{after:?}");
+    assert_eq!(service.pending(None, 10).await.expect("未满页").next, None);
     let first = service.resolve(pending[0], SETTING_OFF).await.expect("处置");
     assert!(!first.replayed);
     assert_eq!(first.decision.refund, RefundEffect::RestoreRefundPurpose);
     assert_eq!(first.decision.listing, ListingEffect::Unchanged);
     assert_eq!(first.decision.relist, RelistEligibility::Forbidden, "退款被退不触发再售");
     assert_eq!(count(pool, "SELECT count(*) FROM public.consignment_return_dispositions").await, 1);
-    assert!(service.pending(10).await.expect("待处置").is_empty(), "已处置的消费不再待办");
+    assert!(
+        service.pending(None, 10).await.expect("待处置").items.is_empty(),
+        "已处置的消费不再待办"
+    );
 
     // 正例：同请求重放返回原处置，不新增行。
     let replay = service.resolve(pending[0], SETTING_OFF).await.expect("重放");
@@ -104,7 +114,7 @@ async fn postgres_consignment_recovery_resolve_return_fails_closed_without_a_con
     let pool = owner.postgres_pool();
     seed_consumed(pool, &store, Rts { n: 1 }).await;
     let service = service(&store);
-    let pending = service.pending(10).await.expect("待处置");
+    let pending = service.pending(None, 10).await.expect("待处置").items;
 
     let error = service
         .resolve(pending[0], AutoRelistSetting { enabled: true, config_digest: [0; 32] })
@@ -135,7 +145,7 @@ async fn postgres_consignment_recovery_resolve_return_retains_the_contract_below
         .await
         .expect("消费");
     let service = service(&store);
-    let pending = service.pending(10).await.expect("待处置");
+    let pending = service.pending(None, 10).await.expect("待处置").items;
     assert_eq!(pending.len(), 1);
 
     let resolved = service.resolve(pending[0], SETTING_ON).await.expect("处置");
@@ -194,7 +204,7 @@ async fn postgres_consignment_recovery_resolve_return_seller_payout_never_relist
         .await
         .expect("消费");
     let service = service(&store);
-    let pending = service.pending(10).await.expect("待处置");
+    let pending = service.pending(None, 10).await.expect("待处置").items;
     assert_eq!(pending.len(), 1);
 
     let resolved = service.resolve(pending[0], SETTING_ON).await.expect("处置");

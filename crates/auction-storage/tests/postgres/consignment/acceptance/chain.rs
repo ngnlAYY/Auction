@@ -440,9 +440,18 @@ impl Order {
     /// 下游首轮生产者跑一轮（与 Worker 消费端同一写序：存储备好首轮投递 → 授权首轮）；返回新建的轮数。
     pub(in crate::consignment) async fn produce_rounds(&self) -> usize {
         let repository = DownstreamRoundRepository::new(self.runtime.clone(), Arc::new(CONTENT));
-        let prepared = repository.prepare_pending(64).await.expect("下游首轮待办");
+        let prepared = repository.prepare_pending(None, 64).await.expect("下游首轮待办");
+        // 键集分页：恰有一项待办时，读满一页（页大小 1）给出游标，游标之后没有更多待办（正例）；
+        // 读不满一页没有游标（反例）。
+        if let [_] = prepared.items.as_slice() {
+            assert_eq!(prepared.next, None, "读不满一页没有游标");
+            let page = repository.prepare_pending(None, 1).await.expect("满页");
+            let next = page.next.expect("读满一页应给出游标");
+            let after = repository.prepare_pending(Some(next), 1).await.expect("游标之后");
+            assert!((after.items.is_empty(), after.next.is_none()) == (true, true), "{after:?}");
+        }
         let mut created = 0;
-        for round in prepared {
+        for round in prepared.items {
             let receipt = self
                 .service
                 .authorize(round.key, RoundOrigin::First, round.delivery_id, round.frozen)

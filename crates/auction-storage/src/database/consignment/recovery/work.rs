@@ -3,7 +3,7 @@
 use auction_application::consignment::{
     AutoRelist, AutoRelistReceipt, AutoRelistStore, ConsignmentFuture, PaymentReminderStore,
     PendingAutoRelist, PendingResolution, RemindContract, ReminderReceipt, ResolveReceipt,
-    ResolveReturn, ReturnDispositionStore,
+    ResolveReturn, ReturnDispositionStore, ScanCursor, ScanPage,
 };
 use uuid::Uuid;
 
@@ -15,8 +15,12 @@ impl ReturnDispositionStore for DatabaseStore {
         Box::pin(resolve::resolve_return(self, command))
     }
 
-    fn pending_resolutions(&self, limit: u32) -> ConsignmentFuture<'_, Vec<PendingResolution>> {
-        Box::pin(resolve::pending_resolutions(self, limit))
+    fn pending_resolutions(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<PendingResolution>> {
+        Box::pin(resolve::pending_resolutions(self, after, limit))
     }
 }
 
@@ -25,8 +29,12 @@ impl AutoRelistStore for DatabaseStore {
         Box::pin(relist::auto_relist(self, command))
     }
 
-    fn pending_auto_relists(&self, limit: u32) -> ConsignmentFuture<'_, Vec<PendingAutoRelist>> {
-        Box::pin(relist::pending_auto_relists(self, limit))
+    fn pending_auto_relists(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<PendingAutoRelist>> {
+        Box::pin(relist::pending_auto_relists(self, after, limit))
     }
 }
 
@@ -35,7 +43,11 @@ impl PaymentReminderStore for DatabaseStore {
         Box::pin(reminder::remind(self, command))
     }
 
-    fn due_reminders(&self, limit: u32) -> ConsignmentFuture<'_, Vec<Uuid>> {
-        Box::pin(reminder::due_reminders(self, limit))
+    fn due_reminders(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<Uuid>> {
+        Box::pin(reminder::due_reminders(self, after, limit))
     }
 }

@@ -7,7 +7,7 @@
 
 use auction_application::consignment::{
     AutoRelist, AutoRelistOutcome, AutoRelistReceipt, ConsignmentError, DepositBusinessRejection,
-    PendingAutoRelist, RecoveryOperation,
+    PendingAutoRelist, RecoveryOperation, ScanCursor, ScanPage,
 };
 use auction_domain::CommandId;
 use auction_domain::consignment::deposit::PositionState;
@@ -30,6 +30,7 @@ use crate::database::consignment::commands::session::DepositTransaction;
 use crate::database::consignment::commands::{LockKeys, with_deposit_transaction};
 use crate::database::consignment::deposit::primitives::{database_now, service_control};
 use crate::database::consignment::listings::projection::lock_listings;
+use crate::database::consignment::scan::{cursor_binds, page_of};
 use crate::database::mail::originals::invariant_decoding;
 
 /// 冻结在处置行里的、决定所需的事实。
@@ -468,12 +469,20 @@ async fn insert_decision(
 }
 
 /// 冻结开关为开、尚无决定、挂单已是未付收回下架态的处置（仅供 Worker 轮询，没有授权含义）。
+///
+/// 键集分页（不变量 5）：“原件还没有回到在库”等暂态由锁内事实决定、不写任何行，下一轮仍会被选中；
+/// 这些事实跨多张表（position 代、Sale 封闭、在途与对账），不在此处用 SQL 复刻（复刻会与锁内判定分叉）。
+/// 若总取排序最前的一页，未就绪项会占满整页、饿死后面已就绪的处置；一次扫描内按
+/// `(decided_at, disposition_id)` 走完全部待办，游标不持久、不跨轮、不作事实来源。
 pub(super) async fn pending_auto_relists(
     store: &DatabaseStore,
+    after: Option<ScanCursor>,
     limit: u32,
-) -> Result<Vec<PendingAutoRelist>, ConsignmentError> {
+) -> Result<ScanPage<PendingAutoRelist>, ConsignmentError> {
+    let (after_at, after_id) = cursor_binds(after);
     let rows = sqlx::query(
-        "SELECT disposition.disposition_id, contract.listing_id
+        "SELECT disposition.disposition_id, contract.listing_id,
+                disposition.decided_at AS scan_at, disposition.disposition_id AS scan_id
          FROM public.consignment_return_dispositions AS disposition
          JOIN public.consignment_contracts AS contract
            ON contract.contract_id = disposition.contract_id
@@ -483,20 +492,23 @@ pub(super) async fn pending_auto_relists(
            AND NOT EXISTS (
                SELECT 1 FROM public.consignment_relist_decisions AS decision
                WHERE decision.source_consumption_id = disposition.consumption_id)
+           AND ($2::timestamptz IS NULL
+                OR (disposition.decided_at, disposition.disposition_id)
+                   > ($2::timestamptz, $3::uuid))
          ORDER BY disposition.decided_at, disposition.disposition_id
          LIMIT $1",
     )
     .bind(i64::from(limit))
+    .bind(after_at)
+    .bind(after_id)
     .fetch_all(store.pool())
     .await
     .map_err(|error| WriteError::from(error).into_application())?;
-    rows.iter()
-        .map(|row| {
-            Ok(PendingAutoRelist {
-                disposition_id: row.try_get("disposition_id")?,
-                listing_id: row.try_get("listing_id")?,
-            })
+    page_of(&rows, limit, |row| {
+        Ok(PendingAutoRelist {
+            disposition_id: row.try_get("disposition_id")?,
+            listing_id: row.try_get("listing_id")?,
         })
-        .collect::<Result<Vec<_>, sqlx::Error>>()
-        .map_err(|error| WriteError::from(error).into_application())
+    })
+    .map_err(|error| WriteError::from(error).into_application())
 }

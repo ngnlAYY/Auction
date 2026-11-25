@@ -11,7 +11,7 @@ use auction_application::consignment::{
     PendingAutoRelist, PendingResolution, RemindContract, ReminderReceipt, ResolveReceipt,
     ResolveReturn, ReturnDispositionService, ReturnDispositionStore, RightNoticeDisposition,
     RightNoticeFuture, RightNoticeLease, RightNoticeWorkStore, SanctionWorkOutcome,
-    SanctionWorkRef, SanctionWorkStore,
+    SanctionWorkRef, SanctionWorkStore, ScanCursor, ScanPage,
 };
 use tokio::sync::Notify;
 use uuid::Uuid;
@@ -29,9 +29,13 @@ struct Sanctions {
 }
 
 impl SanctionWorkStore for Sanctions {
-    fn open_sanction_work(&self, _limit: u32) -> ConsignmentFuture<'_, Vec<SanctionWorkRef>> {
+    fn open_sanction_work(
+        &self,
+        _after: Option<ScanCursor>,
+        _limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<SanctionWorkRef>> {
         self.opens.fetch_add(1, Ordering::Relaxed);
-        Box::pin(async { Ok(Vec::new()) })
+        Box::pin(async { Ok(ScanPage::last(Vec::new())) })
     }
 
     fn execute_sanction_work(
@@ -53,9 +57,13 @@ impl ReturnDispositionStore for Recovery {
         panic!("没有待处置的消费")
     }
 
-    fn pending_resolutions(&self, _limit: u32) -> ConsignmentFuture<'_, Vec<PendingResolution>> {
+    fn pending_resolutions(
+        &self,
+        _after: Option<ScanCursor>,
+        _limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<PendingResolution>> {
         self.scans.fetch_add(1, Ordering::Relaxed);
-        Box::pin(async { Ok(Vec::new()) })
+        Box::pin(async { Ok(ScanPage::last(Vec::new())) })
     }
 }
 
@@ -64,8 +72,12 @@ impl AutoRelistStore for Recovery {
         panic!("没有待重列的处置")
     }
 
-    fn pending_auto_relists(&self, _limit: u32) -> ConsignmentFuture<'_, Vec<PendingAutoRelist>> {
-        Box::pin(async { Ok(Vec::new()) })
+    fn pending_auto_relists(
+        &self,
+        _after: Option<ScanCursor>,
+        _limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<PendingAutoRelist>> {
+        Box::pin(async { Ok(ScanPage::last(Vec::new())) })
     }
 }
 
@@ -74,8 +86,12 @@ impl PaymentReminderStore for Recovery {
         panic!("没有到期的提醒")
     }
 
-    fn due_reminders(&self, _limit: u32) -> ConsignmentFuture<'_, Vec<Uuid>> {
-        Box::pin(async { Ok(Vec::new()) })
+    fn due_reminders(
+        &self,
+        _after: Option<ScanCursor>,
+        _limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<Uuid>> {
+        Box::pin(async { Ok(ScanPage::last(Vec::new())) })
     }
 }
 

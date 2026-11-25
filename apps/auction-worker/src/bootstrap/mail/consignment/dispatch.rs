@@ -153,7 +153,7 @@ mod tests {
 
     use auction_application::consignment::{
         ConsignmentFuture, DispatchSendRequest, DispatchWorkClaim, DispatchWorkStore,
-        QueuedRedispatch, RedispatchPrepared,
+        QueuedRedispatch, RedispatchPrepared, ScanCursor, ScanPage,
     };
     use auction_application::core::{ApplicationError, ApplicationFuture, Clock};
     use auction_application::mail::{MailLoginKey, MailLoginKeyReader};
@@ -218,7 +218,11 @@ mod tests {
             Box::pin(async move { Ok(Some(request)) })
         }
 
-        fn queued_redispatches(&self, _limit: u32) -> ConsignmentFuture<'_, Vec<QueuedRedispatch>> {
+        fn queued_redispatches(
+            &self,
+            _after: Option<ScanCursor>,
+            _limit: u32,
+        ) -> ConsignmentFuture<'_, ScanPage<QueuedRedispatch>> {
             panic!("传输不读补寄待办")
         }
 

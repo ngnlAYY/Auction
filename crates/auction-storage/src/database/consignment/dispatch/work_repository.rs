@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use auction_application::consignment::{
     ConsignmentFuture, DispatchSendRequest, DispatchWorkClaim, DispatchWorkStore, QueuedRedispatch,
-    RedispatchPrepared,
+    RedispatchPrepared, ScanCursor, ScanPage,
 };
 use auction_time::Timestamp;
 use uuid::Uuid;
@@ -56,9 +56,16 @@ impl DispatchWorkStore for DispatchWorkRepository {
         })
     }
 
-    fn queued_redispatches(&self, limit: u32) -> ConsignmentFuture<'_, Vec<QueuedRedispatch>> {
+    fn queued_redispatches(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<QueuedRedispatch>> {
         Box::pin(async move {
-            self.store.load_queued_redispatches(limit).await.map_err(WriteError::into_application)
+            self.store
+                .load_queued_redispatches(after, limit)
+                .await
+                .map_err(WriteError::into_application)
         })
     }
 

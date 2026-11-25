@@ -263,7 +263,7 @@ async fn postgres_consignment_order_resolve_retain_entitlement_moves_the_returne
     let pool = owner.postgres_pool();
     let store = Arc::new(database.store().await.expect("运行账号"));
     seed_consumed(pool, &store, Rts { n: 1 }).await;
-    let pending = disposition_service(&store).pending(10).await.expect("待处置");
+    let pending = disposition_service(&store).pending(None, 10).await.expect("待处置").items;
     let disposition = disposition_service(&store)
         .resolve(pending[0], AutoRelistSetting { enabled: false, config_digest: [9; 32] })
         .await
@@ -359,7 +359,7 @@ async fn postgres_consignment_order_resolve_retain_entitlement_refuses_while_the
     let pool = owner.postgres_pool();
     let store = Arc::new(database.store().await.expect("运行账号"));
     seed_consumed(pool, &store, Rts { n: 1 }).await;
-    let pending = disposition_service(&store).pending(10).await.expect("待处置");
+    let pending = disposition_service(&store).pending(None, 10).await.expect("待处置").items;
     let disposition = disposition_service(&store)
         .resolve(pending[0], AutoRelistSetting { enabled: false, config_digest: [9; 32] })
         .await

@@ -9,7 +9,7 @@
 
 use auction_application::consignment::{
     ConsignmentError, DepositBusinessRejection, PendingResolution, RecoveryOperation,
-    ResolveReceipt, ResolveReturn,
+    ResolveReceipt, ResolveReturn, ScanCursor, ScanPage,
 };
 use auction_domain::consignment::recovery::{
     BuyerRightEffect, DeliveryClosure, ListingEffect, PrincipalEffect, RecoveryDomainError,
@@ -32,6 +32,7 @@ use crate::database::consignment::commands::session::DepositTransaction;
 use crate::database::consignment::commands::{LockKeys, with_deposit_transaction};
 use crate::database::consignment::deposit::primitives::database_now;
 use crate::database::consignment::returns::funding_error;
+use crate::database::consignment::scan::{cursor_binds, page_of};
 use crate::database::mail::originals::invariant_decoding;
 use crate::database::settlement::funding::lock_funding_worlds;
 
@@ -551,27 +552,34 @@ macro_rules! pending_resolution_source {
 }
 pub(crate) use pending_resolution_source;
 
+/// 键集分页：不写事实的项（确定拒绝、暂缺证据）下一轮仍会被选中，若总取排序最前的一页，它们会占满整页、
+/// 饿死排在后面的可处置项；一次扫描内按 `(consumed_at, id)` 走完全部待办，游标不持久、不跨轮。
 pub(super) async fn pending_resolutions(
     store: &DatabaseStore,
+    after: Option<ScanCursor>,
     limit: u32,
-) -> Result<Vec<PendingResolution>, ConsignmentError> {
+) -> Result<ScanPage<PendingResolution>, ConsignmentError> {
+    let (after_at, after_id) = cursor_binds(after);
     let rows = sqlx::query(concat!(
-        "SELECT consumption.id, consumption.intake_id ",
+        "SELECT consumption.id, consumption.intake_id,
+                consumption.consumed_at AS scan_at, consumption.id AS scan_id ",
         pending_resolution_source!(),
-        " ORDER BY consumption.consumed_at, consumption.id
+        " AND ($2::timestamptz IS NULL
+                OR (consumption.consumed_at, consumption.id) > ($2::timestamptz, $3::uuid))
+         ORDER BY consumption.consumed_at, consumption.id
          LIMIT $1",
     ))
     .bind(i64::from(limit))
+    .bind(after_at)
+    .bind(after_id)
     .fetch_all(store.pool())
     .await
     .map_err(|error| WriteError::from(error).into_application())?;
-    rows.iter()
-        .map(|row| {
-            Ok(PendingResolution {
-                consumption_id: row.try_get("id")?,
-                intake_id: row.try_get("intake_id")?,
-            })
+    page_of(&rows, limit, |row| {
+        Ok(PendingResolution {
+            consumption_id: row.try_get("id")?,
+            intake_id: row.try_get("intake_id")?,
         })
-        .collect::<Result<Vec<_>, sqlx::Error>>()
-        .map_err(|error| WriteError::from(error).into_application())
+    })
+    .map_err(|error| WriteError::from(error).into_application())
 }

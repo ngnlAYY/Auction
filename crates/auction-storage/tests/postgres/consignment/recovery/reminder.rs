@@ -49,7 +49,14 @@ async fn postgres_consignment_recovery_reminder_is_queued_once_and_never_resent(
     let service = PaymentReminderService::new(port);
     let contract = CONTRACT.parse().expect("合同 ID");
 
-    assert_eq!(service.due(10).await.expect("待办"), vec![contract]);
+    assert_eq!(service.due(None, 10).await.expect("待办").items, vec![contract]);
+    // 键集分页：读满一页给出游标，游标之后没有更多待办（正例）；读不满一页没有游标（反例）。
+    let page = service.due(None, 1).await.expect("满页");
+    assert_eq!(page.items, vec![contract]);
+    let next = page.next.expect("读满一页应给出游标");
+    let after = service.due(Some(next), 1).await.expect("游标之后");
+    assert!((after.items.is_empty(), after.next.is_none()) == (true, true), "{after:?}");
+    assert_eq!(service.due(None, 10).await.expect("未满页").next, None);
     let first = service.remind(contract).await.expect("排提醒");
     assert!(!first.replayed);
     let ReminderOutcome::Queued { delivery_id } = first.outcome else {
@@ -65,7 +72,7 @@ async fn postgres_consignment_recovery_reminder_is_queued_once_and_never_resent(
     assert!(replay.replayed);
     assert_eq!(replay.outcome, ReminderOutcome::Queued { delivery_id });
     assert_eq!((count(pool, deliveries).await, count(pool, reminders).await), (1, 1));
-    assert!(service.due(10).await.expect("待办").is_empty());
+    assert!(service.due(None, 10).await.expect("待办").items.is_empty());
 
     // 派前复验：尚未派出（pending）与已领取但未进 sending（claimed）都可继续；
     // 一旦进入 sending（可能已派出）就零补发。

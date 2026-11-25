@@ -13,13 +13,14 @@ use auction_observability::WorkerResult;
 use tokio::sync::{Notify, watch};
 use tokio::time::Instant;
 
-use super::{error_code, stopped};
+use super::{error_code, next_scan_cursor, stopped};
 
 const IDLE_POLL: Duration = Duration::from_secs(60);
 const BACKOFF_INITIAL: Duration = Duration::from_secs(1);
 const BACKOFF_MAXIMUM: Duration = Duration::from_secs(30);
 /// 单轮最多处理的工作数，之后让出调度。
-const MAX_PER_ROUND: u32 = 64;
+/// 每页读取的待办数；一次扫描按页走完全部待办。
+const PAGE_SIZE: u32 = 64;
 
 /// 处罚执行循环的运行参数。
 pub struct SanctionExecutionRuntime {
@@ -38,34 +39,44 @@ struct Round {
 
 impl SanctionExecutionRuntime {
     /// 处理当前全部待收口工作；单项失败不影响其他项。
+    /// 一次扫描：按 `(created_at, id)` 键集分页走完全部未收口工作。矛盾或执行失败的工作不会收口、下一轮仍会
+    /// 被选中，分页让它们不会占满整页、饿死排在后面的可执行工作；游标只活在本次扫描里，不跨轮、不作事实来源。
     async fn round(&self) -> Round {
         let mut round = Round { worked: false, failed: false };
-        let open = match self.store.open_sanction_work(MAX_PER_ROUND).await {
-            Ok(open) => open,
-            Err(error) => {
-                tracing::warn!(code = error_code(error), "读取待执行寄售处罚工作失败");
-                round.failed = true;
-                return round;
-            }
-        };
-        for work in open {
-            match self.store.execute_sanction_work(work).await {
-                Ok(SanctionWorkOutcome::Replayed) => {}
-                Ok(SanctionWorkOutcome::Inconsistent) => {
-                    tracing::error!("寄售处罚账号工作的持久事实自相矛盾，已失败关闭，需人工对账");
-                    round.failed = true;
-                }
-                Ok(_) => round.worked = true,
+        let mut after = None;
+        loop {
+            let page = match self.store.open_sanction_work(after, PAGE_SIZE).await {
+                Ok(page) => page,
                 Err(error) => {
-                    tracing::warn!(
-                        code = error_code(error),
-                        "寄售处罚账号工作执行失败，保留待重入"
-                    );
+                    tracing::warn!(code = error_code(error), "读取待执行寄售处罚工作失败");
                     round.failed = true;
+                    return round;
                 }
+            };
+            for work in page.items {
+                match self.store.execute_sanction_work(work).await {
+                    Ok(SanctionWorkOutcome::Replayed) => {}
+                    Ok(SanctionWorkOutcome::Inconsistent) => {
+                        tracing::error!(
+                            "寄售处罚账号工作的持久事实自相矛盾，已失败关闭，需人工对账"
+                        );
+                        round.failed = true;
+                    }
+                    Ok(_) => round.worked = true,
+                    Err(error) => {
+                        tracing::warn!(
+                            code = error_code(error),
+                            "寄售处罚账号工作执行失败，保留待重入"
+                        );
+                        round.failed = true;
+                    }
+                }
+            }
+            match next_scan_cursor(after, page.next) {
+                Some(next) => after = Some(next),
+                None => return round,
             }
         }
-        round
     }
 }
 
@@ -118,5 +129,83 @@ async fn wait_for_backoff(drain: &mut watch::Receiver<bool>, delay: Duration) ->
         biased;
         changed = drain.changed() => changed.is_err() || *drain.borrow(),
         () = tokio::time::sleep(delay) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use auction_application::consignment::{
+        ConsignmentFuture, SanctionWorkOutcome, SanctionWorkRef, SanctionWorkStore, ScanCursor,
+        ScanPage,
+    };
+    use auction_time::Timestamp;
+    use uuid::Uuid;
+
+    use super::{Arc, Notify, SanctionExecutionRuntime};
+
+    /// 两页未收口工作：第一页两项执行后事实自相矛盾（不会收口），第二页一项可执行。
+    #[derive(Default)]
+    struct TwoPages {
+        executed: Mutex<Vec<Uuid>>,
+    }
+
+    fn work(n: u128) -> SanctionWorkRef {
+        SanctionWorkRef {
+            work_id: Uuid::from_u128(n),
+            sanction_id: Uuid::from_u128(n + 100),
+            buyer_user_id: Uuid::from_u128(n + 200),
+        }
+    }
+
+    impl SanctionWorkStore for TwoPages {
+        fn open_sanction_work(
+            &self,
+            after: Option<ScanCursor>,
+            _limit: u32,
+        ) -> ConsignmentFuture<'_, ScanPage<SanctionWorkRef>> {
+            let page = match after {
+                None => ScanPage {
+                    items: vec![work(1), work(2)],
+                    next: Some(ScanCursor {
+                        sort_at: Timestamp::from_timestamp(0, 0).unwrap(),
+                        tie_id: Uuid::from_u128(2),
+                    }),
+                },
+                Some(_) => ScanPage::last(vec![work(3)]),
+            };
+            Box::pin(async { Ok(page) })
+        }
+
+        fn execute_sanction_work(
+            &self,
+            work: SanctionWorkRef,
+        ) -> ConsignmentFuture<'_, SanctionWorkOutcome> {
+            self.executed.lock().unwrap().push(work.work_id);
+            let outcome = if work.work_id == Uuid::from_u128(3) {
+                SanctionWorkOutcome::Applied { account_command_id: Uuid::from_u128(7) }
+            } else {
+                SanctionWorkOutcome::Inconsistent
+            };
+            Box::pin(async move { Ok(outcome) })
+        }
+    }
+
+    /// 不变量 5：前面的工作因事实矛盾不会收口、仍留在库里时，一次扫描按键集分页走完全部待办，
+    /// 排在后面的可执行工作在同一轮落账号效果，不会被前面的工作饿死；矛盾项仍按故障退避。
+    #[tokio::test]
+    async fn one_round_executes_work_behind_inconsistent_items() {
+        let store = Arc::new(TwoPages::default());
+        let runtime =
+            SanctionExecutionRuntime { store: store.clone(), wakeup: Arc::new(Notify::new()) };
+        let round = runtime.round().await;
+        assert_eq!(
+            *store.executed.lock().unwrap(),
+            [Uuid::from_u128(1), Uuid::from_u128(2), Uuid::from_u128(3)],
+            "第二页的工作同一轮被执行"
+        );
+        assert!(round.worked, "第二页的工作写下了账号效果");
+        assert!(round.failed, "矛盾项仍失败关闭、转人工");
     }
 }

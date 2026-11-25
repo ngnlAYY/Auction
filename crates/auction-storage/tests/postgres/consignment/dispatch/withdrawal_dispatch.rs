@@ -304,7 +304,7 @@ async fn postgres_withdrawal_dispatch_returned_original_goes_back_to_custody_wit
 
     let port: Arc<dyn ReturnDispositionStore> = store.clone();
     let dispositions = ReturnDispositionService::new(port);
-    let pending = dispositions.pending(10).await.expect("待处置");
+    let pending = dispositions.pending(None, 10).await.expect("待处置").items;
     assert_eq!(pending.len(), 1);
     let setting = AutoRelistSetting { enabled: true, config_digest: [9; 32] };
     let resolved = dispositions.resolve(pending[0], setting).await.expect("处置");

@@ -10,7 +10,8 @@ use auction_application::consignment::{
     ConsumeReceipt, ConsumeReturn, DispatchService, DispatchStore, EvidenceReceipt,
     MarkWriteStarted, OrderRecheckClaim, OrderRecheckLease, OrderRecheckOutcome,
     OrderRecheckWorkStore, PostPermit, RecheckDispatchAttempt, RecordEvidence, ReturnIntakeStore,
-    ReturnService, RoundReceipt, StartAttempt, StartReturnTake, WriteStartOutcome,
+    ReturnService, RoundReceipt, ScanCursor, ScanPage, StartAttempt, StartReturnTake,
+    WriteStartOutcome,
 };
 use auction_application::core::Clock;
 use auction_domain::consignment::dispatch::AttemptKey;
@@ -51,9 +52,13 @@ impl DispatchWorkSource for Sources {
 }
 
 impl RedispatchWorkSource for Sources {
-    fn pending_redispatches(&self, _limit: u32) -> ConsignmentFuture<'_, Vec<PendingRedispatch>> {
+    fn pending_redispatches(
+        &self,
+        _after: Option<ScanCursor>,
+        _limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<PendingRedispatch>> {
         self.redispatch.fetch_add(1, Ordering::Relaxed);
-        Box::pin(async { Ok(Vec::new()) })
+        Box::pin(async { Ok(ScanPage::last(Vec::new())) })
     }
 }
 

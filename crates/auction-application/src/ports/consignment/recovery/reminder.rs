@@ -11,6 +11,7 @@ use crate::errors::diagnostics::{
     DiagnosticContext, DiagnosticError, DiagnosticLevel, record_error,
 };
 use crate::ports::consignment::errors::{ConsignmentError, ConsignmentFuture};
+use crate::ports::consignment::scan::{ScanCursor, ScanPage};
 use crate::ports::core::RequestHash;
 use crate::ports::mail::{
     MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, MailNotificationTemplate,
@@ -123,6 +124,11 @@ pub trait PaymentReminderStore: Send + Sync {
     /// 到期且已证寄出才作决定并落库；已建过提醒的合同重放原结果，不再排第二封。
     fn remind(&self, command: RemindContract) -> ConsignmentFuture<'_, ReminderReceipt>;
 
-    /// 列出已到期、已证寄出且尚无提醒决定的合同。
-    fn due_reminders(&self, limit: u32) -> ConsignmentFuture<'_, Vec<Uuid>>;
+    /// 列出游标之后至多 `limit` 个已到期、已证寄出且尚无提醒决定的合同，按 `(付款期限, 合同 ID)` 升序；
+    /// 读满一页才给出下一页游标。
+    fn due_reminders(
+        &self,
+        after: Option<ScanCursor>,
+        limit: u32,
+    ) -> ConsignmentFuture<'_, ScanPage<Uuid>>;
 }

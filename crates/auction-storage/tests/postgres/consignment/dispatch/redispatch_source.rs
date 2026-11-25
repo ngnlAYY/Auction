@@ -88,8 +88,15 @@ async fn postgres_consignment_redispatch_prepares_the_new_round_delivery_once_fo
         panic!("应为 redispatch_queued：{queued:?}");
     };
 
-    let pending = source.queued_redispatches(10).await.expect("补寄待办");
+    let pending = source.queued_redispatches(None, 10).await.expect("补寄待办").items;
     assert_eq!(pending.len(), 1, "{pending:?}");
+    // 键集分页：读满一页给出游标，游标之后没有更多待办（正例）；读不满一页没有游标（反例）。
+    let page = source.queued_redispatches(None, 1).await.expect("满页");
+    assert_eq!(page.items.len(), 1);
+    let next = page.next.expect("读满一页应给出游标");
+    let after = source.queued_redispatches(Some(next), 1).await.expect("游标之后");
+    assert!((after.items.is_empty(), after.next.is_none()) == (true, true), "{after:?}");
+    assert_eq!(source.queued_redispatches(None, 10).await.expect("未满页").next, None);
     let item = &pending[0];
     assert_eq!((item.dispatch_id, item.key.round, item.prepared.as_ref()), (dispatch_id, 2, None));
     assert_eq!(item.closed_by_return_intake, receipt.intake_id);
@@ -157,7 +164,7 @@ async fn postgres_consignment_redispatch_prepares_the_new_round_delivery_once_fo
     assert_eq!(digest_after, digest);
 
     // 待办给出已备好的投递与原样冻结身份，交给授权即建第 2 轮；之后不再列出。
-    let pending = source.queued_redispatches(10).await.expect("补寄待办");
+    let pending = source.queued_redispatches(None, 10).await.expect("补寄待办").items;
     let prepared = pending[0].prepared.clone().expect("已备好");
     assert_eq!((prepared.delivery_id, &prepared.frozen), (delivery_id, &frozen));
     let origin = RoundOrigin::Redispatch { closed_by_return_intake: receipt.intake_id };
@@ -170,7 +177,7 @@ async fn postgres_consignment_redispatch_prepares_the_new_round_delivery_once_fo
         (round.round_id, round.delivery_id, round.replayed),
         (dispatch_id, delivery_id, false)
     );
-    assert!(source.queued_redispatches(10).await.expect("补寄待办").is_empty());
+    assert!(source.queued_redispatches(None, 10).await.expect("补寄待办").items.is_empty());
     let reset: (String, Option<Uuid>) = sqlx::query_as(
         "SELECT execution_state, delivery_id FROM public.settlement_obligation_fulfillments
          WHERE obligation_id = $1",
