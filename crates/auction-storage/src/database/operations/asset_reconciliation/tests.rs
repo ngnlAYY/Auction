@@ -261,7 +261,8 @@ async fn postgres_solvency_query_decodes_numeric_sum_as_i64()
     let mut tx = connection.begin().await?;
     tx.execute(
         "CREATE TEMP TABLE settlement_obligations (
-            id uuid, world_id text, obligation_kind text, business_state text, amount bigint
+            id uuid, world_id text, obligation_kind text, business_state text, amount bigint,
+            contract_id uuid
          );
          CREATE TEMP TABLE settlement_obligation_fulfillments (
             obligation_id uuid, execution_state text, dispatch_world text, delivery_id uuid,
@@ -383,7 +384,8 @@ async fn postgres_solvency_in_transit_aligns_with_balance_observation()
     // 同一事务内 now() 不变：余额观察时刻固定为 now() - 1 小时，103 与之恰好相等。
     tx.execute(
         "CREATE TEMP TABLE settlement_obligations (
-            id uuid, world_id text, obligation_kind text, business_state text, amount bigint
+            id uuid, world_id text, obligation_kind text, business_state text, amount bigint,
+            contract_id uuid
          );
          CREATE TEMP TABLE settlement_obligation_fulfillments (
             obligation_id uuid, execution_state text, dispatch_world text, delivery_id uuid,
