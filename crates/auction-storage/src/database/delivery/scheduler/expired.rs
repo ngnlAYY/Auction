@@ -18,13 +18,16 @@ pub(super) async fn reconcile(
     notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
 ) -> Result<(), auction_application::core::RepositoryError> {
     // 候选读取不持业务锁；每条短事务内重新锁定并核验有效期。
-    // 寄售处置投递的过期由寄售专用链按原起写事实核对，不能被通用回收改成人工对账
-    // （不变量 4：结果未知只转人工核对，绝不自动重发；起写许可只发一次）。
+    // 寄售处置投递与寄售轮投递的过期由寄售专用链按原起写事实核对，不能被通用回收加 fence、
+    // 改成人工对账（不变量 4：结果未知只转人工核对，绝不自动重发；起写许可只发一次）。
+    // 寄售轮起写后的结果未知由寄售派发路径（已起写、无终局证据 → 未知派发）承担。
     let candidates = sqlx::query_scalar::<_, Uuid>(concat!(
         "SELECT id FROM public.deliveries AS deliveries WHERE status='sending'
          AND lease_expires_at+($2::bigint*interval '1 microsecond')<=$1
          AND ",
         delivery_generic_origin_guard!(),
+        " AND ",
+        delivery_not_consignment_round_guard!(),
         " ORDER BY lease_expires_at,id LIMIT $3"
     ))
     .bind(now)
@@ -77,6 +80,8 @@ async fn expire_one(
          AND lease_expires_at+($3::bigint*interval '1 microsecond')<=(SELECT at FROM sql_clock)
          AND ",
         delivery_generic_origin_guard!(),
+        " AND ",
+        delivery_not_consignment_round_guard!(),
         " RETURNING command_id,fencing_version,attempt_count,payload,created_at,origin_kind"
     )).bind(id).bind(now).bind(grace_micros).fetch_optional(&mut *tx).await?;
     if let Some(row) = row {

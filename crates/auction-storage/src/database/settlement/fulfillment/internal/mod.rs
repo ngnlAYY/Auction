@@ -114,12 +114,35 @@ impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
     }
 }
 
+/// 通用内部执行器不是寄售义务的 owner：寄售义务只经寄售派发轮，显式失败关闭，保护不变量 6。
+/// 寄售的收件人授权在派发轮起写处由 `authorize_entitlement_recipient_in_tx` 完成。
+///
+/// 只读探针、不加锁，须先于任何拍卖锁；拍卖义务与不存在的义务 ID 放行，后续校验照旧判定。
+async fn reject_consignment_obligation(
+    tx: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
+    obligation_id: uuid::Uuid,
+) -> Result<(), FundingError> {
+    let consignment: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM public.settlement_obligations
+                       WHERE id=$1 AND contract_id IS NOT NULL)",
+    )
+    .bind(obligation_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(sql_error)?;
+    if consignment {
+        return Err(FundingError::Unproven);
+    }
+    Ok(())
+}
+
 /// 旧prepare/activate/satisfy也遵守同一业务锁序，不能在fulfillment后反锁义务。
 pub(super) async fn lock_legacy(
     tx: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     claim: &auction_application::settlement::SettlementFulfillmentClaim,
     custody: Option<(&SettlementInternalEvidenceSnapshot, uuid::Uuid)>,
 ) -> Result<bool, FundingError> {
+    reject_consignment_obligation(tx, claim.obligation_id.as_uuid()).await?;
     if claim.kind == auction_domain::SettlementObligationKind::BuyerRefund
         && claim.state != auction_application::settlement::SettlementFulfillmentState::Enqueued
     {

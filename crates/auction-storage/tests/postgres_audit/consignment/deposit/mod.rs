@@ -1,5 +1,9 @@
 //! v2 多挂单命令的审计失败必须回滚业务事实、事件与回执。
 
+// 镜像 postgres 目标的同名夹具（符号链接）；其余条目只由原目标的测试使用。
+#[allow(dead_code)]
+pub(super) mod support;
+
 use auction_application::consignment::{ConsignmentError, EnvelopeStore, ReceiptDisposition};
 use auction_domain::CommandId;
 use auction_storage::{

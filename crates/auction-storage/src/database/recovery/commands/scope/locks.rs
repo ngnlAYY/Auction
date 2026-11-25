@@ -170,7 +170,7 @@ pub(in crate::database::recovery::commands) async fn lock_obligations(
     // 与原逐 ID 加锁保持相同 UUID 顺序；一条查询锁齐完整集合，缺失任何义务都失败关闭。
     let rows = sqlx::query(
         r#"SELECT id, auction_id, lot_id, world_id, obligation_kind, business_state,
-                  equipment_id, amount, recipient_user_id, recipient_game_identity
+                  equipment_id, amount, recipient_user_id, recipient_game_identity, contract_id
            FROM public.settlement_obligations
            WHERE id = ANY($1)
            ORDER BY id
@@ -185,6 +185,11 @@ pub(in crate::database::recovery::commands) async fn lock_obligations(
     }
     let mut obligations = BTreeMap::new();
     for (id, row) in ids.into_iter().zip(rows) {
+        // 寄售义务不经本入口（只经寄售派发轮），显式失败关闭，保护不变量 6；
+        // 恢复记录引用寄售义务属于存储结果矛盾，与下方来源不符同样返回 InvalidStoredResult。
+        if row.try_get::<Option<Uuid>, _>("contract_id").map_err(map_sql_error)?.is_some() {
+            return Err(RecoveryCommandError::InvalidStoredResult);
+        }
         let obligation = ObligationRow {
             id: row.try_get("id").map_err(map_sql_error)?,
             auction_id: row.try_get("auction_id").map_err(map_sql_error)?,

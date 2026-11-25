@@ -1,13 +1,10 @@
 //! 隔离解除：在同一顶层事务内复判、写终局与解除，并交还原 owner。
 
-use std::collections::BTreeSet;
-
 use auction_application::consignment::{
     ConsignmentError, DepositBusinessRejection, DepositOperation, ReleaseQuarantineCommand,
     ReleaseReceipt,
 };
 use auction_domain::CommandId;
-use auction_domain::consignment::ListingEquipmentIdentity;
 use auction_domain::consignment::deposit::{ReleaseKind, ReleasePlan};
 use auction_time::Timestamp;
 use sqlx::Postgres;
@@ -24,6 +21,7 @@ use crate::database::consignment::commands::ledger::{DepositArbitration, Deposit
 use crate::database::consignment::commands::{LockKeys, with_deposit_transaction};
 use crate::database::consignment::deposit::primitives::database_now;
 use crate::database::consignment::deposit::repository::DepositRepository;
+use crate::database::consignment::returns::release_acquire;
 use crate::database::recovery::scheduler::RecoveryHandoff;
 use crate::database::settlement::fulfillment::consume_return_for_mail_in_tx;
 
@@ -46,27 +44,18 @@ pub(crate) async fn release_quarantine_port(
     let mapped_seller = super::quarantine::seller_by_name(&mut pre, observation.sender.as_deref())
         .await
         .map_err(WriteError::into_application)?;
+    // 拟定接管时锁集合另含原轮买家：接管同事务写返回事实，须持买家锁（不变量 2）。
+    let (sellers, equipment) = super::rts_intake::release_lock_set(
+        &mut pre,
+        &command,
+        &quarantine.mail_key,
+        &observation,
+        mapped_seller,
+    )
+    .await
+    .map_err(WriteError::into_application)?;
     drop(pre);
     let key = quarantine.mail_key.clone();
-    let mut seller_set = BTreeSet::new();
-    if let Some(seller) = mapped_seller {
-        seller_set.insert(seller.as_uuid());
-    }
-    let sellers: Vec<Uuid> = seller_set.into_iter().collect();
-    let world = key.world();
-    let equipment: Vec<ListingEquipmentIdentity> = observation
-        .items
-        .iter()
-        .filter_map(|item| {
-            item.canonical_eid.as_ref().and_then(|eid| {
-                ListingEquipmentIdentity::new(
-                    auction_domain::consignment::settlement_world_code(item.world.unwrap_or(world)),
-                    eid,
-                )
-                .ok()
-            })
-        })
-        .collect();
     let keys = LockKeys {
         command_id: command.command_id.as_uuid(),
         sellers: &sellers,
@@ -182,7 +171,7 @@ pub(crate) async fn release_quarantine_port(
                         release_to_recovery(writer, input, &plan, now).await
                     }
                     ReleaseKind::AcquireReturn => {
-                        Err(conflict(DepositBusinessRejection::EvidenceUnproven))
+                        release_acquire(writer, &quarantine, &observation, now).await
                     }
                 }
             })

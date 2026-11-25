@@ -22,7 +22,6 @@ pub(crate) const ACTIVE_COUNT_SQL: &str = concat!(
 );
 
 /// 在卖家锁内，计数滚动一小时内已接受的登记，包含其后终结的挂单。
-#[allow(dead_code, reason = "由后续任务 2D 调用")]
 pub(crate) async fn hourly_registration_count(
     tx: &mut PgConnection,
     seller_user_id: UserId,
@@ -32,7 +31,6 @@ pub(crate) async fn hourly_registration_count(
 }
 
 /// 在同一个卖家锁内，计数该卖家两个世界的有效活动挂单。
-#[allow(dead_code, reason = "由后续任务 2D 调用")]
 pub(crate) async fn effective_activity_count(
     tx: &mut PgConnection,
     seller_user_id: UserId,
@@ -52,7 +50,6 @@ async fn seller_count(
 
 /// 同件装备上的持久活动行及清退或占用事实。
 #[derive(Debug)]
-#[allow(dead_code, reason = "由后续任务 2D 调用")]
 pub(crate) struct EquipmentOccupant {
     /// 调用方在此挂单上提交清退或继续判断。
     pub(crate) listing_id: Uuid,
@@ -65,7 +62,6 @@ pub(crate) struct EquipmentOccupant {
 }
 
 /// 在命令、卖家、EID 会话锁及当前卖家行锁后，按 UUID 锁本件持久活动行并返回占用事实。
-#[allow(dead_code, reason = "由后续任务 2D 调用")]
 pub(crate) async fn lock_equipment_occupants(
     tx: &mut PgConnection,
     identity: &ListingEquipmentIdentity,

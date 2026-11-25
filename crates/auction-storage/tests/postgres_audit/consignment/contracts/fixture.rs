@@ -1,0 +1,1 @@
+../../../postgres/consignment/contracts/fixture.rs

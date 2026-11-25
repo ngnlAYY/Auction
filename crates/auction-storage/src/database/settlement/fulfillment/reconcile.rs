@@ -202,7 +202,7 @@ pub(super) async fn satisfy_postgres(
     })
 }
 
-pub(super) async fn manual_reconcile_in_transaction(
+pub(crate) async fn manual_reconcile_in_transaction(
     transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
     obligation_id: Uuid,
     execution_state: &str,

@@ -4,8 +4,10 @@ use std::sync::{Arc, Mutex};
 
 use auction_application::consignment::ConsignmentError;
 use sqlx::PgConnection;
+use tracing::Dispatch;
 use tracing::field::{Field, Visit};
 use tracing::instrument::WithSubscriber;
+use tracing::subscriber::NoSubscriber;
 
 use super::fixture::{COMMAND, LISTING, SELLER, counts, register, seed};
 use crate::database::DatabaseStore;
@@ -102,7 +104,13 @@ pub(super) async fn verify(store: &DatabaseStore) -> Result<(), WriteError> {
 
 pub(super) async fn capture_audit_failure<T>(operation: impl Future<Output = T>) -> T {
     let events = Arc::new(Mutex::new(Vec::new()));
-    let result = operation.with_subscriber(Capture(events.clone())).await;
+    let capture = Dispatch::new(Capture(events.clone()));
+    // 回调点的兴趣是进程级缓存。进程里只登记了一个订阅者时，tracing 按首次触发回调点的那个线程的
+    // 缺省计算兴趣；同一测试二进制里并行的审计失败用例会在没有订阅者的线程里首次触发同一回调点，
+    // 把兴趣缓存成 never，本用例的事件随之被丢弃。再登记一个与捕获同寿命的订阅者，tracing 就改按
+    // 全部存活订阅者计算兴趣，捕获订阅者始终在内。
+    let _other_dispatch = Dispatch::new(NoSubscriber::default());
+    let result = operation.with_subscriber(capture).await;
     let events = events.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     assert!(
         events.iter().any(|entry| entry.starts_with("auction::storage::audit_health ")

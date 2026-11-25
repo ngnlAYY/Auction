@@ -8,6 +8,7 @@ use auction_application::reconciliation::{
 use auction_time::Timestamp;
 use sqlx::Row;
 
+use super::consignment_solvency::consignment_solvency;
 use super::{WORLDS, open_snapshot, queries, query_failed, snapshot_unavailable};
 use crate::database::DatabaseStore;
 
@@ -24,29 +25,66 @@ pub(super) async fn solvency_snapshot(
             .fetch_one(&mut *transaction)
             .await
             .map_err(query_failed)?;
-        let pending_seller_payout_count: i64 =
+        let mut pending_seller_payout_count: i64 =
             row.try_get("pending_seller_payout_count").map_err(query_failed)?;
-        let pending_seller_payout_credits: i64 =
+        let mut pending_seller_payout_credits: i64 =
             row.try_get("pending_seller_payout_credits").map_err(query_failed)?;
-        let pending_refund_count: i64 =
+        let mut pending_refund_count: i64 =
             row.try_get("pending_refund_count").map_err(query_failed)?;
-        let pending_refund_credits: i64 =
+        let mut pending_refund_credits: i64 =
             row.try_get("pending_refund_credits").map_err(query_failed)?;
-        let in_transit_seller_payout_count: i64 =
+        let mut in_transit_seller_payout_count: i64 =
             row.try_get("in_transit_seller_payout_count").map_err(query_failed)?;
-        let in_transit_seller_payout_credits: i64 =
+        let mut in_transit_seller_payout_credits: i64 =
             row.try_get("in_transit_seller_payout_credits").map_err(query_failed)?;
-        let in_transit_refund_count: i64 =
+        let mut in_transit_refund_count: i64 =
             row.try_get("in_transit_refund_count").map_err(query_failed)?;
-        let in_transit_refund_credits: i64 =
+        let mut in_transit_refund_credits: i64 =
             row.try_get("in_transit_refund_credits").map_err(query_failed)?;
         let pending_outbound_mail_count: i64 =
             row.try_get("pending_outbound_mail_count").map_err(query_failed)?;
-        let (in_transit_review_count, in_transit_review_credits, in_transit_review_reasons) =
-            review_reasons(&row)?;
+        let (
+            mut in_transit_review_count,
+            mut in_transit_review_credits,
+            mut in_transit_review_reasons,
+        ) = review_reasons(&row)?;
         let custody_count: i64 = row.try_get("custody_count").map_err(query_failed)?;
         let custody_credits: i64 = row.try_get("custody_credits").map_err(query_failed)?;
-        let balance_before_take: bool = row.try_get("balance_before_take").map_err(query_failed)?;
+        let mut balance_before_take: bool =
+            row.try_get("balance_before_take").map_err(query_failed)?;
+        // 寄售负债由专用口径计入：一笔 funded 成交只计一份最大负债（卖款与退款互斥，取 P 不取 S+P）。
+        let consignment = consignment_solvency(&mut transaction, world).await?;
+        for (total, extra) in [
+            (&mut pending_seller_payout_count, consignment.pending_seller_payout.0),
+            (&mut pending_seller_payout_credits, consignment.pending_seller_payout.1),
+            (&mut pending_refund_count, consignment.pending_refund.0),
+            (&mut pending_refund_credits, consignment.pending_refund.1),
+            (&mut in_transit_seller_payout_count, consignment.in_transit_seller_payout.0),
+            (&mut in_transit_seller_payout_credits, consignment.in_transit_seller_payout.1),
+            (&mut in_transit_refund_count, consignment.in_transit_refund.0),
+            (&mut in_transit_refund_credits, consignment.in_transit_refund.1),
+        ] {
+            *total = total.checked_add(extra).ok_or("reconciliation_query_failed")?;
+        }
+        if consignment.review_reasons.len() != consignment.review_counts.len()
+            || consignment.review_reasons.len() != consignment.review_credits.len()
+        {
+            return Err("reconciliation_query_failed");
+        }
+        for ((reason, count), credits) in consignment
+            .review_reasons
+            .into_iter()
+            .zip(consignment.review_counts)
+            .zip(consignment.review_credits)
+        {
+            in_transit_review_count =
+                in_transit_review_count.checked_add(count).ok_or("reconciliation_query_failed")?;
+            in_transit_review_credits = in_transit_review_credits
+                .checked_add(credits)
+                .ok_or("reconciliation_query_failed")?;
+            in_transit_review_reasons.push(SolvencyInTransitReason { reason, count, credits });
+        }
+        balance_before_take |= consignment.balance_before_take;
         let postage_estimate_credits = pending_outbound_mail_count
             .checked_mul(report.postage_rate_credits)
             .ok_or("reconciliation_query_failed")?;

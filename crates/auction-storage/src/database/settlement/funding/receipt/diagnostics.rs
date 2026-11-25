@@ -71,6 +71,8 @@ pub(super) enum ReceiptRejection {
     StoreFailed,
     /// 授权关联的付款义务缺失。
     ObligationMissing,
+    /// 授权关联的义务属于寄售合同；通用收据校验不接收寄售义务。
+    ConsignmentObligation,
     /// 授权关联的装备缺失。
     EquipmentMissing,
     /// 授权关联的履约缺失。
@@ -160,6 +162,7 @@ impl ReceiptRejection {
             Self::StoreSentMissing => "funding_receipt_store_sent_missing",
             Self::StoreFailed => "funding_receipt_store_failed",
             Self::ObligationMissing => "funding_receipt_obligation_missing",
+            Self::ConsignmentObligation => "funding_receipt_consignment_obligation",
             Self::EquipmentMissing => "funding_receipt_equipment_missing",
             Self::FulfillmentMissing => "funding_receipt_fulfillment_missing",
             Self::DeliveryMissing => "funding_receipt_delivery_missing",
@@ -203,6 +206,7 @@ impl ReceiptRejection {
             Self::StoreSentMissing | Self::StoreFailed => "receipt_store",
             Self::RelationUnproven
             | Self::ObligationMissing
+            | Self::ConsignmentObligation
             | Self::EquipmentMissing
             | Self::FulfillmentMissing
             | Self::DeliveryMissing
@@ -258,6 +262,7 @@ pub(super) async fn diagnose_relation(
     let query = sqlx::query(
         r#"SELECT
         o.id IS NOT NULL AS obligation_exists,
+        o.contract_id IS NULL AS obligation_not_consignment,
         e.id IS NOT NULL AS equipment_exists,
         f.obligation_id IS NOT NULL AS fulfillment_exists,
         d.id IS NOT NULL AS delivery_exists,
@@ -299,6 +304,8 @@ pub(super) async fn diagnose_relation(
     };
     for (kind, column) in [
         (ReceiptRejection::ObligationMissing, "obligation_exists"),
+        // 寄售义务不经本入口（只经寄售派发轮）；其装备列为空，须先于装备缺失归类，保护不变量 6。
+        (ReceiptRejection::ConsignmentObligation, "obligation_not_consignment"),
         (ReceiptRejection::EquipmentMissing, "equipment_exists"),
         (ReceiptRejection::FulfillmentMissing, "fulfillment_exists"),
         (ReceiptRejection::DeliveryMissing, "delivery_exists"),

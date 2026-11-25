@@ -81,6 +81,10 @@ pub(crate) fn decode_rejection(code: &str) -> Option<DepositBusinessRejection> {
         "hold_mismatch" => DepositBusinessRejection::HoldMismatch,
         "action_not_allowed" => DepositBusinessRejection::ActionNotAllowed,
         "fence_mismatch" => DepositBusinessRejection::FenceMismatch,
+        "equipment_committed" => DepositBusinessRejection::EquipmentCommitted,
+        "custody_unproven" => DepositBusinessRejection::CustodyUnproven,
+        "operations_hold" => DepositBusinessRejection::OperationsHold,
+        "listing_limit_reached" => DepositBusinessRejection::ListingLimitReached,
         _ => return None,
     })
 }

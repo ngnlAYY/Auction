@@ -6,6 +6,7 @@
 
 mod control;
 mod envelope;
+mod loss;
 
 use auction_application::consignment::{
     DEPOSIT_SCHEMA_VERSION, DepositOperation, ListingStateChange, ReceiptDisposition,
@@ -454,6 +455,13 @@ mod tests {
             ListingVersion::new(3).expect("版本"),
             auction_domain::consignment::ListingState::DepositAccepted,
             Some(id(9)),
+        ));
+        assert_roundtrip(WithdrawDepositReceipt::withdrawal_accepted(
+            command(70),
+            id(71),
+            ListingVersion::new(5).expect("版本"),
+            id(72),
+            id(73),
         ));
         assert_roundtrip(WithdrawDepositReceipt::new(
             command(10),

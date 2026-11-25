@@ -48,6 +48,12 @@ pub(super) async fn begin_claim_cycle_postgres(
                     store.notification_metrics(),
                 )
                 .await?;
+                super::watch::retire_voided_reminders(
+                    &mut transaction,
+                    now,
+                    store.notification_metrics(),
+                )
+                .await?;
                 transaction.commit().await.map_err(map_storage_error)
             },
         )
@@ -117,6 +123,8 @@ pub(super) async fn claim_postgres(
         delivery_completion_gate!("(SELECT at FROM sql_clock)"),
         " AND ",
         delivery_generic_origin_guard!(),
+        " AND ",
+        delivery_not_consignment_round_guard!(),
         r#"
              AND NOT EXISTS (
                  SELECT 1
@@ -254,7 +262,9 @@ pub(super) async fn claim_postgres(
                  AND "#,
             delivery_completion_gate!("(SELECT at FROM sql_clock)"),
             " AND ",
-            delivery_generic_origin_guard!()
+            delivery_generic_origin_guard!(),
+            " AND ",
+            delivery_not_consignment_round_guard!()
         ))
         .bind(delivery_id)
         .bind(lease_token)

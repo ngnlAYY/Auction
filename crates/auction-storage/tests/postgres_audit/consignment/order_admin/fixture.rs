@@ -1,0 +1,1 @@
+../../../postgres/consignment/order_admin/fixture.rs

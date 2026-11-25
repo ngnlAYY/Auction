@@ -29,11 +29,15 @@ const APPEND_ONLY_TABLES: [&str; 11] = [
 
 const INSUFFICIENT_PRIVILEGE: &str = "42501";
 
-/// `000122` 改名得到的链尾入口与 `000131` 新建的公开入口；三者都必须只允许 owner 执行。
-const RUNTIME_PRIVILEGE_FUNCTIONS: [&str; 3] = [
+/// 授权链上的全部入口：公开入口与 `000117`、`000122`、`000132`、`000134`、`000135` 逐版改名得到的前驱；
+/// 都必须只允许 owner 执行。
+const RUNTIME_PRIVILEGE_FUNCTIONS: [&str; 6] = [
     "public.apply_auction_runtime_privileges()",
     "public.apply_auction_runtime_privileges_000117()",
     "public.apply_auction_runtime_privileges_000122()",
+    "public.apply_auction_runtime_privileges_000132()",
+    "public.apply_auction_runtime_privileges_000134()",
+    "public.apply_auction_runtime_privileges_000135()",
 ];
 
 /// 执行一条语句并返回数据库错误码；成功返回 `None`。
@@ -94,7 +98,7 @@ async fn public_executable(store: &DatabaseStore, function: &str) -> bool {
     .expect("读取 PUBLIC 函数执行授权")
 }
 
-/// 把三个授权链函数的 ACL 置回 `--no-privileges` 恢复后的默认状态，并显式授给运行账号。
+/// 把授权链全部函数的 ACL 置回 `--no-privileges` 恢复后的默认状态，并显式授给运行账号。
 async fn restore_default_function_acls(store: &DatabaseStore) {
     for function in RUNTIME_PRIVILEGE_FUNCTIONS {
         let statement = format!("GRANT EXECUTE ON FUNCTION {function} TO PUBLIC, auction_runtime");
@@ -166,7 +170,7 @@ async fn postgres_runtime_privileges_replay_closes_entire_function_chain() {
     let runtime = database.store().await.expect("以运行账号连接");
     let maintenance = database.maintenance_store().await.expect("以维护账号连接");
 
-    // 模拟 `--no-privileges` 恢复：三个函数回到 PUBLIC 可执行，运行账号也能直接执行。
+    // 模拟 `--no-privileges` 恢复：全部授权链函数回到 PUBLIC 可执行，运行账号也能直接执行。
     restore_default_function_acls(&maintenance).await;
     for function in RUNTIME_PRIVILEGE_FUNCTIONS {
         assert!(public_executable(&maintenance, function).await, "{function} 应处于默认 ACL");

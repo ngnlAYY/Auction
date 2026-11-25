@@ -148,6 +148,11 @@ pub(super) async fn load(
             sending_fencing_version: 0,
         });
     };
+    // 寄售派发证据只经 consignment/dispatch/evidence.rs 记录，人工 Sent 确认（含预览）不接收寄售
+    // 投递：显式失败关闭，保护不变量 6。必须先于按拍卖列的反序列化。
+    if !data["obligation"]["contract_id"].is_null() {
+        return Err(Error::Rejected);
+    }
     let now: Timestamp =
         sqlx::query_scalar("SELECT clock_timestamp()").fetch_one(&mut **tx).await?;
     // 准入判定在应用层完成；这里只把锁定行投影成结构体并翻译阻断项。从未进入发送尝试的投递

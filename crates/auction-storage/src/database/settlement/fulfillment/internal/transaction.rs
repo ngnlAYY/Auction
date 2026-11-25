@@ -146,6 +146,11 @@ async fn apply(
     external_refund: bool,
 ) -> Result<bool, FundingError> {
     let rejected = |kind, stage, error| diagnose_collected(proof.is_some(), kind, stage, error);
+    // 通用内部执行器不是寄售义务的 owner（只经寄售派发轮），显式失败关闭，保护不变量 6；
+    // 只读探针须先于 generation 与拍卖锁。
+    super::reject_consignment_obligation(tx, command.claim.obligation_id.as_uuid())
+        .await
+        .map_err(|error| rejected("collected_consignment_obligation", "claim_validate", error))?;
     crate::lock_mail_runtime_generation(tx, &evidence.identity.runtime)
         .await
         .map_err(evidence_error)

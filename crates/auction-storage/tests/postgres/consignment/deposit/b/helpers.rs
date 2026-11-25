@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use auction_application::consignment::{
-    DepositCommandService, ExpireReservationCommand, IssueReservationCommand,
+    ConsignmentError, DepositCommandService, ExpireReservationCommand, IssueReservationCommand,
     ReservationInvalidation, ReservationSecretAad, ReservationSecretCrypto,
     ReservationSecretCryptoError, SealedReservationSecret,
 };
@@ -11,7 +11,10 @@ use auction_application::core::RequestHash;
 use auction_domain::consignment::deposit::{TokenText, format_token, parse_token};
 use auction_domain::consignment::{FeeBps, ListingPrice, ListingVersion};
 use auction_domain::{CommandId, SettlementWorld, UserId};
-use auction_storage::{DepositRepository, DepositSettings};
+use auction_storage::{
+    DepositRepository, DepositSettings, FirstDispatchContent, FirstDispatchContentSource,
+    FirstDispatchRequest, WithdrawalDispatchRequest,
+};
 use sqlx::{AssertSqlSafe, PgPool};
 use uuid::Uuid;
 
@@ -57,6 +60,30 @@ impl ReservationSecretCrypto for TestCrypto {
     }
 }
 
+/// 测试派发内容：撤回件首轮用明显的假主题与固定摘要，附件为规范装备；购买首轮本夹具不用。
+pub struct TestDispatchContent;
+
+impl FirstDispatchContentSource for TestDispatchContent {
+    fn content(
+        &self,
+        _request: &FirstDispatchRequest<'_>,
+    ) -> Result<FirstDispatchContent, ConsignmentError> {
+        Err(ConsignmentError::Unavailable)
+    }
+
+    fn withdrawal_content(
+        &self,
+        request: &WithdrawalDispatchRequest<'_>,
+    ) -> Result<FirstDispatchContent, ConsignmentError> {
+        Ok(FirstDispatchContent {
+            template: "consignment_equipment_withdrawal".to_owned(),
+            subject: "fake withdrawal subject".to_owned(),
+            body_digest: [0xd2; 32],
+            equipment_ids: vec![request.canonical_eid.to_owned()],
+        })
+    }
+}
+
 /// 以运行账号构造真实存储端口与测试密码边界。
 pub async fn repository(database: &TestDatabase) -> DepositRepository {
     repository_with_max(database, 100).await
@@ -90,6 +117,7 @@ pub async fn repository_with_settings(
         Arc::new(TestCrypto),
         settings,
     )
+    .with_dispatch_content(Arc::new(TestDispatchContent))
 }
 
 /// 以同一真实存储组合应用层收件命令服务，用于软关闭后的只读重放。

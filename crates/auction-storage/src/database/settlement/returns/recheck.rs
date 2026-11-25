@@ -126,14 +126,13 @@ async fn record_once(
             }
             // 核验只能证实原证据义务；读到的主题指向别的义务时不改绑。
             let locked = match (obligation_id, snapshot.obligation_id) {
-                (Some(observed), Some(recorded)) if observed == recorded => {
-                    lock_obligation(
-                        &mut tx,
-                        recorded,
-                        settlement_return_dispatch_request(&metadata),
-                    )
-                    .await?
-                }
+                (Some(observed), Some(recorded)) if observed == recorded => lock_obligation(
+                    &mut tx,
+                    recorded,
+                    settlement_return_dispatch_request(&metadata),
+                )
+                .await?
+                .into_auction(),
                 _ => None,
             };
             let received_at: Timestamp =

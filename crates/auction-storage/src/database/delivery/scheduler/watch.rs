@@ -1,5 +1,6 @@
 //! 收口已失去资格且从未开始发送的提醒；不覆盖 sending 或未知外部结果。
 //! 资格失效包括取消/重新领先与 lot 有效截止已过；两者共用同一预检退役语义。
+//! 寄售付款提醒在派前复验作废时（7A-3）同样按预检退役收口。
 
 use auction_time::Timestamp;
 use sqlx::{Postgres, Row};
@@ -193,6 +194,45 @@ pub(super) async fn retire_player_notifications(
     .await
     .map_err(map_storage_error)?;
     record_retirement(transaction, rows, now, notifications, "season_notice_invalidated").await
+}
+
+/// 寄售付款提醒在 sending 围栏前作废（已付、已取消或轮已变）：作废判定与投递终结在同一事务内完成，
+/// 只作用于从未进入 sending 的 pending / claimed 投递；已派或结果未知的提醒照旧零补发（不变量 4、5）。
+/// 冻结载荷、提醒决定行与合同事实都不改写；存量停留的作废提醒在下一轮领取前同样收口。
+pub(super) async fn retire_voided_reminders(
+    transaction: &mut crate::database::TrackedTransaction<'_, Postgres>,
+    now: Timestamp,
+    notifications: &dyn auction_application::notification_metrics::NotificationRecorder,
+) -> Result<(), auction_application::core::RepositoryError> {
+    let voided = super::reminder_gate::voided_deliveries(transaction).await.map_err(|error| {
+        match error {
+            super::reminder_gate::GateError::Sqlx(error) => map_storage_error(error),
+            super::reminder_gate::GateError::Storage(error) => {
+                // 只记录脱敏分类（SQLSTATE 与约束名），不含任何载荷或收件人。
+                tracing::warn!(error = %error, "寄售付款提醒的退役复验失败，本轮领取中止");
+                crate::database::repository_error("寄售付款提醒退役复验失败")
+            }
+        }
+    })?;
+    if voided.is_empty() {
+        return Ok(());
+    }
+    // 候选行已在复验时锁定；这里再核一次从未进入 sending，保证只退役确定未派出的投递。
+    let rows = sqlx::query(concat!(
+        r#"WITH retired AS (
+            SELECT deliveries.id FROM public.deliveries AS deliveries
+            WHERE deliveries.id = ANY($2)
+              AND deliveries.status IN ('pending', 'claimed')
+              AND deliveries.sending_at IS NULL
+        )"#,
+        retire_tail!("consignment_notice_invalidated", "payment_reminder_voided")
+    ))
+    .bind(now)
+    .bind(&voided)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(map_storage_error)?;
+    record_retirement(transaction, rows, now, notifications, "consignment_notice_invalidated").await
 }
 
 /// 每条退役行追加一条确定未写入的失败审计与处置事实，并按通知种类记一次 retired 指标；

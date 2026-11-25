@@ -11,7 +11,6 @@ use super::protocol::{LEASE_GRACE, MAX_LISTING_LOOKUP_ATTEMPTS, rate_limit_delay
 
 /// 在挂单登记事务中写入第一代工作。不变量 2、5：调用方已写入挂单并持有单例锁，
 /// 使用登记事实的数据库时刻，首次工作立即可领。
-#[allow(dead_code, reason = "由后续任务 2D 调用")]
 pub(crate) async fn enqueue_lookup(
     conn: &mut PgConnection,
     listing_id: Uuid,
@@ -35,7 +34,6 @@ pub(crate) async fn enqueue_lookup(
 
 /// 同提交取消挂单的未完成工作，返回被撤销的行数。调用方先持挂单锁，再持单例锁。
 /// 不变量 2、5、6：清除租约即废止提交围栏；可能在途时给原持有者保留时间栅栏。
-#[allow(dead_code, reason = "由后续任务 2D 调用")]
 pub(crate) async fn cancel_lookup(
     conn: &mut PgConnection,
     listing_id: Uuid,
@@ -77,7 +75,6 @@ pub(crate) async fn cancel_lookup(
 }
 
 /// 活租约初次仲裁的结果。
-#[allow(dead_code, reason = "由后续任务 2D 区分围栏结果")]
 pub(crate) enum LookupFenceCheck {
     /// 工作与全局许可均匹配且未到期。
     Matched(MatchedLookupLease),
@@ -95,7 +92,6 @@ pub(crate) struct MatchedLookupLease {
 
 impl MatchedLookupLease {
     /// 本次领取已经持久化的计次。达到尝试上限时，调用方先终结挂单再完成工作。
-    #[allow(dead_code, reason = "由后续任务 2D 选择解析结果的挂单迁移")]
     pub(crate) const fn attempt_count(&self) -> i16 {
         self.attempt_count
     }
@@ -104,7 +100,6 @@ impl MatchedLookupLease {
 /// 重放仲裁后，在挂单锁、单例锁之后锁工作，再读数据库墙钟。
 /// 不变量 2、5、6：首次提交只承认活围栏；失败分支不写工作、许可或账本。
 /// 准入代次及挂单资格由调用方在本事务内核验。
-#[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
 pub(crate) async fn check_lookup_fence(
     conn: &mut PgConnection,
     fence: LookupFence,
@@ -172,7 +167,6 @@ async fn check_lookup_fence_inner(
 }
 
 /// 活租约已得到的本次观察结论。
-#[allow(dead_code, reason = "由后续任务 2D 提交观察")]
 pub(crate) enum LookupResolution {
     /// 已完成解析，不再安排下次尝试。
     Done,
@@ -191,7 +185,6 @@ pub(crate) enum LookupResolution {
 /// Applied(Some) 为下次解析时刻，Applied(None) 为完成或耗尽。
 /// 第六次 429 仍写冷却，取已有截止、数据库墙钟加两小时、数据库墙钟加封顶六小时的
 /// Retry-After 三者最大值。提示缺失或短于两小时时，本次新增的冷却为两小时。
-#[allow(dead_code, reason = "由后续任务 2D 调用")]
 pub(crate) async fn finish_lookup(
     conn: &mut PgConnection,
     lease: MatchedLookupLease,

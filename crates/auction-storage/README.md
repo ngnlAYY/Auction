@@ -20,6 +20,7 @@ PostgreSQL 18 适配器：实现应用层的仓储、事务与命令端口，拥
 | `initialize_empty_postgres` / `PostgresDatabaseBootstrap` / `PostgresDatabaseRebuildGuard` | 合并部署首次初始化、缺失才创建的建库、持锁重建空库 |
 | `collect_recovery_preflight` / `collect_retention_inventory` / `collect_retention_dry_run`；`preflight_retention_purge` / `execute_retention_purge` | 只读预检与盘点；经演练回执与逐族令牌批准的运行态清理（只覆盖代码内闭集表） |
 | `strict_deployment_database_identity` / `postgres_connect_options` / `postgres_expected_migration_version` | 不连接数据库的部署目标比较；连接选项解析；内嵌最高迁移版本 |
+| `PgRightsStore` / `PgRightNoticeStore` | 寄售受限权利（找回、挑战、续办与 `refresh_contract_rights` 补刷）与权利通知 outbox 的领取和结果；`SanctionWorkStore` 与 `ConsignmentFundingStore` 由 `DatabaseStore` 直接实现。权利登记、状态刷新与 outbox 布局见[docs/contracts/database.md#寄售损失受限权利与通知迁移-000137](../../docs/contracts/database.md#寄售损失受限权利与通知迁移-000137) |
 
 ## 单一适配器结构
 
@@ -90,7 +91,7 @@ COD 实收路径的 `stage` 集合（`transaction_*`、`runtime_generation`、`w
 | 结算与资金 | [settlement](src/database/settlement)（现金账本、履约、调度、报表、策略、目录、补偿冲正与结算退件案件：案件投影、命令/事件/领回事实、持久 Take、补寄授权与资金返还，见[docs/guide/mail-flows.md#结算退件](../../docs/guide/mail-flows.md#结算退件)） |
 | 投递与恢复 | [delivery](src/database/delivery)（outbox、发送围栏、处置事实、装备损失、人工 Sent）、[recovery](src/database/recovery) |
 | 邮件与论坛 | [mail](src/database/mail)（轮询、入站、检查点、邮箱维护与通知事实）、[forum](src/database/forum)、[lot_watch](src/database/lot_watch) |
-| 寄售收件与代管 | [consignment](src/database/consignment)（挂单、解析工作与许可）、[consignment/deposit](src/database/consignment/deposit)（预约、整封接受、实物占用、position、处置与交接）、[mail/originals](src/database/mail/originals)（原信 K、观察与派生事实、隔离与重检、终局、起写/证明与交还旧 owner 的兼容行）；表族见[docs/contracts/database.md#一口价挂单](../../docs/contracts/database.md#一口价挂单) |
+| 寄售收件与代管 | [consignment](src/database/consignment)（挂单、解析工作与许可）、[consignment/deposit](src/database/consignment/deposit)（预约、整封接受、实物占用、position、处置与交接）、[mail/originals](src/database/mail/originals)（原信 K、观察与派生事实、隔离与重检、终局、起写/证明与交还旧 owner 的兼容行）、[consignment/dispatch](src/database/consignment/dispatch)（派发轮、起写授权与轮投递衔接）、[consignment/rights](src/database/consignment/rights)（受限权利、挑战与通知 outbox）、[consignment/recovery](src/database/consignment/recovery)（退回处置、处罚执行与解禁周期、损失、自动重列与付款提醒）；表族见[docs/contracts/database.md#一口价挂单](../../docs/contracts/database.md#一口价挂单) |
 | 实时与运维 | [realtime](src/database/realtime)（公开回放、竞价事件提交后补号；非竞价事件的同事务取号、写入与共用负载只经 `append.rs`，Admin 重放副本除外）、[operations](src/database/operations)（告警、资产对账、一致性巡检、SLI、审计与进程健康、运行时开关、通知模板修订） |
 | 运维数据库 | [maintenance](src/database/maintenance)（初始化、最小权限、重建、恢复预检、密钥轮换、部署证据、停机窗口与保留清理） |
 

@@ -3,6 +3,8 @@
 //! 首次成功起写只由 `mail_disposition_write_starts.work_id` 唯一行产生；证明必须引用原
 //! attempt/fence。领取、释放、核对与收口都以 delivery 的 token/fence 条件更新。
 
+use std::sync::Arc;
+
 use auction_application::consignment::{
     ConsignmentError, DepositActor, DepositBusinessRejection, DepositOperation, DispositionAction,
     DispositionStore, MailProofKind, ProofDisposition, ProofReceipt, StartReceipt,
@@ -217,6 +219,7 @@ async fn apply_port(
         equipment: &equipment,
     };
     let max_open_per_user = repository.settings().max_open_per_user;
+    let content = Arc::clone(repository.dispatch_content());
     let mail_keys = [key.clone()];
     let input = command;
     let transaction =
@@ -224,6 +227,7 @@ async fn apply_port(
             let sellers = sellers.clone();
             let equipment = equipment.clone();
             let key = key.clone();
+            let content = Arc::clone(&content);
             Box::pin(async move {
                 tx.ensure_lock_set(&sellers, &equipment, std::slice::from_ref(&key))?;
                 let arbitration = tx
@@ -368,6 +372,7 @@ async fn apply_port(
                         proof_id,
                         now,
                         max_open_per_user,
+                        &content,
                     )
                     .await?;
                     receipt.listing_changes = writer.listing_changes();

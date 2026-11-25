@@ -1,0 +1,1 @@
+../../../../postgres/consignment/recovery/confirm_loss/fixture.rs

@@ -34,6 +34,20 @@ impl From<FundingError> for FenceError {
         Self::Funding(error)
     }
 }
+impl From<super::super::reminder_gate::GateError> for FenceError {
+    fn from(error: super::super::reminder_gate::GateError) -> Self {
+        use super::super::reminder_gate::GateError;
+        use crate::database::consignment::commands::errors::WriteError;
+        match error {
+            GateError::Sqlx(error) => Self::Sqlx(error),
+            // 提醒事实读取遇到序列化冲突或持久失配：回滚后带分类返回，不写 sending。
+            GateError::Storage(WriteError::RetryConflict) => {
+                Self::Fault(SafeErrorKind::REPOSITORY_SERIALIZATION_CONFLICT)
+            }
+            GateError::Storage(_) => Self::Fault(SafeErrorKind::REPOSITORY_FAILED),
+        }
+    }
+}
 impl From<MailEvidenceTransactionError> for FenceError {
     fn from(error: MailEvidenceTransactionError) -> Self {
         Self::Evidence(error)
@@ -196,6 +210,10 @@ async fn run_transaction(
                     // 分类节奏锁在全部业务锁之前；未到期确定回滚，不在持有凭据期间睡眠。
                     let category =
                         super::super::cadence::lock_due(&mut tx, claim, intervals).await?;
+                    // 付款提醒的派前复验：已付、已取消或轮已变时不写 sending（零发送）。
+                    if !super::super::reminder_gate::allows_sending(&mut tx, claim).await? {
+                        return Err(FenceError::Rejected);
+                    }
                     let outcome = match evidence {
                         Some(evidence) => {
                             super::authorization::authorize(

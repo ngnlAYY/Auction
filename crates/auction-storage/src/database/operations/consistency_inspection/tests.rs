@@ -225,7 +225,7 @@ CREATE TEMP TABLE compensation_pool_reversals (
 );
 CREATE TEMP TABLE settlement_obligations (
     id uuid, prerequisite_obligation_id uuid, auction_id uuid, lot_id uuid,
-    equipment_id uuid, obligation_kind text, business_state text
+    equipment_id uuid, obligation_kind text, business_state text, contract_id uuid
 );
 CREATE TEMP TABLE settlement_obligation_fulfillments (
     obligation_id uuid, execution_state text, delivery_id uuid, proof_digest bytea, proof_kind text

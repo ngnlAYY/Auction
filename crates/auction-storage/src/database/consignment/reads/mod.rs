@@ -3,10 +3,13 @@
 mod availability;
 mod catalog;
 mod commands;
+mod commands_v2;
 mod deposits;
 mod maintenance;
+pub(crate) mod orders;
 mod private;
 mod projection;
+mod v2;
 
 #[cfg(feature = "test-db")]
 mod test_access;

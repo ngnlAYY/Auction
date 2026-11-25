@@ -1,5 +1,7 @@
 //! 只读对账查询；参数固定为 world、观察到的外部装备 ID 与样本上限。
 
+use super::consignment::consignment_custody_branch;
+
 /// 随装备履约的义务种类：COD、异世界交付与流拍/撤拍退回。
 macro_rules! equipment_obligation_kinds {
     () => {
@@ -7,6 +9,9 @@ macro_rules! equipment_obligation_kinds {
     };
 }
 
+/// 寄售代管件（`in_custody`/`committed`/`reconcile` 的 position）由最后一段按 position 状态计入，
+/// 原因 `consignment_<状态>`，季末终态后退出（见 `consignment_custody_branch!`）。
+///
 /// 应持装备集合的查询共用同一 CTE；`$1` 是 world、`$2` 是观察到的外部装备 ID。
 /// 预览分支的世界口径由调用方传入：计数按装备所属世界，样本按场次世界（保持既有行为）。
 /// 装备义务一经成功寄出（投递 `succeeded`），装备就随邮件离开了 Armory：不论履约仍在等待
@@ -115,8 +120,10 @@ WITH expected AS (
                 "returned_delivery"
             ),
             r#", false))
-      )
-)"#
+      )"#,
+            consignment_custody_branch!(),
+            "
+)"
         )
     };
 }
@@ -315,7 +322,10 @@ WITH health AS (
         FROM public.settlement_return_cases c
         WHERE c.delivery_id = f.delivery_id
     ) AS returned ON true
-    WHERE o.obligation_kind IN ('seller_payout', 'buyer_refund')
+    -- 寄售负债由第 6 期 6C 的专用口径计入（一笔交易最大负债取买家付款额，卖款与退款互斥，不能按
+    -- 拍卖口径相加），本处只算拍卖。
+    WHERE o.contract_id IS NULL
+      AND o.obligation_kind IN ('seller_payout', 'buyer_refund')
       AND COALESCE(f.dispatch_world, o.world_id) = $1
       AND NOT (o.obligation_kind = 'buyer_refund' AND o.business_state = 'contingent')
       AND COALESCE(f.execution_state, 'pending') <> 'satisfied'

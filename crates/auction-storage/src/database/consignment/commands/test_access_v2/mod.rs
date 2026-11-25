@@ -250,6 +250,14 @@ impl TestDepositReceipt {
             DepositOperation::SeasonClose => {
                 Ok(Self::SeasonClose(SeasonCloseReceipt::decode(stored)?))
             }
+            // 第 7 期新增操作的回执存储由 7C-2 及之后的车道接入；之前测试入口失败关闭。
+            DepositOperation::Relist
+            | DepositOperation::ConfirmPositionLoss
+            | DepositOperation::RecordLossCaseOutcome
+            | DepositOperation::RecordPositionLossProof
+            | DepositOperation::FulfillWithdrawIntent => {
+                Err(WriteError::invariant("consignment_v2_receipt"))
+            }
         }
     }
 }

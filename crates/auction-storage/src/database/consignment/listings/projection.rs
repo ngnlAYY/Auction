@@ -50,14 +50,14 @@ pub(crate) struct LockedListing {
     pub(crate) snapshot: ListingSnapshot,
     /// 本单所关联的安全装备快照。
     pub(crate) current_snapshot_id: Option<Uuid>,
-    #[allow(dead_code, reason = "由后续任务 2D / 2F 读取锁内投影")]
+    #[allow(dead_code, reason = "尚无非测试读取方；待挂牌调度车道（2D / 2F）读取锁内投影")]
     /// 登记冻结的费率。
     pub(crate) fee_bps: FeeBps,
     /// 登记时固定的服务代次。
     pub(crate) service_epoch: i64,
     /// 登记时已见的拉黑历史事实数。
     pub(crate) blacklist_count_at_register: i64,
-    #[allow(dead_code, reason = "由后续任务 2D / 2F 读取锁内投影")]
+    #[allow(dead_code, reason = "尚无非测试读取方；待挂牌调度车道（2D / 2F）读取锁内投影")]
     /// 最近一次投影变动的数据库时刻。
     pub(crate) updated_at: Timestamp,
 }
@@ -105,7 +105,7 @@ impl LockedListing {
     }
 
     /// 不变量 6：强制清退及归属检查完成后才比较调用方预期版本。
-    #[allow(dead_code, reason = "由后续任务 2D 调用")]
+    #[allow(dead_code, reason = "尚无非测试调用方；待挂牌调度车道（2D）在版本比较处接线")]
     pub(crate) fn require_version(
         &self,
         expected_version: ListingVersion,

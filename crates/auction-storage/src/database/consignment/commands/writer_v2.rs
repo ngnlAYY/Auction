@@ -38,12 +38,19 @@ pub(crate) struct DepositWriter<'w, 'tx, 'conn> {
     pub(super) events: Vec<DepositEvent>,
     pub(super) request_hash: RequestHash,
     pub(super) request_id: Option<&'w str>,
+    /// 只进追加审计 metadata 的私有说明（不进账本回执与 DTO）；键名固定。
+    pub(super) audit_note: Option<(&'static str, String)>,
 }
 
 impl<'w, 'tx, 'conn> DepositWriter<'w, 'tx, 'conn> {
     /// 供业务 SQL 使用同一顶层事务连接。
     pub(crate) fn connection(&mut self) -> &mut PgConnection {
         self.tx.connection()
+    }
+
+    /// 登记一条私有说明，随成功或确定拒绝的审计一起落库（不变量 7、8；先例是 `admin_delist_reason`）。
+    pub(crate) fn set_private_audit_note(&mut self, key: &'static str, note: &str) {
+        self.audit_note = Some((key, note.to_owned()));
     }
 
     /// 当前事务的命令 ID；命令行由 [`Self::finish`] 最后写入，子事实可先引用。
@@ -195,12 +202,15 @@ impl<'w, 'tx, 'conn> DepositWriter<'w, 'tx, 'conn> {
             )
             .await?;
         }
-        let metadata = json!({
+        let mut metadata = json!({
             "command_id": command_id,
             "code": result.code,
             "disposition": self.operation_body_disposition(&result.body),
             "held_reason": result.body.get("held_reason").cloned(),
         });
+        if let Some((key, note)) = &self.audit_note {
+            metadata[*key] = json!(note);
+        }
         let command_id = self.tx.command_id;
         audit(
             self.tx.connection(),
@@ -238,6 +248,14 @@ impl<'w, 'tx, 'conn> DepositWriter<'w, 'tx, 'conn> {
         };
         self.insert(rejection.code(), &result, now).await?;
         let command_id = self.tx.command_id;
+        let mut metadata = json!({
+            "command_id": command_id,
+            "code": rejection.code(),
+            "disposition": "rejected",
+        });
+        if let Some((key, note)) = &self.audit_note {
+            metadata[*key] = json!(note);
+        }
         audit(
             self.tx.connection(),
             Audit {
@@ -248,11 +266,7 @@ impl<'w, 'tx, 'conn> DepositWriter<'w, 'tx, 'conn> {
                 accepted: false,
                 now,
                 command_id,
-                metadata: json!({
-                    "command_id": command_id,
-                    "code": rejection.code(),
-                    "disposition": "rejected",
-                }),
+                metadata,
             },
         )
         .await?;
@@ -435,6 +449,12 @@ const fn operation_action(operation: DepositOperation) -> &'static str {
         DepositOperation::ReleaseOperationsHold => "consignment.release_hold",
         DepositOperation::SeasonNotice => "consignment.season_notice",
         DepositOperation::SeasonClose => "consignment.season_close",
+        // 第 7 期新增操作：账本 `operation` 的 CHECK 由 7M-2 追加，之前数据库拒绝这些值，失败关闭。
+        DepositOperation::Relist => "consignment.relist",
+        DepositOperation::ConfirmPositionLoss => "consignment.confirm_position_loss",
+        DepositOperation::RecordLossCaseOutcome => "consignment.record_loss_case_outcome",
+        DepositOperation::RecordPositionLossProof => "consignment.record_position_loss_proof",
+        DepositOperation::FulfillWithdrawIntent => "consignment.fulfill_withdraw_intent",
     }
 }
 
@@ -444,5 +464,7 @@ fn audit_actor(actor: &DepositActor) -> Actor<'_> {
         DepositActor::Admin(actor) => Actor::Admin(actor),
         DepositActor::Worker => Actor::Worker,
         DepositActor::System => Actor::System,
+        DepositActor::Browser { binding_digest } => Actor::Browser(binding_digest),
+        DepositActor::RightHolder { right_id } => Actor::RightHolder(*right_id),
     }
 }

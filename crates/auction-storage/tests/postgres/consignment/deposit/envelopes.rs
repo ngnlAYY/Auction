@@ -49,7 +49,7 @@ impl ReservationSecretCrypto for NoCrypto {
     }
 }
 
-pub(super) async fn repository(database: &TestDatabase) -> DepositRepository {
+pub(in crate::consignment) async fn repository(database: &TestDatabase) -> DepositRepository {
     DepositRepository::new(
         database.store().await.expect("运行账号"),
         Arc::new(NoCrypto),
@@ -156,7 +156,7 @@ pub(super) fn readiness() -> String {
     )
 }
 
-pub(super) async fn seed_base(pool: &PgPool) {
+pub(in crate::consignment) async fn seed_base(pool: &PgPool) {
     succeeds(
         pool,
         &(users_and_key()
@@ -318,7 +318,7 @@ pub(super) fn quarantine_command(command_id: CommandId) -> DecideEnvelopeCommand
     }
 }
 
-pub(super) fn worker_command(text: &str) -> CommandId {
+pub(in crate::consignment) fn worker_command(text: &str) -> CommandId {
     CommandId::from_uuid(Uuid::new_v5(&Uuid::NAMESPACE_URL, text.as_bytes()))
 }
 

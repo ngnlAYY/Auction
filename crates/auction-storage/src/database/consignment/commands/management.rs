@@ -52,7 +52,7 @@ pub(super) async fn execute<T>(
     let expected_seller = match cmd.actor {
         Actor::PublicUser(seller_user_id) => Some(seller_user_id),
         Actor::Admin(_) => None,
-        Actor::Worker | Actor::System => {
+        Actor::Worker | Actor::System | Actor::Browser(_) | Actor::RightHolder(_) => {
             return Err(WriteError::invariant("consignment_management_actor"));
         }
     };

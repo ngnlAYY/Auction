@@ -1,6 +1,7 @@
 //! 整封取得证明成立后逐件推进 position 与挂单。
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use auction_application::consignment::{
     ConsignmentError, CustodyListingChange, DepositBusinessRejection,
@@ -23,6 +24,9 @@ use crate::database::consignment::deposit::primitives::{
     season_state, seller_eligibility, service_control, transition,
 };
 use crate::database::consignment::listings::projection::{LockedListing, lock_listings};
+use crate::database::consignment::purchase::FirstDispatchContentSource;
+use crate::database::consignment::recovery::withdrawal::{TakenPosition, fulfill_intent_at_take};
+use crate::database::consignment::rights::register_position_right_in_tx;
 
 struct CustodyPosition {
     position_id: Uuid,
@@ -43,13 +47,15 @@ struct CustodyPosition {
 /// 000134 的 custody event 与 generation 外键在提交时统一校验。不变量 2、3、6、10：
 /// 任一 position 失败整体回滚，挂单与 position 的版本同事务推进。
 ///
-/// `max_open_per_user` 由应用配置冻结值传入；存储只按锁内有效活动数判断名额。
+/// `max_open_per_user` 由应用配置冻结值传入；存储只按锁内有效活动数判断名额。`content` 是兑现撤回意愿时
+/// 撤回件首轮的冻结内容来源。
 pub(crate) async fn apply_take_custody_in_tx(
     writer: &mut DepositWriter<'_, '_, '_>,
     decision_id: Uuid,
     proof_id: Uuid,
     now: Timestamp,
     max_open_per_user: i64,
+    content: &Arc<dyn FirstDispatchContentSource>,
 ) -> Result<Vec<CustodyListingChange>, WriteError> {
     if max_open_per_user < 1 {
         return Err(rejection(DepositBusinessRejection::ActionNotAllowed));
@@ -184,6 +190,29 @@ pub(crate) async fn apply_take_custody_in_tx(
         let (version, state, held_reason) =
             listing_projection(writer, listing, decision, now).await?;
         advance_position(writer, &position, command_id, proof_id, version, now).await?;
+        // 不变量 3：卖家取回权随取得证明同事务登记；同 position 同卖家至多一行。
+        register_position_right_in_tx(writer.connection(), position.position_id, command_id, now)
+            .await?;
+        // 不变量 2、3：意愿先到时，Withdrawal、返还义务与挂单 `withdrawal_pending` 同事务提交；
+        // 季界先于意愿的决策不进入此分支，意愿保留。
+        if withdrawal_requested && state == ListingState::WithdrawalPending {
+            fulfill_intent_at_take(
+                writer.tracked(),
+                &TakenPosition {
+                    position_id: position.position_id,
+                    listing_id: position.listing_id,
+                    seller_user_id: position.seller_user_id,
+                    equipment_id: position.equipment_id,
+                    world_id: &position.world_id,
+                    canonical_eid: &position.canonical_eid,
+                    season_window_id: position.season_window_id,
+                    generation: FIRST_GENERATION,
+                },
+                now,
+                content,
+            )
+            .await?;
+        }
         changes.push(CustodyListingChange {
             listing_id: position.listing_id,
             listing_version: version,

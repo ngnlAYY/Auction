@@ -550,6 +550,9 @@ async fn postgres_custody_counts_separate_expected_stock_and_unknown()
             last_error_code text
          );
          CREATE TEMP TABLE auctions (id uuid, status text, world_id text);
+         CREATE TEMP TABLE consignment_custody_positions (
+             world_id text, canonical_eid text, state text
+         );
          CREATE TEMP TABLE auction_preview_items (auction_id uuid, equipment_id uuid);
          CREATE TEMP TABLE auction_submissions (id uuid, auction_id uuid, source_reference text);
          CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb, fencing_version bigint);
@@ -607,6 +610,9 @@ async fn postgres_custody_scopes_preview_and_submission_samples_by_world()
             last_error_code text
          );
          CREATE TEMP TABLE auctions (id uuid, status text, world_id text);
+         CREATE TEMP TABLE consignment_custody_positions (
+             world_id text, canonical_eid text, state text
+         );
          CREATE TEMP TABLE auction_preview_items (auction_id uuid, equipment_id uuid);
          CREATE TEMP TABLE auction_submissions (id uuid, auction_id uuid, source_reference text);
          CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb, fencing_version bigint);
@@ -693,6 +699,9 @@ async fn postgres_custody_excludes_withdrawn_submissions_after_return()
             last_error_code text
          );
          CREATE TEMP TABLE auctions (id uuid, status text, world_id text);
+         CREATE TEMP TABLE consignment_custody_positions (
+             world_id text, canonical_eid text, state text
+         );
          CREATE TEMP TABLE auction_preview_items (auction_id uuid, equipment_id uuid);
          CREATE TEMP TABLE auction_submissions (id uuid, auction_id uuid, source_reference text);
          CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb, fencing_version bigint);
@@ -775,6 +784,9 @@ async fn postgres_custody_delivery_branch_reads_canonical_attachment_kind()
             last_error_code text
          );
          CREATE TEMP TABLE auctions (id uuid, status text, world_id text);
+         CREATE TEMP TABLE consignment_custody_positions (
+             world_id text, canonical_eid text, state text
+         );
          CREATE TEMP TABLE auction_preview_items (auction_id uuid, equipment_id uuid);
          CREATE TEMP TABLE auction_submissions (id uuid, auction_id uuid, source_reference text);
          CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb, fencing_version bigint);
@@ -874,6 +886,9 @@ async fn postgres_custody_moves_sent_equipment_to_in_transit()
             last_error_code text
          );
          CREATE TEMP TABLE auctions (id uuid, status text, world_id text);
+         CREATE TEMP TABLE consignment_custody_positions (
+             world_id text, canonical_eid text, state text
+         );
          CREATE TEMP TABLE auction_preview_items (auction_id uuid, equipment_id uuid);
          CREATE TEMP TABLE auction_submissions (id uuid, auction_id uuid, source_reference text);
          CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb, fencing_version bigint);
@@ -1027,6 +1042,9 @@ async fn postgres_custody_counts_recovered_equipment_where_recovery_placed_it()
             last_error_code text
          );
          CREATE TEMP TABLE auctions (id uuid, status text, world_id text);
+         CREATE TEMP TABLE consignment_custody_positions (
+             world_id text, canonical_eid text, state text
+         );
          CREATE TEMP TABLE auction_preview_items (auction_id uuid, equipment_id uuid);
          CREATE TEMP TABLE auction_submissions (id uuid, auction_id uuid, source_reference text);
          CREATE TEMP TABLE deliveries (id uuid, status text, payload jsonb, fencing_version bigint);

@@ -15,6 +15,8 @@ use uuid::Uuid;
 use super::outcome::{FirstOutcome, PortOutcome, conflict, replay};
 use super::primitives::{database_now, transition};
 use super::repository::DepositRepository;
+use super::season_end::end_season_positions;
+use super::take_season_close::close_unstarted_take_work;
 use crate::database::consignment::commands::DepositRejection;
 use crate::database::consignment::commands::DepositWriter;
 use crate::database::consignment::commands::errors::WriteError;
@@ -256,17 +258,11 @@ async fn close_stage(
         return reject(writer, DepositBusinessRejection::ActionNotAllowed, now).await;
     }
     let listing_ids = close_targets(writer.connection(), command, &window).await?;
-    if listing_ids.is_empty() {
-        let receipt = SeasonCloseReceipt::closed(
-            command.command_id,
-            command.season.season_id.clone(),
-            command.target,
-            Vec::new(),
-        );
-        writer.finish(receipt.clone(), now).await?;
-        return Ok(FirstOutcome::Accepted { receipt, children: () });
-    }
-    let listings: Vec<LockedListing> = lock_listings(writer.connection(), &listing_ids).await?;
+    let listings: Vec<LockedListing> = if listing_ids.is_empty() {
+        Vec::new()
+    } else {
+        lock_listings(writer.connection(), &listing_ids).await?
+    };
     let mut closed = Vec::new();
     for listing in &listings {
         if !listing.snapshot.state.is_active() {
@@ -286,6 +282,8 @@ async fn close_stage(
             .await?;
         closed.push(listing.listing_id);
     }
+    end_season_positions(&mut writer, command, window.id, now).await?;
+    close_unstarted_take_work(&mut writer, command, window.id, now).await?;
     let receipt = SeasonCloseReceipt::closed(
         command.command_id,
         command.season.season_id.clone(),
@@ -305,9 +303,12 @@ async fn close_lock_keys(
             sqlx::query_as(
                 "SELECT seller_user_id, world_id, external_equipment_id
                  FROM public.consignment_listings
-                 WHERE world_id = $1 AND state IN (
+                 WHERE world_id = $1 AND (state IN (
                      'resolving', 'displayed', 'awaiting_deposit', 'deposit_accepted',
                      'available', 'held_off_market', 'withdrawal_pending')
+                    OR EXISTS (SELECT 1 FROM public.consignment_custody_positions position
+                               WHERE position.listing_id = consignment_listings.id
+                                 AND position.state IN ('in_custody', 'reconcile')))
                  ORDER BY id",
             )
             .bind(auction_domain::consignment::settlement_world_code(world))

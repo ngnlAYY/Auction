@@ -4,6 +4,7 @@
 
 pub(crate) mod admin_read;
 pub(crate) mod disposition;
+pub(crate) mod first_quarantine;
 pub(crate) mod identity;
 pub(crate) mod observations;
 pub(crate) mod owner;
@@ -14,6 +15,8 @@ pub(crate) mod reads;
 pub(crate) mod recheck;
 pub(crate) mod release;
 pub(crate) mod release_legacy;
+pub(crate) mod rts_intake;
+pub(crate) mod work_claim;
 
 use std::fmt::Display;
 

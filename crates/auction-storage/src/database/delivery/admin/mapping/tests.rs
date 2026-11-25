@@ -271,3 +271,41 @@ fn recovery_superseded_settlement_delivery_validates_without_send_facts() {
     open.completed_at = None;
     assert!(!valid_snapshot(&open));
 }
+
+/// 季末关闭从未起写的取得工作时取消的寄售处置投递（`failed/season_ended`，与 000137 守卫同一形状）
+/// 必须通过校验；可能从未被领取。其他失败码、发送时间、远端引用、租约、缺完成时间或未推进围栏都失败关闭。
+#[test]
+fn consignment_season_ended_take_delivery_validates() {
+    let mut cancelled =
+        retired_player_notification("consignment_disposition", "season_ended", "season_ended");
+    cancelled.origin_id = "consignment:fake-decision:fake-work".to_owned();
+    cancelled.template = Some("consignment_take".to_owned());
+    cancelled.category = None;
+    cancelled.retirement_reason = None;
+    cancelled.reason_code = None;
+    assert!(valid_snapshot(&cancelled));
+    let mut claimed = cancelled.clone();
+    claimed.claimed_at = Some(claimed.created_at + auction_time::TimeDelta::seconds(1));
+    claimed.attempt_count = 1;
+    claimed.fencing_version = 2;
+    assert!(valid_snapshot(&claimed));
+
+    let mut other_failure = cancelled.clone();
+    other_failure.failure_code = Some("send_rejected".to_owned());
+    assert!(!valid_snapshot(&other_failure));
+    let mut sent = cancelled.clone();
+    sent.sending_at = Some(sent.created_at + auction_time::TimeDelta::seconds(2));
+    assert!(!valid_snapshot(&sent));
+    let mut referenced = cancelled.clone();
+    referenced.external_reference = Some("3120869".to_owned());
+    assert!(!valid_snapshot(&referenced));
+    let mut leased = cancelled.clone();
+    leased.lease_expires_at = Some(leased.updated_at);
+    assert!(!valid_snapshot(&leased));
+    let mut open = cancelled.clone();
+    open.completed_at = None;
+    assert!(!valid_snapshot(&open));
+    let mut unfenced = cancelled;
+    unfenced.fencing_version = 0;
+    assert!(!valid_snapshot(&unfenced));
+}

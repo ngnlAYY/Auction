@@ -134,8 +134,11 @@ WITH RECURSIVE chain AS (
     FROM public.settlement_obligations obligation
     LEFT JOIN public.settlement_obligations parent ON parent.id = obligation.prerequisite_obligation_id
     WHERE obligation.prerequisite_obligation_id IS NOT NULL
-      AND (parent.id IS NULL OR parent.auction_id <> obligation.auction_id
-           OR parent.lot_id <> obligation.lot_id OR parent.equipment_id <> obligation.equipment_id)
+      -- NULL 安全比较：寄售义务的拍卖身份列全为 NULL，需靠 contract_id 区分来源。
+      AND (parent.id IS NULL OR parent.auction_id IS DISTINCT FROM obligation.auction_id
+           OR parent.lot_id IS DISTINCT FROM obligation.lot_id
+           OR parent.equipment_id IS DISTINCT FROM obligation.equipment_id
+           OR parent.contract_id IS DISTINCT FROM obligation.contract_id)
     UNION ALL
     SELECT DISTINCT root_id::text,
            CASE WHEN cycle THEN 'obligation_cycle' ELSE 'obligation_chain_depth_limit' END
@@ -159,6 +162,8 @@ WITH RECURSIVE chain AS (
     FROM public.settlement_obligations payment
     LEFT JOIN public.settlement_recoveries recovery ON recovery.payment_obligation_id = payment.id
     WHERE payment.obligation_kind IN ('winner_equipment_cod', 'winner_payment_carrier_cod')
+      -- 寄售付款腿没有拍卖成交恢复记录，不适用该链条。
+      AND payment.contract_id IS NULL
       AND recovery.id IS NULL
     UNION ALL
     SELECT recovery.id::text, 'recovery_obligation_binding_mismatch'

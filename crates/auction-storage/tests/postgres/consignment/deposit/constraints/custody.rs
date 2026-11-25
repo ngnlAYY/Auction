@@ -301,13 +301,6 @@ pub fn cases() -> Vec<Case> {
             "c4_generation_time_ck",
             "UPDATE public.consignment_disposition_generations SET created_at='infinity' WHERE position_id='89000000-0000-0000-0000-000000000001' AND generation=1;",
         ),
-        check(
-            "consignment_disposition_generations",
-            "c4_generation_phase4_ck",
-            "UPDATE public.consignment_disposition_generations
-             SET generation=2, predecessor=1, purpose='withdrawal_only'
-             WHERE position_id='89000000-0000-0000-0000-000000000001' AND generation=1;",
-        ),
         fk(
             "consignment_disposition_generations",
             "c4_generation_season_fk",
@@ -346,26 +339,9 @@ pub fn cases() -> Vec<Case> {
         ),
         check(
             "consignment_custody_events",
-            "c4_custody_event_phase4_ck",
-            "INSERT INTO public.consignment_custody_events
-                (position_id, version, command_id, event_kind, from_state, to_state, proof_id,
-                 listing_id, listing_version, occurred_at)
-             VALUES ('89000000-0000-0000-0000-000000000001', 3,
-                     '41000000-0000-5000-8000-000000000002', 'committed', 'in_custody',
-                     'committed', '9b000000-0000-4000-8000-000000000001',
-                     '20000000-0000-0000-0000-000000000001', 4, '2026-01-01T03:00:00Z');",
-        ),
-        check(
-            "consignment_custody_events",
             "c4_custody_event_time_ck",
             "UPDATE public.consignment_custody_events SET occurred_at='infinity' WHERE position_id='89000000-0000-0000-0000-000000000001' AND version=2;",
         ),
-        Case {
-            table: "consignment_custody_events",
-            constraint: "c4_custody_event_proof_fk",
-            state: "23503",
-            sql: "UPDATE public.consignment_custody_events SET proof_id='deadbeef-0000-4000-8000-00000000000c' WHERE position_id='89000000-0000-0000-0000-000000000001' AND version=2;",
-        },
         check(
             "consignment_equipment_handoffs",
             "c4_handoff_edge_id_ck",
@@ -376,11 +352,7 @@ pub fn cases() -> Vec<Case> {
             "c4_handoff_edge_kind_ck",
             "UPDATE public.consignment_equipment_handoffs SET kind='bogus' WHERE id='a3000000-0000-4000-8000-000000000001';",
         ),
-        check(
-            "consignment_equipment_handoffs",
-            "c4_handoff_edge_phase4_ck",
-            "UPDATE public.consignment_equipment_handoffs SET kind='consignment_delivered' WHERE id='a3000000-0000-4000-8000-000000000001';",
-        ),
+        // 000136 起 consignment_delivered 合法（挂在 position 上的交接边），原 phase4 拒绝用例随之移除。
         check(
             "consignment_equipment_handoffs",
             "c4_handoff_edge_source_ck",

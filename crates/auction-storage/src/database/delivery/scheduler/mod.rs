@@ -184,6 +184,22 @@ macro_rules! delivery_generic_origin_guard {
 }
 pub(crate) use delivery_generic_origin_guard;
 
+/// 通用领取与起写不处理寄售轮投递：其 Send 只经寄售派发端口的 `mark_write_started`
+/// 持久起写（同事务登记尝试与冻结身份），一次性许可之外不得再有第二条 POST 路径。
+/// 保护不变量 4：外部写入只在本地提交后执行，结果未知只转人工核对，绝不自动重发。
+///
+/// 判据是载荷里的冻结身份摘要 `identity_digest`：寄售首轮（`create_first_round_in_tx`）与新轮
+/// （授权要求 `prepared_delivery_matches`）的投递都必带它，拍卖与其他来源的载荷没有这个键。
+/// 不直接查 `consignment_dispatch_rounds`，因为该表在 136 才出现，而通用领取要能在更早的
+/// schema 上执行（升级测试的 134 快照）；PG 测试断言每个轮投递都带该键以守住这一等价。
+/// 只用于以 `deliveries` 为别名的领取与起写语句。
+macro_rules! delivery_not_consignment_round_guard {
+    () => {
+        "NOT (deliveries.origin_kind = 'settlement' \
+         AND deliveries.payload ->> 'identity_digest' IS NOT NULL)"
+    };
+}
+
 /// MailIntake delivery 必须等待入站邮件及其命令账本完成，并由决定元数据明确授权当前
 /// delivery；没有入站账本授权的行（含已删除的论坛回执历史行）永不领取。
 /// 已录入拍卖的邮件不能退回，相反资产意图也不能同时发送；该门禁覆盖升级前已 pending/claimed 的
@@ -235,11 +251,13 @@ mod cash;
 mod claims;
 mod disposition_work;
 mod disposition_write;
+pub(in crate::database) mod entitlement;
 mod expired;
 mod mapping;
 mod outcome;
 mod quarantine;
 pub(in crate::database::delivery) mod recipient;
+mod reminder_gate;
 mod state;
 pub(in crate::database) mod take_attempts;
 mod wakeup;

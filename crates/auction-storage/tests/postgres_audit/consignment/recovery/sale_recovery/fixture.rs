@@ -1,0 +1,1 @@
+../../../../postgres/consignment/recovery/sale_recovery/fixture.rs

@@ -298,6 +298,8 @@ async fn obligations(
            LEFT JOIN public.settlement_obligation_fulfillments AS fulfillment
              ON fulfillment.obligation_id = obligation.id
            WHERE obligation.recipient_user_id = $1
+             -- 支持视图只表达拍卖义务（`auction_id`/`lot_id` 非空）；寄售义务不出现在此。
+             AND obligation.contract_id IS NULL
            ORDER BY obligation.created_at DESC, obligation.id DESC
            LIMIT $2"#,
     )

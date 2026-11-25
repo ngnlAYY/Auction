@@ -103,7 +103,14 @@ pub(crate) async fn consume_return_for_mail_in_tx(
     let metadata: serde_json::Value = row.try_get("return_metadata").map_err(map_storage_error)?;
     let request = settlement_return_dispatch_request(&metadata);
     let locked = match evidence_obligation {
-        Some(obligation_id) => lock_obligation(transaction, obligation_id, request).await?,
+        Some(obligation_id) => match lock_obligation(transaction, obligation_id, request).await? {
+            ObligationLookup::Auction(locked) => Some(*locked),
+            ObligationLookup::Missing => None,
+            // 纵深防御：寄售义务不归拍卖 owner，不写证据、不建案件、不交接；邮件留在共享隔离。
+            ObligationLookup::Consignment => {
+                return Err(repository_error("结算退件绑定的是寄售义务，不属于拍卖"));
+            }
+        },
         None => None,
     };
     let obligation_id = locked.as_ref().map(|locked| locked.facts.id);
@@ -207,15 +214,33 @@ pub(crate) struct LockedObligation {
     pub(crate) state_version: Option<i64>,
 }
 
+/// 义务查找的三态：拍卖义务、寄售义务（`contract_id` 非空，不属于本 owner）、不存在。
+pub(crate) enum ObligationLookup {
+    Auction(Box<LockedObligation>),
+    Consignment,
+    Missing,
+}
+
+impl ObligationLookup {
+    /// 只取拍卖义务；寄售义务与不存在同样视为无义务，供不建案件的核验路径使用。
+    pub(crate) fn into_auction(self) -> Option<LockedObligation> {
+        match self {
+            Self::Auction(locked) => Some(*locked),
+            Self::Consignment | Self::Missing => None,
+        }
+    }
+}
+
 /// 按义务 → 履约的既有锁序锁定行，再按证据请求解析原派发的发送事实。只认来源为该义务的结算
-/// 投递；义务不存在时返回 `None`。
+/// 投递；寄售义务单独返回 `Consignment`，不会被拍卖退件案件绑定、建案或改写履约（不变量 6）。
 pub(crate) async fn lock_obligation(
     transaction: &mut Transaction<'_, Postgres>,
     obligation_id: Uuid,
     request: SettlementReturnDispatchRequest,
-) -> Result<Option<LockedObligation>, auction_application::core::RepositoryError> {
+) -> Result<ObligationLookup, auction_application::core::RepositoryError> {
     let Some(obligation) = sqlx::query(
         r#"SELECT obligation.obligation_kind, obligation.amount, obligation.carrier_credit,
+                  obligation.contract_id IS NOT NULL AS consignment,
                   equipment.external_equipment_id
            FROM public.settlement_obligations AS obligation
            LEFT JOIN public.equipment AS equipment ON equipment.id = obligation.equipment_id
@@ -227,8 +252,11 @@ pub(crate) async fn lock_obligation(
     .await
     .map_err(map_storage_error)?
     else {
-        return Ok(None);
+        return Ok(ObligationLookup::Missing);
     };
+    if obligation.try_get::<bool, _>("consignment").map_err(map_storage_error)? {
+        return Ok(ObligationLookup::Consignment);
+    }
     let fulfillment = sqlx::query(
         r#"SELECT fulfillment.execution_state, fulfillment.state_version,
                   fulfillment.delivery_id, fulfillment.dispatch_no
@@ -254,7 +282,7 @@ pub(crate) async fn lock_obligation(
     let (delivery, dispatch_lookup) =
         resolve_dispatch(transaction, obligation_id, request, current_delivery, current_dispatch)
             .await?;
-    Ok(Some(LockedObligation {
+    Ok(ObligationLookup::Auction(Box::new(LockedObligation {
         facts: SettlementReturnObligation {
             id: obligation_id,
             kind: obligation.try_get("obligation_kind").map_err(map_storage_error)?,
@@ -276,7 +304,7 @@ pub(crate) async fn lock_obligation(
             .map(|row| row.try_get("state_version"))
             .transpose()
             .map_err(map_storage_error)?,
-    }))
+    })))
 }
 
 /// 按证据请求在只追加的派发历史中解析原派发：首寄查编号 1，补寄查引用的编号。迁移前已准备的

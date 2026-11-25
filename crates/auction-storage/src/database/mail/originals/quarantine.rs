@@ -8,18 +8,15 @@ use std::collections::BTreeSet;
 use auction_application::consignment::{
     AppendQuarantineObservationCommand, ConsignmentError, DecideEnvelopeCommand, DepositActor,
     DepositBusinessRejection, DepositOperation, EnvelopeDisposition, EnvelopeReceipt,
-    EnvelopeStore, ObservationReceipt, QuarantineReference, RecheckQuarantineCommand,
-    RecheckReceipt, ReleaseQuarantineCommand, ReleaseReceipt,
-};
-use auction_application::consignment::{
-    canonical_system_recheck_request_hash, system_command_id, system_recheck_business_key,
+    EnvelopeStore, ObservationReceipt, RecheckQuarantineCommand, RecheckReceipt,
+    ReleaseQuarantineCommand, ReleaseReceipt,
 };
 use auction_application::core::lower_hex;
 use auction_domain::SettlementWorld;
 use auction_domain::UserId;
 use auction_domain::consignment::deposit::{
     EnvelopeDecision, EnvelopeItemKind, EnvelopeObservation, EnvelopeRoute, LockedEnvelopeFacts,
-    QuarantineReason, decide_envelope,
+    QuarantineReason, decide_envelope_with_origin,
 };
 use auction_domain::consignment::{
     ListingEquipmentIdentity, ListingVersion, OriginalMailKey, check_listing_history,
@@ -35,7 +32,6 @@ use super::disposition::{
 use super::identity::{MailKeyColumns, QuarantineMetadata, readiness_capabilities};
 use super::observations::{self, StoredObservation};
 use super::{Outcome, conflict, invariant, invariant_decoding, replay_receipt};
-use crate::database::consignment::commands::DepositReceipt;
 use crate::database::consignment::commands::errors::WriteError;
 use crate::database::consignment::commands::ledger::{DepositArbitration, DepositTarget};
 use crate::database::consignment::commands::{LockKeys, with_deposit_transaction};
@@ -78,8 +74,8 @@ async fn decide_envelope_port(
     command: DecideEnvelopeCommand,
 ) -> Result<EnvelopeReceipt, ConsignmentError> {
     let key = command.mail_key.clone();
-    let sellers = envelope_sellers(&command.facts);
-    let equipment = envelope_equipment(&command.facts);
+    let (sellers, equipment) =
+        super::rts_intake::envelope_lock_set(repository.store(), &command).await?;
     let keys = LockKeys {
         command_id: command.command_id.as_uuid(),
         sellers: &sellers,
@@ -147,7 +143,14 @@ pub(crate) async fn decide_envelope_in_tx(
     }
     let locked =
         lock_envelope_facts(writer.connection(), key, &stored, &command.facts, now).await?;
-    let EnvelopeRoute::Consignment(recomputed) = decide_envelope(&locked) else {
+    // 可信寄售 RTS 的来源只用来定位：领域在“疑似系统 RTS”时才改走接管，来源本身由接管写端在锁内按
+    // 持久的派发事实重读复判（读不出就整封隔离），不信任命令自称（不变量 6）。
+    let origin = match &command.decision {
+        EnvelopeDecision::AcquireReturn(rts) => Some(*rts),
+        _ => None,
+    };
+    let EnvelopeRoute::Consignment(recomputed) = decide_envelope_with_origin(&locked, origin)
+    else {
         return Err(conflict(DepositBusinessRejection::DispositionConflict));
     };
     if recomputed != command.decision {
@@ -155,41 +158,14 @@ pub(crate) async fn decide_envelope_in_tx(
     }
     match &recomputed {
         EnvelopeDecision::Quarantine(reason) => {
-            let decision_id = Uuid::new_v4();
-            let quarantine_id = Uuid::new_v4();
-            insert_initial_decision(
-                writer.connection(),
-                key,
-                decision_id,
-                stored.observation_id,
-                command_id,
-                "quarantined",
-                Some(quarantine_id),
-                now,
+            super::first_quarantine::quarantine_envelope_in_tx(
+                writer, command, &stored, *reason, now,
             )
-            .await?;
-            let metadata = QuarantineMetadata::new(&stored.mailbox_key);
-            persist_quarantine(
-                writer.connection(),
-                key,
-                quarantine_id,
-                decision_id,
-                stored.observation_id,
-                *reason,
-                &metadata,
-                now,
-            )
-            .await?;
-            // 裁定：首次隔离在同一事务排一条系统重检；重检命中旧拍卖 owner 后由系统自动
-            // 交接，其它解除仍由 Admin。命令与工作同提交，隔离回执永久可重放。
-            enqueue_first_recheck(writer.connection(), quarantine_id, now).await?;
-            let mut receipt = EnvelopeReceipt::new(
-                command.command_id,
-                EnvelopeDisposition::Quarantined,
-                decision_id,
-            );
-            receipt.quarantine = Some(QuarantineReference { quarantine_id, version: 1 });
-            Ok(receipt)
+            .await
+        }
+        // 可信寄售 RTS：同事务交退件接管写端（intake、Take 工作、返回事实与事件）。
+        EnvelopeDecision::AcquireReturn(rts) => {
+            super::rts_intake::acquire_envelope_in_tx(writer, command, &stored, rts, now).await
         }
         decision => {
             let decision_id = Uuid::new_v4();
@@ -255,7 +231,7 @@ pub(crate) async fn decide_envelope_in_tx(
                 EnvelopeDecision::Accept(_) => EnvelopeDisposition::Accepted,
                 EnvelopeDecision::Return(_) => EnvelopeDisposition::ReturnDecided,
                 EnvelopeDecision::ArchiveEmpty => EnvelopeDisposition::ArchivedEmpty,
-                EnvelopeDecision::Quarantine(_) => {
+                EnvelopeDecision::Quarantine(_) | EnvelopeDecision::AcquireReturn(_) => {
                     return Err(invariant("consignment_envelope_quarantine_branch"));
                 }
             };
@@ -266,54 +242,6 @@ pub(crate) async fn decide_envelope_in_tx(
             Ok(receipt)
         }
     }
-}
-
-/// 首次隔离同事务写入系统重检命令与 queued 工作。
-async fn enqueue_first_recheck(
-    connection: &mut sqlx::PgConnection,
-    quarantine_id: Uuid,
-    now: Timestamp,
-) -> Result<(), WriteError> {
-    let command_id = system_command_id(
-        DepositOperation::RecheckQuarantine,
-        &system_recheck_business_key(quarantine_id),
-    );
-    let request_hash = canonical_system_recheck_request_hash(quarantine_id, 1);
-    let work_id = Uuid::new_v4();
-    let receipt = RecheckReceipt::queued(command_id, quarantine_id, work_id);
-    let body = receipt.body();
-    sqlx::query(
-        "INSERT INTO public.consignment_commands
-            (command_id, schema_version, actor_kind, actor_ref, operation, request_target,
-             request_digest, replay_key_id, listing_id, result_status, result_code,
-             result_body, created_at, target_kind, target_id, target_bot_uid,
-             target_world_id, target_external_mid, target_season_id, target_calendar_version)
-         VALUES ($1, 2, 'system', $7, 'recheck_quarantine', $2,
-                 $3, NULL, NULL, 202, 'ok', $4, $5, 'quarantine', $6, NULL, NULL, NULL,
-                 NULL, NULL)",
-    )
-    .bind(command_id.as_uuid())
-    .bind(quarantine_id.to_string())
-    .bind(request_hash.as_bytes())
-    .bind(&body)
-    .bind(now)
-    .bind(quarantine_id)
-    .bind(DepositActor::DEPOSIT_SERVICE_REF)
-    .execute(&mut *connection)
-    .await?;
-    sqlx::query(
-        "INSERT INTO public.mail_quarantine_rechecks
-            (id, quarantine_id, requested_version, command_id, state, available_at,
-             lease_token, lease_until, fence, attempt_count, completed_at)
-         VALUES ($1, $2, 1, $3, 'queued', $4, NULL, NULL, 0, 0, NULL)",
-    )
-    .bind(work_id)
-    .bind(quarantine_id)
-    .bind(command_id.as_uuid())
-    .bind(now)
-    .execute(&mut *connection)
-    .await?;
-    Ok(())
 }
 
 pub(crate) fn envelope_sellers(facts: &LockedEnvelopeFacts) -> Vec<Uuid> {
@@ -530,7 +458,7 @@ pub(crate) fn reservation_binding(
 }
 
 #[allow(clippy::too_many_arguments, reason = "逐列复刻隔离首次事实")]
-async fn persist_quarantine(
+pub(super) async fn persist_quarantine(
     connection: &mut PgConnection,
     key: &OriginalMailKey,
     quarantine_id: Uuid,

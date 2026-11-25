@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use auction_application::consignment::ChallengeAad;
 use auction_domain::DataKeyDomain;
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
@@ -11,6 +12,7 @@ use uuid::Uuid;
 use crate::database::operations::audit_health::AuditWriteResult as _;
 
 mod admin_commands;
+mod right_notice;
 mod stored_keys;
 pub use admin_commands::{replace_admin_command_key_envelope, scan_admin_command_key_envelopes};
 pub use stored_keys::stored_key_ids;
@@ -69,6 +71,8 @@ pub enum KeyEnvelopeSource {
     EvidenceEnvelope,
     /// Admin 用户命令的响应信封。
     AdminCommand,
+    /// 权利通知 outbox 的挑战码密文。
+    RightNotice,
 }
 
 impl KeyEnvelopeSource {
@@ -83,6 +87,7 @@ impl KeyEnvelopeSource {
             Self::ReservationSecret => "consignment_reservation_secrets",
             Self::EvidenceEnvelope => "mail_evidence_envelopes",
             Self::AdminCommand => "user_admin_commands",
+            Self::RightNotice => "consignment_right_notice_outbox",
         }
     }
 
@@ -95,10 +100,14 @@ impl KeyEnvelopeSource {
             Self::EvidenceEnvelope => "id",
             Self::UserLogin => "user_id",
             Self::AdminCommand => "command_id",
+            Self::RightNotice => "work_id",
         }
     }
 
     fn select(self) -> String {
+        if self == Self::RightNotice {
+            return right_notice::SELECT.to_owned();
+        }
         let (aad, retired) = match self {
             Self::Equipment => ("equipment_id", "false"),
             Self::Registration => ("aad_equipment_id", "retired_at IS NOT NULL"),
@@ -138,10 +147,11 @@ impl KeyEnvelopeSource {
 const EQUIPMENT_SOURCES: [KeyEnvelopeSource; 3] =
     [KeyEnvelopeSource::Equipment, KeyEnvelopeSource::Registration, KeyEnvelopeSource::ReplayKey];
 
-const CREDENTIAL_SOURCES: [KeyEnvelopeSource; 3] = [
+const CREDENTIAL_SOURCES: [KeyEnvelopeSource; 4] = [
     KeyEnvelopeSource::Credential,
     KeyEnvelopeSource::ReservationSecret,
     KeyEnvelopeSource::EvidenceEnvelope,
+    KeyEnvelopeSource::RightNotice,
 ];
 
 /// 上一页最后一条信封的位置，表种与表内身份共同决定顺序。
@@ -172,6 +182,8 @@ pub struct StoredKeyEnvelope {
     pub purpose: Option<String>,
     /// 受保护证据的 AAD owner。
     pub aad_owner: Option<String>,
+    /// 权利通知密文的挑战 AAD；挑战事实不全时为空，调用方须失败关闭。
+    pub challenge_aad: Option<ChallengeAad>,
     /// 密文及认证标签。
     pub ciphertext: Vec<u8>,
     /// 本次扫描捕获的 nonce。
@@ -186,8 +198,8 @@ impl StoredKeyEnvelope {
     /// 装备域回执需初始化的来源，即使一处没有信封也记录零计数。
     pub const EQUIPMENT_SOURCES: [KeyEnvelopeSource; 3] = EQUIPMENT_SOURCES;
 
-    /// 凭据域的三处来源；新增密文用途必须同时进入此清单。
-    pub const CREDENTIAL_SOURCES: [KeyEnvelopeSource; 3] = CREDENTIAL_SOURCES;
+    /// 凭据域的四处来源；新增密文用途必须同时进入此清单。
+    pub const CREDENTIAL_SOURCES: [KeyEnvelopeSource; 4] = CREDENTIAL_SOURCES;
 
     /// 供回执计数及写回选择正确的表。
     pub const fn source(&self) -> KeyEnvelopeSource {
@@ -357,6 +369,8 @@ fn decode_envelope(
     row: &PgRow,
 ) -> Result<StoredKeyEnvelope, KeyRotationError> {
     let entity_id = row.try_get("entity_id").map_err(read_failed)?;
+    let notice = source == KeyEnvelopeSource::RightNotice;
+    let (ciphertext, fingerprint) = right_notice::envelope_bytes(row, notice)?;
     Ok(StoredKeyEnvelope {
         source,
         equipment_aad: row.try_get("equipment_aad").map_err(read_failed)?,
@@ -368,10 +382,11 @@ fn decode_envelope(
         seller_user_id: row.try_get("seller_user_id").map_err(read_failed)?,
         purpose: row.try_get("purpose").map_err(read_failed)?,
         aad_owner: row.try_get("aad_owner").map_err(read_failed)?,
-        ciphertext: row.try_get("ciphertext").map_err(read_failed)?,
+        challenge_aad: if notice { right_notice::challenge_aad(row)? } else { None },
+        ciphertext,
         nonce: row.try_get("nonce").map_err(read_failed)?,
         encryption_key_id: row.try_get("encryption_key_id").map_err(read_failed)?,
-        fingerprint: row.try_get("fingerprint").map_err(read_failed)?,
+        fingerprint,
     })
 }
 
@@ -392,13 +407,14 @@ pub async fn replace_key_envelope(
         | KeyEnvelopeSource::EvidenceEnvelope => {
             ("ciphertext = $1, fingerprint = $7", "AND retired_at IS NULL")
         }
+        KeyEnvelopeSource::RightNotice => right_notice::REPLACE,
         _ => ("ciphertext = $1, fingerprint = $7", ""),
     };
+    let touched = right_notice::touched(source == KeyEnvelopeSource::RightNotice);
     // 不变量 1、5、6、7：只替换原信封的投影，旧领取或旧扫描不得覆盖更新、退休或命令事实。
     let sql = format!(
         "UPDATE public.{table}
-         SET {payload}, nonce = $2, encryption_key_id = $3,
-             updated_at = GREATEST(transaction_timestamp(), updated_at)
+         SET {payload}, nonce = $2, encryption_key_id = $3{touched}
          WHERE {pk} = $4 AND encryption_key_id = $5 AND nonce = $6 {active}",
         table = source.as_str(),
         pk = source.primary_key(),

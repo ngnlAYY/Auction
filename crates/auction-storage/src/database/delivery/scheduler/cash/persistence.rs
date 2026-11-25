@@ -85,13 +85,15 @@ pub(super) async fn persist_sending(
     evidence: Option<&SettlementInternalEvidenceSnapshot>,
     expectation: Option<&DeliveryPreparedExpectation>,
 ) -> Result<(), FenceError> {
-    // 寄售处置投递不得进入通用 sending：其起写许可只发一次，未知结果只转人工核对（不变量 4）。
+    // 寄售处置投递与寄售轮投递不得进入通用 sending：其起写许可只发一次，未知结果只转人工核对（不变量 4）。
     let changed = sqlx::query(concat!(
         "WITH sql_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
          UPDATE public.deliveries AS deliveries SET status='sending',sending_at=$2,updated_at=(SELECT at FROM sql_clock) WHERE id=$1 AND status='claimed' AND lease_token=$3 AND fencing_version=$4 AND lease_expires_at>$2 AND lease_expires_at>(SELECT at FROM sql_clock) AND ",
         delivery_completion_gate!("(SELECT at FROM sql_clock)"),
         " AND ",
-        delivery_generic_origin_guard!()
+        delivery_generic_origin_guard!(),
+        " AND ",
+        delivery_not_consignment_round_guard!()
     )).bind(claim.delivery_id).bind(started_at).bind(claim.lease_token).bind(claim.fencing_version)
         .execute(&mut **tx).await?;
     if changed.rows_affected() != 1 {

@@ -7,8 +7,8 @@ use std::collections::BTreeSet;
 use std::fmt::Display;
 
 use auction_application::consignment::{
-    ConsignmentError, DepositActor, DepositOperation, EnvelopePreflight, EnvelopeReceipt,
-    MailReadinessGate, PollEnvelopeStore, PollEnvelopeWrite,
+    ConsignmentError, ConsignmentRtsLocator, DepositActor, DepositOperation, EnvelopePreflight,
+    EnvelopeReceipt, MailReadinessGate, PollEnvelopeStore, PollEnvelopeWrite,
 };
 use auction_application::core::ApplicationFuture;
 use auction_domain::SettlementWorld;
@@ -32,9 +32,9 @@ use crate::database::consignment::deposit::primitives::database_now;
 use crate::database::mail::originals::identity::MailKeyColumns;
 use crate::database::mail::originals::observations;
 use crate::database::mail::originals::quarantine::{
-    decide_envelope_in_tx, envelope_equipment, envelope_sellers, reservation_binding,
-    seller_by_name,
+    decide_envelope_in_tx, reservation_binding, seller_by_name,
 };
+use crate::database::mail::originals::rts_intake::{envelope_lock_set, locate_consignment_rts};
 use crate::database::mail::originals::{Outcome, replay_receipt};
 use crate::database::mail::poll::complete_prefix;
 
@@ -287,6 +287,7 @@ impl PollEnvelopeStore for DatabaseStore {
         key: OriginalMailKey,
         observation: EnvelopeObservation,
         sender: Option<String>,
+        rts: Option<ConsignmentRtsLocator>,
     ) -> auction_application::consignment::ConsignmentFuture<'_, EnvelopePreflight> {
         Box::pin(async move {
             let mut connection = self.pool().acquire().await.map_err(preflight_unavailable)?;
@@ -324,6 +325,10 @@ impl PollEnvelopeStore for DatabaseStore {
             let existing_decision = read_existing_decision(&mut connection, &key)
                 .await
                 .map_err(WriteError::into_application)?;
+            let consignment_rts =
+                locate_consignment_rts(&mut connection, &key, &observation, rts.as_ref())
+                    .await
+                    .map_err(WriteError::into_application)?;
             let capabilities = EnvelopeCapabilities {
                 safe_original_return: readiness
                     .try_get("return_ready")
@@ -338,6 +343,7 @@ impl PollEnvelopeStore for DatabaseStore {
                 capabilities,
                 now,
                 season_window_id: binding.season_window_id,
+                consignment_rts,
             })
         })
     }
@@ -361,10 +367,10 @@ impl PollEnvelopeStore for DatabaseStore {
             {
                 return Err(ConsignmentError::InvalidDepositRequest);
             }
-            let sellers =
-                write.command.as_ref().map_or_default(|command| envelope_sellers(&command.facts));
-            let equipment =
-                write.command.as_ref().map_or_default(|command| envelope_equipment(&command.facts));
+            let (sellers, equipment) = match &write.command {
+                Some(command) => envelope_lock_set(self, command).await?,
+                None => (Vec::new(), Vec::new()),
+            };
             let key = write.mail_key.clone();
             let keys = LockKeys {
                 command_id: write.command_id.as_uuid(),

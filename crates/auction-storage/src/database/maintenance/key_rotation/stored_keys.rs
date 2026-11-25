@@ -46,6 +46,9 @@ pub async fn stored_key_ids(
                  UNION ALL
                  SELECT encryption_key_id FROM public.mail_evidence_envelopes
                  WHERE retired_at IS NULL
+                 UNION ALL
+                 SELECT encryption_key_id FROM public.consignment_right_notice_outbox
+                 WHERE sealed_payload IS NOT NULL
              ) AS envelopes
              GROUP BY encryption_key_id ORDER BY encryption_key_id"
         }

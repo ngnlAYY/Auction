@@ -207,6 +207,12 @@ impl DepositReceipt for WithdrawDepositReceipt {
         if let Some(intent_id) = self.intent_id {
             body.insert("intent_id".into(), json!(intent_id.to_string()));
         }
+        if let Some(contract_id) = self.contract_id {
+            body.insert("contract_id".into(), json!(contract_id.to_string()));
+        }
+        if let Some(equipment_id) = self.equipment_id {
+            body.insert("equipment_id".into(), json!(equipment_id.to_string()));
+        }
         finish_body(body)
     }
 
@@ -225,6 +231,8 @@ impl DepositReceipt for WithdrawDepositReceipt {
             listing_version: u64,
             state: String,
             intent_id: Option<Uuid>,
+            contract_id: Option<Uuid>,
+            equipment_id: Option<Uuid>,
         }
         let common = common_body(stored, DepositOperation::Withdraw)?;
         let body: Body = serde_json::from_value(stored.body.clone()).map_err(corrupt_from)?;
@@ -232,7 +240,7 @@ impl DepositReceipt for WithdrawDepositReceipt {
             .into_iter()
             .find(|disposition| disposition.as_str() == common.disposition)
             .ok_or_else(corrupt)?;
-        require_status(
+        let receipt = require_status(
             stored,
             &common,
             Self {
@@ -247,10 +255,14 @@ impl DepositReceipt for WithdrawDepositReceipt {
                 .map_err(corrupt_from)?,
                 state: body.state.parse().map_err(corrupt_from)?,
                 intent_id: body.intent_id,
-                contract_id: None,
-                equipment_id: None,
+                contract_id: body.contract_id,
+                equipment_id: body.equipment_id,
             },
-        )
+        )?;
+        // 不变量 6：按处置校验字段形状（`withdrawal_accepted` 必带合同与装备，其余处置必不带），
+        // 损坏的已存回执不被还原成合法端口结果。
+        receipt.validate_shape().map_err(corrupt_from)?;
+        Ok(receipt)
     }
 }
 

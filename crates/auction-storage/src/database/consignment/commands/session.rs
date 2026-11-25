@@ -52,11 +52,7 @@ impl LockKeys<'_> {
         // 同层哈希碰撞只让两个原本独立的身份串行。
         let mut keys =
             BTreeSet::from([(COMMAND_LOCK_NAMESPACE, lock_hash(&[self.command_id.as_bytes()]))]);
-        keys.extend(
-            self.sellers
-                .iter()
-                .map(|seller| (USER_LOCK_NAMESPACE, lock_hash(&[seller.as_bytes()]))),
-        );
+        keys.extend(self.sellers.iter().copied().map(user_lock_key));
         keys.extend(self.equipment.iter().map(equipment_lock_key));
         keys
     }
@@ -81,6 +77,11 @@ impl LockKeys<'_> {
         }));
         keys
     }
+}
+
+/// 本地用户锁键：购买、拒收与解禁共用同一把买家互斥锁，键只在此处计算。
+pub(crate) fn user_lock_key(user: Uuid) -> (i32, i32) {
+    (USER_LOCK_NAMESPACE, lock_hash(&[user.as_bytes()]))
 }
 
 /// 寄售与拍卖三入口共用的规范实物锁键；世界与 EID 以斜杠分隔后取 SHA-256 前四字节。

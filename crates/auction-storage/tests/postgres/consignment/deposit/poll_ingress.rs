@@ -339,11 +339,10 @@ fn poll_write(
     cursor_mid: &str,
 ) -> PollEnvelopeWrite {
     let now = Timestamp::now();
-    let command = DepositCommandService::prepare_decide_envelope(facts(
-        key.clone(),
-        observation.clone(),
-        now,
-    ))
+    let command = DepositCommandService::prepare_decide_envelope(
+        facts(key.clone(), observation.clone(), now),
+        None,
+    )
     .expect("纯构造决定")
     .expect("应首次决定");
     let command_id = command.command_id;
@@ -494,7 +493,7 @@ async fn postgres_poll_gate_and_preflight_require_live_readiness() {
         "没有就绪投影时必须关闭寄售候选"
     );
     assert!(matches!(
-        store.load_envelope_preflight(key.clone(), observation.clone(), sender.clone()).await,
+        store.load_envelope_preflight(key.clone(), observation.clone(), sender.clone(), None).await,
         Err(ConsignmentError::Unavailable)
     ));
 
@@ -505,7 +504,7 @@ async fn postgres_poll_gate_and_preflight_require_live_readiness() {
         "valid_until 已过时必须关闭寄售候选"
     );
     assert!(matches!(
-        store.load_envelope_preflight(key.clone(), observation.clone(), sender.clone()).await,
+        store.load_envelope_preflight(key.clone(), observation.clone(), sender.clone(), None).await,
         Err(ConsignmentError::Unavailable)
     ));
 
@@ -523,8 +522,10 @@ async fn postgres_poll_gate_and_preflight_require_live_readiness() {
         store.consignment_candidates_enabled(SettlementWorld::Main).await.expect("读取门控"),
         "就绪有效时必须允许寄售候选"
     );
-    let preflight =
-        store.load_envelope_preflight(key, observation, sender).await.expect("就绪有效时预读");
+    let preflight = store
+        .load_envelope_preflight(key, observation, sender, None)
+        .await
+        .expect("就绪有效时预读");
     assert_eq!(
         preflight.session_id,
         Uuid::parse_str(SESSION).expect("固定会话"),
@@ -544,7 +545,7 @@ async fn postgres_poll_decision_replans_when_reservation_appears_after_preflight
     let observed = observation(Uuid::new_v4(), "20");
     let sender = Some("FakeSellerOne".to_owned());
     let preflight = store
-        .load_envelope_preflight(key.clone(), observed.clone(), sender.clone())
+        .load_envelope_preflight(key.clone(), observed.clone(), sender.clone(), None)
         .await
         .expect("锁外预读");
     assert!(preflight.reservations.is_empty(), "预读时尚无预约");
@@ -583,7 +584,7 @@ async fn postgres_poll_decision_replans_when_reservation_appears_after_preflight
         OriginalMailKey::new("12345", SettlementWorld::Main, "21").expect("对照原信键");
     let control_observed = observation(Uuid::new_v4(), "21");
     let control_preflight = control_store
-        .load_envelope_preflight(control_key.clone(), control_observed.clone(), sender)
+        .load_envelope_preflight(control_key.clone(), control_observed.clone(), sender, None)
         .await
         .expect("对照预读");
     assert!(control_preflight.reservations.is_empty());

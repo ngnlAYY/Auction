@@ -70,14 +70,20 @@ async fn resolve(
     {
         return Ok(None);
     }
-    let kind: Option<String> = sqlx::query_scalar(
-        "SELECT obligation_kind FROM public.settlement_obligations WHERE id = $1",
+    let obligation: Option<(String, bool)> = sqlx::query_as(
+        "SELECT obligation_kind, contract_id IS NOT NULL FROM public.settlement_obligations
+         WHERE id = $1",
     )
     .bind(obligation_id)
     .fetch_optional(store.pool())
     .await
     .map_err(storage_unavailable)?;
-    let Some(kind) = kind.as_deref().and_then(parse_kind) else {
+    // 不变量 6：寄售来源的义务 ID 不是拍卖 owner。必须在“查不到则交原案件”（E2）之前返回，
+    // 否则寄售退件会被当成本地不存在的退款建成拍卖案件。
+    if obligation.as_ref().is_some_and(|(_, consignment)| *consignment) {
+        return Ok(None);
+    }
+    let Some(kind) = obligation.as_ref().and_then(|(kind, _)| parse_kind(kind)) else {
         // E2：本地不存在的退款/卖款 UUID 仍按规范主题进入原案件；其余（尤其装备交付）
         // 无法区分退件案件与恢复流程，查不到时不猜，保持隔离。
         return Ok(subject_case_owner(subject, obligation_id));

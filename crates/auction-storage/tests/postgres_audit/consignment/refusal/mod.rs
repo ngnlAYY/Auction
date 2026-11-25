@@ -1,0 +1,5 @@
+//! 镜像 postgres 目标 `refusal` 目录的拒收存量夹具。
+
+// 镜像 postgres 目标的同名夹具（符号链接）；其余条目只由原目标的测试使用。
+#[allow(dead_code)]
+pub(super) mod fixture;

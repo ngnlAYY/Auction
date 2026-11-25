@@ -120,7 +120,7 @@ async fn postgres_consignment_v2_receipt_and_disposition_payload_align_across_la
             assert_eq!(state, ListingStateV2::DepositAccepted);
             assert_eq!(intent_id, Uuid::parse_str(INTENT).expect("规范意愿 UUID"));
         }
-        WithdrawReceiptV2::Closed { .. } => panic!("撤回意愿回执不得解成 closed"),
+        other => panic!("撤回意愿回执不得解成其他处置：{other:?}"),
     }
     execute(
         pool,
@@ -155,7 +155,7 @@ async fn postgres_consignment_v2_receipt_and_disposition_payload_align_across_la
             assert_eq!(operation, ConsignmentOperationV2::Withdraw);
             assert_eq!(state, ListingStateV2::Closed);
         }
-        WithdrawReceiptV2::WithdrawalRequested { .. } => panic!("关闭回执不得解成撤回意愿"),
+        other => panic!("关闭回执不得解成其他处置：{other:?}"),
     }
     execute(
         pool,

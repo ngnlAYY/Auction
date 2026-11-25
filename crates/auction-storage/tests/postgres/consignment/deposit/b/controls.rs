@@ -472,3 +472,55 @@ async fn postgres_withdraw_held_keeps_operations_reason() {
             .expect("读取挂单原因");
     assert_eq!(reason.as_deref(), Some("operations_hold"));
 }
+
+/// 停用且无预约码密码的装配（D9 §6.3、§7）：签发预约失败关闭且零写入，撤回照常。
+#[tokio::test]
+async fn postgres_deposit_without_reservation_crypto_still_withdraws_but_cannot_issue() {
+    let database = TestDatabase::create().await.expect("克隆模板库");
+    let maintenance = database.maintenance_store().await.expect("维护连接");
+    let pool = maintenance.postgres_pool();
+    seed_listing(pool, listing_id(), auction_domain::SettlementWorld::Main).await;
+    seed_mail_ready(pool).await;
+    let settings = auction_storage::DepositSettings::new(
+        auction_domain::consignment::FeeBps::new(500).expect("测试费率"),
+        auction_domain::consignment::ListingPrice::new(
+            auction_domain::consignment::ListingPrice::MIN,
+        )
+        .expect("测试下限"),
+        auction_domain::consignment::ListingPrice::new(
+            auction_domain::consignment::ListingPrice::MAX,
+        )
+        .expect("测试上限"),
+        24,
+        100,
+    );
+    let repository = auction_storage::DepositRepository::without_reservation_crypto(
+        database.store().await.expect("运行账号"),
+        settings,
+    );
+    let issue = repository
+        .issue_reservation(issue_command(client_command(20), listing_id(), 2, 0x51))
+        .await
+        .expect_err("无密码实现时签发必须失败关闭");
+    assert!(matches!(issue, ConsignmentError::Unavailable));
+    let reservations: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM public.consignment_deposit_reservations")
+            .fetch_one(pool)
+            .await
+            .expect("预约数");
+    assert_eq!(reservations, 0, "失败的签发不得落预约");
+    let receipt = repository
+        .request_withdrawal(auction_application::consignment::WithdrawDepositCommand {
+            command_id: client_command(21),
+            seller_user_id: auction_domain::UserId::from_uuid(
+                Uuid::parse_str(super::helpers::USER).expect("固定用户"),
+            ),
+            listing_id: listing_id(),
+            expected_version: auction_domain::consignment::ListingVersion::new(2).expect("版本"),
+            request_hash: hash(0x52),
+            request_id: None,
+        })
+        .await
+        .expect("无密码实现时撤回照常");
+    assert_eq!(receipt.state, ListingState::Closed);
+}
