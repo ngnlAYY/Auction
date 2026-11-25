@@ -9,7 +9,18 @@ pub(super) fn map_mooglemail_message(
     page_message: MoogleMailPageMessage,
     mailbox_key: String,
 ) -> Result<MailPollFetchedMessage, auction_integrations::mooglemail::MoogleMailError> {
+    let world = page_message.world();
     let (message, consignment_candidate) = page_message.into_parts();
+    let Some(message) = message else {
+        // 严格通用解析失败的候选：只有 4D1 宽容观察，没有业务 envelope。
+        let candidate = consignment_candidate.ok_or_else(|| {
+            auction_integrations::mooglemail::MoogleMailError::protocol_drift(
+                auction_integrations::mooglemail::MoogleMailOperation::Detail,
+                world,
+            )
+        })?;
+        return map_unparsed_candidate(candidate);
+    };
     let consignment_candidate = consignment_candidate.map(map_consignment_candidate).transpose()?;
     let external_mail_id = message.external_mail_id.clone();
     let world_id = message.world.as_str().to_owned();
@@ -46,6 +57,34 @@ pub(super) fn map_mooglemail_message(
         claimable,
         consignment_candidate,
         business: Some(business),
+    })
+}
+
+/// 无通用解析结果的候选：摘要字段取自宽容观察；业务 envelope 缺席，下游只能走寄售事务。
+fn map_unparsed_candidate(
+    candidate: auction_integrations::mooglemail::MoogleMailConsignmentCandidate,
+) -> Result<MailPollFetchedMessage, auction_integrations::mooglemail::MoogleMailError> {
+    let list_subject = candidate.row.subject.clone();
+    let mut mapped = map_consignment_candidate(candidate)?;
+    // 详情主题读不出时回落到列表投影，仅供分类判据；发件人不回落，空发件人交隔离。
+    if mapped.subject.is_empty() {
+        mapped.subject = list_subject;
+    }
+    Ok(MailPollFetchedMessage {
+        external_mail_id: mapped.external_mail_id.clone(),
+        world_id: mapped.world_id.clone(),
+        received_at: mapped.received_at,
+        sender: (!mapped.sender.is_empty()).then(|| mapped.sender.clone()),
+        subject: mapped.subject.clone(),
+        message_display: None,
+        content_digest: mapped.body_digest,
+        attachment_count: mapped.raw_count.unwrap_or(0),
+        credits: 0,
+        cod: 0,
+        returnable: false,
+        claimable: false,
+        consignment_candidate: Some(mapped),
+        business: None,
     })
 }
 

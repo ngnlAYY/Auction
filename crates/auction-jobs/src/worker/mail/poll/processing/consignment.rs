@@ -99,7 +99,7 @@ pub(super) async fn handle_candidate(
             // 候选由寄售事务自行落定；只有分类仍判定不适用时才继续旧路径留证。
             match process_candidate(
                 service,
-                &business,
+                Some(&business),
                 candidate,
                 claim,
                 polled_at,
@@ -213,10 +213,36 @@ pub(super) async fn handle_candidate(
     }
 }
 
+/// 严格通用解析失败的候选（没有旧信 envelope）：不经旧路由，直接交寄售事务落成待隔离决定。
+///
+/// 不变量 6：没有旧 owner 可归属时，分类器若仍判“不适用”则失败关闭，不写任何事实。
+pub(super) async fn handle_unparsed_candidate(
+    service: &ConsignmentIngressService,
+    candidate: MailPollConsignmentCandidate,
+    claim: &MailPollClaim,
+    polled_at: Timestamp,
+    next_poll_at: Timestamp,
+    deadline: Instant,
+) -> Result<(), ConsignmentFailure> {
+    match process_candidate(service, None, candidate, claim, polled_at, next_poll_at, deadline)
+        .await?
+    {
+        ConsignmentIngressOutcome::Committed(_) | ConsignmentIngressOutcome::Recovered(_) => Ok(()),
+        ConsignmentIngressOutcome::Pending(reason) => Err(ConsignmentFailure {
+            failure_code: "consignment_pending".to_owned(),
+            safe_detail: format!("寄售来信保留待读：{}", reason.as_str()),
+        }),
+        ConsignmentIngressOutcome::NotApplicable => Err(ConsignmentFailure {
+            failure_code: "consignment_not_applicable".to_owned(),
+            safe_detail: "无旧信解析结果的寄售候选不适用寄售分类，游标保持在候选之前".to_owned(),
+        }),
+    }
+}
+
 /// 在同一批次预算内把候选交给寄售事务。
 pub(super) async fn process_candidate(
     service: &ConsignmentIngressService,
-    message: &MailMessage,
+    message: Option<&MailMessage>,
     candidate: MailPollConsignmentCandidate,
     claim: &MailPollClaim,
     polled_at: Timestamp,
@@ -278,8 +304,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use auction_application::consignment::{
-        ConsignmentError, ConsignmentFuture, EnvelopePreflight, EnvelopeReceipt, PollEnvelopeStore,
-        PollEnvelopeWrite,
+        ConsignmentError, ConsignmentFuture, EnvelopeDisposition, EnvelopePreflight,
+        EnvelopeReceipt, PollEnvelopeStore, PollEnvelopeWrite,
     };
     use auction_application::mail::{
         ConsignmentIngressService, MailDiagnosticContext, MailDiagnosticError,
@@ -299,7 +325,7 @@ mod tests {
     use serde_json::json;
     use uuid::Uuid;
 
-    use super::{CandidateStep, handle_candidate};
+    use super::{CandidateStep, handle_candidate, handle_unparsed_candidate};
     use crate::worker::mail::poll::MailPollConsignmentCandidate;
     use crate::worker::mail::poll::MailPollRuntimeConfig;
     use crate::worker::mail::poll::failure::MailPollMetricContext;
@@ -642,5 +668,71 @@ mod tests {
             outcomes.iter().any(|outcome| outcome.failure_code == "invalid_business_decision"),
             "不适用后回到旧路由的无效决定必须留证"
         );
+    }
+
+    /// 记录首次决定写入的替身：只验证交给存储的命令与观察，不连数据库。
+    struct RecordingPollStore {
+        writes: Arc<Mutex<Vec<PollEnvelopeWrite>>>,
+    }
+
+    impl PollEnvelopeStore for RecordingPollStore {
+        fn load_envelope_preflight(
+            &self,
+            key: OriginalMailKey,
+            observation: EnvelopeObservation,
+            sender: Option<String>,
+        ) -> ConsignmentFuture<'_, EnvelopePreflight> {
+            EmptyPreflightStore.load_envelope_preflight(key, observation, sender)
+        }
+
+        fn decide_envelope_in_poll(
+            &self,
+            write: PollEnvelopeWrite,
+        ) -> ConsignmentFuture<'_, EnvelopeReceipt> {
+            let receipt = EnvelopeReceipt::new(
+                write.command_id,
+                EnvelopeDisposition::Quarantined,
+                Uuid::from_u128(9),
+            );
+            self.writes.lock().expect("写入记录").push(write);
+            Box::pin(async { Ok(receipt) })
+        }
+    }
+
+    /// 重复原文 EID 且详情发件人读不出：没有旧信 envelope，仍须落成待隔离决定，
+    /// 发件人不进入卖家预读与原始观察，全程不触及旧业务处理器。
+    #[tokio::test]
+    async fn unparsed_candidate_with_unproven_sender_is_quarantined() {
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let service = ConsignmentIngressService::new(
+            Arc::new(auction_application::mail::ConsignmentMailService::planner()),
+            Arc::new(RecordingPollStore { writes: Arc::clone(&writes) }),
+        );
+        let mut unparsed = candidate();
+        unparsed.sender = String::new();
+        unparsed.observation.duplicate_raw_eid = true;
+        unparsed.observation.list_detail_consistent = false;
+        unparsed.observation.sender_identity = SenderIdentity::Unverified;
+        unparsed.binding.protocol_version =
+            auction_application::settlement::INTERNAL_EVIDENCE_PROTOCOL;
+        unparsed.binding.digest = unparsed.binding.compute_digest();
+        unparsed.observation.session_binding_digest = unparsed.binding.digest;
+        let polled_at = Timestamp::UNIX_EPOCH;
+        handle_unparsed_candidate(
+            &service,
+            unparsed,
+            &claim(),
+            polled_at,
+            polled_at + auction_time::Duration::hours(1),
+            Instant::now() + Duration::from_secs(5),
+        )
+        .await
+        .expect("无旧信 envelope 的候选应提交隔离决定");
+        let writes = writes.lock().expect("写入记录");
+        assert_eq!(writes.len(), 1);
+        let command = writes[0].command.as_ref().expect("首次决定命令");
+        assert_eq!(command.decision.decision_kind(), "quarantine");
+        assert_eq!(writes[0].raw.as_ref().expect("原始观察").sender, None);
+        assert_eq!(writes[0].cursor_mid, "100");
     }
 }

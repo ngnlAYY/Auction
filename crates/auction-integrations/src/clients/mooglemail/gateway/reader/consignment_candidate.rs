@@ -17,6 +17,7 @@ use super::consignment::{
     BoundConsignmentObservation, ConsignmentReadPending, remote_observation_id,
 };
 use crate::clients::mooglemail::error::{MoogleMailError, MoogleMailErrorCategory};
+use crate::clients::mooglemail::gateway::model::MoogleMailConsignmentCandidate;
 use crate::clients::mooglemail::parser::{
     ConsignmentListRow, MoogleMailSummary, parse_consignment_detail,
 };
@@ -92,6 +93,36 @@ pub(crate) async fn bind_candidate(
     let observed_at = Timestamp::now();
     let remote_observation_id = remote_observation_id(&binding, &observation);
     Ok(BoundConsignmentObservation { observation, binding, remote_observation_id, observed_at })
+}
+
+/// 严格通用解析失败的候选形状邮件：改以宽容解析落成待隔离观察，不让整页读取失败。
+///
+/// 不变量 6：只接受“详情页世界标记可证实”的协议漂移（页面确为本世界邮件详情）；其余失败
+/// 原样返回，临时失败与认证问题仍保留 pending。详情完整发件人读得出时白名单与旧 owner 分流
+/// 同 [`bind_candidate`]（旧 owner 仍返回原严格错误）；读不出发件人时不授权、不判旧 owner，
+/// 观察的列表/详情一致性为假，由寄售决定进隔离。
+pub(crate) async fn bind_unparsed_candidate(
+    gateway: &MoogleMailGateway,
+    session: &MoogleMailCredentialSession,
+    world: MoogleMailWorld,
+    deadline: tokio::time::Instant,
+    row: &ConsignmentListRow,
+    document: &[u8],
+    strict_error: MoogleMailError,
+) -> Result<MoogleMailConsignmentCandidate, MoogleMailError> {
+    if strict_error.category != MoogleMailErrorCategory::ProtocolDrift {
+        return Err(strict_error);
+    }
+    let probe = parse_consignment_detail(document, world, row);
+    let owned_by_legacy = !probe.sender.is_empty()
+        && detail_route(&probe.sender, &probe.subject, true) == DetailRoute::Legacy;
+    if probe.world_marker != Some(world) || owned_by_legacy {
+        return Err(strict_error);
+    }
+    let bound = bind_candidate(gateway, session, world, deadline, row, document)
+        .await
+        .map_err(|reason| pending_error(world, reason))?;
+    Ok(MoogleMailConsignmentCandidate { row: row.clone(), bound })
 }
 
 /// 把读取 pending 映射为可重试或失败关闭的 gateway 错误；不携带远端原文。

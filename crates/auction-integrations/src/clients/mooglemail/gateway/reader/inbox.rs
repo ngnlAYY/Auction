@@ -15,7 +15,8 @@ use auction_application::mail::{MailPollProgressStage, MailPollReadSummary};
 use super::super::super::protocol::valid_opaque_id;
 use super::super::MoogleMailCredentialSession;
 use super::consignment_candidate::{
-    DetailRoute, bind_candidate, detail_route, list_is_candidate, pending_error,
+    DetailRoute, bind_candidate, bind_unparsed_candidate, detail_route, list_is_candidate,
+    pending_error,
 };
 use super::error::{fetch_budget_exhausted, read_journal_unavailable};
 use super::window::pending_anchor;
@@ -146,20 +147,28 @@ impl MoogleMailGateway {
         let deadline = requested_deadline.map_or(configured_deadline, |deadline| {
             tokio::time::Instant::from_std(deadline).min(configured_deadline)
         });
-        let session = tokio::time::timeout_at(
-            deadline,
-            self.credentials.begin_read(world, MoogleMailOperation::Inbox),
-        )
-        .await
-        .map_err(|diagnostic_cause| {
-            safe_diagnostics::warn(
-                "mooglemail_read",
-                "acquire_inbox_session_timeout",
-                safe_diagnostics::project(&diagnostic_cause),
-                DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
-            );
-            fetch_budget_exhausted(world)
-        })??;
+        // 门控打开时 4D1 候选要在同一会话上证明认证 UID（read_identity_in_session 要求独占
+        // guard），故持独占会话读完整个窗口，使详情与身份绑定出自同一凭据；关闭时仍是不持锁的读会话。
+        let acquire = async {
+            if consignment_candidates {
+                self.credentials.begin_exclusive(world, MoogleMailOperation::Inbox).await
+            } else {
+                self.credentials.begin_read(world, MoogleMailOperation::Inbox).await
+            }
+        };
+        let session =
+            tokio::time::timeout_at(deadline, acquire).await.map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_read",
+                    "acquire_inbox_session_timeout",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(world.as_str()),
+                        ..Default::default()
+                    },
+                );
+                fetch_budget_exhausted(world)
+            })??;
         match tokio::time::timeout_at(
             deadline,
             self.fetch_with_cookie(
@@ -396,10 +405,33 @@ impl MoogleMailGateway {
                 }
                 Ok(Err(error)) => return Err(error),
             };
-            let message = self
+            let parsed = self
                 .client
                 .diagnose_parse(&target, &document, self.parser.parse_detail(&document, &summary))
-                .await?;
+                .await;
+            let message = match parsed {
+                Ok(message) => message,
+                Err(strict_error) if candidate_shaped => {
+                    // 严格解析失败（如重复原文 EID）的候选形状邮件：诊断已记录，改以宽容解析
+                    // 落成待隔离观察，不让整页读取失败而挡住同窗口后续邮件。
+                    let row = super::consignment_candidate::row_from_summary(&summary);
+                    let candidate = bind_unparsed_candidate(
+                        self,
+                        session,
+                        world,
+                        deadline,
+                        &row,
+                        &document,
+                        strict_error,
+                    )
+                    .await?;
+                    messages.push(MoogleMailPageMessage::UnparsedConsignmentCandidate(Box::new(
+                        candidate,
+                    )));
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             // MID、world 与接收时间取自同一摘要，无需逐字段复核；parser 改为从页面读取时须恢复。
             // 业务身份与白名单只使用详情完整发件人；旧待读摘要的截断名称不参与授权。
             // 不匹配时保留队列，也不执行任何业务命令。
@@ -645,6 +677,10 @@ mod tests {
     }
 
     async fn fixture_server(detail: &'static str) -> FixtureServer {
+        fixture_server_with_list(detail, list_page()).await
+    }
+
+    async fn fixture_server_with_list(detail: &'static str, list: &'static str) -> FixtureServer {
         let listener =
             TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.expect("回环监听");
         let address = listener.local_addr().expect("回环地址");
@@ -677,8 +713,10 @@ mod tests {
                         include_str!(
                             "../../../../../tests/fixtures/mooglemail/consign-identity-main.html"
                         )
+                    } else if line.contains("mid=900005") {
+                        SINGLE_DETAIL
                     } else {
-                        list_page()
+                        list
                     };
                     let response = format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\
@@ -697,6 +735,22 @@ mod tests {
 <div id="world_text"><div><p>Currently playing on Persistent</p></div></div>
 <table id="mmail_list">
 <tr><th>From</th><th>Subject</th><th>Sent</th><th>Read</th></tr>
+<tr onclick="document.location='https://hentaiverse.org/?s=Bazaar&amp;ss=mm&amp;filter=read&amp;mid=900004'">
+<td>FixtureSeller</td><td>consign</td><td>2026-11-02 03:45</td><td>2026-11-02 03:45</td>
+</tr></table>
+<div id="mmail_pager"><div></div><div><span>Next &gt;</span></div></div>
+</body></html>"#
+    }
+
+    /// 同页两封候选：新的 900005 在前，重复 EID 的 900004 是更早的一封，先被读取。
+    fn list_page_with_following_mail() -> &'static str {
+        r#"<!DOCTYPE html><html><body>
+<div id="world_text"><div><p>Currently playing on Persistent</p></div></div>
+<table id="mmail_list">
+<tr><th>From</th><th>Subject</th><th>Sent</th><th>Read</th></tr>
+<tr onclick="document.location='https://hentaiverse.org/?s=Bazaar&amp;ss=mm&amp;filter=read&amp;mid=900005'">
+<td>FixtureSeller</td><td>consign</td><td>2026-11-02 03:46</td><td>2026-11-02 03:46</td>
+</tr>
 <tr onclick="document.location='https://hentaiverse.org/?s=Bazaar&amp;ss=mm&amp;filter=read&amp;mid=900004'">
 <td>FixtureSeller</td><td>consign</td><td>2026-11-02 03:45</td><td>2026-11-02 03:45</td>
 </tr></table>
@@ -744,6 +798,79 @@ mod tests {
         .expect("夹具 gateway")
     }
 
+    /// 回显请求 UID 的论坛资料替身：只让认证身份读取成功，不连论坛。
+    struct EchoProfileReader;
+
+    impl auction_application::forum::ForumTargetProfileReader for EchoProfileReader {
+        fn read_target_profile(
+            &self,
+            target_uid: String,
+            _deadline: Instant,
+        ) -> auction_application::settlement::InternalEvidenceFuture<
+            '_,
+            auction_application::forum::ForumTargetProfileEvidence,
+        > {
+            Box::pin(async move {
+                Ok(auction_application::forum::ForumTargetProfileEvidence {
+                    target_uid,
+                    player_name: "FixtureBot".to_owned(),
+                    observed_at: Timestamp::now(),
+                    protocol_version: "forum_target_profile_mid_v1",
+                    digest: [1; 32],
+                })
+            })
+        }
+    }
+
+    struct NoInvalidation;
+
+    impl auction_application::admin::AdminCredentialRuntimeWriter for NoInvalidation {
+        fn mark_invalid(
+            &self,
+            _credential_id: uuid::Uuid,
+            _now: Timestamp,
+        ) -> ApplicationFuture<'_, ()> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    /// 具备持久凭据身份与论坛资料能力的网关：门控打开的候选才能建立 4D1 会话绑定。
+    async fn identity_gateway(server: &FixtureServer) -> MoogleMailGateway {
+        let client = MoogleMailClient::with_config(MoogleMailClientConfig {
+            endpoint: server.endpoint.clone(),
+            maximum_response_bytes: 8 * 1024 * 1024,
+            minimum_request_interval: Duration::from_millis(1),
+            request_timeout: Duration::from_secs(2),
+        })
+        .expect("回环客户端");
+        let credentials =
+            crate::clients::mooglemail::MoogleMailCredentialSet::from_runtime_credentials(
+                vec![crate::clients::mooglemail::MoogleMailRuntimeCredential {
+                    credential_id: uuid::Uuid::new_v4(),
+                    state_version: 1,
+                    world: None,
+                    player_name: None,
+                    cookie: MoogleMailCookie::new("ipb_member_id=fixture; ipb_pass_hash=fixture")
+                        .expect("夹具 Cookie"),
+                }],
+                Arc::new(NoInvalidation),
+                Some(Arc::new(ValidOwner)),
+            )
+            .expect("夹具凭据");
+        MoogleMailGateway::new(
+            Arc::new(client),
+            credentials,
+            MoogleMailGatewayConfig {
+                maximum_pages: 10,
+                sender_allowlist: vec!["FixtureSeller".to_owned()],
+                sender_allowlist_disabled: false,
+                fetch_budget: Duration::from_secs(3),
+            },
+        )
+        .expect("夹具 gateway")
+        .with_forum_profile_reader(Arc::new(EchoProfileReader))
+    }
+
     async fn fetch_with_gate(
         gateway: &MoogleMailGateway,
         consignment_candidates: bool,
@@ -760,8 +887,12 @@ mod tests {
             .await
     }
 
+    /// 候选分流计数是进程内全局量：读它的测试与会触发分流的测试须串行。
+    static ROUTE_COUNTER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     #[tokio::test]
     async fn disabled_gate_fetch_returns_legacy_for_consign_detail() {
+        let _serial = ROUTE_COUNTER_LOCK.lock().await;
         CANDIDATE_ROUTE_DECISIONS.store(0, Ordering::SeqCst);
         let server = fixture_server(SINGLE_DETAIL).await;
         let gateway = fixture_gateway(&server).await;
@@ -776,6 +907,7 @@ mod tests {
 
     #[tokio::test]
     async fn disabled_gate_fetch_keeps_generic_failure_for_duplicate_eid() {
+        let _serial = ROUTE_COUNTER_LOCK.lock().await;
         CANDIDATE_ROUTE_DECISIONS.store(0, Ordering::SeqCst);
         let server = fixture_server(DUPLICATE_DETAIL).await;
         let gateway = fixture_gateway(&server).await;
@@ -790,6 +922,59 @@ mod tests {
         let requests = server.requests.lock().expect("请求记录").clone();
         assert!(requests.iter().any(|request| request.contains("mid=900004")));
         assert!(!requests.iter().any(|request| request.contains("s=Character")));
+    }
+
+    /// 生产入口：门控打开时候选经独占会话读取，并带回认证身份绑定。
+    #[tokio::test]
+    async fn enabled_gate_binds_single_eid_candidate_through_production_entry() {
+        let _serial = ROUTE_COUNTER_LOCK.lock().await;
+        let server = fixture_server(SINGLE_DETAIL).await;
+        let gateway = identity_gateway(&server).await;
+        let page = fetch_with_gate(&gateway, true).await.expect("候选应被绑定而不是身份未证");
+        assert_eq!(page.messages.len(), 1);
+        let MoogleMailPageMessage::ConsignmentCandidate { candidate, .. } = &page.messages[0]
+        else {
+            panic!("门控打开的 consign 应交出候选：{:?}", page.messages[0]);
+        };
+        assert!(!candidate.bound.binding().authenticated_uid.is_empty());
+        assert!(!candidate.bound.observation().duplicate_raw_eid);
+    }
+
+    /// 门控关闭时仍用不持锁的读会话：另一处持有独占 guard 时不被阻塞。
+    #[tokio::test]
+    async fn disabled_gate_fetch_is_not_blocked_by_an_exclusive_session() {
+        let server = fixture_server(SINGLE_DETAIL).await;
+        let gateway = identity_gateway(&server).await;
+        let _held = gateway
+            .credentials
+            .begin_exclusive(MoogleMailWorld::Main, MoogleMailOperation::Detail)
+            .await
+            .expect("独占会话");
+        let page = tokio::time::timeout(Duration::from_secs(2), fetch_with_gate(&gateway, false))
+            .await
+            .expect("门控关闭的读取不得等待独占 guard")
+            .expect("门控关闭沿用通用解析");
+        assert!(matches!(page.messages[0], MoogleMailPageMessage::Legacy(_)));
+    }
+
+    #[tokio::test]
+    async fn enabled_gate_hands_over_duplicate_eid_candidate_and_reads_following_mail() {
+        let _serial = ROUTE_COUNTER_LOCK.lock().await;
+        let server =
+            fixture_server_with_list(DUPLICATE_DETAIL, list_page_with_following_mail()).await;
+        let gateway = identity_gateway(&server).await;
+        let page = fetch_with_gate(&gateway, true).await.expect("重复 EID 候选不得让整页失败");
+        assert_eq!(page.messages.len(), 2);
+        // 严格解析失败的候选只交出宽容观察，且观察标明重复原文 EID 供寄售决定进隔离。
+        let MoogleMailPageMessage::UnparsedConsignmentCandidate(candidate) = &page.messages[0]
+        else {
+            panic!("重复 EID 候选应以无通用解析结果的形态交出：{:?}", page.messages[0]);
+        };
+        assert_eq!(candidate.row.external_mail_id, "900004");
+        assert!(candidate.bound.observation().duplicate_raw_eid);
+        // 同页后续邮件照常读取，游标取最后一封。
+        assert!(matches!(page.messages[1], MoogleMailPageMessage::ConsignmentCandidate { .. }));
+        assert_eq!(page.next_cursor.as_deref(), Some("900005"));
     }
 
     /// 升级前登记的旧版待读行：没有列表世界标记与原始分钟。

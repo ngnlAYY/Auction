@@ -123,6 +123,9 @@ pub enum MoogleMailPageMessage {
         /// 4D1 候选。
         candidate: Box<MoogleMailConsignmentCandidate>,
     },
+    /// 寄售候选，但严格通用解析失败（如重复原文 EID）：只有 4D1 宽容观察，没有通用解析结果。
+    /// 下游不得走旧路由，只能交寄售事务落成待隔离观察。
+    UnparsedConsignmentCandidate(Box<MoogleMailConsignmentCandidate>),
 }
 
 impl fmt::Debug for MoogleMailPageMessage {
@@ -132,24 +135,37 @@ impl fmt::Debug for MoogleMailPageMessage {
             Self::ConsignmentCandidate { candidate, .. } => {
                 formatter.debug_tuple("ConsignmentCandidate").field(candidate).finish()
             }
+            Self::UnparsedConsignmentCandidate(candidate) => {
+                formatter.debug_tuple("UnparsedConsignmentCandidate").field(candidate).finish()
+            }
         }
     }
 }
 
 impl MoogleMailPageMessage {
+    /// 邮件所属 world。
+    pub fn world(&self) -> MoogleMailWorld {
+        match self {
+            Self::Legacy(message) | Self::ConsignmentCandidate { message, .. } => message.world,
+            Self::UnparsedConsignmentCandidate(candidate) => candidate.row.world,
+        }
+    }
+
     /// 远端邮件身份；游标与完成账本仍只使用该值。
     pub fn external_mail_id(&self) -> &str {
         match self {
             Self::Legacy(message) => &message.external_mail_id,
             Self::ConsignmentCandidate { message, .. } => &message.external_mail_id,
+            Self::UnparsedConsignmentCandidate(candidate) => &candidate.row.external_mail_id,
         }
     }
 
-    /// 拆出通用解析结果；寄售候选同样先按旧信透传。
-    pub fn into_parts(self) -> (MoogleMailMessage, Option<MoogleMailConsignmentCandidate>) {
+    /// 拆出通用解析结果；寄售候选同样先按旧信透传，严格解析失败的候选没有通用解析结果。
+    pub fn into_parts(self) -> (Option<MoogleMailMessage>, Option<MoogleMailConsignmentCandidate>) {
         match self {
-            Self::Legacy(message) => (message, None),
-            Self::ConsignmentCandidate { message, candidate } => (message, Some(*candidate)),
+            Self::Legacy(message) => (Some(message), None),
+            Self::ConsignmentCandidate { message, candidate } => (Some(message), Some(*candidate)),
+            Self::UnparsedConsignmentCandidate(candidate) => (None, Some(*candidate)),
         }
     }
 }
