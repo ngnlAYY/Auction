@@ -82,7 +82,7 @@ object_store = { version = "0.14.2", default-features = false, features = ["aws-
 scraper = { version = "0.29.0", default-features = false, features = ["errors"] }
 rust-embed = { version = "8.13.0", features = ["mime-guess"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
-url = "2.5.8"
+url = "2.5.9"
 # 上游缺陷补齐：dioxus-web 0.7.10 的 src/history.rs 无条件调用 `Window::location()`，
 # 但它的 web-sys 依赖没有声明 `Location` feature，只能靠依赖图中其他 crate 顺带启用。
 # 这里显式启用该 feature；升级 Dioxus 时应复查上游是否已修，届时可移除对应项。
