@@ -49,7 +49,7 @@ VALUES (76, 'breaking');
 
 ## 索引
 
-当前 head 为 `000134`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。
+当前 head 为 `000137`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。
 
 | 版本 | 主题 |
 | --- | --- |
@@ -187,3 +187,6 @@ VALUES (76, 'breaking');
 | 000132 | 一口价挂单基础：新增挂单、只追加命令/事件/快照/基线/碰撞、可退休登记信封、重放比较密钥及持久解析工作与许可；复合外键绑定当前快照，延迟约束保护首写基线和同版事件；新投影按列授权，解析单例初始化为关闭；兼容与恢复待真实 PG 验证，登记 breaking |
 | 000133 | 新增装备世界与规范编号表达式索引、lot 装备 ID 与 lot ID 索引，供寄售历史、碰撞与有效活动额度读取，登记 compatible |
 | 000134 | 寄售第 4 期收件与代管：新增季窗与季通知、认证会话与收件就绪、原信 K/观察与派生事实/首次决定/隔离与重检/终局与解除、预约与逐件接受、实物占用、代管 position/代/事件/控制/交接、交给恢复流程的接管与投递 work/attempt/起写/证明共 29 张表；挂单扩展全部状态与 held 原因，命令行增加 v2 形状与类型化目标，整封接受在提交前校验条数/预约/item/position/唯一 Take，lot 实物准入与寄售强占用共用互斥行，`deliveries.origin_kind` 增加 `consignment_disposition` 并校验新载荷，授权入口再包装 000132；登记 breaking |
+| 000135 | 寄售第 5 期合同与结算来源：新增 `consignment_contracts`、`consignment_sales`、`consignment_withdrawals`（只追加，运行账号仅 `SELECT`、`INSERT`）；`settlement_obligations` 的拍卖四列放宽为可空并新增 `contract_id`、`contract_kind`、`custody_equipment_id`，来源恰为拍卖或寄售之一、来源列由触发器冻结；Sale 金额守恒（`F=floor(P*fee_bps/10000)`、`S=P-F`）；合同图（合同、子项、义务、履约）由延迟约束触发器在提交前核对；`position` 在季末等号及之后可由 `in_custody`/`reconcile` 进入 `season_ended`，占用释放仅对该终态免邮件证明；`position.listing_id` 唯一；授权入口再包装 000134；登记 breaking |
+| 000136 | 寄售第 6 期购买、资金、退件与拒收：放开 `available→sale_pending`、`sale_pending→closed(sold)` 与 position 的 `committed/in_transit/handed_over/reconcile` 及 `awaiting_take` 季末迁移，买家确领改认新表 `consignment_handoff_proofs`；命令账本增加购买、派发、退件、资金与处罚操作及回执；资金分配唯一键改为含 `consignment_contract_id` 的四列并新增过渡/手续费/核销用途与 `claimed` 分录，累计 issue 上限触发器加跨 source 守卫；新增 COD 收据与 opening 份额、手续费与本金事实、现金退件阻断与原资金消费、派发轮次/尝试/证据、退件接管/消费、拒收周期/事实/裁决/处罚/构成项/账号工作等 23 张表；`consignment_sales` 追加资金边界列；授权入口再包装 000135；登记 breaking |
+| 000137 | 寄售第 7 期：独立表段新增损失证据/事实/案件/结果/回执、受限权利及其状态/挑战/尝试/会话/令牌、权利通知 outbox 与结果、付款提醒、重列决定、找回预算命中共 16 张表（全部只追加，outbox 仅租约三列可更新），共享替换段再新增处罚效果与账号工作结果 2 张表；定义 `c7_sha1` 与 `c7_right_id`（权利 ID 的确定性 UUIDv5），并为既有合同回填失败关闭的权利；共享替换段放宽命令账本 actor / 目标 / 操作 / 回执闭集、挂单迁移与事件、处分代 g+1、position `lost`、占用释放与交接边，并放宽通知投递载荷；统一处置种类闭集新增 `season_closed`（季末关闭从未起写的寄售取得投递，插入守卫限定绑定，写入时固定解除告警）；授权入口再包装 000136；末尾追加 ㉑ 寄售 record_carrier 校验接受 `equipment_ids`、㉒ 放开撤回件 position `in_custody ↔ in_transit`（限当前代 Withdrawal）、㉓ 未付取消封闭后拒写 funded；登记 breaking。表与派生规则见 [docs/contracts/database.md](../../docs/contracts/database.md#寄售损失受限权利与通知迁移-000137) |

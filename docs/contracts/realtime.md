@@ -32,6 +32,15 @@ Public relay（每 poll_interval_millis，默认 250ms）
 
 一口价挂单的状态变化写入 `consignment_events` 供内部记录。该事件没有公开订阅或 HTTP 回放，也没有新增 WebSocket 或 SSE 入口。页面重读权威状态所用的接口见[一口价挂单](routes.md#一口价挂单)。
 
+### 一口价订单阶段事件
+
+一口价订单（成交与撤回合同）的阶段变化写入 `realtime_events`：流 `consignment_order:<contract_id>`，kind `consignment.order_stage_changed`，版本 1，序号在业务事务内立即取号。事件与它所描述的事实同事务提交、同事务回滚：购买事务（成交、义务图、首轮、挂单转 `sale_pending` 与事件）与 COD 实收认证（`certify_cod`，付款满足、资金分账、funded 投影与事件）各追加一条；其余资金与履约写口接入时调用同一个追加入口，不另造负载。
+
+- 负载恰好六个字段：`contract_id`、`order_state`、`delivery_stage`、`payment_stage`、`payout_stage`、`refund_stage`，取值是[订单阶段闭集](routes.md#一口价挂单)的线协议码；不含金额、预约码、装备 key、对方账号与原信正文。
+- 订单态与阶段由领域 `project_order_stages` 在写事务内读取最新事实投影，与 `GET /api/v2/me/consignment/orders` 读到的同源；矛盾或未知的事实一律投影为 `reconcile`。
+- 订单版本 `version` 取该流的头部序号（至少为 1）；事件的 `state_version` 只作排序提示。
+- 这个流没有公开订阅、回放或推送：Public relay 只扫描 `auction:` 前缀的流，注册表（`PublicRealtimeEvent::validate`）也不接受它；它是内部持久通知，页面仍按上文“事件只是变化通知”的约定重读权威接口。
+
 迁移 `000011` 建立的 `auction:discovery` 历史发现流只保留、不再写入、没有读者：relay 目录不列出它，公开回放与 WebSocket 不接受它，事件注册表把它当作非法流名拒绝；Admin 仪表盘的全量积压与“实时事件”页的滞后列表（计数与明细）也不计入它的游标，升级前旧版本留下的落后游标不会让实时分区永久降级。该流上的未解决失败无法经 Admin 重放收口（注册表拒收），升级前应确认为 0。其历史事件随下文的 30 天保留期清理，流行与各 consumer 游标按保留规则永久保留。
 
 竞价事件（`lot.bid_accepted`）与出价事实同事务写入，但序号在提交后分配。出价事务因此
@@ -117,7 +126,7 @@ WebSocket 每帧是一个 JSON 对象；HTTP 回放的 `events` 数组元素形�
 - 连接是**只读**的：客户端发送任何文本或二进制消息都会以 1008 关闭；消息与帧上限 4 KiB，超限以 1009 关闭。
 - 服务端每 50 秒发送 Ping，60 秒内未收到 Pong 即断开；单次写入超时 5 秒。
 - 会话复核：连接期间至少每 30 秒（或在会话到期时）重新核对会话；会话失效以 1008 关闭，会话服务不可用以 1013 关闭。
-- 建立连接并通过会话复核后，服务端的第一帧是构建号控制帧 `{"type":"hello","build":"<构建号>"}`；它不是事件，`stream_sequence` 与事件去重不受影响。浏览器据此在部署后提示刷新，不自动重载页面。旧版浏览器会把该帧按未知事件计数一次并继续接收后续事件，不会因此断开（除非已经连续失败）。构建号取值与 `x-auction-build` 响应头相同。
+- 建立连接并通过会话复核后，服务端的第一帧是构建号控制帧 `{"type":"hello","build":"<构建号>"}`；它不是事件，`stream_sequence` 与事件去重不受影响。浏览器据此在部署后提示刷新，不自动重载页面。旧版浏览器会把该帧按未知事件计数一次并继续接收后续事件，不会因此断开（除非已经连续失败）。构建号取值与 `x-auction-build` 响应头相同。只有连接 URL 带能力声明 `independent_build=1`（Solid 页面带，旧壳不带；其他取值以 400 拒绝）、配置了静态挂载且入口指针 build 与独立入口 build 不同（回切期）时，帧才另带可选字段 `independent_build`，取值与 `x-auction-build-independent` 响应头相同，即独立入口（新版 Solid 页面）的构建号；其余情况不带该字段，帧字节与此前一致。Solid 页面优先用 `independent_build` 比对，缺省回退 `build`。
 - 进程关闭时以 1001 关闭；发送队列满（慢消费者）以 1013 关闭，客户端应重连并用 HTTP 回放补齐。
 
 ### 客户端建议流程

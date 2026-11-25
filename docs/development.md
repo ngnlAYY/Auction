@@ -13,7 +13,7 @@
 | 数据库 | PostgreSQL 18（运行与运维命令需要；静态检查不需要） |
 | 页面构建 | `dx`（Dioxus CLI 0.7）、`wasm-bindgen`、`wasm-opt` 与 `esbuild`，随 `mise install` 安装；`dx` 首次从源码编译，需要 C 编译器、CMake、`pkg-config` 与 OpenSSL 开发文件 |
 
-页面的 TypeScript + SolidJS 实现在 `web/` 下，用同样由 mise 安装的 bun 管理依赖。先运行 `mise run web-prepare` 安装依赖；`bun run typecheck`、`bun run lint` 与包边界检查（TypeScript 语法树）由 `mise run web-check` 运行，并包含在 `mise run verify` 中；行为测试用 `mise run web-test`，不并入默认门禁。完整命令与编码规则见 [web/README.md](../web/README.md)。Public 与 Admin 都已通过各自的 `web-solid` 接入内嵌与分支上的手动候选构建，正式发行仍只产出 Rust 版。
+页面的 TypeScript + SolidJS 实现在 `web/` 下，用同样由 mise 安装的 bun 管理依赖。先运行 `mise run web-prepare` 安装依赖；`bun run typecheck`、`bun run lint` 与包边界检查（TypeScript 语法树）由 `mise run web-check` 运行，并包含在 `mise run verify` 中；行为测试用 `mise run web-test`，不并入默认门禁。完整命令与编码规则见 [web/README.md](../web/README.md)。Public 与 Admin 都已通过各自的 `web-solid` 接入内嵌、手动候选构建与正式发行；正式发行两端都使用 Solid，本地构建缺省仍是 Rust 版。
 
 直接调用负责依赖解析的 Cargo 命令时加 `--locked`；mise 任务、CI 检查与发布构建已固定该参数。本地配置命令通过独立参数传递目录，包含空格的路径须在调用 `mise run` 时加引号。如需本机编译加速（sccache、mold 等），只在用户级 `~/.cargo/config.toml` 中配置，不改仓库 profile。
 
@@ -126,6 +126,8 @@ cargo build --locked -p auction-public-api -p auction-admin-api -p auction-worke
 target/debug/auction-cli --config-dir "$dir" config check --strict
 target/debug/auction-cli --config-dir "$dir" db migrate --owner-secrets "$owner_secrets" --no-systemd
 ```
+
+这类调试构建（`debug_assertions` 且启用 `consignment-dev-preview`）开启寄售时不读页面栈回执，也就不需要 `[web].mount_root` 与 `RECEIPT.v1`；发布构型，或未启用该 feature 的构建，开启寄售缺回执即拒绝启动，见[寄售服务配置](../ops/config/README.md#寄售服务)。
 
 `reservation_ttl_hours`、`isekai_preclose_days` 等第 4 期字段的默认值、范围、关闭时仍校验的规则与 Credential 数据密钥要求见[寄售服务](../ops/config/README.md#寄售服务)；这里只按该文档填写临时配置。
 

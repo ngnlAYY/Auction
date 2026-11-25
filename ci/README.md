@@ -67,7 +67,7 @@ bash ci/checks/check.sh <检查项>...
 | `test` | push / PR / 手动，`docs` 通过后 | 经 mise 安装 bun 并执行 `mise run web-prepare`；安装 PostgreSQL 18 后依次运行 `mise run test`、`mise run web-test`、`mise run test-db`（PostgreSQL 18 集成测试）、`mise run test-db-compat`（迁移兼容声明验证）与 `mise run test-wasm`（使用运行器自带的 Firefox 验证浏览器收包接线）。这些测试均不并入默认 `mise run verify`。测试构建以 `CARGO_PROFILE_DEV_DEBUG=0` 关闭调试信息，缩小构建缓存 |
 | `security-audit` | push / PR / 手动中 `docs` 通过后；每周一 04:17 UTC 独立调度 | `dependency-audit`（cargo-audit 由 mise 安装）与 `web-dependency-audit`（bun 由 mise 安装）相互独立执行；定时与手动运行另以完整历史执行 `release-dependency-audit`；非定时事件另执行 `dependency-unused`，见[ci/checks/README.md#每周依赖审计](checks/README.md#每周依赖审计) |
 | `msrv` | push / PR / 手动，`docs` 通过后 | `ci/checks/check.sh rust-version`：MSRV 等于固定工具链，编译已由 `verify` 覆盖，这里只核对版本声明；作业名是 `main` 的必需检查 |
-| `artifacts` | 仅手动（`workflow_dispatch`） | 调用可复用工作流 `.github/workflows/release-build.yml`，手动输入 `web_stack`（`dioxus` 缺省或 `solid`）：输入在 checkout 后先经 `ci/release/build-identity.sh` 校验，非法值、空串或大小写不符在任何工具安装与缓存恢复前失败；缓存键使用两端实际组合（如 `public-dioxus_admin-dioxus` 或 `public-solid_admin-solid`）。随后由 mise 安装发布工具，选择 `solid` 时另装 bun 并运行 `mise run web-prepare`，再以 `ci/release/release.sh release-check` 构建并校验完整发布包，上传 1 天候选包；在 tag 上手动选择 `solid` 会立即失败并提示在分支上触发候选构建。选择 `solid` 时候选 Actions artifact 名称带 `-solid`，缺省保持原名，候选包不可部署，默认分支推送不再运行 |
+| `artifacts` | 仅手动（`workflow_dispatch`） | 调用可复用工作流 `.github/workflows/release-build.yml`，手动输入 `web_stack`（`dioxus` 缺省或 `solid`）：输入在 checkout 后先经 `ci/release/build-identity.sh` 校验，非法值、空串或大小写不符在任何工具安装与缓存恢复前失败；缓存键使用两端实际组合（如 `public-dioxus_admin-dioxus` 或 `public-solid_admin-solid`）。随后由 mise 安装发布工具，选择 `solid` 时另装 bun 并运行 `mise run web-prepare`，再以 `ci/release/release.sh release-check` 构建并校验完整发布包，上传 1 天候选包；在 tag 上手动触发仍是候选构建（包名带 `-candidate`），不取得正式发行身份。选择 `solid` 时候选 Actions artifact 名称带 `-solid`，缺省保持原名，候选包不可部署，默认分支推送不再运行 |
 
 普通 CI 的 `test` 与版本发布的 `verify` 都在准备完 Web 依赖后运行 `mise run gate-self-test`。依赖与失败诊断见[门禁自测](checks/README.md#门禁自测)。
 
@@ -112,9 +112,9 @@ bash ci/release/verify-deployment-package.sh <*.tar.gz> --tag <v版本>        #
 | embedded | 两端按实际技术栈取 `web-embed` 或 `web-solid` | Public、Admin、Worker、auction-cli | 分体部署发布包 |
 | single | `auction-server/web-embed`，再按两端实际技术栈追加 `web-solid-public`/`web-solid-admin` | auction-server、auction-cli | 合并部署发布包（`-single` 后缀） |
 
-feature、产物目录、工具、体积预算、构建回执与复用身份全部由 `ci/release/build-identity.sh` 的逐 surface 技术栈选择得出，cargo feature 由其中的 `web_cargo_features` 汇总。缺省与显式 `AUCTION_WEB_STACK=dioxus` 得到原来的 `auction-public-api/web-embed,auction-admin-api/web-embed` 与 `auction-server/web-embed`；`solid` 表示 Public 与 Admin 都用 Solid，因此 embedded 为 `auction-public-api/web-solid,auction-admin-api/web-solid`，single 为 `auction-server/web-embed,auction-server/web-solid-public,auction-server/web-solid-admin`。三种合法组合（API-only、Dioxus、Solid）都可用于本地构建与分支上的手动候选构建；正式发行仍只产出 Dioxus。
+feature、产物目录、工具、体积预算、构建回执与复用身份全部由 `ci/release/build-identity.sh` 的逐 surface 技术栈选择得出，cargo feature 由其中的 `web_cargo_features` 汇总。缺省与显式 `AUCTION_WEB_STACK=dioxus` 得到原来的 `auction-public-api/web-embed,auction-admin-api/web-embed` 与 `auction-server/web-embed`；`solid` 表示 Public 与 Admin 都用 Solid，因此 embedded 为 `auction-public-api/web-solid,auction-admin-api/web-solid`，single 为 `auction-server/web-embed,auction-server/web-solid-public,auction-server/web-solid-admin`。三种合法组合（API-only、Dioxus、Solid）都可用于本地构建与手动候选构建；正式发行只接受 Solid。
 
-**正式发行（`v<版本>` tag 触发的 Release）只产出 Rust 版页面。** 发布脚本只把 `GITHUB_ACTIONS=true`、`GITHUB_EVENT_NAME=push`、`GITHUB_REF_TYPE=tag` 识别为正式发行；任一端为 Solid 时会在任何工具、临时目录、构建或装包步骤之前拒绝。`workflow_dispatch` 即使选择 tag 也属于候选构建，包名带 `-candidate`；tag 上手动选择 Solid 仍由工作流在安装工具前拒绝。`--allow-dirty` 不改变正式发行判定。
+**正式发行（`v<版本>` tag 触发的 Release）两端都使用 Solid 页面。** `release.yml` 的 tag push 以 `web_stack: solid`、`release_kind: formal` 调用 `release-build.yml`。发布脚本只把 `GITHUB_ACTIONS=true`、`GITHUB_EVENT_NAME=push`、`GITHUB_REF_TYPE=tag` 识别为正式发行，并要求由 `release.yml` 调用、tag 等于工作区版本、Public 与 Admin 都是 Solid；任一不符时在任何工具、临时目录、构建或装包步骤之前拒绝。`workflow_dispatch` 即使选择 tag 也属于候选构建，包名带 `-candidate`。`--allow-dirty` 不改变正式发行判定。
 
 ### 门禁
 
@@ -185,7 +185,7 @@ Solid 路径不联网。`mise run web-prepare` 在 `bun install --frozen-lockfil
 
 `WEB-BUILD-INFO` 记录单端输入指纹、构建环境指纹、构建工具版本与实际编译进 payload 的构建号（`build_id`）；Dioxus 记录 dx/rustc/brotli，Solid 记录 bun/brotli 与 `stack=solid`。复用要求回执全部字段匹配，且现有 payload 再次通过完整门禁。任一端的变更使共享构建号变化时，两端都要重建。缺少该字段的旧回执同样触发重建。构建结束后重新计算单端输入指纹、环境指纹与共享构建号，全部与构建前匹配才原子发布回执。
 
-发布入口 `ci/release/release.sh` 的 `build-api`、`build-embedded`、`build-single`、`verify-artifacts`、`verify-single`、`verify-web-size` 与 `release-check`/`package` 都接受三种组合：API-only、缺省 Dioxus、Solid（Public 与 Admin 都用 Solid）。正式发行路径见[制品变体](#制品变体)：只有 `GITHUB_ACTIONS=true`、`GITHUB_EVENT_NAME=push`、`GITHUB_REF_TYPE=tag` 同时成立时才按正式发行守卫；任一端为 Solid 会在任何有副作用的步骤之前以“正式发行只产出 Rust 版页面”拒绝。手动候选构建（包括选择 tag 的 `workflow_dispatch`）会在包名附加 `-candidate`；tag 上的 Solid 手动触发仍会在安装工具前拒绝。
+发布入口 `ci/release/release.sh` 的 `build-api`、`build-embedded`、`build-single`、`verify-artifacts`、`verify-single`、`verify-web-size` 与 `release-check`/`package` 都接受三种组合：API-only、缺省 Dioxus、Solid（Public 与 Admin 都用 Solid）。正式发行路径见[制品变体](#制品变体)：只有 `GITHUB_ACTIONS=true`、`GITHUB_EVENT_NAME=push`、`GITHUB_REF_TYPE=tag` 同时成立时才按正式发行守卫；任一端不是 Solid 会在任何有副作用的步骤之前以“正式发行必须 Public 与 Admin 两端都使用 Solid 页面”拒绝。手动候选构建（包括选择 tag 的 `workflow_dispatch`）会在包名附加 `-candidate`。
 
 `verify_web_payload` 的 Solid 分支要求入口文档只允许带 `src` 的模块脚本恰好一个、入口引用的资源都存在于 payload、入口恰好有一个 `<link rel="icon" href="/favicon.ico">` 且 `assets/` 下恰好有一个 `favicon-*.svg`、`assets/` 下每个文件名都带 Vite 风格的内容指纹（`<name>-<8 位 base64url 字符>.<扩展名>`，压缩副本的 `.br` 不改变此判定），profile 固定为 `solid-release`。入口 HTML 不做通用解析：出现 HTML 注释起始符（`<!` 后接 `--`）直接失败；`template`、`base`、`iframe`、`object`、`embed` 出现即失败；每个 `<script>`/`<link>` 必须整体匹配 Vite 产物固定的四种写法（属性顺序固定、大小写敏感、双引号、同行闭合），入口、样式表、预加载和图标共用这一份引用清单。单引号、无引号、未知 link 类型或无法执行的枚举命令都会失败关闭。入口模块与 `modulepreload` 声明的 JS 计入首屏 JS。
 

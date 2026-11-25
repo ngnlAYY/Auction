@@ -8,6 +8,12 @@
 
 `mise run gate-self-test`（等价于 `bash ci/checks/check.sh gate-self-test`）离线依次运行 `ci/checks/*-test.sh`，遇到失败即报告脚本名和退出码。`all` 与 `mise run verify` 仍只执行静态检查。运行前用 `mise run web-prepare` 准备 Web 依赖。自测使用可写的临时目录、Bash、Git、Perl、brotli、Rust、rg、Bun 和 mise 管理的 Dioxus 发布工具。详见[发布工具说明](../tools/README.md#发布构建如何取用工具)。
 
+以下三个自测没有对应的 `check.sh` 门禁项，只经门禁自测运行；其余自测随下文各门禁项列出：
+
+- `bash ci/checks/recovery-tables-test.sh`：核对 [ops/deploy/RECOVERY.md](../../ops/deploy/RECOVERY.md) 的“寄售跨 breaking 迁移回退汇总核对”一节覆盖迁移 000134–000137 新增的每个 `consignment_*` 表，并在临时副本中删去该节或一个表名，确认核对失败。
+- `bash ci/checks/release-formal-test.sh`：正式发行双 Solid 的四类调用身份（正式 tag push、tag 上手动候选、分支候选、只读查询）、正式身份断言的反例，以及 `docs/WEB-STACK.v1` 与页面导出树的装包、核对与拒绝；全部在临时目录与环境变量夹具中运行，不联网、不构建。
+- `bash ci/checks/consignment-release-features-test.sh`：发布配方拒绝寄售预览 feature，覆盖两种技术栈下的仓库配方及临时注入的分体、合并配方。
+
 ## 热字段镜像
 
 ```bash
