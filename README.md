@@ -3,7 +3,7 @@
 HentaiVerse 装备拍卖服务：后端与默认前端用 Rust 实现，玩家在网站或 E-Hentai 论坛出价，通过游戏内 MoogleMail 寄售装备、注册账号、付款与收货；运营人员在管理后台处理场次、凭据、投递与结算。
 
 - **后端**：三个可独立部署的进程——Public API、Admin API、Worker——加运维命令行 `auction-cli`；也可用 `auction-server` 单文件合并运行。
-- **前端**：默认是 Public 与 Admin 两个 Dioxus 0.7 CSR（WASM）单页应用，内嵌在对应后端二进制中同源提供；五种界面语言。`web/` 下另有 Public 与 Admin 的 TypeScript + SolidJS 实现，由 `AUCTION_WEB_STACK=solid` 选择、各自的 `web-solid` 内嵌；正式发布仍只产出 Rust 版，见 [web/README.md](web/README.md)。
+- **前端**：默认是 Public 与 Admin 两个 Dioxus 0.7 CSR（WASM）单页应用，内嵌在对应后端二进制中同源提供；五种界面语言。`web/` 下另有 Public 与 Admin 的 TypeScript + SolidJS 实现，由 `AUCTION_WEB_STACK=solid` 选择、各自的 `web-solid` 内嵌；正式发行两端都使用 Solid 版，本地与候选构建缺省仍是 Rust 版，见 [web/README.md](web/README.md)。
 - **存储**：PostgreSQL 18 是唯一事实来源。
 - **平台**：原生程序仅支持 Linux x86_64。
 
@@ -66,7 +66,7 @@ mise run release-check       # 构建、门禁与装包
 
 ## 发布
 
-只在 `main` 上打 `v<版本>` tag（等于 `Cargo.toml` 的 workspace version）触发 CI 发布：tag 守卫、完整门禁、发布构建、SLSA 来源证明与 GitHub Release 资产在同一条流水线完成，Release 永久保留。正式发行只产出 Rust 版页面；部署只使用这些 Release 资产，部署前运行 `mise run verify-package` 核对提交可从发布 tag 到达。手动触发的 CI 候选构建可选择 `dioxus`（缺省）或 `solid`，Solid 候选 Actions artifact 名称带 `-solid`，但候选包不可部署。合并部署包（`auction-server` + `auction-cli`）用 `mise run release-check --single-binary` 构建。详见 [ci/README.md](ci/README.md)。
+只在 `main` 上打 `v<版本>` tag（等于 `Cargo.toml` 的 workspace version）触发 CI 发布：tag 守卫、完整门禁、发布构建、SLSA 来源证明与 GitHub Release 资产在同一条流水线完成，Release 永久保留。正式发行两端都使用 Solid 页面（`release.yml` 显式选择 `solid`）；部署只使用这些 Release 资产，部署前运行 `mise run verify-package` 核对提交可从发布 tag 到达。手动触发的 CI 候选构建可选择 `dioxus`（缺省）或 `solid`，Solid 候选 Actions artifact 名称带 `-solid`，但候选包不可部署。合并部署包（`auction-server` + `auction-cli`）用 `mise run release-check --single-binary` 构建。详见 [ci/README.md](ci/README.md)。
 
 ## 许可
 

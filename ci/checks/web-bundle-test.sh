@@ -488,13 +488,13 @@ fi
 default_fingerprint=$(bash ci/release/release.sh source-fingerprint 2>/dev/null)
 [[ "$default_fingerprint" =~ ^[0-9a-f]{64}$ ]] || fail '缺省发布入口不应被 Solid 拒绝'
 
-# 正式发行 = tag 触发的 CI 运行；Solid 必须在任何工具或目录副作用之前拒绝。
+# 正式发行 = release.yml 的 tag push；两端不全是 Solid（缺省 Dioxus）时必须在任何工具或目录副作用之前拒绝。
 make_tagged_release_fixture() {
 	local directory=$1
 	mkdir -p "$directory/ci/release" "$directory/bin" \
 		"$directory/target/dist/artifacts/embedded" "$directory/target/dist/build/embedded" \
 		"$directory/target/web/public"
-	cp ci/release/release.sh ci/release/build-identity.sh "$directory/ci/release/"
+	cp ci/release/release.sh ci/release/build-identity.sh ci/release/web-stack.sh "$directory/ci/release/"
 	printf '[workspace.package]\nversion = "9.9.9"\n' >"$directory/Cargo.toml"
 	printf 'lock\n' >"$directory/Cargo.lock"
 	cat >"$directory/bin/cargo" <<'FIXTURE'
@@ -537,14 +537,16 @@ make_tagged_release_fixture "$tagged"
 if diagnostic=$(
 	(
 		cd "$tagged"
-		GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push GITHUB_REF_TYPE=tag AUCTION_WEB_STACK=solid \
+		GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v9.9.9 \
+			GITHUB_REPOSITORY=fixture/repo \
+			GITHUB_WORKFLOW_REF=fixture/repo/.github/workflows/release.yml@refs/tags/v9.9.9 \
 			CARGO_CALL_LOG="$tagged/calls.log" TOOL_SENTINEL_LOG="$tagged/tools.log" \
 			PATH="$tagged/bin:$PATH" bash ci/release/release.sh release-check --allow-dirty
 	) 2>&1
 ); then
-	fail '正式发行在 Solid 下应被拒绝'
+	fail '正式发行在缺省 Dioxus 下应被拒绝'
 fi
-[[ "$diagnostic" == *'正式发行只产出 Rust 版页面'* ]] || fail "正式发行拒绝缺少明确诊断：$diagnostic"
+[[ "$diagnostic" == *'正式发行必须 Public 与 Admin 两端都使用 Solid'* ]] || fail "正式发行拒绝缺少明确诊断：$diagnostic"
 [[ ! -e "$tagged/calls.log" ]] || fail '正式发行拒绝前已执行 cargo'
 [[ ! -e "$tagged/tools.log" ]] || fail '正式发行拒绝前已调用 mktemp、bun 或 dx'
 for sentinel in \
@@ -559,14 +561,16 @@ fi
 if diagnostic=$(
 	(
 		cd "$tagged"
-		GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push GITHUB_REF_TYPE=tag AUCTION_WEB_STACK=solid \
+		GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v9.9.9 \
+			GITHUB_REPOSITORY=fixture/repo \
+			GITHUB_WORKFLOW_REF=fixture/repo/.github/workflows/release.yml@refs/tags/v9.9.9 \
 			CARGO_CALL_LOG="$tagged/calls.log" TOOL_SENTINEL_LOG="$tagged/tools.log" \
 			PATH="$tagged/bin:$PATH" bash ci/release/release.sh package --allow-dirty
 	) 2>&1
 ); then
-	fail '正式发行装包在 Solid 下应被拒绝'
+	fail '正式发行装包在缺省 Dioxus 下应被拒绝'
 fi
-[[ "$diagnostic" == *'正式发行只产出 Rust 版页面'* ]] ||
+[[ "$diagnostic" == *'正式发行必须 Public 与 Admin 两端都使用 Solid'* ]] ||
 	fail "正式发行装包拒绝缺少明确诊断：$diagnostic"
 [[ ! -e "$tagged/calls.log" ]] || fail '正式发行装包拒绝前已执行 cargo'
 [[ ! -e "$tagged/tools.log" ]] || fail '正式发行装包拒绝前已调用 mktemp、bun 或 dx'
@@ -595,7 +599,7 @@ make_reuse_release_fixture() {
 		done = 1
 	}
 	{ print }' ci/release/release.sh >"$directory/ci/release/release.sh"
-	cp ci/release/build-identity.sh "$directory/ci/release/"
+	cp ci/release/build-identity.sh ci/release/web-stack.sh "$directory/ci/release/"
 	cat >>"$directory/ci/release/build-identity.sh" <<'FIXTURE'
 configure_build_tools() { :; }
 source_fingerprint() { printf '%064d\n' 1; }

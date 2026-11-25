@@ -148,8 +148,11 @@ jobs:
 
   build:
     needs: [guard, verify]
-    # 正式发行不传 web_stack：缺省 dioxus，只产出 Rust 版页面。
+    # 正式发行显式传 solid：Public 与 Admin 都是 Solid 页面；release-build.yml 与 release.sh 会再次断言。
     uses: ./.github/workflows/release-build.yml
+    with:
+      web_stack: solid
+      release_kind: formal
 
   publish:
     needs: [guard, build]

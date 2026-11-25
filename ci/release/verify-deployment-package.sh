@@ -12,6 +12,10 @@ archive=
 tag=
 release_repo=${GITHUB_REPOSITORY:-}
 offline=false
+receipt=
+# 首个含 docs/WEB-STACK.v1 的正式版本：不小于该版本的包必须带页面凭据并通过核对。
+# 与 apps/auction-cli 的 FIRST_WEB_STACK_VERSION 取同一值，由版本提升提交写死。
+first_web_stack_version=0.1.9
 
 usage() {
 	printf '%s\n' \
@@ -20,6 +24,7 @@ usage() {
 		'  --repo <路径>        用于核对 tag 与提交的 Git 仓库（默认本仓库）' \
 		'  --release-repo <owner/name>  GitHub 仓库（默认 $GITHUB_REPOSITORY 或 origin）' \
 		'  --offline            跳过 GitHub 来源证明校验；仅用于离线核对' \
+		'  --receipt <路径>     校验通过后写出验证回执（0600，路径必须不存在）' \
 		'  -h, --help           显示帮助' >&2
 }
 
@@ -46,6 +51,11 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	--offline) offline=true; shift ;;
+	--receipt)
+		[[ $# -ge 2 && -n $2 ]] || fail '--receipt 需要回执路径'
+		receipt=$2
+		shift 2
+		;;
 	-h | --help) usage; exit 0 ;;
 	-*) usage; fail "未知参数：$1" ;;
 	*)
@@ -57,6 +67,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n $archive ]] || { usage; fail '缺少发布归档路径'; }
+# 回执不覆盖既有文件：在做任何核对前先确认目标位置可用。
+if [[ -n $receipt ]]; then
+	[[ ! -e $receipt && ! -L $receipt ]] || fail "验证回执已存在，拒绝覆盖：$receipt"
+	[[ -d $(dirname "$receipt") ]] || fail "验证回执所在目录不存在：$receipt"
+fi
+source "$script_root/ci/release/web-stack.sh"
 [[ -f $archive && ! -L $archive ]] || fail "发布归档必须是普通文件：$archive"
 archive=$(cd "$(dirname "$archive")" && pwd)/$(basename "$archive")
 package_dir=$(dirname "$archive")
@@ -72,6 +88,7 @@ base=${package_archive%.tar.gz}
 [[ $base != *-candidate ]] || fail '拒绝部署候选制品'
 [[ $base =~ ^auction-rust-(.+)-([0-9a-f]{12})(-single)?$ ]] ||
 	fail "归档名不符合 auction-rust-<版本>-<提交前12位>[-single].tar.gz：$package_archive"
+package_version=${BASH_REMATCH[1]}
 short_commit=${BASH_REMATCH[2]}
 
 # 先限制外层清单只指向两个预期文件，再读取摘要目标，避免将任意路径交给 sha256sum。
@@ -202,6 +219,15 @@ grep -Fq -- '- Source worktree：`clean`' "$packaged_dependencies" ||
 cmp -s "$dependencies" "$packaged_dependencies" ||
 	fail '外层 DEPENDENCIES.md 与包内文件不一致'
 
+# 页面凭据：版本不小于硬边界的包必须带 WEB-STACK.v1（缺失即拒）；旧版本 Rust 包按旧格式通过，
+# 但若自带该文件也要核对。
+web_stack_id=none
+if [[ $(printf '%s\n%s\n' "$first_web_stack_version" "$package_version" | LC_ALL=C sort -V | head -n 1) == "$first_web_stack_version" ||
+	-e $package_root/docs/WEB-STACK.v1 ]]; then
+	web_stack_verify_package "$package_root" "$commit" "$fingerprint" || fail '页面凭据 WEB-STACK.v1 或页面导出树核对失败'
+	web_stack_id=public-solid_admin-solid
+fi
+
 # 提交必须存在于本地 Git 历史，并且可从发布 tag 到达。
 git -C "$repository_root" rev-parse --git-dir >/dev/null 2>&1 ||
 	fail "不是 Git 仓库：$repository_root"
@@ -281,9 +307,27 @@ else
 	printf '%s\n' '警告：已跳过 GitHub 来源证明校验（--offline）；仅用于离线核对，不能作为部署依据。' >&2
 fi
 
+archive_sha256=$(sha256sum "$archive" | awk '{print $1}')
+if [[ -n $receipt ]]; then
+	# 回执只在全部核对通过后写出；noclobber 让并发创建同一路径的一方失败。
+	(
+		set -o noclobber
+		umask 077
+		printf '%s\n' \
+			'schema=auction-package-verification/1' \
+			"archive_sha256=$archive_sha256" \
+			"package=$base" \
+			"source_commit=$commit" \
+			"tag=$tag" \
+			"provenance=$provenance" \
+			"web_stack_id=$web_stack_id" \
+			"verified_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >"$receipt"
+	) || fail "无法写出验证回执：$receipt"
+fi
+
 printf '部署制品校验通过\n'
 printf 'archive=%s\n' "$package_archive"
-printf 'sha256=%s\n' "$(sha256sum "$archive" | awk '{print $1}')"
+printf 'sha256=%s\n' "$archive_sha256"
 printf 'commit=%s\n' "$commit"
 printf 'tag=%s\n' "$tag"
 printf 'provenance=%s\n' "$provenance"
