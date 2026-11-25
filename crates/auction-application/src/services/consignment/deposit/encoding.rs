@@ -19,7 +19,7 @@ use crate::ports::consignment::{
     SeasonCloseCommand, SeasonCloseTarget, SeasonNoticeCommand, SetOperationsHoldCommand,
     StartDispositionWriteCommand, WithdrawDepositCommand,
 };
-use crate::ports::core::RequestHash;
+use crate::ports::core::{RequestHash, lower_hex};
 
 /// v2 统一前缀，末尾一个 NUL 字节。
 pub const COMMAND_PREFIX_V2: &[u8] = b"auction.consignment.command.v2\0";
@@ -39,6 +39,14 @@ pub enum CommandTarget<'a> {
     OriginalAttempt(Uuid),
     /// 稳定原信键。
     MailKey(&'a OriginalMailKey),
+    /// 受限权利 UUID。
+    Right(Uuid),
+    /// 代管 position UUID（第 7 期灭失命令）。
+    Position(Uuid),
+    /// 寄售合同 UUID（Admin 订单 recheck / resolve）。
+    Contract(Uuid),
+    /// 浏览器绑定摘要；编码为小写十六进制文本，与 actor 引用同形。
+    Browser([u8; 32]),
     /// 冻结季窗头。
     Season {
         /// 季身份。
@@ -69,12 +77,23 @@ impl CommandEncoding {
         actor: &DepositActor,
         target: CommandTarget<'_>,
     ) -> Self {
+        Self::with_operation(operation.as_str(), actor, target)
+    }
+
+    /// 以操作名文本写入头部；受限权利命令的操作不在拍卖 `DepositOperation` 闭集内。
+    pub fn with_operation(
+        operation: &str,
+        actor: &DepositActor,
+        target: CommandTarget<'_>,
+    ) -> Self {
         let mut encoding = Self { bytes: COMMAND_PREFIX_V2.to_vec() };
-        encoding.text(operation.as_str());
+        encoding.text(operation);
         encoding.text(actor.kind());
         match actor {
             DepositActor::PublicUser(user_id) => encoding.bytes(user_id.as_uuid().as_bytes()),
             DepositActor::Admin(actor_ref) => encoding.text(actor_ref),
+            DepositActor::Browser { binding_digest } => encoding.text(&lower_hex(binding_digest)),
+            DepositActor::RightHolder { right_id } => encoding.uuid(*right_id),
             DepositActor::Worker | DepositActor::System => {
                 encoding.text(DepositActor::DEPOSIT_SERVICE_REF);
             }
@@ -84,7 +103,11 @@ impl CommandEncoding {
             | CommandTarget::Quarantine(id)
             | CommandTarget::Reservation(id)
             | CommandTarget::FinalDecision(id)
-            | CommandTarget::OriginalAttempt(id) => encoding.uuid(id),
+            | CommandTarget::OriginalAttempt(id)
+            | CommandTarget::Right(id)
+            | CommandTarget::Position(id)
+            | CommandTarget::Contract(id) => encoding.uuid(id),
+            CommandTarget::Browser(digest) => encoding.text(&lower_hex(&digest)),
             CommandTarget::MailKey(key) => encoding.mail_key(key),
             CommandTarget::Season {
                 season_id,
@@ -308,6 +331,10 @@ pub(super) fn canonical_decide_envelope(command: &DecideEnvelopeCommand) -> Comm
                 encoding.u64(u64::from(item.ordinal));
                 encoding.text(item.reason.as_str());
             }
+        }
+        EnvelopeDecision::AcquireReturn(origin) => {
+            encoding.uuid(origin.obligation_id);
+            encoding.u64(u64::from(origin.original_round));
         }
         EnvelopeDecision::Accept(_) | EnvelopeDecision::ArchiveEmpty => encoding.u64(0),
     }

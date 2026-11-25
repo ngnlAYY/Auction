@@ -23,7 +23,8 @@ const SETTLEMENT_SUBJECT_BASES: [&str; 4] = [
 
 /// 发件人恰为系统且主题为 `[RTS] ` + canonical 结算主题时，返回主题里的义务 ID。主题按 ASCII
 /// 不区分大小写比较，UUID 必须是规范小写形式；无前缀主题、玩家自拟的同名主题与其他系统退信
-/// 都返回 `None`。
+/// 都返回 `None`。寄售主题（`Consignment ...`，见 `consignment_source`）的基名不在四个拍卖基名内，
+/// 同样返回 `None`，由寄售识别函数另行认证。
 pub fn system_returned_settlement_obligation_id(sender: &str, subject: &str) -> Option<Uuid> {
     if sender != SYSTEM_RETURN_SENDER {
         return None;
@@ -49,4 +50,38 @@ pub fn system_return_matches_obligation(
     sender == SYSTEM_RETURN_SENDER
         && canonical_settlement_fulfillment_subject(kind, SettlementId::from_uuid(obligation_id))
             .is_some_and(|canonical| subject.eq_ignore_ascii_case(&format!("[RTS] {canonical}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_domain::SettlementId;
+    use uuid::Uuid;
+
+    use super::{
+        SETTLEMENT_SUBJECT_BASES, SYSTEM_RETURN_SENDER, system_returned_settlement_obligation_id,
+    };
+    use crate::ports::settlement::returns::consignment_source::{
+        ConsignmentSubjectKind, canonical_consignment_subject,
+    };
+
+    /// 寄售主题基名与拍卖四个基名不相交，拍卖识别函数对任何寄售主题返回 `None`：
+    /// 寄售退件不会被拍卖 owner 当作“本地不存在的退款”（不变量 6：来源失败关闭）。
+    #[test]
+    fn consignment_subjects_are_disjoint_from_auction_and_unrecognized() {
+        let obligation = SettlementId::from_uuid(Uuid::from_u128(7));
+        for kind in ConsignmentSubjectKind::ALL {
+            let base = kind.base().to_ascii_lowercase();
+            assert!(base.starts_with("consignment "), "{base}");
+            assert!(!SETTLEMENT_SUBJECT_BASES.contains(&base.as_str()), "{base}");
+            let subject = canonical_consignment_subject(kind, obligation);
+            assert!(
+                system_returned_settlement_obligation_id(
+                    SYSTEM_RETURN_SENDER,
+                    &format!("[RTS] {subject}")
+                )
+                .is_none(),
+                "{subject}"
+            );
+        }
+    }
 }

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use auction_domain::UserId;
 use auction_domain::consignment::deposit::{
     EnvelopeObservation, EnvelopeRoute, LockedEnvelopeFacts, PendingReason, SenderIdentity,
-    decide_envelope,
+    TrustedConsignmentRts, decide_envelope_with_origin,
 };
 use auction_domain::consignment::{
     EnvelopeCapabilities, LegacyAuctionOwner, OriginalMailKey, ReservationBinding,
@@ -137,6 +137,19 @@ impl ConsignmentMailService {
         &self,
         input: ConsignmentMailInput<'_>,
     ) -> Result<ConsignmentMailPlan, ConsignmentError> {
+        self.plan_with_origin(input, None).await
+    }
+
+    /// 带寄售来源的纯分类：`origin` 是 poll 预读按 RTS 线索定位的原轮
+    /// （[`EnvelopePreflight::consignment_rts`](crate::ports::consignment::EnvelopePreflight::consignment_rts)）。
+    ///
+    /// 来源只用于定位：只有领域判为“疑似系统 RTS”隔离时才改交退件接管，接管写端在锁内按持久派发事实
+    /// 复判，复判不成立仍整封隔离（不变量 6）。没有来源时与 [`Self::plan`] 逐字一致。
+    pub async fn plan_with_origin(
+        &self,
+        input: ConsignmentMailInput<'_>,
+        origin: Option<TrustedConsignmentRts>,
+    ) -> Result<ConsignmentMailPlan, ConsignmentError> {
         let ConsignmentMailInput {
             message,
             mail_key,
@@ -202,13 +215,13 @@ impl ConsignmentMailService {
             already_decided: false,
             now,
         };
-        match decide_envelope(&facts) {
+        match decide_envelope_with_origin(&facts, origin) {
             EnvelopeRoute::LegacyAuction(owner) => Ok(ConsignmentMailPlan::NotApplicable(
                 ConsignmentNotApplicable::LegacyAuctionOwner(owner),
             )),
             EnvelopeRoute::Pending(reason) => Ok(ConsignmentMailPlan::Pending(reason)),
             EnvelopeRoute::Consignment(_) => {
-                let command = DepositCommandService::prepare_decide_envelope(facts)?
+                let command = DepositCommandService::prepare_decide_envelope(facts, origin)?
                     .ok_or(ConsignmentError::Unavailable)?;
                 Ok(ConsignmentMailPlan::First(Box::new(command)))
             }

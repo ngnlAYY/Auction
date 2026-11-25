@@ -26,6 +26,7 @@ pub enum NotificationKind {
     AuctionSellerSummary,
     IsekaiSeasonReminder,
     ConsignmentSeasonNotice,
+    ConsignmentPaymentReminder,
     UserAssetsRejected,
     SettlementWinnerEquipmentCod,
     SettlementPaymentCarrier,
@@ -40,7 +41,7 @@ pub enum NotificationKind {
 
 impl NotificationKind {
     /// 零初始化与闭集断言使用的稳定顺序；顺序与判别值一致。
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 23] = [
         Self::RegisterKey,
         Self::RegisterResult,
         Self::RebindResult,
@@ -53,6 +54,7 @@ impl NotificationKind {
         Self::AuctionSellerSummary,
         Self::IsekaiSeasonReminder,
         Self::ConsignmentSeasonNotice,
+        Self::ConsignmentPaymentReminder,
         Self::UserAssetsRejected,
         Self::SettlementWinnerEquipmentCod,
         Self::SettlementPaymentCarrier,
@@ -80,6 +82,7 @@ impl NotificationKind {
             Self::AuctionSellerSummary => "auction_seller_summary",
             Self::IsekaiSeasonReminder => "isekai_season_reminder",
             Self::ConsignmentSeasonNotice => "consignment_season_notice",
+            Self::ConsignmentPaymentReminder => "consignment_payment_reminder",
             Self::UserAssetsRejected => "user_assets_rejected",
             Self::SettlementWinnerEquipmentCod => "settlement_winner_equipment_cod",
             Self::SettlementPaymentCarrier => "settlement_payment_carrier",
@@ -134,6 +137,7 @@ impl NotificationKind {
             "auction_seller_summary" => Self::AuctionSellerSummary,
             "isekai_season_reminder" => Self::IsekaiSeasonReminder,
             "consignment_season_notice" => Self::ConsignmentSeasonNotice,
+            "consignment_payment_reminder" => Self::ConsignmentPaymentReminder,
             "user_assets_rejected" => Self::UserAssetsRejected,
             "settlement_winner_equipment_cod" => Self::SettlementWinnerEquipmentCod,
             "settlement_payment_carrier" => Self::SettlementPaymentCarrier,

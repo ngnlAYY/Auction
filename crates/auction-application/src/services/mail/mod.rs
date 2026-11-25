@@ -13,8 +13,8 @@ pub use maintenance::{
     DispositionWorkClaim, DispositionWorkStore, MailboxMaintenanceReport,
     MailboxMaintenanceService, PreparedDisposition, QuarantineMailLocator, QuarantineRecheckClaim,
     QuarantineRecheckReadError, QuarantineRecheckReader, QuarantineRecheckRound,
-    QuarantineRecheckService, QuarantineRecheckStore, QuarantineReobservation,
-    SignedConsignmentProof, disposition_proof_observation_id,
+    QuarantineRecheckService, QuarantineRecheckStore, QuarantineReobservation, ReturnTakeClaim,
+    ReturnTakeLease, ReturnTakeWorkStore, SignedConsignmentProof, disposition_proof_observation_id,
 };
 pub use processing::{
     ConsignmentIngressOutcome, ConsignmentIngressRequest, ConsignmentIngressService,

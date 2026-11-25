@@ -9,6 +9,7 @@ use auction_domain::UserId;
 use auction_domain::consignment::OriginalMailKey;
 use auction_domain::consignment::deposit::{
     EnvelopeCapabilities, EnvelopeObservation, LegacyReturnEvidence, ReservationBinding,
+    TrustedConsignmentRts,
 };
 use auction_time::Timestamp;
 use uuid::Uuid;
@@ -38,6 +39,19 @@ pub struct EnvelopePreflight {
     pub now: Timestamp,
     /// 全部预约共享的季窗口；不一致或缺失时为空。
     pub season_window_id: Option<Uuid>,
+    /// 系统 RTS 按定位线索唯一指认的寄售原轮；只用于定位与取锁，接管写端在锁内按持久派发事实复判。
+    pub consignment_rts: Option<TrustedConsignmentRts>,
+}
+
+/// 系统 RTS 的寄售来源定位线索：主题证明的原义务与正文末行的派发引用原文。
+///
+/// 锁外线索，不是授权：存储只用它在派发轮里唯一定位原轮，读不出或不唯一就没有来源（整封隔离）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsignmentRtsLocator {
+    /// `[RTS] ` + 寄售规范主题里的义务 UUID。
+    pub obligation_id: Uuid,
+    /// RTS 正文末行的派发引用原文（寄售轮 ID）；缺失时只在该义务恰有一轮时定位。
+    pub dispatch_reference: Option<String>,
 }
 
 /// 首次观察在本事务内写入所需的原始字段。
@@ -108,11 +122,14 @@ pub struct PollEnvelopeWrite {
 /// 寄售 poll 的存储端口。
 pub trait PollEnvelopeStore: Send + Sync {
     /// 锁外预读卖家、预约、已有决定、会话与能力；任何不一致都失败关闭。
+    ///
+    /// `rts` 是系统 RTS 的寄售来源线索；存储据此定位原轮写进 [`EnvelopePreflight::consignment_rts`]。
     fn load_envelope_preflight(
         &self,
         key: OriginalMailKey,
         observation: EnvelopeObservation,
         sender: Option<String>,
+        rts: Option<ConsignmentRtsLocator>,
     ) -> ConsignmentFuture<'_, EnvelopePreflight>;
 
     /// 同一顶层事务写观察、首次决定、回执与工作，随后删除待读前缀、推进游标并释放租约。

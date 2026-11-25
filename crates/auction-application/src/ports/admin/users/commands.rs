@@ -8,9 +8,7 @@ use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
 
-use super::model::{
-    AdminUser, AdminUserStatus, RECOVERY_BUYER_BLACKLIST_ACTOR, is_recovery_buyer_blacklist_reason,
-};
+use super::model::{AdminUser, AdminUserStatus, is_recovery_blacklist_identity};
 use crate::ports::core::RequestHash;
 use crate::ports::mail::user::{MailLoginKey, MailLoginKeyEnvelope};
 
@@ -37,8 +35,7 @@ impl RecoveryBuyerBlacklistCommand {
             && !self.recovery_id.is_nil()
             && !self.action_id.is_nil()
             && !self.buyer_user_id.is_nil()
-            && is_recovery_buyer_blacklist_reason(&self.public_reason)
-            && self.actor_id == RECOVERY_BUYER_BLACKLIST_ACTOR
+            && is_recovery_blacklist_identity(&self.public_reason, &self.actor_id)
             && super::validation::valid_time(self.occurred_at)
     }
 }
@@ -65,8 +62,7 @@ impl RecoveryBuyerBlacklistResult {
             && !self.buyer_user_id.is_nil()
             && self.user.id == self.buyer_user_id
             && self.user.status == AdminUserStatus::Blacklisted
-            && is_recovery_buyer_blacklist_reason(&self.public_reason)
-            && self.actor_id == RECOVERY_BUYER_BLACKLIST_ACTOR
+            && is_recovery_blacklist_identity(&self.public_reason, &self.actor_id)
             && super::validation::valid_time(self.occurred_at)
             && self.user.validate()
     }

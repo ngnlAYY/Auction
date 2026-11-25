@@ -2,6 +2,7 @@
 
 pub(crate) mod claim_validation;
 pub(crate) mod commands;
+pub(crate) mod consignment_funding;
 pub(crate) mod equipment_loss;
 pub(crate) mod evidence;
 pub(crate) mod fulfillment;
@@ -20,6 +21,7 @@ pub use commands::{
     SettlementTransaction, SettlementTransactionError, SettlementTransactionFailure,
     SettlementTransactionRunner,
 };
+pub use consignment_funding::*;
 pub use equipment_loss::*;
 pub use evidence::*;
 pub use fulfillment::{

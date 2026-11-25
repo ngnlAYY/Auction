@@ -100,6 +100,28 @@ impl WithdrawDepositReceipt {
         }
     }
 
+    /// 直接撤回已被接受：合同与装备已绑定，挂单进入 `withdrawal_pending`，无意愿 ID（第 7 期）。
+    pub const fn withdrawal_accepted(
+        command_id: CommandId,
+        listing_id: Uuid,
+        listing_version: ListingVersion,
+        contract_id: Uuid,
+        equipment_id: Uuid,
+    ) -> Self {
+        Self {
+            schema_version: DEPOSIT_SCHEMA_VERSION,
+            operation: DepositOperation::Withdraw,
+            disposition: ReceiptDisposition::WithdrawalAccepted,
+            command_id,
+            listing_id,
+            listing_version,
+            state: ListingState::WithdrawalPending,
+            intent_id: None,
+            contract_id: Some(contract_id),
+            equipment_id: Some(equipment_id),
+        }
+    }
+
     /// 校验回执形状。
     pub fn validate_shape(&self) -> Result<(), auction_domain::consignment::deposit::DepositError> {
         use auction_domain::consignment::deposit::DepositError;
@@ -127,6 +149,15 @@ impl WithdrawDepositReceipt {
                     || self.intent_id.is_some()
                     || self.contract_id.is_some()
                     || self.equipment_id.is_some()
+                {
+                    return Err(DepositError::InvalidRequest);
+                }
+            }
+            ReceiptDisposition::WithdrawalAccepted => {
+                if self.state != ListingState::WithdrawalPending
+                    || self.intent_id.is_some()
+                    || self.contract_id.is_none()
+                    || self.equipment_id.is_none()
                 {
                     return Err(DepositError::InvalidRequest);
                 }
@@ -304,4 +335,64 @@ pub trait CustodyControlStore: Send + Sync {
         listing_id: Uuid,
         request_hash: RequestHash,
     ) -> ConsignmentFuture<'_, Option<OperationsHoldReceipt>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_domain::CommandId;
+    use auction_domain::consignment::{ListingState, ListingVersion};
+    use uuid::Uuid;
+
+    use super::{WithdrawDepositReceipt, WithdrawDisposition};
+    use crate::ports::consignment::deposit::commands::ReceiptDisposition;
+
+    fn id(value: u128) -> Uuid {
+        Uuid::from_u128(value)
+    }
+
+    fn accepted() -> WithdrawDepositReceipt {
+        WithdrawDepositReceipt::withdrawal_accepted(
+            CommandId::from_uuid(id(1)),
+            id(2),
+            ListingVersion::new(3).unwrap(),
+            id(4),
+            id(5),
+        )
+    }
+
+    /// `withdrawal_accepted` 必带合同与装备、必须是 `withdrawal_pending`、不带意愿 ID。
+    #[test]
+    fn withdrawal_accepted_shape_accepts_the_contract_form_only() {
+        assert!(accepted().validate_shape().is_ok());
+
+        let mut receipt = accepted();
+        receipt.contract_id = None;
+        assert!(receipt.validate_shape().is_err());
+        let mut receipt = accepted();
+        receipt.equipment_id = None;
+        assert!(receipt.validate_shape().is_err());
+        let mut receipt = accepted();
+        receipt.intent_id = Some(id(6));
+        assert!(receipt.validate_shape().is_err());
+        let mut receipt = accepted();
+        receipt.state = ListingState::Closed;
+        assert!(receipt.validate_shape().is_err());
+    }
+
+    /// 第 4 期两个处置仍不允许带合同或装备，避免旧回执被新字段污染。
+    #[test]
+    fn legacy_withdraw_dispositions_still_reject_contract_fields() {
+        let mut requested = WithdrawDepositReceipt::new(
+            CommandId::from_uuid(id(1)),
+            WithdrawDisposition::WithdrawalRequested,
+            id(2),
+            ListingVersion::new(3).unwrap(),
+            ListingState::DepositAccepted,
+            Some(id(6)),
+        );
+        assert!(requested.validate_shape().is_ok());
+        requested.contract_id = Some(id(4));
+        assert!(requested.validate_shape().is_err());
+        assert_eq!(accepted().disposition, ReceiptDisposition::WithdrawalAccepted);
+    }
 }

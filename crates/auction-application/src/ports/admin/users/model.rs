@@ -1,5 +1,6 @@
 //! Admin Users owner 的安全投影、列表请求和分页模型。
 
+use auction_domain::consignment::recovery::sanction_rule_from_reason_code;
 use auction_domain::{valid_optional_text, valid_text};
 use auction_time::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -41,6 +42,21 @@ pub fn is_recovery_buyer_blacklist_reason(value: &str) -> bool {
 }
 /// recovery 代 Users owner 写入黑名单时使用的固定 actor。
 pub const RECOVERY_BUYER_BLACKLIST_ACTOR: &str = "auction-recovery";
+/// 寄售处罚代 Users owner 写入黑名单时使用的固定 actor。
+pub const RECOVERY_BUYER_BLACKLIST_CONSIGNMENT_ACTOR: &str = "consignment-sanction";
+
+/// 只接受寄售处罚的闭集理由码（决定 18）；其他文本一律拒绝。
+fn is_consignment_sanction_reason(value: &str) -> bool {
+    sanction_rule_from_reason_code(value).is_some()
+}
+
+/// 理由与 actor 必须成对：拍卖理由配 `auction-recovery`，寄售理由码配 `consignment-sanction`。
+/// 两类互不混用，拍卖侧判定行为不变。
+pub(super) fn is_recovery_blacklist_identity(reason: &str, actor: &str) -> bool {
+    (is_recovery_buyer_blacklist_reason(reason) && actor == RECOVERY_BUYER_BLACKLIST_ACTOR)
+        || (is_consignment_sanction_reason(reason)
+            && actor == RECOVERY_BUYER_BLACKLIST_CONSIGNMENT_ACTOR)
+}
 /// 写入 settlement recovery action 的黑名单完成证明类型。
 pub const RECOVERY_BUYER_BLACKLIST_PROOF_KIND: &str = "users_recovery_buyer_blacklisted";
 

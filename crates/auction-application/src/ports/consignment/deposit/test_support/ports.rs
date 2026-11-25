@@ -318,6 +318,10 @@ impl EnvelopeStore for FakeDepositStore {
                         receipt.listing_changes = changes;
                         receipt
                     }
+                    // 退件接管走专用端口，本假实现不建模。
+                    EnvelopeDecision::AcquireReturn(_) => {
+                        return Err(DepositBusinessRejection::ActionNotAllowed.into());
+                    }
                     EnvelopeDecision::Return(_) => EnvelopeReceipt::new(
                         command.command_id,
                         EnvelopeDisposition::ReturnDecided,
