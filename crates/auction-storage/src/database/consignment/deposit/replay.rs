@@ -5,7 +5,8 @@
 //! 4K 的 v2 回执解码，不写任何行。
 
 use auction_application::consignment::{
-    ConsignmentError, DepositActor, DepositOperation, OperationsHoldReceipt, ReservationReceipt,
+    ConsignmentError, DepositActor, DepositOperation, OperationsHoldReceipt, RelistReceipt,
+    ReservationReceipt,
 };
 use auction_application::core::RequestHash;
 use auction_domain::UserId;
@@ -60,6 +61,31 @@ pub(super) async fn replay_set_operations_hold(
         command_id,
         DepositActor::Admin(admin_actor.to_owned()),
         DepositOperation::AdminDelist,
+        DepositTarget::Listing(listing_id),
+        request_hash,
+    )
+    .await
+}
+
+/// 按原命令重放一条卖家重列回执（7C-3）；首次是确定拒绝时返回同一拒绝。
+pub(crate) async fn replay_relist(
+    store: &DatabaseStore,
+    seller_user_id: UserId,
+    command_id: Uuid,
+    listing_id: Uuid,
+    request_hash: RequestHash,
+) -> Result<Option<RelistReceipt>, ConsignmentError> {
+    if command_id.is_nil() {
+        return Err(ConsignmentError::InvalidCommandId);
+    }
+    if listing_id.is_nil() {
+        return Err(ConsignmentError::InvalidListingId);
+    }
+    replay(
+        store,
+        command_id,
+        DepositActor::PublicUser(seller_user_id),
+        DepositOperation::Relist,
         DepositTarget::Listing(listing_id),
         request_hash,
     )
@@ -140,7 +166,8 @@ fn same_target(target: &DepositTarget, row: &PgRow) -> Result<bool, WriteError> 
         | DepositTarget::Reservation(id)
         | DepositTarget::Quarantine(id)
         | DepositTarget::FinalDecision(id)
-        | DepositTarget::OriginalAttempt(id) => {
+        | DepositTarget::OriginalAttempt(id)
+        | DepositTarget::Position(id) => {
             row.try_get::<Option<&str>, _>("target_kind")? == Some(target.kind())
                 && row.try_get::<Option<Uuid>, _>("target_id")? == Some(*id)
         }

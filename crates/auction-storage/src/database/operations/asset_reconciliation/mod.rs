@@ -22,6 +22,8 @@ use uuid::Uuid;
 use crate::database::DatabaseStore;
 use crate::database::operations::audit_health::AuditWriteResult as _;
 
+mod consignment;
+mod consignment_solvency;
 mod queries;
 mod solvency;
 #[cfg(test)]

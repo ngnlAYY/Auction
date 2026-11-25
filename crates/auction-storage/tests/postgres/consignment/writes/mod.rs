@@ -5,4 +5,5 @@ mod history;
 mod lookup;
 mod management;
 mod register;
+mod sanction_blacklist;
 mod termination;

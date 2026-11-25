@@ -51,6 +51,7 @@ pub async fn scan_admin_command_key_envelopes(
                 seller_user_id: None,
                 purpose: None,
                 aad_owner: None,
+                challenge_aad: None,
                 ciphertext: row.try_get("ciphertext").map_err(read_failed)?,
                 nonce: row.try_get("nonce").map_err(read_failed)?,
                 encryption_key_id: row.try_get("encryption_key_id").map_err(read_failed)?,

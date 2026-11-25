@@ -5,6 +5,7 @@
 
 mod account;
 mod classification;
+pub(crate) mod consignment;
 mod deliveries;
 pub(crate) mod diagnostics;
 mod ledger;

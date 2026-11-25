@@ -100,7 +100,7 @@ pub(super) async fn allocation(
         r#"INSERT INTO public.settlement_funding_allocations
                (id, uid, purpose, lot_id, obligation_id, amount)
            VALUES ($1, $2, $3, $4, $5, 0)
-           ON CONFLICT (uid,purpose,lot_id) DO NOTHING"#,
+           ON CONFLICT (uid,purpose,lot_id,consignment_contract_id) DO NOTHING"#,
     )
     .bind(id)
     .bind(uid)
@@ -117,6 +117,7 @@ pub(super) async fn allocation(
            WHERE uid=$1
              AND purpose=$2
              AND lot_id IS NOT DISTINCT FROM $3
+             AND consignment_contract_id IS NULL
            FOR UPDATE"#,
     )
     .bind(uid)

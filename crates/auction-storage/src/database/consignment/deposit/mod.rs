@@ -9,22 +9,23 @@ mod items;
 mod outcome;
 pub(crate) mod poll;
 pub(crate) mod primitives;
-mod replay;
+pub(crate) mod replay;
 pub(crate) mod repository;
 mod reservations;
+mod season_end;
 mod season_task;
 mod seasons;
+mod take_season_close;
 #[cfg(feature = "test-db")]
 pub mod test_access;
 
-#[allow(unused_imports, reason = "4C 在同一 crate 内接入取得后挂牌原语")]
 pub(crate) use crate::database::consignment::custody::apply_take_custody_in_tx;
 pub use auction_application::consignment::{
     ReservationSecretAad, ReservationSecretCrypto, ReservationSecretCryptoError,
     SealedReservationSecret,
 };
-#[allow(unused_imports, reason = "4C 在同一 crate 内使用逐件返回类型")]
+#[allow(unused_imports, reason = "尚无 deposit 之外的调用方；待取得后挂牌（4C）车道接线")]
 pub(crate) use items::AcceptedDepositItem;
-#[allow(unused_imports, reason = "4C 在同一 crate 内接入这些事务内原语")]
 pub(crate) use items::accept_items_in_tx;
+pub(crate) use outcome::decode_rejection;
 pub use repository::{DepositRepository, DepositSettings};

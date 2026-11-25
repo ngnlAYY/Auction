@@ -286,8 +286,8 @@ pub async fn fund_collected_payment(
     )
     .into();
     let command = FundingMutation { command_id: command.command_id, request_digest: digest };
-    let lot: Uuid = sqlx::query_scalar(
-        r#"SELECT lot_id
+    let (lot, contract): (Option<Uuid>, Option<Uuid>) = sqlx::query_as(
+        r#"SELECT lot_id, contract_id
            FROM public.settlement_obligations
            WHERE id=$1
              AND obligation_kind IN ('winner_equipment_cod','winner_payment_carrier_cod')"#,
@@ -299,7 +299,39 @@ pub async fn fund_collected_payment(
     .map_err(|error| {
         diagnostics::reject("collected_payment_lot_query_failed", "payment_mutation", error)
     })?;
+    // 寄售义务不经本入口（只经寄售派发轮），显式失败关闭，保护不变量 6。
+    let lot = match (lot, contract) {
+        (Some(lot), None) => lot,
+        _ => {
+            return Err(diagnostics::reject(
+                "collected_payment_consignment_obligation",
+                "payment_mutation",
+                FundingError::Unproven,
+            ));
+        }
+    };
     fund_lot(tx, account, &command, lot, Some(receipt), false).await
+}
+
+/// 寄售义务不经本模块的拍卖资金入口（只经寄售派发轮），显式失败关闭，保护不变量 6。
+///
+/// 只读探针、不加锁；拍卖义务（`contract_id IS NULL`）与不存在的义务 ID 都放行，后续查询照旧判定。
+async fn reject_consignment_obligation(
+    tx: &mut Transaction<'_, Postgres>,
+    obligation_id: Uuid,
+) -> Result<(), FundingError> {
+    let consignment: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM public.settlement_obligations
+                       WHERE id=$1 AND contract_id IS NOT NULL)",
+    )
+    .bind(obligation_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(storage)?;
+    if consignment {
+        return Err(FundingError::Unproven);
+    }
+    Ok(())
 }
 
 /// 原seller用途转换，不新增收入、不自动再投资。
@@ -312,6 +344,7 @@ pub async fn retain_funded_seller(
     if replay(tx, account, command, "retain", seller_obligation_id).await? {
         return Ok(());
     }
+    reject_consignment_obligation(tx, seller_obligation_id).await?;
     let row = sqlx::query(
         r#"SELECT a.id,
                   a.lot_id,
@@ -363,6 +396,7 @@ pub async fn refund_funded_purchase(
     if replay(tx, account, command, action, refund_obligation_id).await? {
         return Ok(());
     }
+    reject_consignment_obligation(tx, refund_obligation_id).await?;
     let row = sqlx::query(concat!(
         r#"SELECT o.lot_id,
                   o.amount,
@@ -453,4 +487,28 @@ pub async fn refund_funded_purchase(
         .await
         .map_err(storage)?;
     complete(tx, account, command, action, refund_obligation_id).await
+}
+
+/// 集成测试入口：锁给定 UID 的资金账户后对付款义务跑一次已收款入账，成功提交、失败回滚，
+/// 与生产调用方同一事务语义；只在 `test-db` 构建。
+#[cfg(feature = "test-db")]
+impl crate::database::DatabaseStore {
+    pub async fn test_fund_collected_payment(
+        &self,
+        uid: &str,
+        command: &FundingMutation,
+        receipt: &FundingCollectedReceipt<'_>,
+    ) -> Result<(), FundingError> {
+        let mut tx = self.pool().begin().await.map_err(storage)?;
+        let account = crate::database::settlement::funding::lock_funding_account(&mut tx, uid)
+            .await?
+            .ok_or(FundingError::Unavailable)?;
+        match fund_collected_payment(&mut tx, &account, command, receipt).await {
+            Ok(()) => tx.commit().await.map_err(storage),
+            Err(error) => {
+                tx.rollback().await.map_err(storage)?;
+                Err(error)
+            }
+        }
+    }
 }

@@ -103,6 +103,28 @@ pub use consignment::deposit::{
     DepositRepository, DepositSettings, ReservationSecretAad, ReservationSecretCrypto,
     ReservationSecretCryptoError, SealedReservationSecret,
 };
+pub use consignment::dispatch::lease::{RoundLease, RoundLeaseRequest};
+pub use consignment::dispatch::{
+    CollectedRoundRepository, DispatchWorkRepository, DownstreamDispatchContentSource,
+    DownstreamDispatchRequest, DownstreamRoundRepository, PreparedDownstreamRound,
+};
+pub use consignment::purchase::{
+    FirstDispatchContent, FirstDispatchContentSource, FirstDispatchRequest, PurchaseRepository,
+    WithdrawalDispatchRequest,
+};
+pub use consignment::recovery::loss::OpenedLossCase;
+#[cfg(feature = "test-db")]
+pub use consignment::recovery::loss::TestLossProof;
+#[cfg(feature = "test-db")]
+pub use consignment::refusal::test_access::{
+    CycleTransition, RefusalOutcome, ReturnEvidence, ReturnFactSubmission, SanctionRecord,
+    TestAfterLock, test_write_graph_in_conn,
+};
+pub use consignment::rights::{
+    EntitlementDecision, EntitlementRequest, PgRightNoticeStore, PgRightsStore, RetainReason,
+    authorize_entitlement_recipient_in_tx,
+};
+pub use settlement::funding::consignment::preflight::ActiveBotFundingPreflight;
 mod forum;
 mod lot_watch;
 #[cfg(feature = "test-db")]

@@ -15,8 +15,11 @@ use super::{
     persistence::{lock_exact_claim, lock_notice_auction, persist_sending},
     transaction::FenceError,
 };
-use crate::database::TrackedTransaction as Transaction;
+use crate::database::delivery::scheduler::entitlement::{
+    SendBeneficiary, authorize_consignment_send, lock_send_beneficiary,
+};
 use crate::database::settlement::funding;
+use crate::database::{EntitlementDecision, TrackedTransaction as Transaction};
 
 /// 无证据入口在任何业务行锁之前检查保护；None不等于发送授权。
 pub(super) async fn authorize_legacy(
@@ -25,6 +28,14 @@ pub(super) async fn authorize_legacy(
     started_at: Timestamp,
     expectation: Option<&DeliveryPreparedExpectation>,
 ) -> Result<DeliveryFenceOutcome, FenceError> {
+    // 寄售义务只经寄售派发轮起写；无现金证据的旧入口没有受益人判定所需的锁序，显式失败关闭
+    // （不变量 4、6）。非 UUID 的来源不可能是寄售义务，交给原判定。
+    if claim.origin_kind == "settlement"
+        && let Ok(obligation_id) = Uuid::parse_str(&claim.origin_id)
+        && lock_send_beneficiary(tx, obligation_id).await? == SendBeneficiary::Consignment
+    {
+        return Err(FenceError::Rejected);
+    }
     let credential = expectation.map(|expectation| match expectation {
         DeliveryPreparedExpectation::Send(expectation) => {
             (expectation.world_id.as_str(), expectation.credential.as_ref())
@@ -127,6 +138,14 @@ pub(super) async fn authorize(
     } else {
         funding::lock_funding_account(tx, &evidence.identity.authenticated_uid).await?
     };
+    // 授权点锁序：资金账户之后、义务行之前锁寄售受益用户（结算 users 在 obligations 之前），
+    // 锁履约行之后再判定。拍卖义务不取新锁；非 UUID 来源留给下方原有的故障判定。
+    let beneficiary = match Uuid::parse_str(&claim.origin_id) {
+        Ok(obligation_id) if claim.origin_kind == "settlement" => {
+            lock_send_beneficiary(tx, obligation_id).await?
+        }
+        _ => SendBeneficiary::Auction,
+    };
     let protected = funding::funding_requires_authorization(tx).await?;
     lock_notice_auction(tx, claim).await?;
     crate::database::lot_watch::lock_delivery_lot(tx, claim.delivery_id).await?;
@@ -161,6 +180,14 @@ pub(super) async fn authorize(
         .fetch_optional(&mut **tx)
         .await?;
         if exists != Some(id) {
+            return Err(FenceError::Rejected);
+        }
+        // 寄售义务以冻结受益人授权（黑名单不剥夺既有订单权利）；保留权利时零发送、不改状态
+        // （不变量 4、6）。拍卖义务维持原判定。
+        if beneficiary == SendBeneficiary::Consignment
+            && authorize_consignment_send(tx, id, &claim.recipient).await?
+                != EntitlementDecision::Authorized
+        {
             return Err(FenceError::Rejected);
         }
     }

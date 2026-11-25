@@ -101,6 +101,8 @@ pub(super) async fn lifecycle_snapshot(
              LEFT JOIN public.settlement_obligation_fulfillments AS fulfillment
                ON fulfillment.obligation_id = obligation.id
              WHERE boundary.at IS NOT NULL
+               -- 换季欠付只统计拍卖义务；寄售义务没有拍卖来源，不属于该水位。
+               AND obligation.contract_id IS NULL
                -- 未触发的 contingent 退款不是当前欠付；failed/manual_reconcile 仍需人工收口。
                -- 装备损失线下补偿已由不可变处置事实收口，不计入换季欠付。
                AND obligation.business_state <> 'contingent'

@@ -2,7 +2,7 @@
 
 use auction_application::consignment::{
     DEPOSIT_SCHEMA_VERSION, DepositOperation, EnvelopeReceipt, ListingStateChange,
-    ObservationReceipt, ReceiptDisposition, RecheckReceipt, ReleaseReceipt,
+    ObservationReceipt, ReceiptDisposition, RecheckReceipt, ReleaseReceipt, ReturnIntakeReference,
 };
 use auction_domain::CommandId;
 use auction_domain::consignment::deposit::ReleaseKind;
@@ -55,6 +55,13 @@ impl DepositReceipt for EnvelopeReceipt {
                 None => Value::Null,
             },
         );
+        // 接管分支与直接接管的 `return_acquired` 回执同形，字段平铺在正文里。
+        if let Some(intake) = self.return_intake {
+            body.insert("return_intake_id".into(), json!(intake.return_intake_id.to_string()));
+            body.insert("original_round".into(), json!(intake.original_round));
+            body.insert("take_work_id".into(), json!(intake.take_work_id.to_string()));
+            body.insert("take_delivery_id".into(), json!(intake.take_delivery_id.to_string()));
+        }
         finish_body(body)
     }
 
@@ -68,6 +75,10 @@ impl DepositReceipt for EnvelopeReceipt {
             decision_id: Uuid,
             listing_changes: Option<Value>,
             quarantine: Option<Value>,
+            return_intake_id: Option<Uuid>,
+            original_round: Option<u32>,
+            take_work_id: Option<Uuid>,
+            take_delivery_id: Option<Uuid>,
         }
         #[derive(Deserialize)]
         struct Quarantine {
@@ -90,6 +101,26 @@ impl DepositReceipt for EnvelopeReceipt {
                 })
             }
         };
+        let return_intake = match (
+            body.return_intake_id,
+            body.original_round,
+            body.take_work_id,
+            body.take_delivery_id,
+        ) {
+            (None, None, None, None) => None,
+            (
+                Some(return_intake_id),
+                Some(original_round),
+                Some(take_work_id),
+                Some(take_delivery_id),
+            ) => Some(ReturnIntakeReference {
+                return_intake_id,
+                original_round,
+                take_work_id,
+                take_delivery_id,
+            }),
+            _ => return Err(corrupt()),
+        };
         require_status(
             stored,
             &common,
@@ -101,6 +132,7 @@ impl DepositReceipt for EnvelopeReceipt {
                 decision_id: body.decision_id,
                 listing_changes: decode_listing_changes(body.listing_changes)?,
                 quarantine,
+                return_intake,
             },
         )
     }

@@ -383,6 +383,9 @@ async fn postgres_deposit_upgrade_preserves_inflight_auction_mail() {
     .expect("检查入站邮件未加 UID 列");
     assert!(!has_uid);
 
+    // 当前程序只在 schema 迁移到它自身版本后运行（readiness 拒绝落后的 schema），所以先把库迁移到最新
+    // 版本再跑领取：134 之后的迁移同样不得改动旧行，也不得误伤旧来源的 pending Take。
+    postgres_migrate_to(pool, i64::MAX).await.expect("迁移到最新版本");
     let store = database.store().await.expect("运行账号");
     let now = Timestamp::now();
     store.begin_claim_cycle(now, std::time::Duration::from_secs(60)).await.expect("运行领取前清理");

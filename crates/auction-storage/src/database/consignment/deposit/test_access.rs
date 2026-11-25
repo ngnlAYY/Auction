@@ -337,6 +337,7 @@ impl DepositRepository {
                     input.3,
                     now,
                     input.0.settings().max_open_per_user,
+                    input.0.dispatch_content(),
                 )
                 .await?;
                 let previous_version = u64::try_from(previous_version).unwrap_or(u64::MAX);

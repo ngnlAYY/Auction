@@ -2,8 +2,8 @@
 
 use auction_application::consignment::{
     ActiveDepositInstructions, ConsignmentError, ConsignmentFuture, DepositRead, DepositStatus,
-    DepositWorldStatus, DepositWorlds, OwnedDepositInstructions, ReservationSecretAad,
-    SealedReservationSecret,
+    DepositWorldStatus, DepositWorlds, ListingWorld, OwnedDepositInstructions,
+    ReservationSecretAad, SealedReservationSecret,
 };
 use auction_domain::SettlementWorld;
 use auction_domain::consignment::ListingState;
@@ -14,6 +14,7 @@ use crate::database::consignment::deposit::primitives::{
     current_season, mail_readiness, season_state, service_control,
 };
 use crate::database::consignment::deposit::repository::DepositRepository;
+use crate::database::consignment::reads::orders::catalog_v2::{funding_ready, purchase_ready};
 
 impl DepositRead for DepositRepository {
     fn status(&self) -> ConsignmentFuture<'_, DepositStatus> {
@@ -36,10 +37,20 @@ impl DepositRead for DepositRepository {
                 .map_err(WriteError::into_application)?;
             let window =
                 current_season(&mut tx, now).await.map_err(WriteError::into_application)?;
+            let funding = funding_ready(&mut tx).await.map_err(storage)?;
             tx.commit().await.map_err(storage)?;
             let main_ready = main.as_ref().is_some_and(|row| row.fully_ready(now));
             let isekai_ready = isekai.as_ref().is_some_and(|row| row.fully_ready(now));
             let isekai_state = season_state(SettlementWorld::Isekai, window.as_ref(), now);
+            // R5-C10：购买能力可计算；验证器签收清单全为 false 的本期恒为 false。
+            let main_purchase = purchase_ready(
+                ListingWorld::Main,
+                main_ready,
+                auction_domain::consignment::SeasonState::NotSeasonal,
+                funding,
+            );
+            let isekai_purchase =
+                purchase_ready(ListingWorld::Isekai, isekai_ready, isekai_state, funding);
             let registration_ready = admitting && worker_ready;
             let registration_modes = if registration_ready {
                 vec![
@@ -64,18 +75,18 @@ impl DepositRead for DepositRepository {
                 min_price: settings.min_price,
                 max_price: settings.max_price,
                 accepts_mail: main_ready || isekai_ready,
-                purchasable: false,
+                purchasable: main_purchase || isekai_purchase,
                 worlds: DepositWorlds {
                     main: DepositWorldStatus {
                         mail_ready: main_ready,
-                        purchase_ready: false,
+                        purchase_ready: main_purchase,
                         season_state: auction_domain::consignment::SeasonState::NotSeasonal,
                         cutoff_at: None,
                         season_end_at: None,
                     },
                     isekai: DepositWorldStatus {
                         mail_ready: isekai_ready,
-                        purchase_ready: false,
+                        purchase_ready: isekai_purchase,
                         season_state: isekai_state,
                         cutoff_at: window.as_ref().map(|window| window.admission_cutoff_utc),
                         season_end_at: window.as_ref().map(|window| window.end_utc),

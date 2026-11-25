@@ -11,7 +11,6 @@ pub(crate) use auction_application::consignment::MAX_LISTING_LOOKUP_ATTEMPTS;
 pub(crate) const LEASE_GRACE: Duration = Duration::from_secs(5);
 
 /// 本代 Worker 依赖就绪的心跳有效期。
-#[allow(dead_code, reason = "由后续任务 2F 续期心跳时调用")]
 pub(crate) const WORKER_READY_TTL: Duration = Duration::from_secs(30);
 
 /// 按已使用的第 1–5 次尝试选择下次等待。第六次终结，收到 429 时沿用第五档的两小时。

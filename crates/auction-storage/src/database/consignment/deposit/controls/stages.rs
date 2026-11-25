@@ -27,6 +27,9 @@ use crate::database::consignment::commands::DepositWriter;
 use crate::database::consignment::commands::errors::WriteError;
 use crate::database::consignment::commands::ledger::StoredReceipt;
 use crate::database::consignment::eligibility::claims::cancel_active_reservations;
+use crate::database::consignment::recovery::withdrawal::{
+    DirectWithdrawal, direct_withdrawal, position_in_custody,
+};
 
 /// 已存在意愿时不制造新版本的回执映射；其余字段与原回执一致。
 struct UnchangedWithdraw(WithdrawDepositReceipt);
@@ -74,10 +77,12 @@ pub(super) enum WithdrawalChildren {
         command_id: Uuid,
         now: auction_time::Timestamp,
     },
+    /// 直接撤回：合同、挂单与回执已在阶段内同事务写完，没有后续子事实。
+    Direct,
 }
 
 pub(super) async fn withdrawal_stage(
-    _repository: &DepositRepository,
+    repository: &DepositRepository,
     command: &WithdrawDepositCommand,
     mut writer: DepositWriter<'_, '_, '_>,
 ) -> Result<FirstOutcome<WithdrawDepositReceipt, WithdrawalChildren>, WriteError> {
@@ -94,6 +99,35 @@ pub(super) async fn withdrawal_stage(
     match decide_withdrawal_intent(current.snapshot.state) {
         Ok(outcome) => {
             let existing = active_intent(writer.connection(), command.listing_id).await?;
+            // 不变量 2、6：已在库的件不再裸转 `withdrawal_pending`，一律走直接撤回绑定 Withdrawal；
+            // 取得事务里已兑现的意愿（`AlreadyPending` 且有意愿）仍按原重放处理，
+            // 直接撤回已接受而无意愿的件重复撤回则拒绝，不制造第二份意愿或空版本。
+            if position_in_custody(writer.connection(), command.listing_id).await? {
+                match outcome {
+                    WithdrawalIntentOutcome::AlreadyPending if existing.is_none() => {
+                        return reject(writer, DepositBusinessRejection::ActionNotAllowed, now)
+                            .await;
+                    }
+                    WithdrawalIntentOutcome::AlreadyPending => {}
+                    _ => {
+                        let content = repository.dispatch_content();
+                        return match direct_withdrawal(writer, &current, command, now, content)
+                            .await?
+                        {
+                            DirectWithdrawal::Accepted(receipt) => Ok(FirstOutcome::Accepted {
+                                receipt,
+                                children: WithdrawalChildren::Direct,
+                            }),
+                            DirectWithdrawal::Rejected(rejection) => {
+                                Ok(FirstOutcome::Rejected(rejection))
+                            }
+                        };
+                    }
+                }
+            } else if outcome == WithdrawalIntentOutcome::MoveToWithdrawalPending {
+                // 已上架的挂单其 position 必在代管中；否则代管状态未证明，不裸转。
+                return reject(writer, DepositBusinessRejection::CustodyUnproven, now).await;
+            }
             let intent_id = existing.unwrap_or_else(Uuid::new_v4);
             let target_state = match outcome {
                 WithdrawalIntentOutcome::MoveToWithdrawalPending => ListingState::WithdrawalPending,
@@ -213,6 +247,7 @@ pub(super) async fn withdrawal_children(
         WithdrawalChildren::Close { listing_id, command_id, now } => {
             cancel_active_reservations(connection, listing_id, command_id, now).await
         }
+        WithdrawalChildren::Direct => Ok(()),
     }
 }
 

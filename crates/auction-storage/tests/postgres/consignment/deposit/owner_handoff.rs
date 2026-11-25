@@ -43,10 +43,10 @@ enum RecoveryFixture {
     IsekaiEquipmentHandoff,
 }
 
-struct MainReturn {
-    obligation_id: Uuid,
-    delivery_id: Uuid,
-    return_mail_id: Uuid,
+pub(in crate::consignment) struct MainReturn {
+    pub(in crate::consignment) obligation_id: Uuid,
+    pub(in crate::consignment) delivery_id: Uuid,
+    pub(in crate::consignment) return_mail_id: Uuid,
 }
 
 struct RecoveryReturn {
@@ -74,7 +74,7 @@ fn owner_name(owner: LegacyAuctionOwner) -> &'static str {
     }
 }
 
-async fn count(pool: &PgPool, query: &'static str) -> i64 {
+pub(in crate::consignment) async fn count(pool: &PgPool, query: &'static str) -> i64 {
     sqlx::query_scalar(AssertSqlSafe(query.to_owned())).fetch_one(pool).await.expect("读取计数")
 }
 
@@ -159,7 +159,7 @@ async fn seed_seller_payout(pool: &PgPool, sequence: i64) -> MainReturn {
     MainReturn { obligation_id: sale.seller_obligation, delivery_id, return_mail_id }
 }
 
-async fn seed_buyer_refund(pool: &PgPool, sequence: i64) -> MainReturn {
+pub(in crate::consignment) async fn seed_buyer_refund(pool: &PgPool, sequence: i64) -> MainReturn {
     let (minute, settled_at) = settlement_minute();
     let sale = insert_sale(pool, sequence, settled_at, 1).await;
     let delivery_id = insert_sent_fulfillment(
@@ -474,7 +474,7 @@ fn isekai_quarantine_command() -> DecideEnvelopeCommand {
     }
 }
 
-async fn create_quarantine(
+pub(in crate::consignment) async fn create_quarantine(
     database: &TestDatabase,
     repo: &auction_storage::DepositRepository,
     owner: LegacyAuctionOwner,
@@ -546,7 +546,7 @@ async fn create_quarantine(
     (quarantine.quarantine_id, advanced_observation)
 }
 
-async fn release(
+pub(in crate::consignment) async fn release(
     repo: &auction_storage::DepositRepository,
     quarantine_id: Uuid,
     observation_id: Uuid,
@@ -588,7 +588,7 @@ async fn release_retry(
     Err(last_error.expect("至少尝试一次"))
 }
 
-async fn assert_return_case_written(
+pub(in crate::consignment) async fn assert_return_case_written(
     pool: &PgPool,
     fixture: &MainReturn,
     expected_reason: SettlementReturnReason,
@@ -644,7 +644,10 @@ async fn assert_return_case_written(
     );
 }
 
-async fn assert_no_asset_side_effects(pool: &PgPool, before_deliveries: i64) {
+pub(in crate::consignment) async fn assert_no_asset_side_effects(
+    pool: &PgPool,
+    before_deliveries: i64,
+) {
     assert_eq!(count(pool, "SELECT count(*) FROM public.deliveries").await, before_deliveries);
     assert_eq!(count(pool, "SELECT count(*) FROM public.mail_disposition_work").await, 0);
     assert_eq!(count(pool, "SELECT count(*) FROM public.consignment_deposit_items").await, 0);
@@ -1177,6 +1180,137 @@ async fn postgres_resend_without_bound_body_stays_in_original_case() {
         0
     );
     pool.close().await;
+}
+
+/// 退件交接前后必须逐项不变的资产外写与资金计数：投递、发送围栏（POST）、Take/Return 工作与起写、
+/// 补寄派发登记、寄售代管与资金分录。
+const RESEND_ZERO_DELTA: [&str; 8] = [
+    "SELECT count(*) FROM public.deliveries",
+    "SELECT count(*) FROM public.delivery_send_attempts",
+    "SELECT count(*) FROM public.mail_disposition_work",
+    "SELECT count(*) FROM public.mail_disposition_write_starts",
+    "SELECT count(*) FROM public.settlement_fulfillment_dispatches",
+    "SELECT count(*) FROM public.consignment_custody_positions",
+    "SELECT count(*) FROM public.settlement_funding_entries",
+    "SELECT count(*) FROM public.settlement_funding_returns",
+];
+
+async fn resend_zero_delta(pool: &PgPool) -> Vec<i64> {
+    let mut counts = Vec::new();
+    for query in RESEND_ZERO_DELTA {
+        counts.push(count(pool, query).await);
+    }
+    counts
+}
+
+/// 补寄退件带正文摘要（等于该补寄派发发送围栏冻结的摘要）与系统后缀的原收件人 `returned_from`，
+/// 经隔离解除交还拍卖原案件；返回案件的 (状态, 原因, 投递, 派发编号)。断言交接前后资产外写与资金计数不变。
+async fn resend_return_with_body_digest(
+    returned_from: &str,
+) -> (String, String, Option<Uuid>, Option<i32>, Uuid) {
+    let database = TestDatabase::create().await.expect("克隆模板库");
+    let runtime = database.store().await.expect("运行账号");
+    let pool = runtime.postgres_pool();
+    seed_base(pool).await;
+    let (minute, settled_at) = settlement_minute();
+    let sale = insert_sale(pool, 7_500_041, settled_at, 1).await;
+    let reference =
+        SettlementDispatchReference::for_resend(sale.seller_obligation, 2).expect("补寄引用");
+    let sending_at = minute + Duration::minutes(10);
+    insert_resend_delivery(pool, sale.seller_obligation, reference.delivery_id, sending_at).await;
+    // 补寄派发的发送围栏冻结了正文摘要（32 字节 0x5a）与收件人。
+    sqlx::query(
+        "INSERT INTO public.delivery_send_attempts
+            (delivery_id, fencing_version, command_id, request_digest, world_id, sending_at,
+             expectation)
+         VALUES ($1, 1, $2, decode(repeat('93', 32), 'hex'), 'main', $3,
+                 jsonb_build_object('world_id', 'main', 'recipient', 'Recovery seller',
+                     'subject', 'fake', 'body_digest',
+                     (SELECT jsonb_agg(90) FROM generate_series(1, 32)), 'credits', 90,
+                     'cod', 0, 'equipment_ids', '[]'::jsonb, 'credential', 'null'::jsonb))",
+    )
+    .bind(reference.delivery_id)
+    .bind(Uuid::new_v4())
+    .bind(sending_at)
+    .execute(pool)
+    .await
+    .expect("写入补寄发送围栏");
+    let authorizing_case = seed_authorizing_case(pool).await;
+    sqlx::query(
+        "INSERT INTO public.settlement_fulfillment_dispatches
+            (obligation_id, dispatch_no, delivery_id, authorized_by, recorded_at)
+         VALUES ($1, 2, $2, $3, now())",
+    )
+    .bind(sale.seller_obligation)
+    .bind(reference.delivery_id)
+    .bind(authorizing_case)
+    .execute(pool)
+    .await
+    .expect("登记补寄派发");
+    let return_mail_id = insert_mail(
+        pool,
+        "main",
+        MID,
+        minute + Duration::minutes(40),
+        format!("[RTS] Auction seller payout [{}]", sale.seller_obligation),
+        json!({
+            "obligation_id": sale.seller_obligation.to_string(),
+            "credits": 90,
+            "cod": 0,
+            "attachment_ids": [],
+            "returned_from": returned_from,
+            "body_digest": "5a".repeat(32),
+            "dispatch_reference": reference.encode(),
+        }),
+    )
+    .await;
+    let repo = repository(&database).await;
+    let (quarantine_id, observation_id) =
+        create_quarantine(&database, &repo, LegacyAuctionOwner::SellerPayout, false).await;
+    let before = resend_zero_delta(pool).await;
+    let receipt = release(
+        &repo,
+        quarantine_id,
+        observation_id,
+        auction_domain::consignment::deposit::ReleaseKind::AuctionReturnCase,
+        CommandId::from_uuid(Uuid::new_v4()),
+    )
+    .await
+    .expect("交还原案");
+    assert_eq!(receipt.return_mail_id, Some(return_mail_id));
+    // 交接只建原案件：不新增投递、POST、Take/Return、补寄派发或资金分录。
+    assert_eq!(resend_zero_delta(pool).await, before);
+    let (status, reason, delivery_id, dispatch_no): (String, String, Option<Uuid>, Option<i32>) =
+        sqlx::query_as(
+            "SELECT status, reason_code, delivery_id, dispatch_no
+             FROM public.settlement_return_cases WHERE return_mail_id = $1",
+        )
+        .bind(return_mail_id)
+        .fetch_one(pool)
+        .await
+        .expect("读取补寄退件案件");
+    pool.close().await;
+    (status, reason, delivery_id, dispatch_no, reference.delivery_id)
+}
+
+/// 补寄退件的正文摘要在、但系统后缀的原收件人与该派发冻结的收件人不符：正文证明不成立，留在原案件
+/// 隔离（`body_unproven`），不绑定任何派发；正例：同一摘要且原收件人相符（大小写不敏感）才绑定补寄派发。
+/// 两者交接前后资产外写与资金计数均不变。
+///
+/// 保护的不变量：4（退件不触发外写）、6（证明不全时失败关闭）。
+#[tokio::test]
+async fn postgres_resend_digest_with_mismatched_recipient_stays_in_original_case() {
+    let (status, reason, delivery_id, dispatch_no, _) =
+        resend_return_with_body_digest("SomeoneElse").await;
+    assert_eq!(
+        (status.as_str(), reason.as_str(), delivery_id, dispatch_no),
+        ("quarantined", "body_unproven", None, None)
+    );
+
+    let (_, reason, delivery_id, dispatch_no, resend_delivery) =
+        resend_return_with_body_digest("recovery SELLER").await;
+    assert_ne!(reason, "body_unproven");
+    assert_eq!((delivery_id, dispatch_no), (Some(resend_delivery), Some(2)));
 }
 
 async fn preinsert_archived_final(pool: &PgPool) -> Uuid {
@@ -2431,5 +2565,141 @@ async fn postgres_case_handoff_rejects_existing_recovery_facts() {
     assert_eq!(count(pool, "SELECT count(*) FROM public.settlement_return_evidence").await, 0);
     assert_eq!(count(pool, "SELECT count(*) FROM public.settlement_return_cases").await, 0);
     assert_quarantine_active(pool, quarantine_id, 2).await;
+    pool.close().await;
+}
+
+/// 隔离 → 旧 SellerPayout 案件交还的竞争：Admin 与自动复判并发只落一份解除、证据与案件，
+/// 同命令重放不新增事实；交还不产生资产副作用。保护不变量：同一隔离只被解除一次。
+#[tokio::test]
+async fn postgres_seller_payout_release_race_commits_once() {
+    let database = TestDatabase::create().await.expect("克隆模板库");
+    let runtime = database.store().await.expect("运行账号");
+    let pool = runtime.postgres_pool();
+    seed_base(pool).await;
+    let fixture = seed_seller_payout(pool, 7_500_070).await;
+    let repo = repository(&database).await;
+    let (quarantine_id, observation_id) =
+        create_quarantine(&database, &repo, LegacyAuctionOwner::SellerPayout, false).await;
+    let deliveries_before = count(pool, "SELECT count(*) FROM public.deliveries").await;
+    let admin = CommandId::from_uuid(Uuid::new_v4());
+    let automatic = CommandId::from_uuid(Uuid::new_v4());
+    let (admin_result, automatic_result) = tokio::join!(
+        release_retry(&repo, quarantine_id, observation_id, ReleaseKind::AuctionReturnCase, admin),
+        release_retry(
+            &repo,
+            quarantine_id,
+            observation_id,
+            ReleaseKind::AuctionReturnCase,
+            automatic
+        ),
+    );
+    let admin_receipt = admin_result.expect("Admin 解除成功");
+    let automatic_receipt = automatic_result.expect("自动复判得到同一结果");
+    assert_eq!(admin_receipt.release_id, automatic_receipt.release_id);
+    assert_eq!(admin_receipt.decision_id, automatic_receipt.decision_id);
+    assert_eq!(admin_receipt.obligation_id, Some(fixture.obligation_id));
+    assert_eq!(admin_receipt.return_mail_id, Some(fixture.return_mail_id));
+    assert_eq!(count(pool, "SELECT count(*) FROM public.mail_quarantine_releases").await, 1);
+    assert_eq!(count(pool, "SELECT count(*) FROM public.settlement_return_evidence").await, 1);
+    assert_eq!(count(pool, "SELECT count(*) FROM public.settlement_return_cases").await, 1);
+    assert_eq!(count(pool, "SELECT count(*) FROM public.mail_final_dispositions").await, 1);
+    assert_return_case_written(pool, &fixture, SettlementReturnReason::ReturnedAssetsMatch).await;
+    assert_no_asset_side_effects(pool, deliveries_before).await;
+    let replay =
+        release(&repo, quarantine_id, observation_id, ReleaseKind::AuctionReturnCase, admin)
+            .await
+            .expect("同命令重放");
+    assert_eq!(replay.release_id, admin_receipt.release_id);
+    assert_eq!(count(pool, "SELECT count(*) FROM public.mail_quarantine_releases").await, 1);
+    assert_eq!(count(pool, "SELECT count(*) FROM public.settlement_return_cases").await, 1);
+    assert_eq!(count(pool, "SELECT count(*) FROM public.mail_final_dispositions").await, 1);
+    pool.close().await;
+}
+
+/// 旧 SellerPayout 交还遇到冲突最终决定时整笔回滚、零残留，履约保持 enqueued；
+/// 冲突消除后用新命令重试可一次提交。保护不变量：失败的解除不留下半个案件。
+#[tokio::test]
+async fn postgres_seller_payout_release_rolls_back_then_retry_commits() {
+    let database = TestDatabase::create().await.expect("克隆模板库");
+    let runtime = database.store().await.expect("运行账号");
+    let pool = runtime.postgres_pool();
+    seed_base(pool).await;
+    let fixture = seed_seller_payout(pool, 7_500_071).await;
+    let repo = repository(&database).await;
+    let (quarantine_id, observation_id) =
+        create_quarantine(&database, &repo, LegacyAuctionOwner::SellerPayout, false).await;
+    let deliveries_before = count(pool, "SELECT count(*) FROM public.deliveries").await;
+    // 故障注入：测试自建的触发器在案件写入时抛错（解除、决定与证据已先写入同一事务），
+    // 之后可原样 DROP；生产约束与触发器不受影响。
+    let maintenance = database.maintenance_store().await.expect("维护账号");
+    let owner_pool = maintenance.postgres_pool();
+    sqlx::query(
+        "CREATE FUNCTION public.pit2_inject_case_failure() RETURNS trigger LANGUAGE plpgsql AS
+         $$ BEGIN RAISE EXCEPTION 'pit2 injected failure'; END $$",
+    )
+    .execute(owner_pool)
+    .await
+    .expect("创建注入函数");
+    sqlx::query(
+        "CREATE TRIGGER pit2_inject_case_failure BEFORE INSERT ON public.settlement_return_cases
+         FOR EACH ROW EXECUTE FUNCTION public.pit2_inject_case_failure()",
+    )
+    .execute(owner_pool)
+    .await
+    .expect("创建注入触发器");
+    let error = release(
+        &repo,
+        quarantine_id,
+        observation_id,
+        ReleaseKind::AuctionReturnCase,
+        CommandId::from_uuid(Uuid::new_v4()),
+    )
+    .await
+    .expect_err("案件写入失败必须让整笔解除回滚");
+    assert!(matches!(error, auction_application::consignment::ConsignmentError::Unavailable));
+    assert_quarantine_active(pool, quarantine_id, 2).await;
+    assert_eq!(count(pool, "SELECT count(*) FROM public.mail_final_dispositions").await, 0);
+    assert_eq!(count(pool, "SELECT count(*) FROM public.mail_quarantine_releases").await, 0);
+    assert_eq!(count(pool, "SELECT count(*) FROM public.settlement_return_evidence").await, 0);
+    assert_eq!(count(pool, "SELECT count(*) FROM public.settlement_return_cases").await, 0);
+    assert_eq!(
+        count(
+            pool,
+            "SELECT count(*) FROM public.audit_records
+             WHERE action = 'auction.fulfillment.manual_reconcile'"
+        )
+        .await,
+        0
+    );
+    let fulfillment: (String, i64) = sqlx::query_as(
+        "SELECT execution_state, state_version
+         FROM public.settlement_obligation_fulfillments WHERE obligation_id = $1",
+    )
+    .bind(fixture.obligation_id)
+    .fetch_one(pool)
+    .await
+    .expect("读取回滚后履约");
+    assert_eq!(fulfillment, ("enqueued".to_owned(), 3));
+    assert_no_asset_side_effects(pool, deliveries_before).await;
+
+    // 撤掉注入后用新命令重试：必须一次提交。
+    sqlx::query("DROP TRIGGER pit2_inject_case_failure ON public.settlement_return_cases")
+        .execute(owner_pool)
+        .await
+        .expect("撤掉注入触发器");
+    let receipt = release(
+        &repo,
+        quarantine_id,
+        observation_id,
+        ReleaseKind::AuctionReturnCase,
+        CommandId::from_uuid(Uuid::new_v4()),
+    )
+    .await
+    .expect("故障消除后重试提交");
+    assert_eq!(receipt.return_mail_id, Some(fixture.return_mail_id));
+    assert_eq!(count(pool, "SELECT count(*) FROM public.mail_quarantine_releases").await, 1);
+    assert_eq!(count(pool, "SELECT count(*) FROM public.settlement_return_cases").await, 1);
+    assert_return_case_written(pool, &fixture, SettlementReturnReason::ReturnedAssetsMatch).await;
+    assert_no_asset_side_effects(pool, deliveries_before).await;
     pool.close().await;
 }

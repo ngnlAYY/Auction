@@ -330,13 +330,16 @@ pub(crate) fn decision_kind(decision: &EnvelopeDecision) -> &'static str {
         EnvelopeDecision::Return(_) => "return_decided",
         EnvelopeDecision::ArchiveEmpty => "archived_empty",
         EnvelopeDecision::Quarantine(_) => "quarantined",
+        EnvelopeDecision::AcquireReturn(_) => "acquire_return",
     }
 }
 
 /// 非隔离终局必须有工作或显式零工作。
 pub(crate) fn work_action(decision: &EnvelopeDecision) -> Option<DispositionAction> {
     match decision {
-        EnvelopeDecision::Accept(_) => Some(DispositionAction::Take),
+        EnvelopeDecision::Accept(_) | EnvelopeDecision::AcquireReturn(_) => {
+            Some(DispositionAction::Take)
+        }
         EnvelopeDecision::Return(_) => Some(DispositionAction::Return),
         EnvelopeDecision::ArchiveEmpty | EnvelopeDecision::Quarantine(_) => None,
     }

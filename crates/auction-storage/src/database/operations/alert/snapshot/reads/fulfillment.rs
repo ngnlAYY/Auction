@@ -117,6 +117,10 @@ pub(in crate::database::operations::alert::snapshot) const FULFILLMENT_SNAPSHOT:
           ON returned.delivery_id = fulfillment.delivery_id
         -- 转成数组表达式：`= ANY (子查询)` 会按集合比较，数组需显式标注类型。
         WHERE obligation.id = ANY ((SELECT ids FROM live_ids)::uuid[])
+          -- 寄售义务没有拍卖、lot 与恢复记录，按拍卖口径会被误计为积压、阻塞或等待付款，
+          -- 只放行履约已 failed/manual_reconcile 的行：需要人工的状态不能对运营不可见。
+          AND (obligation.contract_id IS NULL
+               OR fulfillment.execution_state IN ('failed', 'manual_reconcile'))
      ), grouped AS (
         SELECT classified.*,
                (business_state = 'ready' AND sent_send

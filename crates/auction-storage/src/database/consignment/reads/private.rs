@@ -21,11 +21,11 @@ use crate::database::consignment::reads::projection::{
 };
 use crate::database::consignment::reads::{page_order, snapshot, storage_error, unavailable};
 
-const ADMIN_COLUMNS: &str = ", l.seller_user_id, s.username AS seller_name,
+pub(super) const ADMIN_COLUMNS: &str = ", l.seller_user_id, s.username AS seller_name,
     a.metadata->>'admin_delist_reason' AS admin_delist_reason";
 
 // 只从实际终结事件指向的成功审计读取说明。拒绝审计与其他挂单不能覆盖它。
-const ADMIN_JOIN: &str = " LEFT JOIN LATERAL (
+pub(super) const ADMIN_JOIN: &str = " LEFT JOIN LATERAL (
     SELECT a.metadata FROM public.audit_records a
     JOIN public.consignment_events e ON a.metadata->>'command_id' = e.command_id::text
     WHERE l.reason_code = 'admin_delisted' AND e.listing_id = l.id
@@ -78,14 +78,7 @@ fn listing_query(
     if page_rows && admin {
         sql.push(ADMIN_COLUMNS);
     }
-    // 可表达性谓词读取有效原因，计数查询也需要这些连接。
-    sql.push(" FROM public.consignment_listings l")
-        .push(listing_sql!(eligibility_joins))
-        .push(" CROSS JOIN (SELECT ")
-        .push_bind(as_of)
-        .push("::timestamptz AS at) db_clock CROSS JOIN LATERAL (SELECT ")
-        .push(listing_sql!(forced_reason, "db_clock.at"))
-        .push(" AS forced_reason) effective");
+    push_listing_from(&mut sql, as_of);
     if page_rows {
         sql.push(EQUIPMENT_JOIN).push(WORK_JOIN);
         if admin {
@@ -95,7 +88,18 @@ fn listing_query(
     sql
 }
 
-fn seller_filter(sql: &mut QueryBuilder<Postgres>, seller: Option<UserId>) {
+/// 挂单、卖家、准入与有效原因的共用 FROM 链；可表达性谓词读取有效原因，计数查询也需要这些连接。
+pub(super) fn push_listing_from(sql: &mut QueryBuilder<Postgres>, as_of: Timestamp) {
+    sql.push(" FROM public.consignment_listings l")
+        .push(listing_sql!(eligibility_joins))
+        .push(" CROSS JOIN (SELECT ")
+        .push_bind(as_of)
+        .push("::timestamptz AS at) db_clock CROSS JOIN LATERAL (SELECT ")
+        .push(listing_sql!(forced_reason, "db_clock.at"))
+        .push(" AS forced_reason) effective");
+}
+
+pub(super) fn seller_filter(sql: &mut QueryBuilder<Postgres>, seller: Option<UserId>) {
     if let Some(seller) = seller {
         sql.push(" AND l.seller_user_id = ").push_bind(seller.as_uuid());
     }
@@ -201,6 +205,32 @@ fn admin(row: &PgRow, paused: bool) -> Result<AdminListingRecord, ConsignmentErr
     )
 }
 
+/// 最近的拍卖碰撞及是否截断；v1 与 v2 Admin 详情共用，保证同一排序与上限。
+pub(super) async fn read_conflicts(
+    tx: &mut sqlx::PgConnection,
+    listing_id: Uuid,
+) -> Result<(Vec<ListingAuctionConflict>, bool), ConsignmentError> {
+    let rows: Vec<(Uuid, Timestamp)> = sqlx::query_as(
+        "SELECT lot_id, detected_at FROM public.consignment_listing_auction_conflicts
+         WHERE listing_id = $1 ORDER BY detected_at DESC, lot_id DESC LIMIT $2",
+    )
+    .bind(listing_id)
+    .bind(MAX_CONFLICTS as i64 + 1)
+    .fetch_all(tx)
+    .await
+    .map_err(storage_error)?;
+    let truncated = rows.len() > MAX_CONFLICTS;
+    let conflicts = rows
+        .into_iter()
+        .take(MAX_CONFLICTS)
+        .map(|(lot_id, detected_at)| ListingAuctionConflict {
+            lot_id: LotId::from_uuid(lot_id),
+            detected_at,
+        })
+        .collect();
+    Ok((conflicts, truncated))
+}
+
 impl OwnedListingRead for DatabaseStore {
     fn list_owned(
         &self,
@@ -257,28 +287,13 @@ impl AdminListingRead for DatabaseStore {
                 tx.commit().await.map_err(storage_error)?;
                 return Ok(None);
             };
-            let conflicts: Vec<(Uuid, Timestamp)> = sqlx::query_as(
-                "SELECT lot_id, detected_at FROM public.consignment_listing_auction_conflicts
-                 WHERE listing_id = $1 ORDER BY detected_at DESC, lot_id DESC LIMIT $2",
-            )
-            .bind(listing_id)
-            .bind(MAX_CONFLICTS as i64 + 1)
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(storage_error)?;
+            let (conflicts, conflicts_truncated) = read_conflicts(&mut tx, listing_id).await?;
             tx.commit().await.map_err(storage_error)?;
 
             Ok(Some(AdminListingDetail {
                 record: admin(&row, self.runtime_switches().external_access_paused())?,
-                conflicts_truncated: conflicts.len() > MAX_CONFLICTS,
-                conflicts: conflicts
-                    .into_iter()
-                    .take(MAX_CONFLICTS)
-                    .map(|(lot_id, detected_at)| ListingAuctionConflict {
-                        lot_id: LotId::from_uuid(lot_id),
-                        detected_at,
-                    })
-                    .collect(),
+                conflicts_truncated,
+                conflicts,
             }))
         })
     }

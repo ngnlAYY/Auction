@@ -142,7 +142,10 @@ async fn postgres_issue_reservation_uses_earliest_deadline_ttl_and_season_end() 
     seed_mail_ready(pool).await;
     let now: auction_time::Timestamp =
         sqlx::query_scalar("SELECT clock_timestamp()").fetch_one(pool).await.expect("数据库时钟");
-    let at = now.checked_add_signed(auction_time::Duration::seconds(1)).expect("一秒后");
+    // 夹具的 updated_at 取真实事务时刻，而触发器拒绝早于它的迁移时刻（updated_at 不得回退）。
+    // 季末段还要再克隆一个库并播种，真实耗时在重负载下可超过秒级，所以固定时刻留足余量，
+    // 保证它晚于所有夹具行的真实写入时刻。
+    let at = now.checked_add_signed(auction_time::Duration::minutes(5)).expect("五分钟后");
     let repository = repository(&database).await;
 
     let ttl_listing = Uuid::new_v4();
@@ -218,8 +221,8 @@ async fn postgres_issue_reservation_rejects_exact_listing_deadline_and_accepts_o
     seed_mail_ready(pool).await;
     let now: auction_time::Timestamp =
         sqlx::query_scalar("SELECT clock_timestamp()").fetch_one(pool).await.expect("数据库时钟");
-    let deadline =
-        now.checked_add_signed(auction_time::Duration::milliseconds(500)).expect("半秒后");
+    // 与上一条同理：固定时刻须晚于夹具行的真实写入时刻，重负载下半秒余量不够。
+    let deadline = now.checked_add_signed(auction_time::Duration::minutes(5)).expect("五分钟后");
     let at =
         deadline.checked_add_signed(auction_time::Duration::microseconds(-1)).expect("前一微秒");
     let repository = repository(&database).await;

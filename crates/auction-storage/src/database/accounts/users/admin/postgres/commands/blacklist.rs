@@ -2,7 +2,7 @@
 
 use auction_application::admin::{
     AdminUser, AdminUserCommandKind, AdminUserCommandResult, AdminUserError, AdminUserStatus,
-    RECOVERY_BUYER_BLACKLIST_ACTOR, RecoveryBuyerBlacklistCommand, RecoveryBuyerBlacklistResult,
+    RecoveryBuyerBlacklistCommand, RecoveryBuyerBlacklistResult,
 };
 use auction_application::core::{ApplicationError, RequestHash};
 use auction_application::core::{TransactionFailure, TransactionPolicy};
@@ -64,6 +64,8 @@ async fn ensure_recovery_blacklist_postgres_once(
         return Ok(result);
     }
 
+    // actor 一律取命令自带值：应用层已保证理由与 actor 成对（拍卖 auction-recovery、寄售
+    // consignment-sanction），审计归属不得被存储层改写（不变量 8）。
     // recovery 与人工拉黑共用完整副作用；即使用户已是 blacklisted，也要修复仍存活的
     // 代理授权和公开会话，再为 recovery 命令保存独立 proof。
     freeze_blacklist_proxies_postgres(
@@ -100,7 +102,7 @@ async fn ensure_recovery_blacklist_postgres_once(
         )
         .bind(command.buyer_user_id)
         .bind(&command.public_reason)
-        .bind(RECOVERY_BUYER_BLACKLIST_ACTOR)
+        .bind(&command.actor_id)
         .bind(side_effect_at)
         .execute(&mut *transaction)
         .await
@@ -113,7 +115,7 @@ async fn ensure_recovery_blacklist_postgres_once(
         .bind(command.command_id)
         .bind(command.buyer_user_id)
         .bind(&command.public_reason)
-        .bind(RECOVERY_BUYER_BLACKLIST_ACTOR)
+        .bind(&command.actor_id)
         .bind(side_effect_at)
         .execute(&mut *transaction)
         .await
@@ -132,7 +134,7 @@ async fn ensure_recovery_blacklist_postgres_once(
         )
         .bind(command.buyer_user_id)
         .bind(&command.public_reason)
-        .bind(RECOVERY_BUYER_BLACKLIST_ACTOR)
+        .bind(&command.actor_id)
         .bind(side_effect_at)
         .execute(&mut *transaction)
         .await
@@ -145,7 +147,7 @@ async fn ensure_recovery_blacklist_postgres_once(
         .bind(command.command_id)
         .bind(command.buyer_user_id)
         .bind(&command.public_reason)
-        .bind(RECOVERY_BUYER_BLACKLIST_ACTOR)
+        .bind(&command.actor_id)
         .bind(side_effect_at)
         .execute(&mut *transaction)
         .await
@@ -174,7 +176,7 @@ async fn ensure_recovery_blacklist_postgres_once(
         command.command_id,
         AdminUserCommandKind::Blacklist,
         command.buyer_user_id,
-        RECOVERY_BUYER_BLACKLIST_ACTOR,
+        &command.actor_id,
         None,
         command.occurred_at,
     )

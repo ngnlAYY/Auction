@@ -31,6 +31,7 @@ pub use internal::asset_conflict_gate_passes;
 pub(crate) use internal::{assetless_mail_notification, exclude_equipment_loss_conflicts};
 mod mapping;
 mod reconcile;
+pub(crate) use reconcile::manual_reconcile_in_transaction;
 mod recovery_closure;
 pub(crate) use recovery_closure::{
     equipment_recovered_closure_sql, recovered_handoff_sent_proof_sql,

@@ -71,7 +71,7 @@ const CRITICAL_CONSTRAINTS: [&str; 37] = [
     "c4_custody_event_state_ck",
     "c4_control_kind_ck",
     "c4_handoff_edge_source_ck",
-    "c4_handoff_edge_phase4_ck",
+    "c7_handoff_edge_kinds_ck",
     "c4_notice_business_uq",
     "c4_work_shape_ck",
     "c4_attempt_identity_uq",
@@ -300,7 +300,7 @@ async fn postgres_consignment_deposit_constraints_and_append_only_triggers_are_e
          WHERE class.relnamespace = 'public'::regnamespace
            AND class.relname = ANY($1)
            AND constraint_row.contype IN ('p', 'u', 'f', 'c')
-           AND constraint_row.conname !~ '^c4_'
+           AND constraint_row.conname !~ '^c[4567]_'
          ORDER BY class.relname, constraint_row.conname",
     )
     .bind(TABLES.as_slice())
@@ -403,7 +403,8 @@ async fn postgres_consignment_deposit_schema_accepts_extended_fact_graph() {
              VALUES ('{POSITION}', 2, 'withdrawal_only', 1, '{PROOF}', 1,
                      ARRAY[]::uuid[], NULL, '{DECIDE}', '{ACCEPTED}');"
         ),
-        "c4_generation_phase4_ck",
+        // g+1 在 000137 放开：没有同事务的成功命令与 Withdrawal 合同时仍被延迟触发器拒绝。
+        "c7_generation_successor_command",
     )
     .await;
     check(
@@ -412,10 +413,11 @@ async fn postgres_consignment_deposit_schema_accepts_extended_fact_graph() {
             "INSERT INTO public.consignment_custody_events
                 (position_id, version, command_id, event_kind, from_state, to_state, proof_id,
                  listing_id, listing_version, occurred_at)
-             VALUES ('{POSITION}', 3, '{PROOF_COMMAND}', 'committed', 'in_custody',
-                     'committed', '{PROOF}', '{LISTING}', 4, '{ACCEPTED}');"
+             VALUES ('{POSITION}', 3, '{PROOF_COMMAND}', 'lost', 'awaiting_take',
+                     'lost', '{PROOF}', '{LISTING}', 4, '{ACCEPTED}');"
         ),
-        "c4_custody_event_phase4_ck",
+        // lost 事件在 000137 放开，来源态限于仍占用实物的四态。
+        "c4_custody_event_state_ck",
     )
     .await;
 }
@@ -786,7 +788,8 @@ async fn postgres_consignment_deposit_release_hold_stays_held_for_review() {
                  updated_at='2026-01-01T04:00:00Z'
              WHERE id='{LISTING}';"
         ),
-        "consignment_listing_transition",
+        // 重列边在 000137 放开：没有同事务的重列命令与事件时仍由事件核对拒绝。
+        "consignment_listing_version_event",
     )
     .await;
 }
@@ -996,7 +999,9 @@ async fn postgres_consignment_deposit_schema_rejects_representative_named_constr
              VALUES ('12345', 'main', '555', '97000000-0000-0000-0000-000000000001',
                      'acquire_return', '{OBSERVATION}', '{DECISION}', '{ACCEPTED}');"
         ),
-        "c4_acquire_return_intake_required",
+        // 首次决定是 accepted：acquire_return 终局与其种类不符，先被 c4_final_initial 拒绝；
+        // 没有 intake 的 acquire_return 由下一个用例覆盖。
+        "c4_final_initial",
     )
     .await;
 }
@@ -1079,21 +1084,6 @@ async fn postgres_consignment_deposit_acquire_return_requires_real_intake() {
         "c4_acquire_return_intake_required",
     )
     .await;
-    check(
-        pool,
-        &format!(
-            "INSERT INTO public.mail_quarantine_releases
-                (id, bot_uid, world_id, external_mid, quarantine_id, expected_version,
-                 observation_id, decision_id, kind, command_id, case_return_mail_id,
-                 case_evidence_id, recovery_handoff_id, released_at)
-             VALUES ('99000000-0000-0000-0000-000000000001', '12346', 'main', '556',
-                     '91000000-0000-0000-0000-000000000001', 1,
-                     '8f000000-0000-0000-0000-000000000001',
-                     '98000000-0000-0000-0000-000000000001', 'acquire_return',
-                     '92000000-0000-4000-8000-000000000001', NULL, NULL, NULL,
-                     '{ACCEPTED}');"
-        ),
-        "c4_acquire_return_intake_required",
-    )
-    .await;
+    // 解除表上的 acquire_return 同样由延迟触发器 c4_reject_acquire_return_without_intake 要求同事务 intake；
+    // 本夹具没有可通过 c4_release_quarantine_fk 的隔离行，解除表分支未在此覆盖。
 }

@@ -476,7 +476,7 @@ async fn origin_chain(
 ) -> Result<(Option<DeliveryAdminObligation>, Option<DeliveryAdminRecovery>), DeliveryAdminError> {
     let row = sqlx::query(
         r#"SELECT obligation.id AS obligation_id, obligation.auction_id,
-                  obligation.lot_id, obligation.world_id, obligation.obligation_kind,
+                  obligation.contract_id, obligation.lot_id, obligation.world_id, obligation.obligation_kind,
                   obligation.business_state, obligation.amount,
                   fulfillment.execution_state AS fulfillment_state,
                   fulfillment.last_error_code AS fulfillment_error_code,
@@ -523,8 +523,14 @@ async fn origin_chain(
     .await
     .map_err(map_storage_error)?;
     let obligation_id: Option<Uuid> = row.try_get("obligation_id").map_err(map_storage_error)?;
+    let contract_id: Option<Uuid> = row.try_get("contract_id").map_err(map_storage_error)?;
     let obligation = match obligation_id {
         None => None,
+        Some(_) if contract_id.is_some() => {
+            // 寄售义务没有拍卖与 lot：详情 DTO 只表达拍卖来源，不能把寄售义务投影成拍卖义务，
+            // 失败关闭；寄售来源的展示随寄售发送的第 6 期扩展 DTO。
+            return Err(DeliveryAdminError::Unavailable);
+        }
         Some(obligation_id) => Some(DeliveryAdminObligation {
             obligation_id,
             auction_id: row.try_get("auction_id").map_err(map_storage_error)?,

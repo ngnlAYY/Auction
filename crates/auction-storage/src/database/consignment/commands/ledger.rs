@@ -23,6 +23,10 @@ pub(crate) enum Actor<'a> {
     Admin(&'a str),
     Worker,
     System,
+    /// 受限权利流程里的原浏览器（J5）；引用是浏览器绑定摘要的小写十六进制。
+    Browser(&'a [u8; 32]),
+    /// 已验证的受限权利人（J5）；引用是 `right_id`。
+    RightHolder(Uuid),
 }
 
 impl Actor<'_> {
@@ -32,6 +36,9 @@ impl Actor<'_> {
             Self::Admin(_) => "admin",
             Self::Worker => "worker",
             Self::System => "system",
+            // 账本 `actor_kind` 的 CHECK 由第 7 期 7M-2 追加这两种；之前数据库约束拒绝，失败关闭。
+            Self::Browser(_) => "browser",
+            Self::RightHolder(_) => "right_holder",
         }
     }
 
@@ -40,6 +47,8 @@ impl Actor<'_> {
             Self::PublicUser(seller_user_id) => seller_user_id.to_string(),
             Self::Admin(actor_ref) => actor_ref.to_owned(),
             Self::Worker | Self::System => "consignment".into(),
+            Self::Browser(binding_digest) => lower_hex(binding_digest),
+            Self::RightHolder(right_id) => right_id.to_string(),
         }
     }
 
@@ -82,6 +91,8 @@ pub(crate) enum DepositTarget {
     OriginalAttempt(Uuid),
     /// 稳定原信键 K。
     MailKey(OriginalMailKey),
+    /// 代管 position 目标（第 7 期灭失命令：确认、证据、人工结果）。
+    Position(Uuid),
     /// 冻结季目标。
     Season {
         /// 季身份文本。
@@ -100,6 +111,10 @@ impl DepositTarget {
                 | (Self::Listing(_), DepositOperation::Withdraw)
                 | (Self::Listing(_), DepositOperation::AdminDelist)
                 | (Self::Listing(_), DepositOperation::ReleaseOperationsHold)
+                | (Self::Listing(_), DepositOperation::Relist)
+                | (Self::Position(_), DepositOperation::ConfirmPositionLoss)
+                | (Self::Position(_), DepositOperation::RecordLossCaseOutcome)
+                | (Self::Position(_), DepositOperation::RecordPositionLossProof)
                 | (Self::Reservation(_), DepositOperation::ExpireReservation)
                 | (Self::Quarantine(_), DepositOperation::AppendQuarantineObservation)
                 | (Self::Quarantine(_), DepositOperation::RecheckQuarantine)
@@ -118,7 +133,8 @@ impl DepositTarget {
             | Self::Reservation(id)
             | Self::Quarantine(id)
             | Self::FinalDecision(id)
-            | Self::OriginalAttempt(id) => id.to_string(),
+            | Self::OriginalAttempt(id)
+            | Self::Position(id) => id.to_string(),
             Self::MailKey(key) => format!(
                 "{}|{}|{}",
                 key.authenticated_bot_uid(),
@@ -149,6 +165,7 @@ impl DepositTarget {
             Self::OriginalAttempt(id) => {
                 ("original_attempt", Some(*id), None, None, None, None, None)
             }
+            Self::Position(id) => ("position", Some(*id), None, None, None, None, None),
             Self::MailKey(key) => (
                 "mail_key",
                 None,
@@ -324,6 +341,7 @@ impl<'tx, 'conn> DepositTransaction<'tx, 'conn> {
                 events: Vec::new(),
                 request_hash,
                 request_id,
+                audit_note: None,
             }));
         };
         let schema_version: i16 = row.try_get("schema_version")?;
@@ -333,7 +351,8 @@ impl<'tx, 'conn> DepositTransaction<'tx, 'conn> {
             | DepositTarget::Reservation(id)
             | DepositTarget::Quarantine(id)
             | DepositTarget::FinalDecision(id)
-            | DepositTarget::OriginalAttempt(id) => {
+            | DepositTarget::OriginalAttempt(id)
+            | DepositTarget::Position(id) => {
                 row.try_get::<Option<&str>, _>("target_kind")? == Some(target.kind())
                     && row.try_get::<Option<Uuid>, _>("target_id")? == Some(*id)
             }
@@ -378,7 +397,18 @@ pub(crate) fn actor_reference(actor: &DepositActor) -> String {
         DepositActor::PublicUser(user_id) => user_id.as_uuid().to_string(),
         DepositActor::Admin(actor) => actor.clone(),
         DepositActor::Worker | DepositActor::System => "consignment".into(),
+        DepositActor::Browser { binding_digest } => lower_hex(binding_digest),
+        DepositActor::RightHolder { right_id } => right_id.to_string(),
     }
+}
+
+/// 32 字节摘要的小写十六进制，与应用层规范编码的浏览器引用一致。
+fn lower_hex(bytes: &[u8; 32]) -> String {
+    let mut text = String::with_capacity(64);
+    for byte in bytes {
+        text.push_str(&format!("{byte:02x}"));
+    }
+    text
 }
 
 impl DepositTarget {
@@ -389,6 +419,7 @@ impl DepositTarget {
             Self::Quarantine(_) => "quarantine",
             Self::FinalDecision(_) => "final_decision",
             Self::OriginalAttempt(_) => "original_attempt",
+            Self::Position(_) => "position",
             Self::MailKey(_) => "mail_key",
             Self::Season { .. } => "season",
         }

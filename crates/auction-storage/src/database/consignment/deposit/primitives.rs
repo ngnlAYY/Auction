@@ -165,9 +165,6 @@ pub(crate) async fn seller_name(
 }
 
 /// 当前 active 预约或 position 持有的实物强占用。
-///
-/// 保护的不变量：强占用只由活动预约或 position 表达；预约退休后占用行保留但两列均为
-/// NULL，这种已释放的行不算占用，否则同件装备（含原挂单）再也签不出新预约。
 pub(crate) async fn claim_holder(
     connection: &mut PgConnection,
     identity: &ListingLockIdentity,

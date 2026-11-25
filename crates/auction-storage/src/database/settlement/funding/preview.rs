@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use sqlx::Postgres;
 
 use crate::database::TrackedTransaction as Transaction;
+use crate::database::settlement::funding::consignment::preview::consignment_preview;
 use crate::database::settlement::funding::{invalid, storage};
 
 impl FundingReconciliationReader for crate::DatabaseStore {
@@ -404,6 +405,9 @@ pub(super) async fn snapshot(
     }
     // 既有隔离永不自动释放；新增隔离只覆盖责任上界增加值，且明确不低于零。
     liabilities = liabilities.saturating_sub(isolated).max(0);
+    // 寄售段：本 UID 的现金退件阻断与全局 record_only 门，与 opening 最终写同一事实（不变量 2、6）。
+    let consignment = consignment_preview(tx, uid).await?;
+    blockers.extend(consignment.blockers);
     blockers.sort();
     blockers.dedup();
     let record_only_eligible = all_accounts.as_array().ok_or(FundingError::Storage)?.is_empty();
@@ -425,7 +429,8 @@ pub(super) async fn snapshot(
         },
         "verified_legacy_self_deliveries": repaired,
         "assetless_notification_deliveries": assetless,
-        "verified_equipment_losses": losses
+        "verified_equipment_losses": losses,
+        "consignment": consignment.facts
     });
     let digest = Sha256::digest(
         serde_json::to_vec(&json!({"version":1,"uid":uid,"facts":facts})).map_err(invalid)?,

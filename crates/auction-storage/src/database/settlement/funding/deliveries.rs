@@ -34,6 +34,7 @@ pub async fn reserve_funded_delivery(
                   o.id AS obligation_id,
                   o.obligation_kind,
                   o.lot_id,
+                  o.contract_id,
                   o.amount,
                   o.carrier_credit,
                   o.world_id AS obligation_world,
@@ -69,6 +70,10 @@ pub async fn reserve_funded_delivery(
     .await
     .map_err(storage)?
     .ok_or(FundingError::Unproven)?;
+    // 寄售义务不经本入口（只经寄售派发轮），先于任何载荷与拍卖列核对显式失败关闭，保护不变量 6。
+    if row.try_get::<Option<Uuid>, _>("contract_id").map_err(storage)?.is_some() {
+        return Err(FundingError::Unproven);
+    }
     let payload: serde_json::Value = row.try_get("payload").map_err(storage)?;
     let credits =
         payload.get("credits").and_then(serde_json::Value::as_i64).ok_or(FundingError::Invalid)?;
@@ -353,4 +358,31 @@ pub async fn finish_funded_delivery(
     .await
     .map_err(storage)?;
     state_entry(tx, account, delivery_id, &row, state).await
+}
+
+/// 集成测试入口：锁给定 UID 的资金账户后对投递跑一次现金 Send 资金门，成功提交、失败回滚，
+/// 与生产调用方同一事务语义；只在 `test-db` 构建。
+#[cfg(feature = "test-db")]
+impl crate::database::DatabaseStore {
+    pub async fn test_reserve_funded_delivery(
+        &self,
+        uid: &str,
+        command: &FundingMutation,
+        delivery_id: Uuid,
+    ) -> Result<Uuid, FundingError> {
+        let mut tx = self.pool().begin().await.map_err(storage)?;
+        let account = crate::database::settlement::funding::lock_funding_account(&mut tx, uid)
+            .await?
+            .ok_or(FundingError::Unavailable)?;
+        match reserve_funded_delivery(&mut tx, &account, command, delivery_id).await {
+            Ok(allocation) => {
+                tx.commit().await.map_err(storage)?;
+                Ok(allocation)
+            }
+            Err(error) => {
+                tx.rollback().await.map_err(storage)?;
+                Err(error)
+            }
+        }
+    }
 }

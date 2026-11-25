@@ -56,7 +56,8 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
 
     // 寄售处置链把起写许可记在 `mail_disposition_write_starts`，不伪造 sending 事实：
     // Take/Return 只从 claimed 直接进入 succeeded/manual_reconcile。该来源在任何状态都不得有
-    // sending_at；处置链不会产生的 pending/sending/failed 也一律失败关闭（不变量 4、6）。
+    // sending_at；季末取消（failed/season_ended）之外，处置链不会产生的 pending/sending/failed 一律失败关闭
+    // （不变量 4、6）。
     if snapshot.origin_kind == "consignment_disposition" {
         return valid_consignment_disposition_snapshot(snapshot);
     }
@@ -134,6 +135,13 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
     ) {
         return snapshot.origin_kind == "season_reminder"
             && snapshot.failure_code.as_deref() == Some("season_notice_invalidated")
+            && valid_preflight_retirement(snapshot);
+    }
+
+    // 寄售付款提醒在发送围栏前作废（已付、已取消或轮已变，7A-3）；失败码固定。
+    if snapshot.reason_code.as_deref() == Some("payment_reminder_voided") {
+        return snapshot.origin_kind == "consignment_notice"
+            && snapshot.failure_code.as_deref() == Some("consignment_notice_invalidated")
             && valid_preflight_retirement(snapshot);
     }
 
@@ -335,9 +343,10 @@ fn valid_preflight_retirement(snapshot: &DeliveryAdminSnapshot) -> bool {
         })
 }
 
-/// 寄售处置投递的专属状态与时间线：没有发送围栏，只允许 `prepared/claimed/succeeded/manual_reconcile`。
+/// 寄售处置投递的专属状态与时间线：没有发送围栏，只允许 `prepared/claimed/succeeded/manual_reconcile`，
+/// 以及季末关闭从未起写的取得工作时取消的 `failed/season_ended`。
 fn valid_consignment_disposition_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
-    // 退役/抑制标记只允许出现在 failed，本来源没有 failed；出现即不是处置链写出的形状。
+    // 本来源从不写退役/抑制标记（季末取消也不写）；出现即不是处置链写出的形状。
     if snapshot.sending_at.is_some()
         || snapshot.retirement_reason.is_some()
         || snapshot.suppression_reason.is_some()
@@ -387,6 +396,25 @@ fn valid_consignment_disposition_snapshot(snapshot: &DeliveryAdminSnapshot) -> b
                 && snapshot.failure_code.as_deref().is_some_and(valid_stored_text)
                 && snapshot.fencing_version > 0
                 && snapshot.attempt_count > 0
+        }
+        // 与 000137 `season_closed` 守卫同一形状：季末取消从未进入发送围栏、围栏已推进，可能从未被领取；
+        // 其余 failed 仍不是处置链写出的形状，失败关闭。
+        "failed" => {
+            no_lease
+                && snapshot.claimed_at.is_none_or(|claimed| {
+                    !is_zero_time(claimed)
+                        && claimed >= snapshot.created_at
+                        && claimed <= snapshot.updated_at
+                })
+                && snapshot.completed_at.is_some_and(|completed| {
+                    !is_zero_time(completed)
+                        && completed >= snapshot.created_at
+                        && snapshot.claimed_at.is_none_or(|claimed| completed >= claimed)
+                        && completed <= snapshot.updated_at
+                })
+                && snapshot.external_reference.is_none()
+                && snapshot.failure_code.as_deref() == Some("season_ended")
+                && snapshot.fencing_version > 0
         }
         _ => false,
     }

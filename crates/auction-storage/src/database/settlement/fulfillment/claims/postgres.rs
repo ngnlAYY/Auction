@@ -33,6 +33,7 @@ pub(crate) async fn claim_postgres(
                LEFT JOIN public.settlement_obligation_fulfillments prerequisite
                    ON prerequisite.obligation_id=o.prerequisite_obligation_id
                WHERE o.business_state='ready'
+                 AND o.contract_id IS NULL
                  AND (f.obligation_id IS NULL OR (
                      f.execution_state IN ('pending','prepared','enqueued')
                      AND ((f.claim_token IS NULL
@@ -49,7 +50,7 @@ pub(crate) async fn claim_postgres(
            )
            SELECT o.id FROM public.settlement_obligations o
            JOIN candidates ON candidates.id=o.id
-           WHERE o.business_state='ready'
+           WHERE o.business_state='ready' AND o.contract_id IS NULL
            ORDER BY o.id FOR UPDATE OF o SKIP LOCKED"#
     ))
     .bind(now)
@@ -68,6 +69,7 @@ pub(crate) async fn claim_postgres(
                LEFT JOIN public.settlement_obligation_fulfillments AS prerequisite
                    ON prerequisite.obligation_id = o.prerequisite_obligation_id
                WHERE o.business_state = 'ready'
+                 AND o.contract_id IS NULL
                  AND o.id=ANY($1)
                  AND f.obligation_id IS NULL
                  AND (
@@ -174,6 +176,7 @@ pub(crate) async fn claim_postgres(
                  OR f.claim_expires_at <= $1
              )
              AND o.business_state = 'ready'
+             AND o.contract_id IS NULL
              AND o.id=ANY($3)
              AND (
                  o.prerequisite_obligation_id IS NULL

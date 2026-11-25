@@ -11,6 +11,7 @@ use sqlx::{Postgres, Row};
 
 use crate::database::TrackedTransaction as Transaction;
 use crate::database::settlement::funding::account::{LockedFundingAccount, lock_funding_account};
+use crate::database::settlement::funding::consignment::blockers::ensure_opening_allowed;
 use crate::database::settlement::funding::ledger::{allocation, issue, source};
 use crate::database::settlement::funding::{
     evidence_error, invalid, lock_funding_liabilities, lock_funding_worlds, storage,
@@ -150,6 +151,9 @@ async fn apply(
     if record_only_exists {
         return Err(FundingError::Conflict);
     }
+    // 寄售的现金退件可能已 Take、资金尚未回补时，本 UID 的任何现金 opening（含零额建界、调整与结转）
+    // 一律拒绝；在 UID 账户锁内重验，已通过的旧预览不能绕过（不变量 2、6）。
+    ensure_opening_allowed(tx, &command.expected_uid).await?;
     if account.as_ref().map_or(0, LockedFundingAccount::version) != command.expected_version {
         return Err(FundingError::Conflict);
     }

@@ -287,7 +287,7 @@ impl QuarantineRecheckReader for ResolverReader {
     }
 }
 
-fn resolver_service(
+pub(in crate::consignment) fn resolver_service(
     repository: &auction_storage::DepositRepository,
     store: DatabaseStore,
     observation: EnvelopeObservation,
@@ -301,7 +301,7 @@ fn resolver_service(
     QuarantineRecheckService::new(commands, Arc::new(repository.clone()), reader)
 }
 
-async fn round_request(pool: &PgPool) -> DispositionRoundRequest {
+pub(in crate::consignment) async fn round_request(pool: &PgPool) -> DispositionRoundRequest {
     let now: Timestamp =
         sqlx::query_scalar("SELECT clock_timestamp()").fetch_one(pool).await.expect("数据库时刻");
     DispositionRoundRequest {

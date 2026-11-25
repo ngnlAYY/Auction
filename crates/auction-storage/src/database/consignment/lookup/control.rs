@@ -6,7 +6,6 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 /// 许可单例的持久状态，内部凭证不实现 Debug。
-#[allow(dead_code, reason = "由后续任务 2D / 2F 读取单例字段")]
 pub(crate) struct LookupControl {
     /// 准入代次。
     pub(crate) enabled_epoch: i64,
@@ -25,6 +24,7 @@ pub(crate) struct LookupControl {
     /// 许可或在途时间围栏的截止时刻。
     pub(crate) permit_until: Option<Timestamp>,
     /// 本代 Worker 就绪的截止时刻。
+    #[allow(dead_code, reason = "尚无非测试读取方；待 Worker 就绪判定（2F 车道）读取")]
     pub(crate) worker_ready_until: Option<Timestamp>,
     /// 维护循环下次补扫的位置。
     pub(crate) scan_after: Option<Uuid>,
@@ -32,7 +32,6 @@ pub(crate) struct LookupControl {
 
 /// 在调用方事务中锁单例。先锁资格与挂单（若路径需要），再锁单例，最后锁工作。
 /// 不变量 2、5：领取从这里开始，持单例期间不能反向取得挂单写锁。
-#[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
 pub(crate) async fn lock_control(conn: &mut PgConnection) -> Result<LookupControl, sqlx::Error> {
     let (
         enabled_epoch,
@@ -67,7 +66,6 @@ pub(crate) async fn lock_control(conn: &mut PgConnection) -> Result<LookupContro
 }
 
 /// 准入、许可调度状态与当前代次的 Worker 心跳是否新鲜。不包含持有者凭证。
-#[allow(dead_code, reason = "由后续任务 2D / 2F 读取准入及调度投影")]
 pub(crate) struct LookupAdmission {
     /// 许可的只读投影及本次数据库时刻。
     pub(crate) permit: LookupPermitStatus,
@@ -77,7 +75,6 @@ pub(crate) struct LookupAdmission {
 
 /// 在调用方的读快照中读取准入和心跳，不取行锁。登记应在锁住单例后调用，
 /// 以便按最新数据库墙钟核新鲜度，并让准入判定与入队在同一事务内串行化。
-#[allow(dead_code, reason = "由后续任务 2D / 2F 调用")]
 pub(crate) async fn read_admission(
     conn: &mut PgConnection,
 ) -> Result<LookupAdmission, sqlx::Error> {

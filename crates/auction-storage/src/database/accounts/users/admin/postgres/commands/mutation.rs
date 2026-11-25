@@ -12,6 +12,9 @@ use uuid::Uuid;
 
 use super::super::reads::{load_command_postgres_tx, load_user_postgres_tx};
 use super::blacklist::{freeze_blacklist_proxies_postgres, revoke_public_sessions_postgres};
+use super::unblacklist::{
+    buyer_has_refusal_cycle, ensure_no_refusal_cycle, reset_buyer_cycle, unblacklist_postgres_once,
+};
 use crate::database::accounts::users::admin::postgres::mapping::{
     insert_audit_postgres, insert_command_postgres, lock_command, map_admin_write_error,
     map_storage_error,
@@ -39,11 +42,27 @@ async fn mutate_postgres_once(
     store: &crate::database::DatabaseStore,
     write: &AdminUserMutationWrite,
 ) -> Result<AdminUserCommandResult, ApplicationError> {
-    let mut transaction = store
+    // 解禁要在开快照之前取寄售买家锁（决定 23 的周期边界），走专用连接；其余动作不变。
+    // 没有任何寄售拒收周期的用户走原解禁路径：不取寄售锁、不写寄售行（对既有拍卖零行为变化）。
+    if write.action == AdminUserMutationAction::Unblacklist
+        && buyer_has_refusal_cycle(store.pool(), write.user_id).await?
+    {
+        return unblacklist_postgres_once(store, write).await;
+    }
+    let transaction = store
         .pool()
         .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
         .await
         .map_err(map_storage_error)?;
+    mutate_in_transaction(transaction, write, false).await
+}
+
+/// 在已开启的 Serializable 事务内执行一次状态 / 身份变更并提交。
+pub(super) async fn mutate_in_transaction(
+    mut transaction: crate::database::TrackedTransaction<'_, sqlx::Postgres>,
+    write: &AdminUserMutationWrite,
+    reset_cycle: bool,
+) -> Result<AdminUserCommandResult, ApplicationError> {
     lock_command(&mut transaction, write.command_id).await?;
     if let Some(result) = load_command_postgres_tx(
         &mut transaction,
@@ -80,7 +99,7 @@ async fn mutate_postgres_once(
             current_version: before.state_version,
         }));
     }
-    apply_mutation_postgres(&mut transaction, write, &before).await?;
+    apply_mutation_postgres(&mut transaction, write, &before, reset_cycle).await?;
     let user = load_user_postgres_tx(&mut transaction, write.user_id).await?;
     let result = AdminUserCommandResult {
         user,
@@ -114,6 +133,7 @@ async fn apply_mutation_postgres(
     transaction: &mut crate::database::TrackedTransaction<'_, sqlx::Postgres>,
     write: &AdminUserMutationWrite,
     before: &AdminUser,
+    reset_cycle: bool,
 ) -> Result<(), ApplicationError> {
     let id = write.user_id;
     let now = write.now;
@@ -278,6 +298,13 @@ async fn apply_mutation_postgres(
             .execute(&mut **transaction)
             .await
             .map_err(map_storage_error)?;
+            if reset_cycle {
+                // 不变量 2、3：寄售拒收周期边界与解禁同事务提交（买家锁已由调用方取得）。
+                reset_buyer_cycle(transaction, id, write.command_id).await?;
+            } else {
+                // 未取寄售锁的原路径：快照内若已有周期（预读之后才出现），按序列化冲突重试，改走持锁路径。
+                ensure_no_refusal_cycle(transaction, id).await?;
+            }
         }
     }
     if matches!(

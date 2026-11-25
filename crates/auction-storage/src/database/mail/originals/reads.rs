@@ -371,6 +371,25 @@ pub(crate) async fn release_receipt_from_existing(
     if release.kind == ReleaseKind::Accept {
         receipt.listing_changes = accepted_listing_changes(connection, release.decision_id).await?;
     }
+    if release.kind == ReleaseKind::AcquireReturn {
+        // 回执形状要求接管四项齐全：从同一最终决定的接管行回填，与首个解除命令的回执一致（不变量 1）。
+        // 接管与解除同事务提交，缺行即矛盾，失败关闭（不变量 6）。
+        let (intake_id, round, take_work_id, take_delivery_id) =
+            sqlx::query_as::<_, (Uuid, i32, Uuid, Uuid)>(
+                "SELECT id, original_round, take_work_id, take_delivery_id
+                 FROM public.consignment_return_intakes WHERE decision_id = $1",
+            )
+            .bind(release.decision_id)
+            .fetch_optional(&mut *connection)
+            .await?
+            .ok_or_else(|| invariant("consignment_release_intake_missing"))?;
+        receipt.return_intake_id = Some(intake_id);
+        receipt.original_round = Some(
+            u32::try_from(round).map_err(invariant_decoding("consignment_release_intake_round"))?,
+        );
+        receipt.take_work_id = Some(take_work_id);
+        receipt.take_delivery_id = Some(take_delivery_id);
+    }
     Ok(receipt)
 }
 

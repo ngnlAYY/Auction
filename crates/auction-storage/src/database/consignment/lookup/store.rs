@@ -22,6 +22,8 @@ use crate::database::DatabaseStore;
 use crate::database::backend::{retry_conflicts, set_read_only_limits};
 use crate::database::consignment::commands::errors::WriteError;
 use crate::database::consignment::eligibility::predicates::listing_sql;
+use crate::database::consignment::recovery::pending_resolution_source;
+use crate::database::consignment::recovery::reminder::due_reminder_source;
 
 /// 用应用层提供的规范命令构造器为存储回收准备终结身份。
 pub(super) struct ReapCommands {
@@ -62,9 +64,10 @@ impl DatabaseStore {
         let result: Result<bool, sqlx::Error> = async {
             let mut tx = self.pool().begin_read_snapshot().await?;
             set_read_only_limits(&mut tx).await.map_err(|(_, error)| error)?;
-            // 不变量 5、6：单一只读快照覆盖挂单、预约、处置、重检、起写、position 与季通知；
-            // 任何读失败都失败关闭，不能把错误当作空库。
-            let has_work = sqlx::query_scalar(
+            // 不变量 5、6：单一只读快照覆盖挂单、预约、处置、重检、起写、position、处罚工作、季通知，
+            // 以及恢复循环的两类待办（未处置的退件消费、到期未提醒的已售合同，判据与各自读口共用同一
+            // SQL 片段）；任何读失败都失败关闭，不能把错误当作空库。
+            let has_work = sqlx::query_scalar(concat!(
                 "SELECT
                     EXISTS (SELECT 1 FROM public.consignment_listings
                             WHERE state NOT IN ('rejected', 'expired', 'closed'))
@@ -83,6 +86,15 @@ impl DatabaseStore {
                                 WHERE proof.work_id = started.work_id))
                  OR EXISTS (SELECT 1 FROM public.consignment_custody_positions
                             WHERE state NOT IN ('handed_over', 'season_ended', 'lost'))
+                 -- 待执行处罚的账号工作（与 `open_sanction_work` 同一判据）：关闭寄售后仍须收口。
+                 OR EXISTS (SELECT 1 FROM public.consignment_account_work AS work
+                            WHERE work.state IN ('pending', 'claimed')
+                               OR (work.state = 'cancelled' AND NOT EXISTS (
+                                    SELECT 1 FROM public.consignment_sanction_work_results AS result
+                                    WHERE result.work_id = work.id))
+                               OR (work.state = 'completed' AND NOT EXISTS (
+                                    SELECT 1 FROM public.consignment_sanction_effects AS effect
+                                    WHERE effect.sanction_id = work.sanction_id)))
                  OR EXISTS (
                         SELECT 1 FROM public.consignment_season_notices AS notice
                         LEFT JOIN public.mail_disposition_work AS work
@@ -92,8 +104,14 @@ impl DatabaseStore {
                                 SELECT 1 FROM public.deliveries AS delivery
                                 WHERE delivery.id = work.delivery_id
                                   AND delivery.status NOT IN
-                                      ('succeeded', 'failed', 'manual_reconcile')))",
-            )
+                                      ('succeeded', 'failed', 'manual_reconcile')))
+                 OR EXISTS (SELECT 1 ",
+                pending_resolution_source!(),
+                ")
+                 OR EXISTS (SELECT 1 ",
+                due_reminder_source!(),
+                ")",
+            ))
             .fetch_one(&mut *tx)
             .await?;
             tx.commit().await?;

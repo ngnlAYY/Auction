@@ -77,6 +77,12 @@ pub(crate) async fn consume_return_postgres(
                  SELECT 1 FROM public.settlement_return_evidence AS evidence
                  WHERE evidence.return_mail_id = inbound.id
              )
+             AND NOT EXISTS (
+                 -- 寄售义务的退件归寄售 owner：不进拍卖消费队列，也不阻塞队头。
+                 SELECT 1 FROM public.settlement_obligations AS consignment
+                 WHERE consignment.id::text = inbound.decision_metadata ->> 'obligation_id'
+                   AND consignment.contract_id IS NOT NULL
+             )
              AND NOT ("#,
         recovery_owned_settlement_return!(system_settlement_return_source!()),
         r#")
