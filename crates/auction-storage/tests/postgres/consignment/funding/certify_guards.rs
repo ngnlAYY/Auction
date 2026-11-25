@@ -40,19 +40,16 @@ async fn postgres_consignment_funding_certify_cod_rechecks_frozen_dispatch_ident
 async fn postgres_consignment_funding_certify_cod_rechecks_send_expectation_against_round() {
     // 冻结的 Send 期望与派发轮、投递行必须一致：期望里的主题被改成另一份，整笔拒绝。
     let env = Env::new(Shape::STRICT).await;
-    let mut conn = env.pool().acquire().await.expect("维护连接");
-    sqlx::query("SET session_replication_role = replica")
-        .execute(&mut *conn)
-        .await
-        .expect("绕过追加守卫");
-    sqlx::query(
-        "UPDATE public.delivery_send_attempts
-         SET expectation = jsonb_set(expectation, '{subject}', '\"another subject\"')",
+    // 篡改模拟：表 owner 在一次性测试库里临时停用追加守卫触发器（不依赖超级用户的 replica 角色），改完即恢复。
+    sqlx::raw_sql(
+        "ALTER TABLE public.delivery_send_attempts DISABLE TRIGGER USER;
+         UPDATE public.delivery_send_attempts
+         SET expectation = jsonb_set(expectation, '{subject}', '\"another subject\"');
+         ALTER TABLE public.delivery_send_attempts ENABLE TRIGGER USER;",
     )
-    .execute(&mut *conn)
+    .execute(env.pool())
     .await
     .expect("篡改期望主题");
-    drop(conn);
     env.assert_rejected(certify(2, None), is_conflict).await;
 }
 
