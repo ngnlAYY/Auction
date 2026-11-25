@@ -45,7 +45,7 @@ fn kind_names_are_unique_and_round_trip() {
         DeliveryDispositionKind::parse("operator_acknowledgement"),
         Err(DeliveryDispositionError::UnknownKind)
     );
-    assert_eq!(seen.len(), 9);
+    assert_eq!(seen.len(), 10);
 }
 
 #[test]
@@ -86,6 +86,7 @@ fn only_lot_watch_invalidated_preflight_retirement_resolves_failures() {
         DeliveryDispositionKind::RecoveryEquipmentRecovered,
         DeliveryDispositionKind::LegacySelf,
         DeliveryDispositionKind::OperatorAcknowledged,
+        DeliveryDispositionKind::SeasonClosed,
     ] {
         assert!(kind.resolves_alert(None), "该种类必须解除失败计数: {}", kind.as_str());
     }
@@ -133,6 +134,12 @@ fn source_requires_exactly_one_reference_matching_the_kind() {
     assert_eq!(empty.validate(DeliveryDispositionKind::PreflightRetired), Ok(()));
     assert_eq!(
         source_with_admin().validate(DeliveryDispositionKind::PreflightRetired),
+        Err(DeliveryDispositionError::InvalidSource)
+    );
+    // 季末关闭同样自证（投递行与同事务的工作关闭记录）：不带任何外部引用。
+    assert_eq!(empty.validate(DeliveryDispositionKind::SeasonClosed), Ok(()));
+    assert_eq!(
+        source_with_admin().validate(DeliveryDispositionKind::SeasonClosed),
         Err(DeliveryDispositionError::InvalidSource)
     );
 }

@@ -1,0 +1,96 @@
+{
+  "_说明": "合同图判定对照夹具：领域 validate_consignment_graph 与 SQL c5_check_contract_graph 对同一组案例必须给出同一结论。价格 1000、费率 500bps、卖款 950。",
+  "cases": [
+    {
+      "name": "sale_main_valid",
+      "kind": "sale",
+      "world": "main",
+      "mutation": "none",
+      "valid": true
+    },
+    {
+      "name": "sale_isekai_valid",
+      "kind": "sale",
+      "world": "isekai",
+      "mutation": "none",
+      "valid": true
+    },
+    {
+      "name": "withdrawal_main_valid",
+      "kind": "withdrawal",
+      "world": "main",
+      "mutation": "none",
+      "valid": true
+    },
+    {
+      "name": "sale_main_drop_refund",
+      "kind": "sale",
+      "world": "main",
+      "mutation": "drop_refund",
+      "valid": false
+    },
+    {
+      "name": "sale_main_payout_amount_minus_one",
+      "kind": "sale",
+      "world": "main",
+      "mutation": "payout_amount_minus_one",
+      "valid": false
+    },
+    {
+      "name": "sale_main_payout_identity_other",
+      "kind": "sale",
+      "world": "main",
+      "mutation": "payout_identity_other",
+      "valid": false
+    },
+    {
+      "name": "sale_main_cod_amount_plus_one",
+      "kind": "sale",
+      "world": "main",
+      "mutation": "cod_amount_plus_one",
+      "valid": false
+    },
+    {
+      "name": "sale_main_refund_state_ready",
+      "kind": "sale",
+      "world": "main",
+      "mutation": "refund_state_ready",
+      "valid": false
+    },
+    {
+      "name": "sale_isekai_drop_refund",
+      "kind": "sale",
+      "world": "isekai",
+      "mutation": "drop_refund",
+      "valid": false
+    },
+    {
+      "name": "sale_isekai_payout_amount_minus_one",
+      "kind": "sale",
+      "world": "isekai",
+      "mutation": "payout_amount_minus_one",
+      "valid": false
+    },
+    {
+      "name": "sale_isekai_payout_identity_other",
+      "kind": "sale",
+      "world": "isekai",
+      "mutation": "payout_identity_other",
+      "valid": false
+    },
+    {
+      "name": "sale_isekai_cod_amount_plus_one",
+      "kind": "sale",
+      "world": "isekai",
+      "mutation": "cod_amount_plus_one",
+      "valid": false
+    },
+    {
+      "name": "sale_isekai_refund_state_ready",
+      "kind": "sale",
+      "world": "isekai",
+      "mutation": "refund_state_ready",
+      "valid": false
+    }
+  ]
+}

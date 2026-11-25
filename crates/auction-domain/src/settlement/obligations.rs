@@ -69,83 +69,114 @@ impl SettlementObligation {
             return Err(DomainError::InvalidSettlementObligation("义务身份或收款人不完整"));
         }
 
-        let prerequisite_present = self.prerequisite_id.is_some();
-        match self.kind {
-            SettlementObligationKind::WinnerEquipmentCod => {
-                if self.world != SettlementWorld::Main
-                    || self.state != SettlementObligationState::Ready
-                    || !has_user
-                    || self.amount.value() == 0
-                    || self.carrier_credit != 0
-                    || prerequisite_present
-                {
-                    return Err(DomainError::InvalidSettlementObligation("main COD 义务字段无效"));
-                }
-            }
-            SettlementObligationKind::WinnerPaymentCarrierCod => {
-                if self.world != SettlementWorld::Isekai
-                    || self.state != SettlementObligationState::Ready
-                    || !has_user
-                    || self.amount.value() == 0
-                    || self.carrier_credit != 1
-                    || prerequisite_present
-                {
-                    return Err(DomainError::InvalidSettlementObligation(
-                        "isekai carrier COD 义务字段无效",
-                    ));
-                }
-            }
-            SettlementObligationKind::WinnerEquipmentHandoff => {
-                if self.world != SettlementWorld::Isekai
-                    || !matches!(
-                        self.state,
-                        SettlementObligationState::Ready | SettlementObligationState::Blocked
-                    )
-                    || !has_user
-                    || self.amount.value() != 0
-                    || self.carrier_credit != 0
-                    || !prerequisite_present
-                {
-                    return Err(DomainError::InvalidSettlementObligation(
-                        "isekai handoff 义务字段无效",
-                    ));
-                }
-            }
-            SettlementObligationKind::SellerPayout => {
-                if !matches!(
-                    self.state,
-                    SettlementObligationState::Ready | SettlementObligationState::Blocked
-                ) || !has_identity
-                    || self.amount.value() == 0
-                    || self.carrier_credit != 0
-                    || !prerequisite_present
-                {
-                    return Err(DomainError::InvalidSettlementObligation("卖方付款义务字段无效"));
-                }
-            }
-            SettlementObligationKind::BuyerRefund => {
-                if !matches!(
-                    self.state,
-                    SettlementObligationState::Ready | SettlementObligationState::Contingent
-                ) || !has_user
-                    || self.amount.value() == 0
-                    || self.carrier_credit != 0
-                    || !prerequisite_present
-                {
-                    return Err(DomainError::InvalidSettlementObligation("买方退款义务字段无效"));
-                }
-            }
-            SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
-                if self.state != SettlementObligationState::Ready
-                    || !has_identity
-                    || self.amount.value() != 0
-                    || self.carrier_credit != 0
-                    || prerequisite_present
-                {
-                    return Err(DomainError::InvalidSettlementObligation("流拍返还义务字段无效"));
-                }
+        validate_obligation_shape(ObligationShape {
+            kind: self.kind,
+            world: self.world,
+            state: self.state,
+            has_user,
+            has_identity,
+            amount: self.amount,
+            carrier_credit: self.carrier_credit,
+            prerequisite_present: self.prerequisite_id.is_some(),
+        })
+    }
+}
+
+/// 义务种类、状态、收款人与前置关系的闭集矩阵输入；拍卖与寄售义务共用同一张矩阵。
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ObligationShape {
+    pub kind: SettlementObligationKind,
+    pub world: SettlementWorld,
+    pub state: SettlementObligationState,
+    pub has_user: bool,
+    pub has_identity: bool,
+    pub amount: SettlementAmount,
+    pub carrier_credit: u32,
+    pub prerequisite_present: bool,
+}
+
+/// 校验义务形状矩阵：收款人恰有用户或游戏身份之一，再按种类核对世界、状态、金额与前置。
+pub(crate) fn validate_obligation_shape(shape: ObligationShape) -> Result<(), DomainError> {
+    // 收款人必须在原字段上互斥；无效 UUID 或未规范化文本不能被当作“未提供”。
+    if shape.has_user == shape.has_identity {
+        return Err(DomainError::InvalidSettlementObligation("义务身份或收款人不完整"));
+    }
+    let ObligationShape { has_user, has_identity, prerequisite_present, .. } = shape;
+    match shape.kind {
+        SettlementObligationKind::WinnerEquipmentCod => {
+            if shape.world != SettlementWorld::Main
+                || shape.state != SettlementObligationState::Ready
+                || !has_user
+                || shape.amount.value() == 0
+                || shape.carrier_credit != 0
+                || prerequisite_present
+            {
+                return Err(DomainError::InvalidSettlementObligation("main COD 义务字段无效"));
             }
         }
-        Ok(())
+        SettlementObligationKind::WinnerPaymentCarrierCod => {
+            if shape.world != SettlementWorld::Isekai
+                || shape.state != SettlementObligationState::Ready
+                || !has_user
+                || shape.amount.value() == 0
+                || shape.carrier_credit != 1
+                || prerequisite_present
+            {
+                return Err(DomainError::InvalidSettlementObligation(
+                    "isekai carrier COD 义务字段无效",
+                ));
+            }
+        }
+        SettlementObligationKind::WinnerEquipmentHandoff => {
+            if shape.world != SettlementWorld::Isekai
+                || !matches!(
+                    shape.state,
+                    SettlementObligationState::Ready | SettlementObligationState::Blocked
+                )
+                || !has_user
+                || shape.amount.value() != 0
+                || shape.carrier_credit != 0
+                || !prerequisite_present
+            {
+                return Err(DomainError::InvalidSettlementObligation(
+                    "isekai handoff 义务字段无效",
+                ));
+            }
+        }
+        SettlementObligationKind::SellerPayout => {
+            if !matches!(
+                shape.state,
+                SettlementObligationState::Ready | SettlementObligationState::Blocked
+            ) || !has_identity
+                || shape.amount.value() == 0
+                || shape.carrier_credit != 0
+                || !prerequisite_present
+            {
+                return Err(DomainError::InvalidSettlementObligation("卖方付款义务字段无效"));
+            }
+        }
+        SettlementObligationKind::BuyerRefund => {
+            if !matches!(
+                shape.state,
+                SettlementObligationState::Ready | SettlementObligationState::Contingent
+            ) || !has_user
+                || shape.amount.value() == 0
+                || shape.carrier_credit != 0
+                || !prerequisite_present
+            {
+                return Err(DomainError::InvalidSettlementObligation("买方退款义务字段无效"));
+            }
+        }
+        SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
+            if shape.state != SettlementObligationState::Ready
+                || !has_identity
+                || shape.amount.value() != 0
+                || shape.carrier_credit != 0
+                || prerequisite_present
+            {
+                return Err(DomainError::InvalidSettlementObligation("流拍返还义务字段无效"));
+            }
+        }
     }
+    Ok(())
 }

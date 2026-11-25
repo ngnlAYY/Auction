@@ -1,6 +1,7 @@
 //! 结算领域模型的模块装配；规则由各子模块持有，本文件只提供稳定导出，不承载计算或状态规则。
 
 mod amount;
+pub mod consignment_funding;
 mod equipment_loss;
 pub use equipment_loss::equipment_loss_funding;
 mod equipment_loss_admission;
@@ -11,6 +12,7 @@ pub use funding::{FundingAccountKey, FundingSplit, funding_reconciliation_capaci
 mod internal;
 pub use internal::InternalSettlementAction;
 mod obligations;
+mod origin;
 mod plan;
 mod policy;
 mod recovery_advance;
@@ -21,7 +23,9 @@ pub use amount::SettlementAmount;
 pub use facts::{
     SettlementFact, SettlementLine, SettlementWorld, validate_settlement_price_breakdown_for_mode,
 };
+pub(crate) use obligations::{ObligationShape, validate_obligation_shape};
 pub use obligations::{SettlementObligation, SettlementObligationKind, SettlementObligationState};
+pub use origin::{ConsignmentContractKind, SettlementOrigin};
 pub use plan::{SettlementPlan, floor_ppm, proportional_floor};
 pub(crate) use policy::RECOVERY_V2_PAYMENT_TIMEOUT;
 pub use policy::{

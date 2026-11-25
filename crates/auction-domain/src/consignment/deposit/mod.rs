@@ -1,5 +1,6 @@
 //! 寄售第 4 期收件与代管：预约令牌、整封决定、隔离解除、取得证明、挂牌决策。
 
+mod actions;
 mod custody;
 mod envelope;
 mod errors;
@@ -7,6 +8,7 @@ mod listing_decision;
 mod release;
 mod token;
 
+pub use actions::{ActionFacts, AdminAction, SellerAction, admin_actions, seller_actions};
 pub use custody::{
     CustodyTransition, ExpectedAttachment, PositionFacts, PositionState, ProofValidatorStatus,
     RemovedMarker, ValidatedMailProof, apply_custody_proof_batch,
@@ -16,8 +18,8 @@ pub use envelope::{
     EnvelopeObservation, EnvelopeRoute, LegacyAuctionOwner, LegacyReturnEvidence,
     LockedEnvelopeFacts, MatchedDepositItem, PendingReason, QuarantineReason, ReservationBinding,
     ReservationState, ReturnItem, ReturnItemReason, ReturnManifest, SenderIdentity,
-    decide_envelope, require_asset_count, reservation_is_live, reservation_matches_item,
-    reservation_sort_key, same_mail_key,
+    TrustedConsignmentRts, decide_envelope, decide_envelope_with_origin, require_asset_count,
+    reservation_is_live, reservation_matches_item, reservation_sort_key, same_mail_key,
 };
 pub use errors::DepositError;
 pub use listing_decision::{

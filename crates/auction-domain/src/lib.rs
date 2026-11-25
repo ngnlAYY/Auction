@@ -39,8 +39,9 @@ pub use equipment::{
 };
 pub use errors::DomainError;
 pub use identity::{
-    AuctionId, BidId, CommandId, EquipmentId, LotId, ProxyAuthorizationId, SettlementId,
-    SubmissionId, UserId, deterministic_uuid, legacy_natural_key_uuid, legacy_worker_uuid,
+    AuctionId, BidId, CommandId, ConsignmentContractId, EquipmentId, LotId, ProxyAuthorizationId,
+    SettlementId, SubmissionId, UserId, deterministic_uuid, legacy_natural_key_uuid,
+    legacy_worker_uuid,
 };
 pub use keys::DataKeyDomain;
 pub use proxy::{
@@ -54,13 +55,14 @@ pub use scheduling::{
 };
 pub use settlement::{
     AdjustmentAnchor, COMPENSATION_REVERSAL_RULE_VERSION, CompensationReversal,
-    DEFAULT_COD_RETURN_LIMIT, EquipmentLossAdmission, EquipmentLossBlocker, FundingAccountKey,
-    FundingSplit, InternalSettlementAction, RecoveryAdvance, RecoveryAdvanceError,
-    RecoveryAdvanceFacts, RecoveryMode, RecoveryPolicy, RecoveryStage, SETTLEMENT_PPM,
-    SettlementAmount, SettlementFact, SettlementLine, SettlementMode, SettlementObligation,
-    SettlementObligationKind, SettlementObligationState, SettlementPlan, SettlementPolicy,
-    SettlementWorld, equipment_loss_funding, floor_ppm, funding_reconciliation_capacity,
-    next_recovery_advance, proportional_floor, validate_settlement_price_breakdown_for_mode,
+    ConsignmentContractKind, DEFAULT_COD_RETURN_LIMIT, EquipmentLossAdmission,
+    EquipmentLossBlocker, FundingAccountKey, FundingSplit, InternalSettlementAction,
+    RecoveryAdvance, RecoveryAdvanceError, RecoveryAdvanceFacts, RecoveryMode, RecoveryPolicy,
+    RecoveryStage, SETTLEMENT_PPM, SettlementAmount, SettlementFact, SettlementLine,
+    SettlementMode, SettlementObligation, SettlementObligationKind, SettlementObligationState,
+    SettlementOrigin, SettlementPlan, SettlementPolicy, SettlementWorld, equipment_loss_funding,
+    floor_ppm, funding_reconciliation_capacity, next_recovery_advance, proportional_floor,
+    validate_settlement_price_breakdown_for_mode,
 };
 pub use settlement::{
     DISPATCH_REFERENCE_LINE_PREFIX, FIRST_DISPATCH_NO, SETTLEMENT_RETURN_RESEND_LIMIT,

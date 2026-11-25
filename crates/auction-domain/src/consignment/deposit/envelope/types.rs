@@ -419,6 +419,15 @@ pub struct ReturnManifest {
     pub items: Vec<ReturnItem>,
 }
 
+/// 已识别寄售来源的可信系统 RTS：只携带来源标识，原发送的其余事实由接管事务锁内重读。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrustedConsignmentRts {
+    /// RTS 主题与后缀证明的原寄售义务。
+    pub obligation_id: uuid::Uuid,
+    /// 原发送轮。
+    pub original_round: u32,
+}
+
 /// 整封决定的闭集。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EnvelopeDecision {
@@ -430,6 +439,8 @@ pub enum EnvelopeDecision {
     ArchiveEmpty,
     /// 持久隔离，零资产 POST。
     Quarantine(QuarantineReason),
+    /// 已识别寄售来源的可信 RTS：交退件接管写端，按 RTS 的 K 建 intake 与 Take 工作。
+    AcquireReturn(TrustedConsignmentRts),
 }
 
 impl EnvelopeDecision {
@@ -440,6 +451,7 @@ impl EnvelopeDecision {
             Self::Return(_) => "return",
             Self::ArchiveEmpty => "archive_empty",
             Self::Quarantine(_) => "quarantine",
+            Self::AcquireReturn(_) => "acquire_return",
         }
     }
 }

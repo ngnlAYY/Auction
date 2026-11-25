@@ -2,11 +2,12 @@
 //!
 //! 处置事实只描述“非正常成功路径的终态如何收口”：自动 Sent 恢复、人工 Sent 证明、
 //! Admin 判失败、装备损失退役、COD 退回与成交撤销的收口、已付款交付被收回后的收口、历史自寄
-//! 核对、发送围栏前的预检退役，以及操作者确认无资金与资产影响的历史失败已处置。普通成功发送
+//! 核对、发送围栏前的预检退役、寄售季末关闭从未起写的取得投递，以及操作者确认无资金与资产影响的
+//! 历史失败已处置。普通成功发送
 //! 不写处置行，不与正常成功路径重复计数。
 //!
 //! 每类准入事实恰好一个来源引用（`DeliveryDispositionSource`）；`PreflightRetired` 以投递行
-//! 自身（投递 id、fence 与失败码）为证。是否解除失败计数在写入时由
+//! 自身（投递 id、fence 与失败码）为证，`SeasonClosed` 以投递行与同事务的工作关闭记录为证。是否解除失败计数在写入时由
 //! [`DeliveryDispositionKind::resolves_alert`] 固定为事实列，读侧不再维护按来源拆分的排除谓词。
 
 use uuid::Uuid;
@@ -19,15 +20,20 @@ pub use original::{
     OriginalMailKey, OriginalMailKeyError, parse_settlement_world, settlement_world_code,
 };
 
-/// 预检退役中唯一解除失败计数的失败码；其余预检退役仍计入通知失败。
+/// 预检退役中解除失败计数的失败码之一：关注提醒失去资格。
 pub const PREFLIGHT_LOT_WATCH_INVALIDATED: &str = "lot_watch_invalidated";
 
+/// 预检退役中解除失败计数的失败码之一：寄售付款提醒在进入 sending 前作废（已付、已取消或轮已变）。
+/// 作废是业务结论而不是发送失败，统筹方任务书（7A-3）要求分类口径不计为未处置失败。
+pub const PREFLIGHT_CONSIGNMENT_NOTICE_INVALIDATED: &str = "consignment_notice_invalidated";
+
 /// 预检退役允许的失败码闭集；与发送围栏前的退役写入共用。
-pub const PREFLIGHT_RETIREMENT_CODES: [&str; 4] = [
+pub const PREFLIGHT_RETIREMENT_CODES: [&str; 5] = [
     PREFLIGHT_LOT_WATCH_INVALIDATED,
     "recipient_renamed",
     "auction_notice_invalidated",
     "season_notice_invalidated",
+    PREFLIGHT_CONSIGNMENT_NOTICE_INVALIDATED,
 ];
 
 /// 处置种类闭集：只覆盖异常或不确定终态的收口，不覆盖每次普通成功发送。
@@ -54,11 +60,14 @@ pub enum DeliveryDispositionKind {
     PreflightRetired,
     /// 操作者确认无资金与资产影响的历史失败已经处置；必须填写原因。
     OperatorAcknowledged,
+    /// 寄售季末关闭从未起写的取得工作，其待发投递被取消（`failed/season_ended`）。自证：以投递行
+    /// 与同事务写入的工作关闭记录为证，没有外部来源引用；数据库守卫只允许它用于这种投递。
+    SeasonClosed,
 }
 
 impl DeliveryDispositionKind {
     /// 全部种类；持久化闭集、应用层与迁移必须逐项对应。
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::AutoSentProof,
         Self::OperatorSentConfirmation,
         Self::AdminFailed,
@@ -68,6 +77,7 @@ impl DeliveryDispositionKind {
         Self::LegacySelf,
         Self::PreflightRetired,
         Self::OperatorAcknowledged,
+        Self::SeasonClosed,
     ];
 
     /// 持久化与协议使用的稳定名称。
@@ -82,6 +92,7 @@ impl DeliveryDispositionKind {
             Self::LegacySelf => "legacy_self",
             Self::PreflightRetired => "preflight_retired",
             Self::OperatorAcknowledged => "operator_acknowledged",
+            Self::SeasonClosed => "season_closed",
         }
     }
 
@@ -100,13 +111,18 @@ impl DeliveryDispositionKind {
 
     /// 该处置是否解除投递与通知的失败计数。
     ///
-    /// 当前口径沿用迁移 `000088` 之前的读侧排除：只有失去资格的关注提醒预检退役不计
-    /// 失败，改名与赛季退役仍计入。放开其余退役属有意改变判定，须用户批准；
+    /// 当前口径沿用迁移 `000088` 之前的读侧排除：失去资格的关注提醒预检退役不计
+    /// 失败，改名与赛季退役仍计入；作废的寄售付款提醒（7A-3）同样不计。放开其余退役属有意
+    /// 改变判定，须用户批准；寄售季末关闭（`SeasonClosed`）解除计数已获维护者批准（2026-11-24），
+    /// 只覆盖这一种类。
     /// 结论在写入时固定到 `delivery_dispositions.resolves_alert`，读侧只按该列过滤。
     pub const fn resolves_alert(self, reason_code: Option<&str>) -> bool {
         match self {
             Self::PreflightRetired => match reason_code {
-                Some(code) => is_same(code, PREFLIGHT_LOT_WATCH_INVALIDATED),
+                Some(code) => {
+                    is_same(code, PREFLIGHT_LOT_WATCH_INVALIDATED)
+                        || is_same(code, PREFLIGHT_CONSIGNMENT_NOTICE_INVALIDATED)
+                }
                 None => false,
             },
             Self::AutoSentProof
@@ -116,7 +132,8 @@ impl DeliveryDispositionKind {
             | Self::CodReturned
             | Self::RecoveryEquipmentRecovered
             | Self::LegacySelf
-            | Self::OperatorAcknowledged => true,
+            | Self::OperatorAcknowledged
+            | Self::SeasonClosed => true,
         }
     }
 
@@ -211,7 +228,11 @@ impl DeliveryDispositionSource {
         {
             return Err(DeliveryDispositionError::InvalidSource);
         }
-        let expected = usize::from(kind != DeliveryDispositionKind::PreflightRetired);
+        let self_evidenced = matches!(
+            kind,
+            DeliveryDispositionKind::PreflightRetired | DeliveryDispositionKind::SeasonClosed
+        );
+        let expected = usize::from(!self_evidenced);
         if self.reference_count() != expected {
             return Err(DeliveryDispositionError::InvalidSource);
         }
@@ -228,7 +249,9 @@ impl DeliveryDispositionSource {
             }
             DeliveryDispositionKind::LegacySelf => self.legacy_self_reconciliation_id.is_some(),
             DeliveryDispositionKind::OperatorAcknowledged => self.audit_id.is_some(),
-            DeliveryDispositionKind::PreflightRetired => true,
+            DeliveryDispositionKind::PreflightRetired | DeliveryDispositionKind::SeasonClosed => {
+                true
+            }
         };
         matches_kind.ok_or(DeliveryDispositionError::InvalidSource)
     }
