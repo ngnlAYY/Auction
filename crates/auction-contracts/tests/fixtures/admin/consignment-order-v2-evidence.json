@@ -1,0 +1,55 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "items": [
+      {
+        "kind": "round",
+        "round_id": "00000000-0000-4000-8000-000000000531",
+        "round_number": 1,
+        "leg": "original",
+        "delivery_stage": "sent",
+        "created_at": "2026-11-21T18:00:00Z"
+      },
+      {
+        "kind": "attempt",
+        "attempt_id": "00000000-0000-4000-8000-000000000532",
+        "round_id": "00000000-0000-4000-8000-000000000531",
+        "fence": 1,
+        "write_started": true,
+        "delivery_stage": "sent"
+      },
+      {
+        "kind": "return_take",
+        "intake_id": "00000000-0000-4000-8000-000000000533",
+        "work_id": "00000000-0000-4000-8000-000000000534",
+        "original_round_id": "00000000-0000-4000-8000-000000000531",
+        "fence": null,
+        "state": "pending"
+      },
+      {
+        "kind": "observation",
+        "observation_id": "00000000-0000-4000-8000-000000000535",
+        "category": "sent",
+        "conclusion": "accepted",
+        "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "observed_at": "2026-11-21T18:01:00Z"
+      },
+      {
+        "kind": "cash_use",
+        "purpose": "seller",
+        "state": "blocked",
+        "amount": 96
+      },
+      {
+        "kind": "blocker",
+        "blocker": "opening_uid_block",
+        "since": "2026-11-21T18:02:00Z",
+        "resolved": false
+      }
+    ],
+    "total": 6,
+    "page": 1,
+    "page_size": 20
+  }
+}

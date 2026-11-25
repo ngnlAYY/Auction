@@ -1,7 +1,5 @@
 //! 静态资源响应构造、条件请求与页面重定向及错误。
 
-use std::borrow::Cow;
-
 use auction_contracts::ApiErrorResponse;
 use auction_time::Timestamp;
 use axum::Json;
@@ -9,32 +7,39 @@ use axum::body::Body;
 use axum::extract::Request;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use rust_embed::{EmbeddedFile, RustEmbed};
+use sha2::{Digest, Sha256};
 
 use super::cache::{CachePolicy, StaticCachePolicy};
 use super::negotiation::{AssetEncoding, negotiate_encoding, static_method};
+use super::pages::PageBuild;
 use super::routes::{Surface, browser_route};
+use super::source::AssetFile;
 use super::{
     ADMIN_NOT_FOUND_HTML, ASSETS_MISSING_BODY, IMF_FIXDATE, OBSOLETE_HTTP_DATES,
     PUBLIC_NOT_FOUND_HTML,
 };
 use crate::middleware::boundary::request_id;
 use crate::middleware::response_cache::etag_matches;
+use crate::middleware::security::PageScriptPolicy;
 
 const VARY_ACCEPT_ENCODING: &str = "Accept-Encoding";
 
 /// 路径与方法检查通过后，才按实际副本协商并构造静态响应。
-pub(super) fn negotiated_asset_response<A: RustEmbed>(
-    file: EmbeddedFile,
+///
+/// 页面响应带上所属 build 的脚本策略扩展，安全头中间件据此写 CSP；配置了挂载时 HTML 的
+/// `ETag` 混入策略标识。
+pub(super) fn negotiated_asset_response(
+    build: &PageBuild,
+    file: AssetFile,
     relative_path: &str,
     request: &Request,
     cache_policy: CachePolicy,
     preload_links: Option<HeaderValue>,
 ) -> Response {
-    let compressed = A::get(&format!("{relative_path}.br"));
+    let compressed = build.get(&format!("{relative_path}.br"));
     let selection = negotiate_encoding(request.headers(), compressed.is_some());
     // 压缩副本沿用原文的媒体类型，验证器与长度取实际发出的表示。
-    let content_type = file.metadata.mimetype().to_owned();
+    let content_type = file.mimetype.clone();
     let (file, encoding) = match (selection, compressed) {
         (Some(AssetEncoding::Brotli), Some(compressed)) => (compressed, Some("br")),
         (Some(AssetEncoding::Identity), _) => (file, None),
@@ -49,6 +54,7 @@ pub(super) fn negotiated_asset_response<A: RustEmbed>(
                 .into_response();
         }
     };
+    let file = bind_policy_to_validator(build, file, &content_type);
     let mut response = asset_response(
         file,
         request.method(),
@@ -62,11 +68,31 @@ pub(super) fn negotiated_asset_response<A: RustEmbed>(
     if let Some(preload_links) = preload_links {
         response.headers_mut().insert(header::LINK, preload_links);
     }
+    response.extensions_mut().insert(PageScriptPolicy(build.script_policy()));
     response
 }
 
+/// 配置了挂载时，HTML 的验证器 = SHA-256(策略标识 ‖ 0x00 ‖ 内容摘要)：同一份 HTML 在不同
+/// 脚本策略下的 `ETag` 不同，缓存的 200 与 304 不能跨策略复用。纯内嵌时保持内容摘要。
+fn bind_policy_to_validator(
+    build: &PageBuild,
+    mut file: AssetFile,
+    content_type: &str,
+) -> AssetFile {
+    if let Some(tag) = build.etag_policy_tag()
+        && content_type.eq_ignore_ascii_case("text/html")
+    {
+        let mut hasher = Sha256::new();
+        hasher.update(tag.as_bytes());
+        hasher.update([0]);
+        hasher.update(file.sha256);
+        file.sha256 = hasher.finalize().into();
+    }
+    file
+}
+
 pub(super) fn asset_response(
-    file: EmbeddedFile,
+    file: AssetFile,
     method: &Method,
     request_headers: &HeaderMap,
     cache_policy: CachePolicy,
@@ -84,8 +110,7 @@ pub(super) fn asset_response(
         .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
     // 同秒重建或回滚会让稳定 URL 的构建时间与内容变化脱钩，仅保留指纹资源的日期验证器。
     let last_modified = if matches!(cache_policy, CachePolicy::Immutable) {
-        file.metadata
-            .last_modified()
+        file.last_modified
             .and_then(|seconds| Timestamp::from_timestamp(i64::try_from(seconds).ok()?, 0))
     } else {
         None
@@ -93,7 +118,7 @@ pub(super) fn asset_response(
     // 对实际发送的表示使用内容摘要，压缩副本与原文各自再验证。
     let etag = HeaderValue::from_str(&format!(
         "\"{}\"",
-        auction_application::core::lower_hex(&file.metadata.sha256_hash())
+        auction_application::core::lower_hex(&file.sha256)
     ))
     .ok();
     let mut headers = HeaderMap::new();
@@ -132,11 +157,8 @@ pub(super) fn asset_response(
     let body = if *method == Method::HEAD {
         Body::empty()
     } else {
-        // release 构建中数据借用自二进制静态段，这里避免多余复制。
-        match file.data {
-            Cow::Borrowed(bytes) => Body::from(bytes),
-            Cow::Owned(bytes) => Body::from(bytes),
-        }
+        // release 构建中内嵌数据借用自二进制静态段，挂载数据在启动时读入一次；`Bytes` 克隆不复制。
+        Body::from(file.data)
     };
     let mut response = (StatusCode::OK, headers, body).into_response();
     response.extensions_mut().insert(StaticCachePolicy(cache_policy));

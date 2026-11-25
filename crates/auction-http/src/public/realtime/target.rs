@@ -16,7 +16,10 @@ const _: () = assert!(MAX_PUBLIC_EVENT_PAGE_SIZE == auction_contracts::MAX_PUBLI
 pub(super) const LIST_QUERY_KEYS: &[&str] = &["auction_id", "after", "page_size"];
 
 /// `/api/v1/ws` 的查询参数白名单：连接只能指向单一拍卖流。
-pub(super) const WEBSOCKET_QUERY_KEYS: &[&str] = &["auction_id"];
+pub(super) const WEBSOCKET_QUERY_KEYS: &[&str] = &["auction_id", "independent_build"];
+
+/// 客户端能力声明：值只能是 `1`；声明后 hello 才可能带 `independent_build`。
+const INDEPENDENT_BUILD_PARAM: &str = "independent_build";
 
 /// 单拍卖流的 stream 名；回放页校验与 Hub 订阅共用同一格式。
 pub(super) fn auction_stream_key(auction_id: Uuid) -> String {
@@ -32,10 +35,17 @@ pub(super) fn parse_http_target(query: &BTreeMap<&str, String>) -> Result<Uuid, 
 }
 
 pub(super) fn parse_websocket_target(query: &BTreeMap<&str, String>) -> Result<Uuid, ()> {
-    if query.len() != 1 {
+    // 只允许 auction_id 加可选的能力声明；声明值非 `1` 一律拒绝，不静默忽略。
+    let declared = usize::from(query.contains_key(INDEPENDENT_BUILD_PARAM));
+    if query.len() != 1 + declared || (declared == 1 && !declares_independent_build(query)) {
         return Err(());
     }
     parse_http_target(query)
+}
+
+/// 连接是否声明理解 hello 的 `independent_build` 字段（旧壳不带该参数）。
+pub(super) fn declares_independent_build(query: &BTreeMap<&str, String>) -> bool {
+    query.get(INDEPENDENT_BUILD_PARAM).is_some_and(|value| value == "1")
 }
 
 /// 旧版只接受无符号规范十进制：`+1`、`01`、空串和超出 i64 的值都必须失败关闭。
@@ -71,7 +81,10 @@ mod tests {
     use axum::http::Uri;
     use uuid::Uuid;
 
-    use super::{LIST_QUERY_KEYS, WEBSOCKET_QUERY_KEYS, parse_http_target, parse_websocket_target};
+    use super::{
+        LIST_QUERY_KEYS, WEBSOCKET_QUERY_KEYS, declares_independent_build, parse_http_target,
+        parse_websocket_target,
+    };
     use crate::query::parse_query;
 
     const AUCTION_ID: &str = "1f0c0000-0000-4000-8000-000000000002";
@@ -92,6 +105,24 @@ mod tests {
         let list = format!("auction_id={AUCTION_ID}&after=3&page_size=10");
         assert_eq!(list_target(&list), Ok(auction_id));
         assert_eq!(websocket_target(&format!("auction_id={AUCTION_ID}")), Ok(auction_id));
+        let declared = format!("auction_id={AUCTION_ID}&independent_build=1");
+        assert_eq!(websocket_target(&declared), Ok(auction_id));
+    }
+
+    #[test]
+    fn independent_build_declaration_is_strict() {
+        for value in ["0", "", "true", "11"] {
+            let query = format!("auction_id={AUCTION_ID}&independent_build={value}");
+            assert_eq!(websocket_target(&query), Err(()), "value={value}");
+        }
+        let uri: Uri = format!("/api/v1/ws?auction_id={AUCTION_ID}&independent_build=1")
+            .parse()
+            .expect("合法 URI");
+        let declared = parse_query(&uri, WEBSOCKET_QUERY_KEYS).expect("合法查询");
+        assert!(declares_independent_build(&declared));
+        let uri: Uri = format!("/api/v1/ws?auction_id={AUCTION_ID}").parse().expect("合法 URI");
+        let plain = parse_query(&uri, WEBSOCKET_QUERY_KEYS).expect("合法查询");
+        assert!(!declares_independent_build(&plain));
     }
 
     #[test]

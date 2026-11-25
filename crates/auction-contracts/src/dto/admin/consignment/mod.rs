@@ -1,7 +1,13 @@
 //! Admin 寄售查询、碰撞记录与下架请求。
 
+mod listing_v2;
+mod loss;
+mod order_v2;
 mod quarantine;
 
+pub use listing_v2::*;
+pub use loss::*;
+pub use order_v2::*;
 pub use quarantine::*;
 
 use std::fmt;

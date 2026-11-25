@@ -1,0 +1,26 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "contract_id": "00000000-0000-4000-8000-000000000501",
+    "kind": "sale",
+    "listing_id": "00000000-0000-4000-8000-000000000101",
+    "equipment_id": "00000000-0000-4000-8000-000000000502",
+    "world": "main",
+    "order_state": "awaiting_payment",
+    "delivery_stage": "sent",
+    "payment_stage": "unpaid",
+    "payout_stage": "blocked",
+    "refund_stage": "not_applicable",
+    "version": 2,
+    "price": 101,
+    "deadline_at": "2026-11-28T18:10:00Z",
+    "fee": 5,
+    "seller_amount": 96,
+    "buyer_user_id": "00000000-0000-4000-8000-000000000521",
+    "buyer_name": "FixtureBuyer",
+    "seller_user_id": "00000000-0000-4000-8000-000000000522",
+    "seller_name": "FixtureSeller",
+    "updated_at": "2026-11-21T18:10:00Z"
+  }
+}

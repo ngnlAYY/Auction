@@ -13,12 +13,19 @@ use crate::middleware::method_strict::{self, MethodRouterExt as _};
 use crate::middleware::{boundary, response_cache};
 use crate::state::PublicApiState;
 
+pub(crate) mod command_receipts;
 pub(crate) mod deposit;
 mod input;
 mod mapping;
 mod mutation;
+#[cfg(test)]
+mod order_tests;
+pub(crate) mod orders;
+pub(crate) mod purchase;
 mod read;
+pub(crate) mod recovery;
 mod response;
+pub(crate) mod rights;
 #[cfg(test)]
 mod tests;
 

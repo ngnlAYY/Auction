@@ -1,0 +1,77 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "record": {
+      "listing": {
+        "listing_id": "00000000-0000-4000-8000-000000000103",
+        "version": 7,
+        "world_id": "main",
+        "external_equipment_id": "42",
+        "mode": "consigned",
+        "price": 101,
+        "pricing_version": 1,
+        "fee_bps": 500,
+        "estimated_fee": 5,
+        "estimated_seller_amount": 96,
+        "created_at": "2026-11-20T18:00:00Z",
+        "updated_at": "2026-11-20T18:20:00Z",
+        "expires_at": "2026-12-20T18:10:00Z",
+        "generation": 1,
+        "position_id": "00000000-0000-4000-8000-000000000c03",
+        "loss_case_id": null,
+        "stored_state": "held_off_market",
+        "effective_state": "held_off_market",
+        "effective_reason": "operations_hold",
+        "allowed_actions": [],
+        "view": {
+          "kind": "held_off_market",
+          "equipment": {
+            "name": "Fixture Oak Staff",
+            "alt_name": null,
+            "category": "Staff",
+            "level": {
+              "kind": "assigned",
+              "value": 42
+            },
+            "tradeable": true,
+            "stat_groups": [
+              {
+                "name": "Fixture attributes",
+                "stats": [
+                  {
+                    "name": "Fixture magic damage",
+                    "value": 12.5,
+                    "base": 10.25
+                  }
+                ]
+              }
+            ],
+            "source": "hvdata-equip-v1",
+            "observed_at": "2026-11-20T18:10:00Z"
+          },
+          "reason": "operations_hold",
+          "hold_id": null
+        }
+      },
+      "seller_user_id": "00000000-0000-4000-8000-0000000000fa",
+      "seller_name": "FixtureSeller",
+      "admin_delist_reason": null,
+      "hold": {
+        "hold_id": "00000000-0000-4000-8000-000000000416",
+        "set_at": "2026-11-20T18:20:00Z"
+      },
+      "position": {
+        "position_id": "00000000-0000-4000-8000-000000000a01",
+        "state": "in_custody",
+        "version": 2,
+        "generation": 1
+      },
+      "admin_actions": [
+        "release_hold"
+      ]
+    },
+    "conflicts": [],
+    "conflicts_truncated": false
+  }
+}

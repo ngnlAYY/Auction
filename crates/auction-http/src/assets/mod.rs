@@ -4,15 +4,22 @@
 //! release 内嵌资源，dev 从磁盘读取；本 crate 仅拥有通用响应和 surface 路由规则。
 
 mod cache;
+mod independent;
+mod mount;
 mod negotiation;
+mod pages;
 mod response;
 mod routes;
+mod source;
 #[cfg(test)]
 mod wire_tests;
 
+use std::sync::Arc;
+
 use axum::{extract::Request, http::HeaderValue, response::Response};
 
-use self::cache::{CachePolicy, StaticCachePolicy, exact_asset_cache, favicon_file};
+use self::cache::{CachePolicy, StaticCachePolicy, exact_asset_cache};
+use self::independent::{EntryClass, entry_class};
 use self::negotiation::{entry_preload_links, exact_asset_path, reserved_json_path, static_method};
 use self::response::{
     assets_missing, canonical_page_redirect, json_not_found, method_not_allowed,
@@ -20,6 +27,9 @@ use self::response::{
 };
 use self::routes::Surface;
 use crate::WebScriptPolicy;
+
+pub use mount::WebMountError;
+pub use pages::SurfacePages;
 
 pub(crate) use cache::cdn_cache_policy;
 
@@ -36,7 +46,8 @@ const PUBLIC_NOT_FOUND_HTML: &str = "<!doctype html><html lang=\"en\"><head><met
 const ADMIN_NOT_FOUND_HTML: &str = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>404</title></head><body><main><h1>404</h1></main></body></html>";
 
 /// 处理公开端的静态产物与显式浏览器路由；缓存判定按本 surface 的实际技术栈。
-pub(crate) async fn serve_public_asset<A: rust_embed::RustEmbed>(
+#[cfg(test)]
+pub(crate) async fn serve_public_asset<A: rust_embed::RustEmbed + 'static>(
     request: Request,
     web_script_policy: WebScriptPolicy,
 ) -> Response {
@@ -44,18 +55,29 @@ pub(crate) async fn serve_public_asset<A: rust_embed::RustEmbed>(
 }
 
 /// 处理管理端的静态产物与显式浏览器路由；缓存判定按本 surface 的实际技术栈。
-pub(crate) async fn serve_admin_asset<A: rust_embed::RustEmbed>(
+#[cfg(test)]
+pub(crate) async fn serve_admin_asset<A: rust_embed::RustEmbed + 'static>(
     request: Request,
     web_script_policy: WebScriptPolicy,
 ) -> Response {
     serve::<A>(Surface::Admin, request, false, web_script_policy)
 }
 
+/// 公开端的页面分派：默认入口与独立入口各自绑定构建号与脚本策略。
+pub(crate) async fn serve_public_pages(pages: Arc<SurfacePages>, request: Request) -> Response {
+    serve_pages(Surface::Public, request, false, &pages)
+}
+
+/// 管理端的页面分派；首次设置页不经此入口。
+pub(crate) async fn serve_admin_pages(pages: Arc<SurfacePages>, request: Request) -> Response {
+    serve_pages(Surface::Admin, request, false, &pages)
+}
+
 /// 只向一次性初始化进程提供 Admin 的 `/setup` 页面和必要静态资源。
 ///
 /// 首次设置页属于 Admin surface，CSP、入口 `Link` 与静态资源指纹判定都必须使用装配根传入的
-/// 同一策略，否则 Solid 产物会拿到 Dioxus 的缓存与预加载规则。
-pub async fn serve_admin_setup_asset<A: rust_embed::RustEmbed>(
+/// 同一策略，否则 Solid 产物会拿到 Dioxus 的缓存与预加载规则。永远只用内嵌页面，不经挂载。
+pub async fn serve_admin_setup_asset<A: rust_embed::RustEmbed + 'static>(
     request: Request,
     web_script_policy: WebScriptPolicy,
 ) -> Response {
@@ -69,12 +91,25 @@ pub async fn serve_admin_setup_asset<A: rust_embed::RustEmbed>(
     response
 }
 
-/// 按“保留路径 → 精确静态文件 → 批准浏览器路由 → 404”顺序封闭分派请求。
-fn serve<A: rust_embed::RustEmbed>(
+/// 纯内嵌分派：与挂载功能出现之前的行为字节一致。
+fn serve<A: rust_embed::RustEmbed + 'static>(
     surface: Surface,
     request: Request,
     setup_only: bool,
     web_script_policy: WebScriptPolicy,
+) -> Response {
+    serve_pages(surface, request, setup_only, &SurfacePages::embedded::<A>(web_script_policy))
+}
+
+/// 按“保留路径 → 精确静态文件 → 批准浏览器路由 → 404”顺序封闭分派请求。
+///
+/// 不变量：页面字节、构建号与脚本策略来自同一个 `PageBuild`；批准的 `/consignment` 前缀路由
+/// 取独立入口，其余页面取默认入口。首次设置只会传入纯内嵌的页面集合。
+fn serve_pages(
+    surface: Surface,
+    request: Request,
+    setup_only: bool,
+    pages: &SurfacePages,
 ) -> Response {
     let method = request.method();
     let path = request.uri().path();
@@ -97,8 +132,9 @@ fn serve<A: rust_embed::RustEmbed>(
         if !static_method(method) {
             return method_not_allowed(request_headers);
         }
-        return match favicon_file::<A>() {
-            Some((relative_path, file)) => negotiated_asset_response::<A>(
+        return match pages.find_favicon() {
+            Some((build, relative_path, file)) => negotiated_asset_response(
+                build,
                 file,
                 &relative_path,
                 &request,
@@ -110,16 +146,17 @@ fn serve<A: rust_embed::RustEmbed>(
     }
 
     if let Some(relative_path) = exact_asset_path(path)
-        && let Some(file) = A::get(relative_path)
+        && let Some((build, file)) = pages.find(relative_path)
     {
         if !static_method(method) {
             return method_not_allowed(request_headers);
         }
-        return negotiated_asset_response::<A>(
+        return negotiated_asset_response(
+            build,
             file,
             relative_path,
             &request,
-            exact_asset_cache(relative_path, web_script_policy),
+            exact_asset_cache(relative_path, build.script_policy()),
             None,
         );
     }
@@ -128,10 +165,13 @@ fn serve<A: rust_embed::RustEmbed>(
         if !static_method(method) {
             return method_not_allowed(request_headers);
         }
-        return match A::get(INDEX_HTML) {
+        let class = if setup_only { EntryClass::Default } else { entry_class(surface, path) };
+        let build = pages.entry(class);
+        return match build.get(INDEX_HTML) {
             Some(index) => {
-                let preload_links = entry_preload_links(&index.data, web_script_policy);
-                negotiated_asset_response::<A>(
+                let preload_links = entry_preload_links(&index.data, build.script_policy());
+                negotiated_asset_response(
+                    build,
                     index,
                     INDEX_HTML,
                     &request,
@@ -673,7 +713,7 @@ mod tests {
     async fn entry_rebuild_in_same_second_requires_current_etag() {
         let respond = |document, headers: &HeaderMap| {
             asset_response(
-                embedded_at_build_second(document, "text/html"),
+                embedded_at_build_second(document, "text/html").into(),
                 &Method::GET,
                 headers,
                 CachePolicy::NoCache,
@@ -718,7 +758,7 @@ mod tests {
             (CachePolicy::Favicon, StatusCode::OK, None),
         ] {
             let response = asset_response(
-                embedded_at_build_second(b"asset", "text/css"),
+                embedded_at_build_second(b"asset", "text/css").into(),
                 &Method::GET,
                 &headers,
                 policy,
@@ -1129,7 +1169,7 @@ mod tests {
         assert_eq!(cdn_cache_policy(&response), "no-cache");
 
         let fingerprinted = asset_response(
-            embedded_at_build_second(b"body{color:red}", "text/css"),
+            embedded_at_build_second(b"body{color:red}", "text/css").into(),
             &Method::GET,
             &HeaderMap::new(),
             exact_asset_cache("assets/app-dxh0123456789abcdef.css", WebScriptPolicy::Dioxus),

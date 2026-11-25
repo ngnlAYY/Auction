@@ -1,17 +1,19 @@
 //! v2 公开与本人挂单读模型，覆盖第 4 期新增状态、处分代、原因和允许动作。
 
+mod generation;
 mod validation;
+mod withdraw;
+
+pub use generation::ListingGeneration;
+pub use withdraw::{WithdrawListingV2, WithdrawReceiptV2};
 
 use auction_time::Timestamp;
-use serde::Deserialize;
-use serde::Serialize;
 use uuid::Uuid;
 
 use crate::deserialize_required_option;
 use crate::dto::public::consignment::catalog::EquipmentLevel;
 use crate::dto::public::consignment::catalog::EquipmentView;
 use crate::dto::public::consignment::owned::LookupProgress;
-use crate::dto::public::consignment::receipt::ConsignmentOperationV2;
 use crate::dto::public::consignment::scalar::ListingFeeBps;
 use crate::dto::public::consignment::scalar::ListingPrice;
 use crate::dto::public::consignment::scalar::ListingPricingVersion;
@@ -24,12 +26,8 @@ use crate::dto::public::consignment::wire::json_object;
 use crate::dto::public::consignment::wire::text;
 use crate::dto::public::consignment::wire::timestamp;
 use crate::dto::public::consignment::wire::uuid;
-use crate::dto::public::consignment::wire_v2::command_uuid;
-use crate::dto::public::consignment::wire_v2::positive_version;
 use crate::dto::public::consignment::wire_v2::required_option_uuid;
-use crate::dto::public::consignment::wire_v2::serialize_positive_version;
 use crate::dto::public::consignment::wire_v2::string_enum;
-use crate::dto::public::consignment::write::write_object;
 
 string_enum! {
     /// 挂单持久态与有效态使用的完整 v2 闭集。
@@ -163,22 +161,6 @@ string_enum! {
     }
 }
 
-/// 处分代。前三期的解析代从 1 开始，第 4 期的寄售处分代也使用同一安全整数区间。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ListingGeneration(i64);
-
-impl<'de> Deserialize<'de> for ListingGeneration {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        positive_version(deserializer).map(Self)
-    }
-}
-
-impl Serialize for ListingGeneration {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serialize_positive_version(&self.0, serializer)
-    }
-}
-
 json_object! {
     ()
     /// 回执中的逐件 L：挂单 ID、版本与状态。
@@ -291,9 +273,6 @@ impl ListingViewV2 {
                 if !reason.is_hold_reason() {
                     return Err("在库下架视图的原因不属于 held_off_market 闭集");
                 }
-                if *reason == ListingReasonV2::OperationsHold && hold_id.is_none() {
-                    return Err("运营止售必须携带 hold_id");
-                }
                 if hold_id.is_some_and(|hold_id| hold_id.is_nil()) {
                     return Err("hold_id 不得为零 UUID");
                 }
@@ -396,6 +375,12 @@ json_object! {
         pub expires_at: Timestamp,
         #[serde(deserialize_with = "deserialize_required_option")]
         pub generation: Option<ListingGeneration>,
+        /// 挂单的代管 position；从未代管为 null。
+        #[serde(deserialize_with = "required_option_uuid")]
+        pub position_id: Option<Uuid>,
+        /// 该 position 的损失案件；没有案件为 null，有时本人详情链接到损失回执（D9 §6.1）。
+        #[serde(deserialize_with = "required_option_uuid")]
+        pub loss_case_id: Option<Uuid>,
         pub stored_state: ListingStateV2,
         pub effective_state: ListingStateV2,
         #[serde(deserialize_with = "deserialize_required_option")]
@@ -403,92 +388,4 @@ json_object! {
         pub allowed_actions: Vec<ListingActionV2>,
         pub view: ListingViewV2,
     } => validate
-}
-
-json_object! {
-    (tag = "disposition", rename_all = "snake_case")
-    /// 本人 v2 撤回的两种合法回执：代管件登记意愿，未代管件按前三期关闭。
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum WithdrawReceiptV2 {
-        /// 代管件登记撤回意愿。
-        WithdrawalRequested {
-            /// 固定 v2。
-            schema_version: u16,
-            operation: ConsignmentOperationV2,
-            #[serde(deserialize_with = "uuid")]
-            command_id: Uuid,
-            #[serde(deserialize_with = "uuid")]
-            listing_id: Uuid,
-            listing_version: ListingVersion,
-            state: ListingStateV2,
-            #[serde(deserialize_with = "uuid")]
-            intent_id: Uuid,
-        },
-        /// 未代管件直接关闭。
-        Closed {
-            /// 固定 v2。
-            schema_version: u16,
-            operation: ConsignmentOperationV2,
-            #[serde(deserialize_with = "uuid")]
-            command_id: Uuid,
-            #[serde(deserialize_with = "uuid")]
-            listing_id: Uuid,
-            listing_version: ListingVersion,
-            state: ListingStateV2,
-        },
-    } => validate
-}
-
-write_object! {
-    /// 本人 v2 撤回或取消请求。不变量 1、6：稳定 UUIDv4 与预期版本。
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct WithdrawListingV2 {
-        pub command_id: Uuid => ("command_uuid", "必须为规范小写的非零 UUIDv4"),
-        pub expected_version: ListingVersion => ("serde::Deserialize::deserialize", "必须为正的安全 JSON 整数"),
-    }
-}
-
-impl WithdrawReceiptV2 {
-    fn validate(&self) -> Result<(), &'static str> {
-        // 第 4 期三个代管态都只登记撤回意愿：available 转入 withdrawal_pending，
-        // deposit_accepted/held_off_market 保留原态；withdrawal_accepted 属第 7 期。
-        match self {
-            Self::WithdrawalRequested {
-                schema_version,
-                operation,
-                command_id,
-                listing_id,
-                state,
-                intent_id,
-                ..
-            } => {
-                if *schema_version != 2
-                    || *operation != ConsignmentOperationV2::Withdraw
-                    || !matches!(
-                        state,
-                        ListingStateV2::DepositAccepted
-                            | ListingStateV2::WithdrawalPending
-                            | ListingStateV2::HeldOffMarket
-                    )
-                {
-                    return Err("撤回意愿回执的版本、operation 或状态不一致");
-                }
-                if command_id.is_nil() || listing_id.is_nil() || intent_id.is_nil() {
-                    return Err("撤回意愿回执的标识不得为零 UUID");
-                }
-            }
-            Self::Closed { schema_version, operation, command_id, listing_id, state, .. } => {
-                if *schema_version != 2
-                    || *operation != ConsignmentOperationV2::Withdraw
-                    || *state != ListingStateV2::Closed
-                {
-                    return Err("未代管撤回回执的版本、operation 或状态不一致");
-                }
-                if command_id.is_nil() || listing_id.is_nil() {
-                    return Err("未代管撤回回执的标识不得为零 UUID");
-                }
-            }
-        }
-        Ok(())
-    }
 }

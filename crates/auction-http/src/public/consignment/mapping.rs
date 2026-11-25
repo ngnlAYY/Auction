@@ -47,25 +47,27 @@ fn wire_mode(mode: ListingMode) -> dto::ListingMode {
 }
 
 // 复用 DTO 的闭集解码器核对应用层的固定码，任何版本漂移都失败关闭。
-fn wire_code<T: for<'de> Deserialize<'de>>(code: &'static str) -> Result<T, ConsignmentError> {
+pub(super) fn wire_code<T: for<'de> Deserialize<'de>>(
+    code: &'static str,
+) -> Result<T, ConsignmentError> {
     let Ok(value) = T::deserialize(StrDeserializer::<serde::de::value::Error>::new(code)) else {
         return Err(ConsignmentError::Unavailable);
     };
     Ok(value)
 }
 
-fn price(value: i64) -> Result<dto::ListingPrice, ConsignmentError> {
+pub(super) fn price(value: i64) -> Result<dto::ListingPrice, ConsignmentError> {
     dto::ListingPrice::new(value).ok_or(ConsignmentError::Unavailable)
 }
 
-fn version(value: u64) -> Result<dto::ListingVersion, ConsignmentError> {
+pub(super) fn version(value: u64) -> Result<dto::ListingVersion, ConsignmentError> {
     let Ok(value) = i64::try_from(value) else {
         return Err(ConsignmentError::Unavailable);
     };
     dto::ListingVersion::new(value).ok_or(ConsignmentError::Unavailable)
 }
 
-fn level(level: ListingEquipmentLevel) -> dto::EquipmentLevel {
+pub(super) fn level(level: ListingEquipmentLevel) -> dto::EquipmentLevel {
     match level {
         ListingEquipmentLevel::Assigned(value) => {
             dto::EquipmentLevel::Assigned { value: i64::from(value) }
@@ -75,7 +77,7 @@ fn level(level: ListingEquipmentLevel) -> dto::EquipmentLevel {
     }
 }
 
-fn equipment(details: &ListingEquipmentDetails) -> dto::EquipmentView {
+pub(super) fn equipment(details: &ListingEquipmentDetails) -> dto::EquipmentView {
     let label = details.label();
     dto::EquipmentView {
         name: label.name.clone(),

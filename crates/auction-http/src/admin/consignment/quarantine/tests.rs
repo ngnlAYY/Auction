@@ -6,15 +6,17 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use auction_application::consignment::{
-    AdminDepositAction, AdminDepositDetail, AdminDepositQuery, AdminListingRead,
+    AdminDepositAction, AdminDepositDetail, AdminDepositQuery, AdminListingDetailV2,
+    AdminListingQuery, AdminListingRead, AdminListingReadV2, AdminListingRecordV2,
     AdminObservationItem, AdminQuarantineObservation, ApplyListingLookupCommand,
     ApplyMailProofCommand, AutoCloseListingCommand, ConsignmentError, ConsignmentFuture,
     CustodyControlStore, DepositBusinessRejection, DepositCommandService, DepositRead,
     DepositStatus, DispositionStore, EnvelopeStore, ExpireReservationCommand,
     IssueReservationCommand, ListingAutoCloseEffect, ListingBusinessRejection, ListingClosed,
     ListingCommandOutcome, ListingCommandStore, ListingLookupEffect, ListingPriceReceipt,
-    ListingRegistered, ListingStateChange, ManageListingService, OperationsHoldDisposition,
-    OperationsHoldReceipt, OwnedDepositInstructions, QuarantineState, RecheckQuarantineCommand,
+    ListingReadPage, ListingRegistered, ListingStateChange, ManageListingService,
+    OperationsHoldDisposition, OperationsHoldReceipt, OwnedDepositInstructions, OwnedListingReadV2,
+    PrivateListingQuery, PrivateListingV2, QuarantineState, RecheckQuarantineCommand,
     RecheckReceipt, RegisterListingCommand, ReleaseOperationsHoldCommand, ReleaseQuarantineCommand,
     ReleaseReceipt, ReservationReceipt, ReservationRetired, ReservationStore, SeasonCloseCommand,
     SeasonCloseReceipt, SeasonNoticeCommand, SeasonNoticeReceipt, SeasonStore,
@@ -228,6 +230,7 @@ struct Backend {
     listing_states: Mutex<HashMap<Uuid, ListingState>>,
     v1_versions: Mutex<HashMap<Uuid, u64>>,
     v1_calls: Mutex<Vec<Uuid>>,
+    v2_records: Mutex<Vec<AdminListingRecordV2>>,
 }
 
 impl Default for Backend {
@@ -252,7 +255,57 @@ impl Default for Backend {
             ])),
             v1_versions: Mutex::new(HashMap::from([(LISTING, 3), (UNMANAGED, 1)])),
             v1_calls: Mutex::new(Vec::new()),
+            v2_records: Mutex::new(Vec::new()),
         }
+    }
+}
+
+impl OwnedListingReadV2 for Backend {
+    fn list_owned_v2(
+        &self,
+        _seller_user_id: UserId,
+        _query: PrivateListingQuery,
+    ) -> ConsignmentFuture<'_, ListingReadPage<PrivateListingV2>> {
+        Box::pin(async { Err(ConsignmentError::Unavailable) })
+    }
+
+    fn owned_detail_v2(
+        &self,
+        _seller_user_id: UserId,
+        _listing_id: Uuid,
+    ) -> ConsignmentFuture<'_, Option<PrivateListingV2>> {
+        Box::pin(async { Err(ConsignmentError::Unavailable) })
+    }
+}
+
+impl AdminListingReadV2 for Backend {
+    fn list_admin_v2(
+        &self,
+        query: AdminListingQuery,
+    ) -> ConsignmentFuture<'_, ListingReadPage<AdminListingRecordV2>> {
+        let items = self.v2_records.lock().expect("v2 记录").clone();
+        let total = items.len() as u64;
+        Box::pin(async move { Ok(ListingReadPage { items, total, window: query.listings.window }) })
+    }
+
+    fn admin_detail_v2(
+        &self,
+        listing_id: Uuid,
+    ) -> ConsignmentFuture<'_, Option<AdminListingDetailV2>> {
+        let record = self
+            .v2_records
+            .lock()
+            .expect("v2 记录")
+            .iter()
+            .find(|record| record.listing.listing_id == listing_id)
+            .cloned();
+        Box::pin(async move {
+            Ok(record.map(|record| AdminListingDetailV2 {
+                record,
+                conflicts: Vec::new(),
+                conflicts_truncated: false,
+            }))
+        })
     }
 }
 
@@ -1387,4 +1440,76 @@ async fn admin_detail_without_session_is_401_before_business() {
     request.headers_mut().remove(header::COOKIE);
     let response = send(&app, request).await;
     failure(response, StatusCode::UNAUTHORIZED, "unauthenticated").await;
+}
+
+fn admin_record(listing: PrivateListingV2) -> AdminListingRecordV2 {
+    AdminListingRecordV2 {
+        listing,
+        seller_user_id: UserId::from_uuid(fixture_uuid(0xfa)),
+        seller_name: "FixtureSeller".to_owned(),
+        admin_delist_reason: None,
+    }
+}
+
+#[tokio::test]
+async fn v2_listing_reads_show_custody_hold_and_admin_actions_not_seller_actions() {
+    let backend = Arc::new(Backend::default());
+    {
+        let mut records = backend.v2_records.lock().expect("v2 记录");
+        records.push(admin_record(crate::mapping::fixtures::held_by_operations(LISTING, HOLD)));
+        records.push(admin_record(crate::mapping::fixtures::available(UNMANAGED)));
+    }
+    let app = router(setup(&backend, true));
+
+    let page = json(send(&app, get(LISTINGS)).await, StatusCode::OK).await;
+    assert_eq!(page["data"]["total"], 2);
+    let held = &page["data"]["items"][0];
+    assert_eq!(held["hold"]["hold_id"], HOLD.to_string());
+    // hold_id 只在 Admin 的 hold 展示，本人视图（含 Admin 内嵌的）不带。
+    assert!(held["listing"]["view"]["hold_id"].is_null());
+    assert_eq!(held["admin_actions"], json!(["release_hold"]));
+    assert_eq!(held["position"]["state"], "in_custody");
+    assert_eq!(held["position"]["generation"], 1);
+    assert_eq!(held["seller_name"], "FixtureSeller");
+    // Admin 视图不带卖家动作，卖家动作与 Admin 动作互不串味。
+    assert_eq!(held["listing"]["allowed_actions"], json!([]));
+    let free = &page["data"]["items"][1];
+    assert_eq!(free["hold"], Value::Null);
+    assert_eq!(free["admin_actions"], json!(["delist"]));
+
+    let detail =
+        json(send(&app, get(&format!("{LISTINGS}/{LISTING}"))).await, StatusCode::OK).await;
+    assert_eq!(detail["data"]["record"], *held);
+    assert_eq!(detail["data"]["conflicts"], json!([]));
+    assert!(!detail.to_string().contains("FixtureKey"));
+
+    let missing = send(&app, get(&format!("{LISTINGS}/{MISSING}"))).await;
+    failure(missing, StatusCode::NOT_FOUND, "listing_not_found").await;
+}
+
+/// 不变量 1、D9 §6.3：软关闭后解除既有止售照常，新的下架仍被拒。
+#[tokio::test]
+async fn release_hold_continues_after_soft_close_while_new_delist_is_refused() {
+    let backend = Arc::new(Backend::default());
+    let app = router(setup(&backend, false));
+    let response = send(
+        &app,
+        post(
+            &format!("{LISTINGS}/{LISTING}/release-hold"),
+            json!({"command_id": COMMAND, "expected_version": 3, "hold_id": HOLD}),
+        ),
+    )
+    .await;
+    let body = json(response, StatusCode::OK).await;
+    assert_eq!(body["data"]["disposition"], "hold_released");
+
+    let delist = send(
+        &app,
+        post(
+            &format!("{LISTINGS}/{LISTING}/delist"),
+            json!({"command_id": OTHER_COMMAND, "expected_version": 3, "reason": "fixture"}),
+        ),
+    )
+    .await;
+    failure(delist, StatusCode::NOT_FOUND, "consignment_disabled").await;
 }

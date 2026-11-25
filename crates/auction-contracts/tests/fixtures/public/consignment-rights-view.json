@@ -1,0 +1,17 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "right_id": "00000000-0000-5000-8000-000000000521",
+    "right_version": 2,
+    "kind": "claim_payment",
+    "world": "main",
+    "target": {
+      "kind": "contract",
+      "contract_id": "00000000-0000-4000-8000-000000000531"
+    },
+    "allowed_actions": [
+      "claim_payment"
+    ]
+  }
+}

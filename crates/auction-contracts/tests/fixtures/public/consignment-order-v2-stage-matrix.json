@@ -1,0 +1,509 @@
+{
+  "cases": [
+    {
+      "name": "卖单：未付款、未发出",
+      "facts": {
+        "kind": "sale",
+        "outcome": "open",
+        "delivery": "not_started",
+        "payment": "unpaid",
+        "payout": "not_applicable",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "awaiting_payment",
+        "delivery_stage": "not_started",
+        "payment_stage": "unpaid",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "卖单：未付款、已发出，卖款被阻断",
+      "facts": {
+        "kind": "sale",
+        "outcome": "open",
+        "delivery": "sent",
+        "payment": "unpaid",
+        "payout": "blocked",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "awaiting_payment",
+        "delivery_stage": "sent",
+        "payment_stage": "unpaid",
+        "payout_stage": "blocked",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "卖单：已付款，等待原件确领",
+      "facts": {
+        "kind": "sale",
+        "outcome": "open",
+        "delivery": "sent",
+        "payment": "certified",
+        "payout": "blocked",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "awaiting_handoff",
+        "delivery_stage": "sent",
+        "payment_stage": "certified",
+        "payout_stage": "blocked",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "卖单：原件已确领，卖款可付出",
+      "facts": {
+        "kind": "sale",
+        "outcome": "open",
+        "delivery": "claimed",
+        "payment": "certified",
+        "payout": "ready",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "awaiting_payout",
+        "delivery_stage": "claimed",
+        "payment_stage": "certified",
+        "payout_stage": "ready",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "卖单：原件已确领，卖款已发出",
+      "facts": {
+        "kind": "sale",
+        "outcome": "open",
+        "delivery": "claimed",
+        "payment": "certified",
+        "payout": "sent",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "awaiting_payout",
+        "delivery_stage": "claimed",
+        "payment_stage": "certified",
+        "payout_stage": "sent",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "卖单：成交取消，退款预留",
+      "facts": {
+        "kind": "sale",
+        "outcome": "open",
+        "delivery": "returned",
+        "payment": "certified",
+        "payout": "closed",
+        "refund": "reserved"
+      },
+      "stages": {
+        "order_state": "refunding",
+        "delivery_stage": "returned",
+        "payment_stage": "certified",
+        "payout_stage": "closed",
+        "refund_stage": "reserved"
+      }
+    },
+    {
+      "name": "卖单：完成",
+      "facts": {
+        "kind": "sale",
+        "outcome": "completed",
+        "delivery": "claimed",
+        "payment": "certified",
+        "payout": "claimed",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "completed",
+        "delivery_stage": "claimed",
+        "payment_stage": "certified",
+        "payout_stage": "claimed",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "卖单：未付款退回后取消",
+      "facts": {
+        "kind": "sale",
+        "outcome": "cancelled",
+        "delivery": "returned",
+        "payment": "closed",
+        "payout": "not_applicable",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "cancelled",
+        "delivery_stage": "returned",
+        "payment_stage": "closed",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "卖单：已付款退款确领后取消",
+      "facts": {
+        "kind": "sale",
+        "outcome": "cancelled",
+        "delivery": "closed",
+        "payment": "certified",
+        "payout": "closed",
+        "refund": "claimed"
+      },
+      "stages": {
+        "order_state": "cancelled",
+        "delivery_stage": "closed",
+        "payment_stage": "certified",
+        "payout_stage": "closed",
+        "refund_stage": "claimed"
+      }
+    },
+    {
+      "name": "卖单：交割结果未知落到核对",
+      "facts": {
+        "kind": "sale",
+        "outcome": "open",
+        "delivery": "unknown",
+        "payment": "unpaid",
+        "payout": "not_applicable",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "reconcile",
+        "delivery_stage": "unknown",
+        "payment_stage": "unpaid",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "卖单：未付款却已确领是矛盾",
+      "facts": {
+        "kind": "sale",
+        "outcome": "open",
+        "delivery": "claimed",
+        "payment": "unpaid",
+        "payout": "not_applicable",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "reconcile",
+        "delivery_stage": "claimed",
+        "payment_stage": "unpaid",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "卖单：已完成结局但卖款只是发出",
+      "facts": {
+        "kind": "sale",
+        "outcome": "completed",
+        "delivery": "claimed",
+        "payment": "certified",
+        "payout": "sent",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "reconcile",
+        "delivery_stage": "claimed",
+        "payment_stage": "certified",
+        "payout_stage": "sent",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "卖单：付款腿不适用是矛盾，付款阶段改报未知",
+      "facts": {
+        "kind": "sale",
+        "outcome": "open",
+        "delivery": "sent",
+        "payment": "not_applicable",
+        "payout": "not_applicable",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "reconcile",
+        "delivery_stage": "sent",
+        "payment_stage": "unknown",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "卖单：已取消结局却仍是未付款",
+      "facts": {
+        "kind": "sale",
+        "outcome": "cancelled",
+        "delivery": "returned",
+        "payment": "unpaid",
+        "payout": "not_applicable",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "reconcile",
+        "delivery_stage": "returned",
+        "payment_stage": "unpaid",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "卖单：已确领后又有退款腿",
+      "facts": {
+        "kind": "sale",
+        "outcome": "open",
+        "delivery": "claimed",
+        "payment": "certified",
+        "payout": "not_applicable",
+        "refund": "ready"
+      },
+      "stages": {
+        "order_state": "reconcile",
+        "delivery_stage": "claimed",
+        "payment_stage": "certified",
+        "payout_stage": "not_applicable",
+        "refund_stage": "ready"
+      }
+    },
+    {
+      "name": "撤回：进行中",
+      "facts": {
+        "kind": "withdrawal",
+        "outcome": "open",
+        "delivery": "in_flight",
+        "payment": "not_applicable",
+        "payout": "not_applicable",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "withdrawing",
+        "delivery_stage": "in_flight",
+        "payment_stage": "not_applicable",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "撤回：完成",
+      "facts": {
+        "kind": "withdrawal",
+        "outcome": "completed",
+        "delivery": "claimed",
+        "payment": "not_applicable",
+        "payout": "not_applicable",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "completed",
+        "delivery_stage": "claimed",
+        "payment_stage": "not_applicable",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "撤回：退回后取消",
+      "facts": {
+        "kind": "withdrawal",
+        "outcome": "cancelled",
+        "delivery": "returned",
+        "payment": "not_applicable",
+        "payout": "not_applicable",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "cancelled",
+        "delivery_stage": "returned",
+        "payment_stage": "not_applicable",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "撤回：事实里带资金腿是矛盾，资金阶段规整为不适用",
+      "facts": {
+        "kind": "withdrawal",
+        "outcome": "open",
+        "delivery": "sent",
+        "payment": "unpaid",
+        "payout": "ready",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "reconcile",
+        "delivery_stage": "sent",
+        "payment_stage": "not_applicable",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "撤回：进行中却已确领",
+      "facts": {
+        "kind": "withdrawal",
+        "outcome": "open",
+        "delivery": "claimed",
+        "payment": "not_applicable",
+        "payout": "not_applicable",
+        "refund": "not_applicable"
+      },
+      "stages": {
+        "order_state": "reconcile",
+        "delivery_stage": "claimed",
+        "payment_stage": "not_applicable",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "等待付款却已认证付款",
+      "kind": "sale",
+      "stages": {
+        "order_state": "awaiting_payment",
+        "delivery_stage": "sent",
+        "payment_stage": "certified",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "完成态的卖款只是发出",
+      "kind": "sale",
+      "stages": {
+        "order_state": "completed",
+        "delivery_stage": "claimed",
+        "payment_stage": "certified",
+        "payout_stage": "sent",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "非核对态携带未知阶段",
+      "kind": "sale",
+      "stages": {
+        "order_state": "awaiting_handoff",
+        "delivery_stage": "unknown",
+        "payment_stage": "certified",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "成交订单不得处于撤回中",
+      "kind": "sale",
+      "stages": {
+        "order_state": "withdrawing",
+        "delivery_stage": "sent",
+        "payment_stage": "certified",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "核对态的成交订单付款腿仍须适用",
+      "kind": "sale",
+      "stages": {
+        "order_state": "reconcile",
+        "delivery_stage": "sent",
+        "payment_stage": "not_applicable",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "已付款取消必须有已领退款",
+      "kind": "sale",
+      "stages": {
+        "order_state": "cancelled",
+        "delivery_stage": "returned",
+        "payment_stage": "certified",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "撤回订单的付款腿不适用",
+      "kind": "withdrawal",
+      "stages": {
+        "order_state": "withdrawing",
+        "delivery_stage": "sent",
+        "payment_stage": "unpaid",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "核对态的撤回订单资金腿仍须不适用",
+      "kind": "withdrawal",
+      "stages": {
+        "order_state": "reconcile",
+        "delivery_stage": "sent",
+        "payment_stage": "not_applicable",
+        "payout_stage": "not_applicable",
+        "refund_stage": "blocked"
+      }
+    },
+    {
+      "name": "撤回订单不得等待付款",
+      "kind": "withdrawal",
+      "stages": {
+        "order_state": "awaiting_payment",
+        "delivery_stage": "sent",
+        "payment_stage": "not_applicable",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "退款进行中但原件仍是已发出",
+      "kind": "sale",
+      "stages": {
+        "order_state": "refunding",
+        "delivery_stage": "sent",
+        "payment_stage": "certified",
+        "payout_stage": "closed",
+        "refund_stage": "reserved"
+      }
+    },
+    {
+      "name": "退款进行中但原件仍在途",
+      "kind": "sale",
+      "stages": {
+        "order_state": "refunding",
+        "delivery_stage": "in_flight",
+        "payment_stage": "certified",
+        "payout_stage": "not_applicable",
+        "refund_stage": "ready"
+      }
+    },
+    {
+      "name": "已取消但原件仍是已发出",
+      "kind": "sale",
+      "stages": {
+        "order_state": "cancelled",
+        "delivery_stage": "sent",
+        "payment_stage": "closed",
+        "payout_stage": "not_applicable",
+        "refund_stage": "not_applicable"
+      }
+    },
+    {
+      "name": "已取消但原件仍在途",
+      "kind": "sale",
+      "stages": {
+        "order_state": "cancelled",
+        "delivery_stage": "in_flight",
+        "payment_stage": "certified",
+        "payout_stage": "closed",
+        "refund_stage": "claimed"
+      }
+    }
+  ]
+}

@@ -34,6 +34,7 @@ use crate::public::consignment::input;
 use crate::public::consignment::response::{self, RouteError, RouteResult};
 use crate::query::parse_public_uuid;
 
+mod listings;
 #[cfg(test)]
 mod tests;
 
@@ -54,10 +55,15 @@ pub(crate) trait DepositState: ConsignmentState {
     fn deposit(&self) -> &DepositCapabilities;
 }
 
-/// 将四条 Public v2 路由放入给定路由器，并沿用严格方法与无缓存边界。
+/// 将六条 Public v2 路由放入给定路由器，并沿用严格方法与无缓存边界。
 pub(crate) fn mount<S: DepositState>(router: Router<S>) -> Router<S> {
     let routes = Router::new()
         .route("/api/v2/consignment/status", method_strict::get(status::<S>))
+        .route("/api/v2/me/consignment/listings", method_strict::get(listings::list_owned::<S>))
+        .route(
+            "/api/v2/me/consignment/listings/{listing_id}",
+            method_strict::get(listings::owned_detail::<S>),
+        )
         .route(
             "/api/v2/me/consignment/listings/{listing_id}/deposit-instructions",
             method_strict::get(instructions::<S>),
@@ -186,6 +192,10 @@ async fn withdraw<S: DepositState>(
         receipt @ WithdrawReceiptV2::WithdrawalRequested { .. } => {
             response::accepted("撤回意愿已登记", receipt)
         }
+        // D9 §6.2：直接建撤回代是 202 `withdrawal_accepted`，合同与装备已确定（7C-2）。
+        receipt @ WithdrawReceiptV2::WithdrawalAccepted { .. } => {
+            response::accepted("撤回已受理", receipt)
+        }
         receipt @ WithdrawReceiptV2::Closed { .. } => response::loaded(receipt),
     }
 }
@@ -243,7 +253,8 @@ fn active_dto(active: ActiveDepositInstructions) -> DepositInstructions {
     }
 }
 
-fn reservation_dto(
+/// 预约成功回执映射；本人回执查询复用同一映射。
+pub(super) fn reservation_dto(
     receipt: auction_application::consignment::ReservationReceipt,
 ) -> Result<DepositReservationReceipt, ConsignmentError> {
     if receipt.state != ListingState::AwaitingDeposit || receipt.schema_version != 2 {
@@ -262,12 +273,39 @@ fn reservation_dto(
     })
 }
 
-fn withdrawal_dto(receipt: WithdrawDepositReceipt) -> Result<WithdrawReceiptV2, ConsignmentError> {
+/// 回执形状必须与处置一一对应：意愿与关闭不带合同和装备，直接撤回必带两者、不带意愿；
+/// 任何不符都按结果未知处理，客户端只能原样重放（不变量 1、6）。本人回执查询复用同一映射。
+pub(super) fn withdrawal_dto(
+    receipt: WithdrawDepositReceipt,
+) -> Result<WithdrawReceiptV2, ConsignmentError> {
     if receipt.schema_version != 2
         || receipt.operation != auction_application::consignment::DepositOperation::Withdraw
-        || receipt.contract_id.is_some()
-        || receipt.equipment_id.is_some()
     {
+        return Err(ConsignmentError::OutcomeUnknown);
+    }
+    if receipt.disposition
+        == auction_application::consignment::ReceiptDisposition::WithdrawalAccepted
+    {
+        let (Some(contract_id), Some(equipment_id), None) =
+            (receipt.contract_id, receipt.equipment_id, receipt.intent_id)
+        else {
+            return Err(ConsignmentError::OutcomeUnknown);
+        };
+        if receipt.state != ListingState::WithdrawalPending {
+            return Err(ConsignmentError::OutcomeUnknown);
+        }
+        return Ok(WithdrawReceiptV2::WithdrawalAccepted {
+            schema_version: 2,
+            operation: auction_contracts::ConsignmentOperationV2::Withdraw,
+            command_id: receipt.command_id.as_uuid(),
+            listing_id: receipt.listing_id,
+            listing_version: wire_version(receipt.listing_version.value())?,
+            state: ListingStateV2::WithdrawalPending,
+            contract_id,
+            equipment_id,
+        });
+    }
+    if receipt.contract_id.is_some() || receipt.equipment_id.is_some() {
         return Err(ConsignmentError::OutcomeUnknown);
     }
     match receipt.disposition {

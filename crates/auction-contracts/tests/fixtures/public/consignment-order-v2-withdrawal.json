@@ -1,0 +1,21 @@
+{
+  "code": "ok",
+  "message": "已加载",
+  "data": {
+    "contract_id": "00000000-0000-4000-8000-000000000503",
+    "kind": "withdrawal",
+    "role": "seller",
+    "listing_id": "00000000-0000-4000-8000-000000000104",
+    "equipment_id": "00000000-0000-4000-8000-000000000504",
+    "world": "isekai",
+    "order_state": "withdrawing",
+    "delivery_stage": "in_flight",
+    "payment_stage": "not_applicable",
+    "payout_stage": "not_applicable",
+    "refund_stage": "not_applicable",
+    "allowed_actions": [],
+    "version": 3,
+    "price": null,
+    "deadline_at": null
+  }
+}

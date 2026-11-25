@@ -83,7 +83,7 @@ pub(super) fn private_query(uri: &Uri) -> Result<PrivateListingQuery, Consignmen
     })
 }
 
-fn enum_filter<T: FromStr>(
+pub(super) fn enum_filter<T: FromStr>(
     query: &BTreeMap<&str, String>,
     key: &str,
 ) -> Result<Option<T>, ConsignmentError> {
@@ -93,7 +93,7 @@ fn enum_filter<T: FromStr>(
     Ok(value)
 }
 
-fn listing_query<'a>(
+pub(super) fn listing_query<'a>(
     uri: &Uri,
     allowed: &[&'a str],
 ) -> Result<BTreeMap<&'a str, String>, ConsignmentError> {
@@ -126,7 +126,9 @@ fn valid_query_encoding(query: &str) -> bool {
     std::str::from_utf8(&decoded).is_ok()
 }
 
-fn page_window(query: &BTreeMap<&str, String>) -> Result<ListingPageWindow, ConsignmentError> {
+pub(super) fn page_window(
+    query: &BTreeMap<&str, String>,
+) -> Result<ListingPageWindow, ConsignmentError> {
     let invalid = ConsignmentError::InvalidQuery;
     let page = parse_positive_i64(query.get("page"), 1, None).map_err(|()| invalid)?;
     let size = parse_public_page_size(query.get("page_size"), 20).map_err(|()| invalid)?;

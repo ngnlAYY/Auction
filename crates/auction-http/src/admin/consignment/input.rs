@@ -49,14 +49,14 @@ pub(super) fn list_query(uri: &Uri) -> Result<AdminListingQuery, ConsignmentErro
     })
 }
 
-fn decimal(raw: &str) -> Result<u32, ConsignmentError> {
+pub(super) fn decimal(raw: &str) -> Result<u32, ConsignmentError> {
     if !raw.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(ConsignmentError::InvalidQuery);
     }
     parse(raw)
 }
 
-fn filter<T: FromStr>(raw: Option<&str>) -> Result<Option<T>, ConsignmentError> {
+pub(super) fn filter<T: FromStr>(raw: Option<&str>) -> Result<Option<T>, ConsignmentError> {
     raw.map(parse).transpose()
 }
 

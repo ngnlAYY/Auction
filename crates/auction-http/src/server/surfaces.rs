@@ -1,5 +1,7 @@
 //! Public/Admin 路由表与静态资源 fallback 装配。
 
+use std::sync::Arc;
+
 use axum::extract::DefaultBodyLimit;
 use axum::routing::get;
 use axum::{Router, middleware};
@@ -12,7 +14,7 @@ use crate::admin::{
     admin_final_phase_auction, admin_open_auction, admin_preview_auction, admin_recovery_report,
     admin_settlement_report, current_admin_session, login_admin_session, logout_admin_session,
 };
-use crate::assets as web_assets;
+use crate::assets::{self as web_assets, SurfacePages};
 use crate::middleware::boundary::HttpBoundary;
 use crate::middleware::security::{AnonymousReadGate, WebScriptPolicy};
 use crate::middleware::{boundary, method_strict, read_gate, response_cache, strict_json};
@@ -63,6 +65,26 @@ pub fn public_router_with_web_script_policy<A>(
 where
     A: rust_embed::RustEmbed + Send + Sync + 'static,
 {
+    public_router_with_pages(
+        version,
+        boundary,
+        anonymous_read_gate,
+        Arc::new(SurfacePages::embedded::<A>(web_script_policy)),
+    )
+}
+
+/// 公开端路由，页面由装配根构造好的 `SurfacePages` 提供（纯内嵌或带静态挂载）。
+///
+/// 安全头的 surface 默认策略与构建号报告都取自 `pages`，页面响应另带所属 build 的策略。
+pub fn public_router_with_pages(
+    version: &'static str,
+    boundary: HttpBoundary,
+    anonymous_read_gate: AnonymousReadGate,
+    pages: Arc<SurfacePages>,
+) -> Router<PublicApiState> {
+    let boundary = boundary
+        .with_web_script_policy(pages.surface_policy())
+        .with_build_report(pages.build_report());
     let health = move || health::health_response("public-api", version);
 
     public_feature_routes(
@@ -74,11 +96,8 @@ where
             .route("/metrics", axum::routing::any(metrics::public)),
         anonymous_read_gate,
     )
-    .fallback(move |request| web_assets::serve_public_asset::<A>(request, web_script_policy))
-    .layer(middleware::from_fn_with_state(
-        boundary.with_web_script_policy(web_script_policy),
-        boundary::enforce,
-    ))
+    .fallback(move |request| web_assets::serve_public_pages(Arc::clone(&pages), request))
+    .layer(middleware::from_fn_with_state(boundary, boundary::enforce))
 }
 
 /// 管理端路由。
@@ -102,6 +121,22 @@ pub fn admin_router_with_web_script_policy<A>(
 where
     A: rust_embed::RustEmbed + Send + Sync + 'static,
 {
+    admin_router_with_pages(
+        version,
+        boundary,
+        Arc::new(SurfacePages::embedded::<A>(web_script_policy)),
+    )
+}
+
+/// 管理端路由，页面由装配根构造好的 `SurfacePages` 提供；首次设置页不经此路径。
+pub fn admin_router_with_pages(
+    version: &'static str,
+    boundary: HttpBoundary,
+    pages: Arc<SurfacePages>,
+) -> Router<AdminApiState> {
+    let boundary = boundary
+        .with_web_script_policy(pages.surface_policy())
+        .with_build_report(pages.build_report());
     let health = move || health::health_response("admin-api", version);
 
     admin_feature_routes(
@@ -112,11 +147,8 @@ where
             .route("/health/ready", get(health::admin_health_ready))
             .route("/metrics", axum::routing::any(metrics::admin)),
     )
-    .fallback(move |request| web_assets::serve_admin_asset::<A>(request, web_script_policy))
-    .layer(middleware::from_fn_with_state(
-        boundary.with_web_script_policy(web_script_policy),
-        boundary::enforce,
-    ))
+    .fallback(move |request| web_assets::serve_admin_pages(Arc::clone(&pages), request))
+    .layer(middleware::from_fn_with_state(boundary, boundary::enforce))
 }
 
 /// 注册已冻结的 Public 路径。
@@ -237,7 +269,13 @@ fn public_feature_routes(
     let router = public_handlers::consignment::mount(
         router.merge(routes.route_layer(middleware::from_fn(boundary::normalize_api_rejection))),
     );
-    public_handlers::consignment::deposit::mount(router)
+    let router = public_handlers::consignment::deposit::mount(router);
+    // 不变量 1、4、6、7：购买、订单与本人回执沿用寄售守卫；权利路由不经 private_identity（D9 §7）。
+    let router = public_handlers::consignment::purchase::mount(router);
+    let router = public_handlers::consignment::orders::mount(router);
+    let router = public_handlers::consignment::recovery::mount(router);
+    let router = public_handlers::consignment::command_receipts::mount(router);
+    public_handlers::consignment::rights::mount(router)
 }
 
 /// 注册已冻结的 Admin 路径。
@@ -554,7 +592,10 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
     );
     // 不变量 1、6、8：只有正式 Admin 路由接入下架命令，并沿用既有会话与审计边界。
     let router = admin_handlers::consignment::mount(router);
-    admin_handlers::consignment::quarantine::mount(router)
+    let router = admin_handlers::consignment::quarantine::mount(router);
+    let router = admin_handlers::consignment::orders::mount(router);
+    let router = admin_handlers::consignment::orders::mount_writes(router);
+    admin_handlers::consignment::loss::mount(router)
 }
 
 #[cfg(test)]
@@ -766,6 +807,259 @@ mod tests {
             .await
             .expect("v2 隔离详情响应");
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// 第 6、7 期的 Admin 订单与损失案件路由必须接入总路由：无会话 Cookie 时沿用既有认证拒绝
+    /// （401）而不是 404；带会话时到达处理器，未装配读端口失败关闭为 503（不变量 6）。
+    #[tokio::test]
+    async fn admin_v2_orders_and_loss_case_are_mounted_and_require_session() {
+        let id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        let paths = [
+            "/api/v2/admin/consignment/orders".to_owned(),
+            format!("/api/v2/admin/consignment/orders/{id}"),
+            format!("/api/v2/admin/consignment/orders/{id}/evidence"),
+            format!("/api/v2/admin/consignment/positions/{id}/loss-case"),
+        ];
+        for path in &paths {
+            let mut request =
+                Request::builder().uri(path).body(Body::empty()).expect("Admin 无会话请求");
+            request.extensions_mut().insert(admin_address());
+            let response = admin_router::<NoAssets>("fixture", crate::HttpBoundary::default())
+                .with_state(admin_state())
+                .oneshot(request)
+                .await
+                .expect("Admin 无会话响应");
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+
+            let response = admin_get(admin_state(), path).await;
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "{path}");
+        }
+    }
+
+    /// 订单读取与购买路由必须接入 Public 总路由：本人订单无会话为 401；公开 v2 目录匿名可读，
+    /// 关闭时为 404 `consignment_disabled`，开启而未装配读端口时失败关闭为 503；且不在 Admin 暴露。
+    #[tokio::test]
+    async fn public_v2_orders_and_purchase_are_mounted_and_private_routes_require_session() {
+        let id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        let state = public_state_with_session();
+        let app = public_router::<NoAssets>(
+            "fixture",
+            state.http_boundary(),
+            state.anonymous_read_gate(),
+        )
+        .with_state(state);
+        for path in [
+            "/api/v2/me/consignment/orders".to_owned(),
+            format!("/api/v2/me/consignment/orders/{id}"),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(&path).body(Body::empty()).expect("订单请求"))
+                .await
+                .expect("订单响应");
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+        }
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v2/consignment/listings")
+                    .body(Body::empty())
+                    .expect("目录请求"),
+            )
+            .await
+            .expect("目录响应");
+        assert_eq!(
+            consignment_json(StatusCode::NOT_FOUND, response).await["code"],
+            "consignment_disabled",
+        );
+
+        let state = public_state_with_session().with_purchase(true, None, None);
+        let app = public_router::<NoAssets>(
+            "fixture",
+            state.http_boundary(),
+            state.anonymous_read_gate(),
+        )
+        .with_state(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v2/consignment/listings")
+                    .body(Body::empty())
+                    .expect("目录请求"),
+            )
+            .await
+            .expect("目录响应");
+        assert_eq!(
+            consignment_json(StatusCode::SERVICE_UNAVAILABLE, response).await["code"],
+            "consignment_unavailable",
+        );
+
+        let response =
+            admin_get(admin_state(), &format!("/api/v2/me/consignment/orders/{id}")).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// 受限权利路由不经 `private_identity`：没有 Public 会话 Cookie、只带权利 Cookie 的请求能到达
+    /// 用例层（未装配时 503，而不是会话 401），且寄售开关关闭（软关闭）不改变这一点（不变量 7、D9 §7）。
+    #[tokio::test]
+    async fn public_v2_rights_routes_are_mounted_without_session_and_ignore_the_soft_switch() {
+        use auction_domain::consignment::rights::{RightSessionToken, format_session_token};
+
+        let session = format_session_token(&RightSessionToken::from_entropy([5; 32]));
+        let cookie = format!("hv_right={}; hv_right_browser={}", session.as_str(), "A".repeat(43),);
+        for enabled in [false, true] {
+            let state = public_state_with_session().with_consignment(
+                ConsignmentCapabilities::without_database(enabled, FeeBps::DEFAULT_CONSIGNED),
+            );
+            let app = public_router::<NoAssets>(
+                "fixture",
+                state.http_boundary(),
+                state.anonymous_read_gate(),
+            )
+            .with_state(state);
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/v2/consignment/rights/current")
+                        .header(header::COOKIE, &cookie)
+                        .body(Body::empty())
+                        .expect("权利请求"),
+                )
+                .await
+                .expect("权利响应");
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "enabled={enabled}");
+        }
+    }
+
+    /// 购买接线：真实 `PublicApiState::with_purchase` 在寄售关闭时先只读重放——已接受的同 ID 同请求
+    /// 回原 201 回执，新 ID 才是 404 `consignment_disabled`，关闭期间没有新购买进入存储（不变量 1、
+    /// D9 §6.3）。同时确认重列、本人损失回执与 Admin 灭失确认已挂进各自的总路由（无会话 401）。
+    #[tokio::test]
+    async fn closed_purchase_replays_through_the_public_state_and_follow_up_routes_are_mounted() {
+        use auction_application::consignment::{
+            ConsignmentError, PurchaseCommand, PurchaseCommandService, PurchaseOutcome,
+            PurchaseReceipt, PurchaseStore, RepriceV2Command, RepriceV2Outcome, RepriceV2Store,
+        };
+        use auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER;
+        use auction_domain::consignment::{ListingVersion, OrderState};
+        use auction_domain::{ConsignmentContractId, SettlementWorld};
+
+        const LISTING: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        const ACCEPTED: Uuid = Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0a01);
+        const FRESH: Uuid = Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0a02);
+
+        /// 账本里只有 ACCEPTED 一笔已接受购买；新购买只计数并失败。
+        #[derive(Default)]
+        struct Purchases {
+            purchases: Mutex<u32>,
+        }
+
+        impl PurchaseStore for Purchases {
+            fn purchase(
+                &self,
+                _command: PurchaseCommand,
+            ) -> ConsignmentFuture<'_, PurchaseOutcome> {
+                *self.purchases.lock().expect("购买计数") += 1;
+                Box::pin(async { Err(ConsignmentError::Unavailable) })
+            }
+
+            fn replay_purchase(
+                &self,
+                command: PurchaseCommand,
+            ) -> ConsignmentFuture<'_, Option<PurchaseOutcome>> {
+                let outcome = (command.command_id.as_uuid() == ACCEPTED).then(|| {
+                    PurchaseOutcome::Purchased(PurchaseReceipt {
+                        command_id: command.command_id,
+                        listing_id: command.input.listing_id,
+                        listing_version: ListingVersion::new(6).expect("版本"),
+                        contract_id: ConsignmentContractId::from_uuid(Uuid::from_u128(0x50)),
+                        contract_version: 1,
+                        equipment_id: Uuid::from_u128(0x60),
+                        world: SettlementWorld::Main,
+                        price: command.input.expected_price,
+                        order_state: OrderState::AwaitingPayment,
+                        replayed: true,
+                    })
+                });
+                Box::pin(async move { Ok(outcome) })
+            }
+        }
+
+        impl RepriceV2Store for Purchases {
+            fn reprice(
+                &self,
+                _command: RepriceV2Command,
+            ) -> ConsignmentFuture<'_, RepriceV2Outcome> {
+                Box::pin(async { Err(ConsignmentError::Unavailable) })
+            }
+        }
+
+        let purchases = Arc::new(Purchases::default());
+        let service = Arc::new(PurchaseCommandService::new(purchases.clone(), purchases.clone()));
+        let state = public_state_with_session().with_purchase(false, Some(service), None);
+        let app = public_router::<NoAssets>(
+            "fixture",
+            state.http_boundary(),
+            state.anonymous_read_gate(),
+        )
+        .with_state(state);
+        let post = |command: Uuid| {
+            let body = serde_json::json!({
+                "command_id": command, "expected_version": 5, "expected_price": 101,
+            });
+            let mut request = Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/v2/consignment/listings/{LISTING}/purchase"))
+                .header(header::COOKIE, "auction_public_session=fixture-placeholder")
+                .header(PUBLIC_EXPECTED_USER_ID_HEADER, PUBLIC_SESSION_USER_ID.to_string())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .expect("购买请求");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(std::net::SocketAddr::from(([192, 0, 2, 24], 3000))));
+            request
+        };
+        let replayed = app.clone().oneshot(post(ACCEPTED)).await.expect("重放响应");
+        let replayed = consignment_json(StatusCode::CREATED, replayed).await;
+        assert_eq!(replayed["data"]["command_id"], ACCEPTED.to_string());
+        assert_eq!(replayed["data"]["disposition"], "purchased");
+        let fresh = app.clone().oneshot(post(FRESH)).await.expect("新命令响应");
+        assert_eq!(
+            consignment_json(StatusCode::NOT_FOUND, fresh).await["code"],
+            "consignment_disabled"
+        );
+        assert_eq!(*purchases.purchases.lock().expect("购买计数"), 0, "关闭后无新购买进入存储");
+
+        for (method, path) in [
+            (Method::POST, format!("/api/v2/consignment/listings/{LISTING}/relist")),
+            (Method::GET, format!("/api/v2/me/consignment/positions/{LISTING}/loss-case")),
+        ] {
+            let request = Request::builder()
+                .method(method)
+                .uri(&path)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .expect("请求");
+            let mut request = request;
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(std::net::SocketAddr::from(([192, 0, 2, 24], 3000))));
+            let response = app.clone().oneshot(request).await.expect("响应");
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+        }
+        // Admin 灭失确认已挂载：带会话的合法请求到达处理器，未装配用例时失败关闭为 503。
+        let body = serde_json::json!({
+            "command_id": FRESH, "expected_version": 1, "proof_id": ACCEPTED, "reason": "夹具说明",
+        });
+        let response = admin_request(
+            admin_state(),
+            Method::POST,
+            &format!("/api/v2/admin/consignment/positions/{LISTING}/confirm-loss"),
+            Body::from(body.to_string()),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 
     async fn consignment_json(status: StatusCode, response: Response) -> serde_json::Value {

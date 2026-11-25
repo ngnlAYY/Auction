@@ -6,7 +6,10 @@ use auction_application::auction::{
     AuctionReader, CompetitionCommandPort, PublicAccountReader, PublicBidLogReader,
     PublicLotReader, PublicPriceHistoryReader, WorldReader,
 };
-use auction_application::consignment::{DepositCommandService, DepositRead};
+use auction_application::consignment::{
+    DepositCommandService, DepositRead, ManualRelistService, OwnedCommandReadV2, OwnedOrderRead,
+    PublicCatalogReadV2, PurchaseCommandService, RightsService, SellerLossCaseRead,
+};
 use auction_application::forum::PublicForumReader;
 use auction_application::operations::ProcessReadinessPort;
 use auction_application::public::{
@@ -20,7 +23,14 @@ use tokio::sync::watch;
 
 use crate::middleware::HttpBoundary;
 use crate::middleware::security::{AnonymousReadGate, PublicHttpSecurity};
+use crate::public::consignment::command_receipts::{
+    CommandReceiptCapabilities, CommandReceiptState,
+};
 use crate::public::consignment::deposit::{DepositCapabilities, DepositState};
+use crate::public::consignment::orders::{OrderCapabilities, OrderReadState};
+use crate::public::consignment::purchase::{PurchaseCapabilities, PurchaseState};
+use crate::public::consignment::recovery::{RecoveryCapabilities, RecoveryState};
+use crate::public::consignment::rights::{RightsCapabilities, RightsState};
 use crate::public::consignment::{ConsignmentCapabilities, ConsignmentState};
 use crate::realtime_hub::{RealtimeHub, RealtimeSubscriptionError};
 
@@ -51,6 +61,11 @@ pub struct PublicApiState {
     commands: Option<Arc<dyn CompetitionCommandPort>>,
     consignment: ConsignmentCapabilities,
     deposit: DepositCapabilities,
+    purchase: PurchaseCapabilities,
+    orders: OrderCapabilities,
+    rights: RightsCapabilities,
+    recovery: RecoveryCapabilities,
+    command_receipts: CommandReceiptCapabilities,
     metrics: Option<Arc<ProcessMetrics>>,
     runtime_switch_snapshot: Option<auction_application::runtime_switches::RuntimeSwitches>,
     readiness: Option<Arc<dyn ProcessReadinessPort>>,
@@ -83,6 +98,11 @@ impl Default for PublicApiState {
             commands: None,
             consignment: ConsignmentCapabilities::default(),
             deposit: DepositCapabilities::default(),
+            purchase: PurchaseCapabilities::default(),
+            orders: OrderCapabilities::default(),
+            rights: RightsCapabilities::default(),
+            recovery: RecoveryCapabilities::default(),
+            command_receipts: CommandReceiptCapabilities::default(),
             metrics: None,
             runtime_switch_snapshot: None,
             readiness: None,
@@ -136,6 +156,11 @@ impl PublicApiState {
             commands,
             consignment: ConsignmentCapabilities::default(),
             deposit: DepositCapabilities::default(),
+            purchase: PurchaseCapabilities::default(),
+            orders: OrderCapabilities::default(),
+            rights: RightsCapabilities::default(),
+            recovery: RecoveryCapabilities::default(),
+            command_receipts: CommandReceiptCapabilities::default(),
             metrics: None,
             runtime_switch_snapshot: None,
             readiness: None,
@@ -158,6 +183,46 @@ impl PublicApiState {
         commands: Option<Arc<DepositCommandService>>,
     ) -> Self {
         self.deposit = DepositCapabilities { enabled, read, commands };
+        self
+    }
+
+    /// 注入购买与公开 v2 目录能力；缺端口的一侧返回 503，关闭只截止新购买。
+    pub fn with_purchase(
+        mut self,
+        enabled: bool,
+        commands: Option<Arc<PurchaseCommandService>>,
+        catalog: Option<Arc<dyn PublicCatalogReadV2>>,
+    ) -> Self {
+        self.purchase = PurchaseCapabilities { enabled, commands, catalog };
+        self
+    }
+
+    /// 注入本人订单读取端口；不随寄售开关关闭。
+    pub fn with_orders(mut self, read: Option<Arc<dyn OwnedOrderRead>>) -> Self {
+        self.orders = OrderCapabilities { read };
+        self
+    }
+
+    /// 注入受限权利用例；数据库可用时无论寄售开关都应装配，软关闭后持有人仍可续办。
+    pub fn with_rights(mut self, service: Option<Arc<RightsService>>) -> Self {
+        self.rights = RightsCapabilities { service };
+        self
+    }
+
+    /// 注入卖家重列与本人损失回执能力；重列随开关截止新承诺，损失回执读取不随开关关闭。
+    pub fn with_recovery(
+        mut self,
+        enabled: bool,
+        relist: Option<Arc<ManualRelistService>>,
+        loss: Option<Arc<dyn SellerLossCaseRead>>,
+    ) -> Self {
+        self.recovery = RecoveryCapabilities { enabled, relist, loss };
+        self
+    }
+
+    /// 注入本人 v2 命令回执读取端口；不随寄售开关关闭，结果未知的客户端先查回执再重放。
+    pub fn with_command_receipts(mut self, read: Option<Arc<dyn OwnedCommandReadV2>>) -> Self {
+        self.command_receipts = CommandReceiptCapabilities { read };
         self
     }
 
@@ -381,5 +446,39 @@ impl ConsignmentState for PublicApiState {
 impl DepositState for PublicApiState {
     fn deposit(&self) -> &DepositCapabilities {
         &self.deposit
+    }
+}
+
+impl PurchaseState for PublicApiState {
+    fn purchase(&self) -> &PurchaseCapabilities {
+        &self.purchase
+    }
+}
+
+impl OrderReadState for PublicApiState {
+    fn orders(&self) -> &OrderCapabilities {
+        &self.orders
+    }
+}
+
+impl RightsState for PublicApiState {
+    fn public_state(&self) -> &Self {
+        self
+    }
+
+    fn rights(&self) -> &RightsCapabilities {
+        &self.rights
+    }
+}
+
+impl CommandReceiptState for PublicApiState {
+    fn command_receipts(&self) -> &CommandReceiptCapabilities {
+        &self.command_receipts
+    }
+}
+
+impl RecoveryState for PublicApiState {
+    fn recovery(&self) -> &RecoveryCapabilities {
+        &self.recovery
     }
 }
