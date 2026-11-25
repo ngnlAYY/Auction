@@ -1,8 +1,8 @@
 //! 隔离解除的六种结果闭集与来源分类。
 //!
-//! 第 4 期没有真实寄售合同或原轮，因此 [`ReleaseKind::AcquireReturn`] 一律按
-//! `evidence_unproven` 拒绝并继续隔离；两个旧拍卖 owner 的交接按 D9 勘误 E2 允许义务为空、
-//! 且资产匹配不是恢复移交门槛。
+//! [`ReleaseKind::AcquireReturn`] 只在来源是寄售时放行到退件接管写端（第 6 期）：来源、原轮、
+//! 清单与同腿唯一由该写端在同一事务内按 `decide_acquire_return` 复判，这里不替它判定；
+//! 两个旧拍卖 owner 的交接按 D9 勘误 E2 允许义务为空、且资产匹配不是恢复移交门槛。
 
 use auction_time::Timestamp;
 use uuid::Uuid;
@@ -263,8 +263,7 @@ pub fn classify_release(
         ReleaseKind::Accept => classify_accept(facts),
         ReleaseKind::Return => classify_return(facts),
         ReleaseKind::ArchiveEmpty => classify_archive_empty(facts),
-        // 第 4 期没有真实寄售合同与原轮；成功回执留到第 6 期。
-        ReleaseKind::AcquireReturn => Err(DepositError::AcquireReturnUnavailable),
+        ReleaseKind::AcquireReturn => classify_acquire_return(facts),
         ReleaseKind::AuctionReturnCase => classify_auction_return(facts),
         ReleaseKind::AuctionRecoveryReturn => classify_auction_recovery(facts),
     }
@@ -336,6 +335,17 @@ fn classify_auction_return(facts: &LockedReleaseFacts) -> Result<ReleasePlan, De
     plan.return_mail_id = Some(source.return_mail_id);
     plan.return_evidence_id = Some(source.evidence_id);
     Ok(plan)
+}
+
+/// 保护不变量 4、6：只有寄售来源才可能接管；旧拍卖来源一律来源不符，交旧 owner。
+fn classify_acquire_return(facts: &LockedReleaseFacts) -> Result<ReleasePlan, DepositError> {
+    if !matches!(facts.source, ReleaseSource::Consignment) {
+        return Err(DepositError::SourceMismatch);
+    }
+    if facts.observation_contradicts_manifest {
+        return Err(DepositError::EvidenceConflict);
+    }
+    Ok(plan(facts, ReleaseKind::AcquireReturn))
 }
 
 fn classify_auction_recovery(facts: &LockedReleaseFacts) -> Result<ReleasePlan, DepositError> {
@@ -440,12 +450,10 @@ mod tests {
     }
 
     #[test]
-    fn acquire_return_is_always_unproven_in_phase_four() {
+    fn acquire_return_passes_only_for_a_consignment_source() {
         let facts = base(ReleaseSource::Consignment);
-        assert_eq!(
-            classify_release(&facts, ReleaseKind::AcquireReturn),
-            Err(DepositError::AcquireReturnUnavailable)
-        );
+        let plan = classify_release(&facts, ReleaseKind::AcquireReturn).expect("寄售来源放行");
+        assert_eq!(plan.kind, ReleaseKind::AcquireReturn);
         let old_refund = ReleaseSource::AuctionReturn(AuctionReturnEvidence {
             kind: AuctionReturnKind::BuyerRefund,
             obligation_id: None,
@@ -454,7 +462,7 @@ mod tests {
         });
         assert_eq!(
             classify_release(&base(old_refund), ReleaseKind::AcquireReturn),
-            Err(DepositError::AcquireReturnUnavailable)
+            Err(DepositError::SourceMismatch)
         );
     }
 

@@ -6,6 +6,7 @@ use super::{
     EnvelopeDecision, EnvelopeItemKind, EnvelopeItemObservation, EnvelopeRoute,
     LockedEnvelopeFacts, MatchedDepositItem, PendingReason, QuarantineReason, ReservationBinding,
     ReservationState, ReturnItem, ReturnItemReason, ReturnManifest, SenderIdentity,
+    TrustedConsignmentRts,
 };
 use crate::consignment::deposit::errors::DepositError;
 use crate::delivery::OriginalMailKey;
@@ -91,6 +92,30 @@ pub fn decide_envelope(facts: &LockedEnvelopeFacts) -> EnvelopeRoute {
     }
     let reasons = return_items(facts, amounts_zero);
     return_or_quarantine(facts, reasons)
+}
+
+/// 带来源的整封决定：先走 [`decide_envelope`]；只有它落到“疑似系统 RTS”隔离、且调用方已把
+/// 该 RTS 识别为寄售来源的可信 RTS 时，才改为交退件接管。
+///
+/// 保护不变量 4、6：旧拍卖 owner、读取失败、缺 UID 与已有决定等前置门仍先于接管；
+/// 没有来源时与 [`decide_envelope`] 逐字一致，既有 `SuspectedSystemRts` 行为不变。
+///
+/// 本函数不读数据库，来源的可信性全由调用方保证：`origin` 必须由同一接管事务在锁内读取的
+/// 寄售来源得出，不得传入锁外读到的值。
+pub fn decide_envelope_with_origin(
+    facts: &LockedEnvelopeFacts,
+    origin: Option<TrustedConsignmentRts>,
+) -> EnvelopeRoute {
+    let route = decide_envelope(facts);
+    match (route, origin) {
+        (
+            EnvelopeRoute::Consignment(EnvelopeDecision::Quarantine(
+                QuarantineReason::SuspectedSystemRts,
+            )),
+            Some(origin),
+        ) => EnvelopeRoute::Consignment(EnvelopeDecision::AcquireReturn(origin)),
+        (route, _) => route,
+    }
 }
 
 fn quarantine(reason: QuarantineReason) -> EnvelopeRoute {

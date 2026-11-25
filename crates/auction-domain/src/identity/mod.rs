@@ -116,6 +116,7 @@ fn legacy_v5_uuid(hash: Sha256) -> Uuid {
 typed_id!(AuctionId);
 typed_id!(BidId);
 typed_id!(CommandId);
+typed_id!(ConsignmentContractId);
 typed_id!(EquipmentId);
 typed_id!(LotId);
 typed_id!(ProxyAuthorizationId);

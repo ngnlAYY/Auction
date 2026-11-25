@@ -91,7 +91,8 @@ pub fn decide_listing_after_custody(facts: ListingDecisionFacts) -> ListingDecis
 pub enum WithdrawalIntentOutcome {
     /// 尚未上架，留在 `deposit_accepted`；意愿等后期执行。
     RemainDepositAccepted,
-    /// 已上架，转入 `withdrawal_pending` 并停止销售。
+    /// 已上架（position 必在代管中）：不再裸转 `withdrawal_pending`，由直接撤回在同事务绑定
+    /// Withdrawal 后再转入 `withdrawal_pending`（D9 §5.3，不经过 `available` 版本与名额变化）。
     MoveToWithdrawalPending,
     /// 已在下架态，保留原因并记录意愿。
     RemainHeldOffMarket,
