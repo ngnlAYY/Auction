@@ -410,6 +410,355 @@ ROLLBACK;
 
 任一表出现与上表预期不符的行（例如 `enabled=false` 的部署出现起写工作或 position），先暂停外部访问并保存查询输出，再回到[恢复流程](#恢复流程)；本节不提供自动差额或迁移工具，业务核销由维护者逐项决定。
 
+## 寄售第 5 期（000135）回退前的只读核对
+
+跨过迁移 `000135`（breaking）回退，只能恢复升级前备份（见[程序回退](#程序回退)），并按[外部历史核对与启动](#6-外部历史核对与启动)核对外部世界。该迁移把拍卖义务表的来源四列放宽为可空并新增合同来源列，旧程序读到寄售义务行会解码失败，所以升级后一旦出现寄售合同或义务，就不能只换回旧程序。恢复前在停机的一致快照上核对下列存量；沿用[上一节](#寄售第-4-期回退前的只读核对)的前提：第 4 期的 `take_ready`、`return_ready` 固定为 false 的部署不会有已成交的寄售，三张合同表与寄售义务预期为零行。
+
+以下只含 SELECT，列名取自迁移 `000135`；一律放在只读事务中：
+
+```sql
+BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SET LOCAL statement_timeout = '5s';
+SET LOCAL lock_timeout = '1s';
+-- 1. 三张合同表（只追加，事实不改写）
+SELECT contract.kind, contract.world_id, count(*) AS contracts,
+       count(sale.contract_id) AS sales, count(withdrawal.contract_id) AS withdrawals,
+       min(contract.created_at) AS earliest_created
+FROM public.consignment_contracts AS contract
+LEFT JOIN public.consignment_sales AS sale ON sale.contract_id = contract.contract_id
+LEFT JOIN public.consignment_withdrawals AS withdrawal ON withdrawal.contract_id = contract.contract_id
+GROUP BY contract.kind, contract.world_id
+ORDER BY contract.kind, contract.world_id;
+-- 2. 义务来源列：寄售来源的义务及其履约进度
+SELECT obligation.contract_kind, obligation.obligation_kind, obligation.business_state,
+       fulfillment.execution_state, count(*) AS obligations
+FROM public.settlement_obligations AS obligation
+JOIN public.settlement_obligation_fulfillments AS fulfillment
+  ON fulfillment.obligation_id = obligation.id
+WHERE obligation.contract_id IS NOT NULL
+GROUP BY obligation.contract_kind, obligation.obligation_kind, obligation.business_state,
+         fulfillment.execution_state
+ORDER BY obligation.contract_kind, obligation.obligation_kind, obligation.business_state,
+         fulfillment.execution_state;
+-- 3. 季末终态 position 及其代管事件（事件无邮件证明，proof_id 必为空）
+SELECT position.world_id, event.event_kind, event.from_state, count(*) AS positions,
+       min(event.occurred_at) AS earliest_event
+FROM public.consignment_custody_positions AS position
+JOIN public.consignment_custody_events AS event
+  ON event.position_id = position.id AND event.version = position.version
+WHERE position.state = 'season_ended'
+GROUP BY position.world_id, event.event_kind, event.from_state
+ORDER BY position.world_id, event.from_state;
+-- 4. 占用释放：终态 position 不应再持有实物占用，非零行是不一致
+SELECT claim.world_id, claim.canonical_eid, position.state
+FROM public.consignment_equipment_claims AS claim
+JOIN public.consignment_custody_positions AS position ON position.id = claim.position_id
+WHERE position.state IN ('handed_over', 'season_ended', 'lost');
+-- 5. 季末后仍未终结的 position（awaiting_take 的未起写 Take 工作由第 6 期处理）
+SELECT position.world_id, position.state, count(*) AS positions
+FROM public.consignment_custody_positions AS position
+JOIN public.consignment_season_windows AS window_row ON window_row.id = position.season_window_id
+WHERE window_row.end_utc <= transaction_timestamp()
+  AND position.state NOT IN ('handed_over', 'season_ended', 'lost')
+GROUP BY position.world_id, position.state
+ORDER BY position.world_id, position.state;
+ROLLBACK;
+```
+
+| 存量 | 查询 | 唯一承接者 | 处置 |
+| --- | --- | --- | --- |
+| 合同与 Sale / Withdrawal 子项 | 1 | 无写入者：三张表由触发器禁止 UPDATE、DELETE 与 TRUNCATE，运行账号只有 `SELECT, INSERT` | 只读保留；非零意味着已有寄售成交或撤回，旧程序不认识：必须恢复到同版本程序，不能回退。预期为零行，非零按事故处理并先停止外部访问 |
+| 寄售来源的义务与履约 | 2 | 第 5 期的寄售专用领取与寄售发送（通用领取不会领取寄售行） | `contract_id` 非空的行不得交给旧程序；`enqueued`/`manual_reconcile` 是外部结果未知，按[外部历史核对与启动](#6-外部历史核对与启动)用原 Sent/Read Mail 详情核对，绝不自动重发。不得手工改来源列（触发器 `c5_obligation_origin_immutable` 会拒绝） |
+| 季末终态 position | 3 | 季任务的关季命令（`close_season`，与 position 终态同事务） | 终态是事实：`season_ended` 之后不再回到非终态，恢复备份时随备份一并回到当时状态；备份之后才终结的 position 在恢复后由第 5 期程序的关季任务重新终结 |
+| 终态 position 的占用释放 | 4 | 同一关季事务（占用释放守卫只认本事务的季末事件与已结束季窗） | 预期为零行；非零说明占用与终态不一致，先暂停外部访问并保存输出，不要手工改 `consignment_equipment_claims` |
+| 季末后未终结的 position | 5 | `in_custody`/`reconcile` 由关季任务终结；`awaiting_take` 留给第 6 期的 Take 收口 | 关季任务落后时会有行，补跑关季命令即可，不要手工改 `state`；`awaiting_take` 的实物仍在 Bot 收件箱，回退前不要领取或退回 |
+
+任一表出现与上表预期不符的行，先暂停外部访问并保存查询输出，再回到[恢复流程](#恢复流程)；本节不提供自动差额或迁移工具，业务核销由维护者逐项决定。
+
+## 寄售第 6 期（000136）回退前的只读核对
+
+跨过迁移 `000136`（breaking）回退，只能恢复升级前备份（见[程序回退](#程序回退)），并按[外部历史核对与启动](#6-外部历史核对与启动)核对外部世界。该迁移放开购买、在途、确领与季末关闭的状态迁移，改写资金分配唯一键并新增 23 张表，旧程序不认识 `sale_pending`、`committed`、`in_transit`、`handed_over`、含合同键的资金分配与现金退件阻断，所以升级后一旦出现购买就不能只换回旧程序。沿用[上一节](#寄售第-5-期000135回退前的只读核对)的前提：`take_ready`、`return_ready` 固定为 false 且 `purchasable` 为 false 的部署不会有购买，下列存量预期为零行。
+
+以下只含 SELECT，列名取自迁移 `000136`；一律放在只读事务中：
+
+```sql
+BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SET LOCAL statement_timeout = '5s';
+SET LOCAL lock_timeout = '1s';
+-- 1. 已购未交付的 position 与挂单（旧程序不认识 committed / in_transit / sale_pending）
+SELECT position.world_id, position.state, listing.state AS listing_state, count(*) AS positions
+FROM public.consignment_custody_positions AS position
+JOIN public.consignment_listings AS listing ON listing.id = position.listing_id
+WHERE position.state IN ('committed', 'in_transit', 'reconcile', 'handed_over')
+   OR listing.state = 'sale_pending'
+GROUP BY position.world_id, position.state, listing.state
+ORDER BY position.world_id, position.state, listing.state;
+-- 2. 派发轮次与尝试：已冻结身份、已起写（有 attempt）而未证明的首派
+SELECT round.world_id, obligation.obligation_kind, round.round,
+       count(*) AS rounds, count(attempt.attempt_id) AS attempts,
+       count(evidence.id) AS evidence_rows
+FROM public.consignment_dispatch_rounds AS round
+JOIN public.settlement_obligations AS obligation ON obligation.id = round.obligation_id
+LEFT JOIN public.consignment_dispatch_attempts AS attempt
+  ON attempt.delivery_id = round.delivery_id
+LEFT JOIN public.consignment_dispatch_evidence AS evidence ON evidence.attempt_id = attempt.attempt_id
+GROUP BY round.world_id, obligation.obligation_kind, round.round
+ORDER BY round.world_id, obligation.obligation_kind, round.round;
+-- 3. 退件接管：未消费的 intake（远端可能已 Take）与其起写事实
+SELECT intake.world_id, intake.leg,
+       (start.work_id IS NOT NULL) AS write_started,
+       (consumption.id IS NOT NULL) AS consumed, count(*) AS intakes
+FROM public.consignment_return_intakes AS intake
+LEFT JOIN public.mail_disposition_write_starts AS start ON start.work_id = intake.take_work_id
+LEFT JOIN public.consignment_return_consumptions AS consumption ON consumption.intake_id = intake.id
+GROUP BY intake.world_id, intake.leg, (start.work_id IS NOT NULL), (consumption.id IS NOT NULL)
+ORDER BY intake.world_id, intake.leg;
+-- 4. 现金退件阻断：open 的阻断持续禁止该 UID 的现金 opening
+SELECT block.uid, block.leg, block.original_mode, block.state, count(*) AS blocks,
+       sum(block.amount) AS amount, min(block.opened_at) AS earliest_opened
+FROM public.consignment_cash_return_blocks AS block
+GROUP BY block.uid, block.leg, block.original_mode, block.state
+ORDER BY block.uid, block.leg, block.state;
+-- 5. COD 实收、手续费与未核销的 opening 份额
+SELECT receipt.uid, count(*) AS receipts, sum(receipt.gross) AS gross,
+       sum(receipt.opening_included) AS opening_included, sum(receipt.new_issue) AS new_issue,
+       (SELECT count(*) FROM public.consignment_funded_sales AS funded
+        WHERE funded.uid = receipt.uid) AS funded_sales,
+       (SELECT count(*) FROM public.consignment_opening_slices AS slice
+        WHERE slice.uid = receipt.uid
+          AND NOT EXISTS (SELECT 1 FROM public.consignment_opening_slice_uses AS use
+                          WHERE use.slice_id = slice.id)) AS unused_slices
+FROM public.consignment_cod_receipts AS receipt
+GROUP BY receipt.uid
+ORDER BY receipt.uid;
+-- 6. 待执行处罚与账号工作（新购阻断贯穿交接）
+SELECT sanction.rule, sanction.state, work.state AS work_state, count(*) AS sanctions
+FROM public.consignment_sanctions AS sanction
+LEFT JOIN public.consignment_account_work AS work ON work.sanction_id = sanction.id
+GROUP BY sanction.rule, sanction.state, work.state
+ORDER BY sanction.rule, sanction.state;
+ROLLBACK;
+```
+
+| 存量 | 查询 | 唯一承接者 | 处置 |
+| --- | --- | --- | --- |
+| 已购未交付的 position / 挂单 | 1 | 第 6 期 Worker 的首派与退件接管、买家确领证明（`consignment_handoff_proofs`） | 非零意味着 `201 purchased` 已授排他交割权，旧程序不认识：必须恢复到同版本程序；尚未 Send 的单仍保全排他权、价格、首寄与原回执 |
+| 已起写未证明的派发与退件 | 2、3 | 同上；Take 起写由 `mail_disposition_write_starts` 唯一，结果未知只读核对 | 已 POST 的项不得重发；已起写的 Take 未消费时保持 `reconcile`，按[外部历史核对与启动](#6-外部历史核对与启动)用原 Sent/Read Mail 详情核对，绝不自动重发、重领或重退 |
+| 现金退件阻断与 COD 实收 | 4、5 | 第 6 期资金写端；阻断只随原资金消费同事务解除 | 非零阻断继续禁止该 UID 的现金 opening，不得凭无消费行放行，也不得在旧程序建立 opening；未用份额与收据保持只读 |
+| 待执行处罚与账号工作 | 6 | 第 7 期账号执行器按原处罚键执行 | `pending` 处罚同时是新购阻断，交接期间保持；不按接管日重算窗口 |
+
+任一表出现与上表预期不符的行（例如 `purchasable=false` 的部署出现 Sale 或派发轮次），先暂停外部访问并保存查询输出，再回到[恢复流程](#恢复流程)；本节不提供自动差额或迁移工具，业务核销由维护者逐项决定。
+
+## 寄售第 7 期（000137）回退前的只读核对
+
+跨过迁移 `000137`（breaking）回退，只能恢复升级前备份（见[程序回退](#程序回退)），并按[外部历史核对与启动](#6-外部历史核对与启动)核对外部世界。该迁移新增损失证据与案件、受限权利与会话、权利通知 outbox、付款提醒与重列决定、权利请求预算、处罚效果与账号工作结果共 18 张表，并为既有合同回填权利；旧程序不认识这些表与新的命令操作，升级后一旦出现损失案件、权利会话或通知结果就不能只换回旧程序。表的契约见[寄售损失、受限权利与通知](../../docs/contracts/database.md#寄售损失受限权利与通知迁移-000137)。回填的权利动作范围为空，不授予任何操作；沿用[上一节](#寄售第-6-期000136回退前的只读核对)的前提：未开放购买的部署除回填权利外，下列存量预期为零行。
+
+以下只含 SELECT，列名取自迁移 `000137`；一律放在只读事务中，不输出密文、定位符摘要或令牌摘要列：
+
+```sql
+BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SET LOCAL statement_timeout = '5s';
+SET LOCAL lock_timeout = '1s';
+-- 1. 损失事实与案件的最新结果（旧程序不认识 lost 与人工案件）
+SELECT fact.world_id, outcome.outcome, count(*) AS cases
+FROM public.consignment_loss_facts AS fact
+JOIN public.consignment_loss_cases AS loss_case ON loss_case.loss_fact_id = fact.loss_fact_id
+JOIN LATERAL (
+  SELECT latest.outcome FROM public.consignment_loss_case_outcomes AS latest
+  WHERE latest.case_id = loss_case.case_id
+  ORDER BY latest.case_version DESC LIMIT 1
+) AS outcome ON true
+GROUP BY fact.world_id, outcome.outcome
+ORDER BY fact.world_id, outcome.outcome;
+-- 2. 权利的最新状态（回填权利为 active 且动作范围为空）
+SELECT right_row.world_id, right_row.kind, state.state,
+       (cardinality(state.allowed_actions) > 0) AS has_actions, count(*) AS rights
+FROM public.consignment_rights AS right_row
+JOIN LATERAL (
+  SELECT latest.state, latest.allowed_actions FROM public.consignment_right_states AS latest
+  WHERE latest.right_id = right_row.right_id
+  ORDER BY latest.version DESC LIMIT 1
+) AS state ON true
+GROUP BY right_row.world_id, right_row.kind, state.state, (cardinality(state.allowed_actions) > 0)
+ORDER BY right_row.world_id, right_row.kind, state.state;
+-- 3. 未过期挑战与会话（旧程序不认识，不可沿用）
+SELECT (SELECT count(*) FROM public.consignment_right_challenges WHERE expires_at > now()) AS live_challenges,
+       (SELECT count(*) FROM public.consignment_right_sessions WHERE expires_at > now()) AS live_sessions;
+-- 4. 权利通知 outbox：无结果的工作与持有租约的工作（结果 unknown 不得重发）
+SELECT outbox.notice_kind, result.result,
+       (outbox.claim_token IS NOT NULL) AS leased, count(*) AS works,
+       min(outbox.created_at) AS earliest_created
+FROM public.consignment_right_notice_outbox AS outbox
+LEFT JOIN public.consignment_right_notice_results AS result ON result.work_id = outbox.work_id
+GROUP BY outbox.notice_kind, result.result, (outbox.claim_token IS NOT NULL)
+ORDER BY outbox.notice_kind, result.result;
+-- 5. 付款提醒与重列决定
+SELECT 'reminder' AS kind, decision AS value, count(*) AS rows FROM public.consignment_payment_reminders GROUP BY decision
+UNION ALL
+SELECT 'relist', mode || ':' || outcome, count(*) FROM public.consignment_relist_decisions GROUP BY mode, outcome
+ORDER BY 1, 2;
+ROLLBACK;
+```
+
+| 存量 | 查询 | 唯一承接者 | 处置 |
+| --- | --- | --- | --- |
+| 损失事实与人工案件 | 1 | 第 7 期损失案件用例与 Admin 案件流 | 非零意味着已有 position 终局为损失：必须恢复到同版本程序；案件没有金额或付款列，不得在库外补记 |
+| 权利 | 2 | 第 7 期权利用例 | 回填行全部为 `active` 且无动作，可只读保留；出现有动作的权利或非 `active` 状态，说明已有领取或续办发生，必须恢复到同版本程序 |
+| 挑战与会话 | 3 | 权利会话用例 | 非零时先停服务，会话与令牌只存摘要且随截止失效，不要凭回退重签 |
+| 通知 outbox | 4 | 第 7 期 Worker 的权利通知发送 | 无结果的工作尚未发送，结果为 `unknown` 的绝不自动重发，按[外部历史核对与启动](#6-外部历史核对与启动)用原邮件记录核对；持有租约的工作按围栏自然过期 |
+| 提醒与重列决定 | 5 | 第 7 期 Worker | 每合同提醒与每处置重列只作一次，非零时保持原决定，不重算 |
+
+任一表出现与上表预期不符的行，先暂停外部访问并保存查询输出，再回到[恢复流程](#恢复流程)；本节不提供自动差额或迁移工具，业务核销由维护者逐项决定。
+
+## 寄售跨 breaking 迁移回退汇总核对
+
+迁移 `000134`–`000137` 都是 breaking：任一迁移之后写入的寄售事实，旧程序都不认识，回退只能恢复升级前备份（见[程序回退](#程序回退)），并按[外部历史核对与启动](#6-外部历史核对与启动)核对外部世界。第 4–7 期各节只给出该期要核对的存量查询与承接者；[第 4 期](#寄售第-4-期回退前的只读核对)、[第 5 期](#寄售第-5-期000135回退前的只读核对)、[第 6 期](#寄售第-6-期000136回退前的只读核对)、[第 7 期](#寄售第-7-期000137回退前的只读核对)未单列查询的表，由本节的逐表行数汇总覆盖，保证四个迁移新增的每个 `consignment_*` 表都被核对到。
+
+以下只含 SELECT，只数行、不取列，因此不会输出预约码、密文、定位符摘要或令牌摘要；表清单取自迁移文件，由门禁自测 `ci/checks/recovery-tables-test.sh` 核对完整。一律放在只读事务中：
+
+```sql
+BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SET LOCAL statement_timeout = '30s';
+SET LOCAL lock_timeout = '1s';
+-- 迁移 000134
+SELECT 'consignment_season_windows' AS table_name, count(*) AS row_count FROM public.consignment_season_windows
+UNION ALL
+SELECT 'consignment_mail_readiness' AS table_name, count(*) AS row_count FROM public.consignment_mail_readiness
+UNION ALL
+SELECT 'consignment_deposit_reservations' AS table_name, count(*) AS row_count FROM public.consignment_deposit_reservations
+UNION ALL
+SELECT 'consignment_reservation_secrets' AS table_name, count(*) AS row_count FROM public.consignment_reservation_secrets
+UNION ALL
+SELECT 'consignment_custody_assets' AS table_name, count(*) AS row_count FROM public.consignment_custody_assets
+UNION ALL
+SELECT 'consignment_equipment_claims' AS table_name, count(*) AS row_count FROM public.consignment_equipment_claims
+UNION ALL
+SELECT 'consignment_deposit_items' AS table_name, count(*) AS row_count FROM public.consignment_deposit_items
+UNION ALL
+SELECT 'consignment_custody_positions' AS table_name, count(*) AS row_count FROM public.consignment_custody_positions
+UNION ALL
+SELECT 'consignment_disposition_generations' AS table_name, count(*) AS row_count FROM public.consignment_disposition_generations
+UNION ALL
+SELECT 'consignment_custody_events' AS table_name, count(*) AS row_count FROM public.consignment_custody_events
+UNION ALL
+SELECT 'consignment_custody_controls' AS table_name, count(*) AS row_count FROM public.consignment_custody_controls
+UNION ALL
+SELECT 'consignment_equipment_handoffs' AS table_name, count(*) AS row_count FROM public.consignment_equipment_handoffs
+UNION ALL
+SELECT 'consignment_season_notices' AS table_name, count(*) AS row_count FROM public.consignment_season_notices
+UNION ALL
+-- 迁移 000135
+SELECT 'consignment_contracts' AS table_name, count(*) AS row_count FROM public.consignment_contracts
+UNION ALL
+SELECT 'consignment_sales' AS table_name, count(*) AS row_count FROM public.consignment_sales
+UNION ALL
+SELECT 'consignment_withdrawals' AS table_name, count(*) AS row_count FROM public.consignment_withdrawals
+UNION ALL
+-- 迁移 000136
+SELECT 'consignment_handoff_proofs' AS table_name, count(*) AS row_count FROM public.consignment_handoff_proofs
+UNION ALL
+SELECT 'consignment_dispatch_rounds' AS table_name, count(*) AS row_count FROM public.consignment_dispatch_rounds
+UNION ALL
+SELECT 'consignment_dispatch_attempts' AS table_name, count(*) AS row_count FROM public.consignment_dispatch_attempts
+UNION ALL
+SELECT 'consignment_dispatch_evidence' AS table_name, count(*) AS row_count FROM public.consignment_dispatch_evidence
+UNION ALL
+SELECT 'consignment_return_intakes' AS table_name, count(*) AS row_count FROM public.consignment_return_intakes
+UNION ALL
+SELECT 'consignment_return_conflicts' AS table_name, count(*) AS row_count FROM public.consignment_return_conflicts
+UNION ALL
+SELECT 'consignment_return_consumptions' AS table_name, count(*) AS row_count FROM public.consignment_return_consumptions
+UNION ALL
+SELECT 'consignment_refusal_cycles' AS table_name, count(*) AS row_count FROM public.consignment_refusal_cycles
+UNION ALL
+SELECT 'consignment_return_facts' AS table_name, count(*) AS row_count FROM public.consignment_return_facts
+UNION ALL
+SELECT 'consignment_return_fact_verdicts' AS table_name, count(*) AS row_count FROM public.consignment_return_fact_verdicts
+UNION ALL
+SELECT 'consignment_refusals' AS table_name, count(*) AS row_count FROM public.consignment_refusals
+UNION ALL
+SELECT 'consignment_sanctions' AS table_name, count(*) AS row_count FROM public.consignment_sanctions
+UNION ALL
+SELECT 'consignment_sanction_members' AS table_name, count(*) AS row_count FROM public.consignment_sanction_members
+UNION ALL
+SELECT 'consignment_account_work' AS table_name, count(*) AS row_count FROM public.consignment_account_work
+UNION ALL
+SELECT 'consignment_work_closures' AS table_name, count(*) AS row_count FROM public.consignment_work_closures
+UNION ALL
+SELECT 'consignment_cod_receipts' AS table_name, count(*) AS row_count FROM public.consignment_cod_receipts
+UNION ALL
+SELECT 'consignment_opening_slices' AS table_name, count(*) AS row_count FROM public.consignment_opening_slices
+UNION ALL
+SELECT 'consignment_opening_slice_uses' AS table_name, count(*) AS row_count FROM public.consignment_opening_slice_uses
+UNION ALL
+SELECT 'consignment_fee_facts' AS table_name, count(*) AS row_count FROM public.consignment_fee_facts
+UNION ALL
+SELECT 'consignment_principal_facts' AS table_name, count(*) AS row_count FROM public.consignment_principal_facts
+UNION ALL
+SELECT 'consignment_cash_return_blocks' AS table_name, count(*) AS row_count FROM public.consignment_cash_return_blocks
+UNION ALL
+SELECT 'consignment_funding_returns' AS table_name, count(*) AS row_count FROM public.consignment_funding_returns
+UNION ALL
+SELECT 'consignment_funded_sales' AS table_name, count(*) AS row_count FROM public.consignment_funded_sales
+UNION ALL
+-- 迁移 000137
+SELECT 'consignment_loss_proofs' AS table_name, count(*) AS row_count FROM public.consignment_loss_proofs
+UNION ALL
+SELECT 'consignment_loss_facts' AS table_name, count(*) AS row_count FROM public.consignment_loss_facts
+UNION ALL
+SELECT 'consignment_loss_cases' AS table_name, count(*) AS row_count FROM public.consignment_loss_cases
+UNION ALL
+SELECT 'consignment_loss_case_outcomes' AS table_name, count(*) AS row_count FROM public.consignment_loss_case_outcomes
+UNION ALL
+SELECT 'consignment_loss_receipts' AS table_name, count(*) AS row_count FROM public.consignment_loss_receipts
+UNION ALL
+SELECT 'consignment_loss_reconciles' AS table_name, count(*) AS row_count FROM public.consignment_loss_reconciles
+UNION ALL
+SELECT 'consignment_rights' AS table_name, count(*) AS row_count FROM public.consignment_rights
+UNION ALL
+SELECT 'consignment_right_states' AS table_name, count(*) AS row_count FROM public.consignment_right_states
+UNION ALL
+SELECT 'consignment_right_challenges' AS table_name, count(*) AS row_count FROM public.consignment_right_challenges
+UNION ALL
+SELECT 'consignment_right_challenge_attempts' AS table_name, count(*) AS row_count FROM public.consignment_right_challenge_attempts
+UNION ALL
+SELECT 'consignment_right_sessions' AS table_name, count(*) AS row_count FROM public.consignment_right_sessions
+UNION ALL
+SELECT 'consignment_right_session_tokens' AS table_name, count(*) AS row_count FROM public.consignment_right_session_tokens
+UNION ALL
+SELECT 'consignment_right_notice_outbox' AS table_name, count(*) AS row_count FROM public.consignment_right_notice_outbox
+UNION ALL
+SELECT 'consignment_right_notice_results' AS table_name, count(*) AS row_count FROM public.consignment_right_notice_results
+UNION ALL
+SELECT 'consignment_right_request_hits' AS table_name, count(*) AS row_count FROM public.consignment_right_request_hits
+UNION ALL
+SELECT 'consignment_payment_reminders' AS table_name, count(*) AS row_count FROM public.consignment_payment_reminders
+UNION ALL
+SELECT 'consignment_relist_decisions' AS table_name, count(*) AS row_count FROM public.consignment_relist_decisions
+UNION ALL
+SELECT 'consignment_sanction_effects' AS table_name, count(*) AS row_count FROM public.consignment_sanction_effects
+UNION ALL
+SELECT 'consignment_sanction_work_results' AS table_name, count(*) AS row_count FROM public.consignment_sanction_work_results
+UNION ALL
+SELECT 'consignment_sale_closures' AS table_name, count(*) AS row_count FROM public.consignment_sale_closures
+UNION ALL
+SELECT 'consignment_return_dispositions' AS table_name, count(*) AS row_count FROM public.consignment_return_dispositions
+UNION ALL
+SELECT 'consignment_order_rechecks' AS table_name, count(*) AS row_count FROM public.consignment_order_rechecks
+UNION ALL
+SELECT 'consignment_order_resolutions' AS table_name, count(*) AS row_count FROM public.consignment_order_resolutions
+UNION ALL
+SELECT 'consignment_order_recheck_results' AS table_name, count(*) AS row_count FROM public.consignment_order_recheck_results
+ORDER BY 1;
+ROLLBACK;
+```
+
+读法：
+
+- 全部为零行（迁移 `000137` 为既有合同回填的 `consignment_rights` 与 `consignment_right_states` 除外，其动作范围为空）时，未发生过任何寄售写入，可按[程序回退](#程序回退)只恢复备份。
+- 任一表非零，先对照所属期的回退前核对节取得该表的承接者与处置；本节不提供自动差额或迁移工具，业务核销由维护者逐项决定。
+- 出现非零行而对应期的核对节没有列出该表时，按事故处理：先暂停外部访问并保存查询输出，必须恢复到不早于该迁移的同版本程序，不得在库外补记或改写。
+
 ## 恢复流程
 
 ### 1. 停止服务

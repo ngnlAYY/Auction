@@ -13,7 +13,7 @@
 
 两种形态共用同一配置布局与同一个 `auction-cli`，但不能同时用于同一套配置。
 
-发布包 `auction-rust-<版本>-<提交前 12 位>[-single].tar.gz` 含 `bin/`、`docs/`、`systemd/`、`caddy/`、`config/examples/` 与 `retention-policy.v2.json`；分体包另含 `tmpfiles/`，合并包另含首次设置代理示例。敏感模板以 `secrets.toml.example` 等命名，须复制为配置引用的实际文件名；用包内 `SHA256SUMS` 校验解压文件。两种包均含定时备份与 WAL 模板，仅由用户按[RECOVERY](deploy/RECOVERY.md)单独启用；`docs/` 的 `MIGRATION-DRILL.md` 与回执模板用于含迁移部署。异机副本还须主机 `age`、离线密钥与 R2 配置，见[异机副本前置准备](deploy/RECOVERY.md#异机副本前置准备)。
+发布包 `auction-rust-<版本>-<提交前 12 位>[-single].tar.gz` 含 `bin/`、`docs/`、`systemd/`、`caddy/`、`config/examples/` 与 `retention-policy.v2.json`；分体包另含 `tmpfiles/`，合并包另含首次设置代理示例。敏感模板以 `secrets.toml.example` 等命名，须复制为配置引用的实际文件名；用包内 `SHA256SUMS` 校验解压文件。两种包均含定时备份与 WAL 模板，仅由用户按[RECOVERY](deploy/RECOVERY.md)单独启用；`docs/` 的 `MIGRATION-DRILL.md` 与回执模板用于含迁移部署，`WEB-SWITCH-DRILL.md` 是页面栈冷回切演练的浏览器步骤与人工签收清单（见[页面栈冷回切演练](deploy/WEB-SWITCH-DRILL.md)）。异机副本还须主机 `age`、离线密钥与 R2 配置，见[异机副本前置准备](deploy/RECOVERY.md#异机副本前置准备)。
 
 ## 目录与账号
 
@@ -144,7 +144,7 @@ auction-cli --config-dir /etc/auction service stop       # 时段门禁 → 按 
 
 ## 升级
 
-**只部署 GitHub Release 资产。** 从 `main` 上 `v<版本>` tag 产生的 Release 下载 `*.tar.gz`、`SHA256SUMS` 与 `DEPENDENCIES.md`，部署前运行 `bash ci/release/verify-deployment-package.sh <归档> --tag <v版本>`（或 `mise run verify-package …`）核对摘要、包内清单、构建提交可从 tag 到达与来源证明。普通 CI 候选 artifact、本地 `mise run release-check` 产物、`-candidate`/`-dirty` 包与 `solid-release` 页面都不可部署；未通过校验的包不得安装、停止服务或迁移。正式发行只产出 Rust 版页面；`AUCTION_WEB_STACK=solid` 只用于本地与分支上的手动候选构建，正式 tag push 上选择 Solid 会直接拒绝。
+**只部署 GitHub Release 资产。** 从 `main` 上 `v<版本>` tag 产生的 Release 下载 `*.tar.gz`、`SHA256SUMS` 与 `DEPENDENCIES.md`，部署前运行 `bash ci/release/verify-deployment-package.sh <归档> --tag <v版本>`（或 `mise run verify-package …`）核对摘要、包内清单、构建提交可从 tag 到达与来源证明。普通 CI 候选 artifact、本地 `mise run release-check` 产物、`-candidate`/`-dirty` 包都不可部署；未通过校验的包不得安装、停止服务或迁移。正式发行两端都是 Solid 页面；Rust 版（Dioxus）页面只出现在本地与手动候选构建中，正式 tag push 上任一端不是 Solid 会直接拒绝。
 
 分体部署用发布包内的 `auction-cli deploy` 完成严格预检、时段门禁、演练回执核对、磁盘空间与在途发送门禁、停机备份与新旧 CLI 校验、保留旧程序、逐个原子替换程序（中途失败时换回已替换的程序）、迁移与顺序启动、运行摘要复核并追加回执。含迁移的版本必须先用候选制品完成[迁移演练](deploy/MIGRATION-DRILL.md)并传入回执与外层 tarball 摘要。
 
@@ -189,6 +189,12 @@ Admin 的邮件 Cookie 在线校验（`POST /api/v1/admin/credentials/{credentia
 结算退件处理（迁移 `000114`–`000116`，均为 breaking）：升级时为已有的结算退件证据补建案件与开案事件、补登首寄派发历史与资金投递历史绑定，并把 `settlement_funding_returns` 收紧为只追加；不改写任何证据、投递或资金金额。升级后已转人工对账的退件改按退件案件计数（`settlement_return_pending`/`settlement_return_quarantined`），不再计入履约人工对账；偿付报告新增代管负债与“余额早于领回证明”标记（`balance_before_take` 为真时结论为 `unknown`，等下一次余额观察）。回退旧程序前须先确认没有未终结的 `settlement_return_action` Take 投递、补寄派发与资金返还事实，否则旧程序会把它们判为未知来源或无资金关联。结算退件 Take 只以数据库邮件凭据执行：只配置敏感 TOML `mooglemail_cookie` 的部署，领回会停在待领回并显示“领回能力不可用”，见[结算退件处理](#结算退件处理)。
 
 同一版本的 Admin 新增“结算退件”页（`/settlement-returns`）与 `GET/POST /api/v1/admin/settlement-returns…` 接口，侧栏的导航待办读取、投递队列的列表与详情读取以及玩家支持读取都改带 `include=settlement_returns`（见[docs/contracts/routes.md#admin-api](../docs/contracts/routes.md#admin-api)）：不带该参数的缺省投影保持已发布的闭集，升级窗口内仍打开的旧页面看不到结算退件 Take 投递（直接打开其详情为 404 `delivery_projection_excluded`，玩家支持的投递分区与参考编号查询也不含它），也读不到装备收回处置，刷新后即为新页面。页面与服务端随同一制品发布：回退到旧服务端后，新页面的退件页读取为 404、导航待办、投递列表与玩家支持读取为 400 `invalid_query`（不显示徽标、队列与玩家支持显示读取失败），按构建号提示刷新后恢复。`auction-cli funds preview` 的 `preview_digest` 自本版本起改变（预览事实新增 main 收回、isekai 取消、三次退回与装备收回收口的识别字段；这些成交的原付款、卖方货款与交付不再按不明责任阻断）：升级前生成的摘要与确认短语在新版本上不再匹配，开户或现金对账前在新版本上重新执行 `funds preview`，使用新的摘要与确认短语。
+
+含寄售资金预览的版本起，`auction-cli funds preview` 的预览事实新增 `consignment` 键（寄售的资金事实与阻断项），`preview_digest` 随之改变：部署前取得的预览摘要与确认短语，在部署后提交 `funds open-record-only`（record_only 开户）会因摘要不符被拒绝（CLI 报“账户版本或责任摘要已变化”，存储事务内同一核对返回 `Conflict`），失败关闭、不写入；`funds reconcile` 核对同一摘要。部署后在新版本上重新执行 `funds preview`，使用新的摘要与确认短语。
+
+含寄售受限权利状态刷新的版本升级后，执行一次 `auction-cli consignment refresh-rights`：此前建立的合同（含迁移 `000137` 回填的权利）的权利状态可能停在登记时的版本、动作为空，补刷按当前订单事实追加状态版本。重复执行只会返回 0；`complete=false` 时命令以非零退出，排查后重跑。见[寄售权利补刷](../apps/auction-cli/README.md#寄售权利补刷)。
+
+配置或修改 `[web].mount_root`，以及每次 `auction-cli web install` / `web switch` 之后，都要重启 Public 与 Admin：两者只在启动时加载挂载与 `RECEIPT.v1`，内容不符即拒绝启动、不退回内嵌页面。字段见[寄售服务配置](config/README.md#寄售服务)，命令见[页面静态挂载](../apps/auction-cli/README.md#页面静态挂载)。
 
 同一版本起 `service`、`deploy`、`rollback` 与停机维护命令在取部署锁前核对部署状态目录（`--state-dir`）：目录本身归 root 且 0700，各级父目录归 root 且禁止 group/other 写入（非 root 的隔离环境为当前账号），之后的锁、回执、回滚记录与保留程序都经同一个固定的目录描述符读写并核对属主与权限，详见[apps/auction-cli/README.md#部署状态目录](../apps/auction-cli/README.md#部署状态目录)。线上 `/var/lib/auction` 已只读核实为 root:root 0755，不需要处理；按旧版首次部署说明把它建为 `auction` 所有的主机，升级前先改为 root:root 0755（运行账号的数据保留在其下自有子目录），否则包括开机 `auction-stack` 在内的 `service start` 都会拒绝。`deployment/` 及其中的回执与回滚记录若出现非 root 的条目，说明运行账号曾改动过它，不要只改属主，先人工核对来源。
 
@@ -458,7 +464,7 @@ COD 实收资金化诊断使用独立 target `auction::settlement::funding_diagn
 ### 一口价挂单的停用与恢复
 
 1. 停止旧 Public、Admin、Worker 写入角色，合并部署则停止 `auction-server`。在三角色共用的 `common.toml` 设置 `[consignment] enabled = false`。保持原数据库目标，分体部署先启动 Worker 并确认就绪，再启动 Admin 与 Public。
-2. Worker 在领单和宣布就绪以前同步停用。由开转关会增加一次持久代次、关闭准入并清除登记心跳。重复以关闭配置重启会沿用该代次。旧代活动挂单立即有效关闭，在途结果失去提交资格，补扫随后提交清退并退休登记信封。关闭只停止新承诺：仍有存量时，处置维护与隔离重检两条寄售循环照常启动；有存量却缺少 MoogleMail 读取器/传输或 Credential 数据密钥时启动失败。数据库不可用、同步结果未确认或 Worker 以无数据库骨架启动时，保留停用配置，待原数据库恢复后完成同步。
+2. Worker 在领单和宣布就绪以前同步停用。由开转关会增加一次持久代次、关闭准入并清除登记心跳。重复以关闭配置重启会沿用该代次。旧代活动挂单立即有效关闭，在途结果失去提交资格，补扫随后提交清退并退休登记信封。关闭只停止新承诺：仍有存量时，处置维护与隔离重检两条寄售循环照常启动（派发、补寄、下游首轮、退件 Take、订单复核、收款确领推进与恢复循环同样照存量运行，见[Worker 装配](../apps/auction-worker/README.md#一口价挂单)）；有存量却缺少 MoogleMail 读取器/传输或 Credential 数据密钥时启动失败。数据库不可用、同步结果未确认或 Worker 以无数据库骨架启动时，保留停用配置，待原数据库恢复后完成同步。
 3. 恢复只在当前制品允许的环境执行。仍须先停旧写角色，再切换共用配置、先启动 Worker。开启会沿用停用后的代次，旧挂单须重新登记。登记事务要求 Worker 有效心跳和 Public 本地封装、重放比较能力；配置了数据库且寄售激活时，Public 与 Admin 缺少当前 Credential 数据密钥即拒绝启动；未配置数据库的骨架模式不要求，v2 能力返回不可用。Worker 在存在寄售存量时缺 MoogleMail 读取器/传输或 Credential 数据密钥即启动失败。应以登记就绪状态确认准入。配置及预览限制见[寄售服务配置](config/README.md#寄售服务)。密钥更换见[装备数据密钥轮换](#装备数据密钥轮换)。
 
 Admin 的邮件隔离详情页为 `/consignment/deposits/{quarantine_id}`，提供隔离观察、重检、解除隔离与交给原 owner 的入口；运营止售与解除在挂单详情。两页目前只有 Solid 版提供，Rust 版没有对应页面。
@@ -466,6 +472,22 @@ Admin 的邮件隔离详情页为 `/consignment/deposits/{quarantine_id}`，提�
 跨过迁移 `000134` 回退前，先按[寄售第 4 期回退前的只读核对](deploy/RECOVERY.md#寄售第-4-期回退前的只读核对)核对预约、隔离、起写未证明、季通知、季窗与 position 存量。
 
 异常旧数据中，若卖家已拉黑但缺少登记后的拉黑流水，挂单在读取时仍有效关闭，补扫缺少可验证的证据，运营可在 Admin 下架收口。
+
+已有寄售拒收周期的用户解禁时，解禁事务会取该买家的寄售锁（锁等待上限 1 秒）；处罚执行器恰好持有这把锁超过 1 秒时，这次解禁失败（存储错误，不写入任何行），Admin 重试即可。没有寄售周期的用户解禁不受影响。业务规则见[拒收与处罚](../docs/business-rules.md#一口价挂单)。
+
+处罚执行的持久事实自相矛盾时 Worker 失败关闭：即使寄售已关闭，Worker 也会启动寄售任务并常驻退避（最长 30 秒），持续记录 error 日志“寄售处罚账号工作的持久事实自相矛盾，已失败关闭，需人工对账”，直到人工对账处理，见[Worker 装配](../apps/auction-worker/README.md#一口价挂单)。
+
+凭据域数据密钥轮换后，轮换前签发、仍在 10 分钟有效期内的权利挑战会验证失败（挑战 MAC 使用当前凭据数据钥），持有人重新申请即可。凭据域的 `keys reencrypt --domain credential` 同时重封权利通知 outbox 中仍带密文的行（已发出或结果未知的通知同样重封，不会因此重发），`keys status` 把这些行计入旧钥引用，见[凭据域密钥轮换](keys/README.md)。
+
+寄售专用领取发现义务来源损坏时，把履约行转人工对账、不发送、不自动重试，`last_error_code` 为以下五个隔离码之一：`consignment_source_missing`（合同来源缺失）、`consignment_world_mismatch`（世界不符）、`consignment_amount_mismatch`（金额不符）、`consignment_recipient_mismatch`（收件人不符）、`consignment_source_invalid`（其他来源损坏）。按失败码核对合同与义务后处理。
+
+寄售派发与补寄只用数据库里 active 的持久邮件凭据起写。只配置敏感 TOML `mooglemail_cookie` 的会话没有持久凭据绑定，派发在准备阶段就不起写（日志 `dispatch_credential_unbound`），订单停在“已领取、未起写”，零 POST。开启寄售前须在 Admin“Cookie 池”页录入并启用对应世界的 `mail_cookie` 凭据。
+
+冻结身份带 Credits 的现金轮（isekai 付款载体 1 Credit + COD P+1、卖款 S、退款 P）与原件轮走同一派发路径。发信前三道门都在许可与 POST 之前：同一 MoogleMail 会话取得新鲜现金观察（绑定本次尝试与投递租约）、发信会话的认证 UID 必须等于成交冻结的资金 UID、余额在起写事务的账户锁下由拍卖通用现金门核对。现金缺口与拍卖同口径：账户转为冻结、不发许可、零 POST、不写起写回执，按既有流程补足并解冻后同一命令可重试。Sent 中剩余 Credits 与冻结值一致才算发出，不一致或无法证明按结果未知转人工、绝不重发。同一资金 UID 只要有一笔现金占用处于在途或结果未知，全部现金外发（含拍卖）都会暂停，直到核清。
+
+卖款、退款与 isekai 原件交割没有购买事务可随之建轮，由 Worker 的下游首轮循环建立首轮：isekai 原件交割在实收认证时放行；卖款在实收认证且买家确领原件（`prove_handoff`）之后放行；退款在退款转换的同一事务里激活。循环只为已放行、尚未建轮的义务备好首轮投递并授权，起写与 POST 仍只经派发 executor；起写前再核义务已放行（交割腿另须尚未转退款），不就绪即确定拒绝、零 POST。生产上原件确领与现金确领两类验证器尚未签收：确领不推进，卖款保持 `blocked`，已寄出的卖款或退款不记为已领取，受益人负债继续，需要时人工核对。实收认证与确领证明目前还没有 Worker 调用循环。main 订单的 COD 实收即买家已领原件，认证后买方权利已结束，此后若转出退款，派发会在收件人授权处保留、不寄出，P 留在退款用途，转人工处置。
+
+Admin 订单复核（`recheck`）只核对该订单已起写、无终局证据的派发尝试与已起写未证的 Take，绝不重发：派发项按原 attempt 冻结的 Send 身份只读查 Sent，查到即经既有证据写口补记 Sent 绑定；Take 项在消费端验证器签收前恒为 `still_unknown`（复核不读、不 Take），已起写未证的 Take 需按原 attempt 人工核对。结果由存储推导：每项都有终局证据为 `bound`，仍有查不到的为 `still_unknown`，没有待核对项为 `nothing_to_check`。表结构见[数据库契约](../docs/contracts/database.md#寄售共享替换段迁移-000137)。
 
 ### 装备数据密钥轮换
 

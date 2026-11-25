@@ -73,6 +73,8 @@ Worker 认领处于 Final 且所有 lot 有效截止都已过去的场次，在�
 
 义务业务状态：`ready`（可执行）、`blocked`（等待前置）、`contingent`（只有恢复流程激活后才执行）。
 
+上表是拍卖义务。一口价挂单的合同另有一套同形的义务图（Sale 三或四条、Withdrawal 一条 `withdrawn_return`），来源是合同而非 lot；它不在上述玩家流程内：第 5 期没有生产路径创建它，通用领取、投递、恢复与告警都不处理寄售义务，业务规则见[第 5 期边界](../business-rules.md#一口价挂单)。
+
 ## 2. 履约
 
 Worker 的“结算履约”循环领取可执行义务，按 `pending → prepared → enqueued → satisfied` 推进：

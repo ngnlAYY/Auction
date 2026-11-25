@@ -20,7 +20,7 @@
 | 文件 | 拥有 |
 | --- | --- |
 | 角色文件 | `common_file`、`secrets_file`（必填，相对角色文件所在目录解析）；可选 `runtime_config_file`；Admin 另有 `worker_config_file`；listener、tracing、HTTP 安全、会话（Public/Admin）、realtime（Public）、`[worker.*]`（Worker） |
-| `common.toml` | `log_filter`、`[metrics]`、`[readiness]`、`[auction.*]`、`[consignment]`、CLI 专用 `[backup]` |
+| `common.toml` | `log_filter`、`[metrics]`、`[readiness]`、`[auction.*]`、`[consignment]`、`[web]`、CLI 专用 `[backup]` |
 | `secrets.toml` | 数据库、外部 Cookie、Admin 登录凭据、四组数据密钥（含旧密钥环）、OTLP 导出头、R2 令牌与可选打卡/心跳/Webhook 地址 |
 | `runtime/admin.toml` | 可由 Admin 后台修改的运行参数（见下文） |
 
@@ -53,6 +53,7 @@
 | `[metrics]` | 进程指标开关、转发拒绝与可选附加出口（见下） |
 | `[readiness]` | 审计失败模式、迁移兼容模式与 HTTP 就绪缓存，见[就绪策略](#就绪策略) |
 | `[consignment]` | 一口价挂单开关、登记限制与后台解析预算，见[寄售服务](#寄售服务) |
+| `[web]` | 页面静态挂载根与页面栈回执位置，见[页面静态挂载](#页面静态挂载) |
 | `[backup]`、`[backup.offsite]`、`[backup.scope]` | CLI 专用定时备份（水位另被 `alert report` 与 `deploy` 复用）、异机副本与数据库之外的范围，见[定时备份策略](#定时备份策略) |
 | `[database_roles]` | `owner` 是迁移 owner 账号名（生产严格预检必填），运行账号固定 `auction_runtime` 不可配置；两者相同则拒绝 |
 | `[auction.schedule]` · `[auction.schedule.early_bird]` | 周排期（时区、预览/开拍/结束时间、参与世界）；赛季早鸟窗口与赛季前场次 |
@@ -101,8 +102,19 @@
 | `lookup_timeout_seconds` | `10` | 整数 1–30 秒，一次解析的端到端预算，底层更紧的限制继续生效 |
 | `lookup_max_response_bytes` | `65536` | 整数 4096–262144，解压后响应体的字节上限 |
 | `lookup_min_interval_ms` | `1000` | 整数 250–60000 毫秒，全服务两次解析起始许可之间的最小间隔 |
+| `payment_deadline_days` | `7` | 整数 1–90 天，寄售成交时冻结的付款期限，独立于拍卖配置 |
+| `cod_return_limit` | `3` | 整数 2–10，寄售装备 COD 退回上限，成交时按合同冻结；与拍卖 `[auction.settlement.recovery]` 的同名字段无关 |
+| `isekai_refusal_limit` | `3` | 整数 2–100，异世界拒付上限，按触发的合同冻结；提醒次数 1 与 90 天拒付窗口是固定常量，不可配置 |
+| `auto_relist_enabled` | `false` | 严格布尔，只在启动时读取，修改须重启。Worker 处置被退回的寄售件时，与本节有效值的摘要一起冻结进处置决定；为 `false` 或摘要缺失时不自动重列，手动重列不受影响 |
 
 解析尝试次数、退避、24 小时总期限、固定来源和 schema 版本由协议定义。Public 接受登记需要 `secrets.toml` 中的 `equipment_data_key_id` 与 `equipment_data_key`，用于封装装备读取凭证及核对登记重放。Public 与 Worker 使用同一装备数据密钥环，联合预检还会核对 Admin 的装备数据密钥环。Public 缺少装备数据密钥时仍可启动，开启服务后的状态接口报告 `registration_ready=false`，有效的新登记返回 503。登记就绪还要求数据库准入开启、至少一个世界可登记及 Worker 心跳新鲜。隔离验收见[本地一口价挂单预览](../../docs/development.md#本地一口价挂单预览)。
+
+### 页面静态挂载
+
+`[web]` 整节可省略，三角色与 CLI 从同一份 `common.toml` 读取。唯一字段 `mount_root` 是不含 `..`、不是根目录的绝对路径，省略时 Public 与 Admin 只用程序内嵌的页面，响应与未支持挂载的程序逐字节一致。目录内容由 `auction-cli web install / switch` 写出（布局见[apps/auction-cli/README.md](../../apps/auction-cli/README.md)），页面栈回执固定为 `<mount_root>/RECEIPT.v1`。
+
+- Public 与 Admin 启动时一次性加载并逐文件核对各自的 `<mount_root>/<surface>`，清单、入口指针或摘要任何不一致都拒绝启动，不退回内嵌页面；没有热重载，`web switch` 换入口指针后须重启 Public 与 Admin。首次设置页始终使用内嵌页面。
+- `[consignment].enabled = true` 且制品门放行时，Public、Admin、Worker（启动时）与 CLI 的 `config check`、`keys status`、`keys reencrypt` 都读取回执：回执须登记双端 Solid、与本程序相同的构建号，以及本程序文件（`/proc/self/exe`）的 SHA-256；缺 `mount_root`、缺回执或任一项不符都拒绝启动或拒绝执行。关闭寄售时不读回执；同时启用 `consignment-dev-preview` 的本地调试构建不要求回执（这种构建不可能是发布制品）。`auction-server` 在派生子进程前以自身程序摘要走同一校验器；回执目前不登记 `auction-server` 的摘要，所以合并部署开启寄售会在启动时被拒绝。
 
 ### 定时备份策略
 

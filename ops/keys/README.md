@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | `equipment` | `equipment_data_key_id` / `equipment_data_key` | `equipment_secrets` 的装备短时 key 信封 | Public、Admin、Worker |
 | `user_login` | `user_login_data_key_id` / `user_login_data_key` | `user_login_key_envelopes` 的 MoogleMail 登录 key 信封，以及 `user_admin_commands` 中持久化的命令响应信封 | Admin、Worker |
-| `credential` | `credential_data_key_id` / `credential_data_key` | `credential_keys` 的外部 Cookie 信封 | Admin、Worker |
+| `credential` | `credential_data_key_id` / `credential_data_key` | `credential_keys` 的外部 Cookie 信封；寄售 `consignment_reservation_secrets` 的预约码密文与 `mail_evidence_envelopes` 的受保护证据密文（均只计未退休的行）；`consignment_right_notice_outbox` 中仍带密文（`sealed_payload` 非空）的权利通知挑战码 | Admin、Worker |
 | `mail_diagnostics` | `mail_diagnostics_data_key_id` / `mail_diagnostics_data_key` | MoogleMail 加密诊断归档 | Worker、`auction-cli mail export-evidence` |
 
 规则：
@@ -49,7 +49,7 @@
        --apply --actor ops@example --receipt /var/lib/auction/keys/credential-20261105.json
    ```
 
-   `--domain` 省略时依次处理 `equipment`、`user_login`、`credential`。`user_login` 同时重加密 `user_login_key_envelopes` 与 `user_admin_commands` 中持久化的命令响应信封；两类信封都完成后旧 key 才无引用。命令可重复执行：第二次扫描不再发现旧 key 的信封，`rewritten` 为 0，回执仍会生成（幂等）。任何信封在重加密期间被并发改写都会中止并提示重新运行。
+   `--domain` 省略时依次处理 `equipment`、`user_login`、`credential`。`user_login` 同时重加密 `user_login_key_envelopes` 与 `user_admin_commands` 中持久化的命令响应信封；两类信封都完成后旧 key 才无引用。`credential` 依次处理上表列出的四处来源；权利通知 outbox 只改写密文三列（`sealed_payload`、`nonce`、`encryption_key_id`），按挑战行冻结的 AAD 解封后以当前 key 重封并复核，明文、AAD 与其余列不变，已发出或结果未知的通知同样重封（不会因此重发）。命令可重复执行：第二次扫描不再发现旧 key 的信封，`rewritten` 为 0，回执仍会生成（幂等）。任何信封在重加密期间被并发改写都会中止并提示重新运行。
 
    `--apply` 必须同时提供 `--receipt` 与 `--actor`（缺一即参数错误）。回执路径必须是绝对路径、父目录禁止 group/other 写入且文件尚不存在；`--actor` 须为 1–128 字节、首尾无空白且不含控制字符的单行文本。这些参数、`SUDO_USER` 与全部目标域的密钥环都在连接数据库之前核对，任一无效时不改写任何信封。改写中途失败时，已提交的改写不会回退：命令照常写回执（`outcome = partial`）并为已改写或最后一次写回结果未知的域追加审计，然后以原错误退出；修复原因后用新的回执路径重新运行即可继续处理剩余信封。
 6. **再次核对**：`auction-cli keys status --strict`，确认各域只剩当前 key ID，且旧 key 的 `still_referenced` 为 `false`。
