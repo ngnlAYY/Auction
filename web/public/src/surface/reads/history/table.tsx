@@ -94,6 +94,7 @@ export function PriceHistoryTable(props: {
         </div>
       </Show>
       <PublicPager
+        pageLevel
         page={props.currentPage}
         pageSize={pageSize()}
         total={props.page.total}

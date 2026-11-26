@@ -118,6 +118,7 @@ pub(crate) fn CatalogTable(
             }
         }
         PublicPager {
+            page_level: true,
             page: page_number,
             page_size,
             total: page_total,

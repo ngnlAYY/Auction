@@ -180,6 +180,7 @@ function CatalogPager(props: {
   // PublicPager 的页长回调写入拍卖 URL 和偏好。直接复用同一底层控件，保持寄售查询独立。
   return (
     <Pager
+      pageLevel
       page={props.page}
       pageSize={props.pageSize}
       total={props.total}

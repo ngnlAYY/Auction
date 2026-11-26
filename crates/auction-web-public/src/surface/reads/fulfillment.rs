@@ -327,6 +327,7 @@ fn FulfillmentTable(
                 }
             }
             PublicPager {
+                page_level: true,
                 page: current_page,
                 page_size: page.page_size,
                 total: Some(page.total),

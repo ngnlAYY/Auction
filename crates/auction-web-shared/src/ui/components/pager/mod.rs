@@ -98,6 +98,10 @@ pub fn Pager(
     /// 由地址驱动的调用方可返回写入结果；缺省调用 `on_page_size_change`。
     #[props(default)]
     on_page_size_commit: Callback<i64, Option<bool>>,
+    /// 页面级分页条：位于页面内容末尾的列表分页，nav 增加 `ui-pager--page`，供 Public
+    /// 样式固定到页面底部。抽屉、展开行与同页有多个列表的分页不要设置。
+    #[props(default)]
+    page_level: bool,
 ) -> Element {
     let page_size = page_size.max(1);
     let total_pages = total
@@ -168,7 +172,7 @@ pub fn Pager(
 
     rsx! {
         nav {
-            class: if numbered { "ui-pager ui-pager--numbered" } else { "ui-pager" },
+            class: pager_class(numbered, page_level),
             aria_label: label,
             if let Some(range) = item_range {
                 span { class: "ui-pager__range", {range_summary.call(range)} }
@@ -293,6 +297,16 @@ pub fn Pager(
     }
 }
 
+/// nav 的 class：页面级标记只追加 `ui-pager--page`，不改变既有 `ui-pager*` 契约。
+fn pager_class(numbered: bool, page_level: bool) -> &'static str {
+    match (numbered, page_level) {
+        (true, true) => "ui-pager ui-pager--numbered ui-pager--page",
+        (true, false) => "ui-pager ui-pager--numbered",
+        (false, true) => "ui-pager ui-pager--page",
+        (false, false) => "ui-pager",
+    }
+}
+
 /// 最多生成七个页码/省略项；固定栈缓冲不分配临时 Vec，省略号仍不可点击。
 fn numbered_pages(page: i64, total_pages: i64) -> impl Iterator<Item = Option<i64>> {
     let pages = if total_pages <= 7 {
@@ -392,6 +406,50 @@ mod tests {
             _ => props.build(),
         };
         rsx! { Pager { ..props } }
+    }
+
+    fn page_level_fixture() -> Element {
+        let page_level = consume_context::<bool>();
+        rsx! {
+            Pager {
+                page: 1,
+                page_size: 10,
+                total: Some(40),
+                label: "翻页".to_owned(),
+                previous_label: "上一页".to_owned(),
+                status: |(page, pages): (i64, i64)| format!("{page}/{pages}"),
+                next_label: "下一页".to_owned(),
+                jump_label: "页码".to_owned(),
+                jump_button_label: "跳转".to_owned(),
+                on_page_change: |_| {},
+                page_size_options: vec![20],
+                page_level,
+            }
+        }
+    }
+
+    fn nav_class(page_level: bool) -> String {
+        let mut dom = VirtualDom::new(page_level_fixture).with_root_context(page_level);
+        let initial = dom.rebuild_to_vec();
+        initial
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "class",
+                    value: AttributeValue::Text(value),
+                    ..
+                } if value.starts_with("ui-pager ") => Some(value.clone()),
+                _ => None,
+            })
+            .expect("渲染出分页条 nav")
+    }
+
+    #[test]
+    fn page_level_marker_is_added_only_when_requested() {
+        // 页面级标记只在调用方显式要求时出现，缺省的分页条不带它。
+        assert_eq!(nav_class(true), "ui-pager ui-pager--numbered ui-pager--page");
+        assert_eq!(nav_class(false), "ui-pager ui-pager--numbered");
     }
 
     fn size_picker_fixture() -> Element {

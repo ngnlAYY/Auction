@@ -251,6 +251,7 @@ function OrderPager(props: {
   // 与挂单列表同样复用底层控件，不写拍卖 URL 与页长偏好。
   return (
     <Pager
+      pageLevel
       page={props.query.page}
       pageSize={props.query.pageSize}
       total={props.total}

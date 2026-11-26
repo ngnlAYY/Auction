@@ -64,6 +64,7 @@ pub(crate) fn PriceHistoryTable(
                 }
             }
             PublicPager {
+                page_level: true,
                 page: current_page,
                 page_size,
                 total: page.total,

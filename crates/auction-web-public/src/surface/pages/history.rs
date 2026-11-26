@@ -272,6 +272,7 @@ pub(crate) fn AuctionHistoryPage(
                 AuctionHistoryTable { rows: page.auctions }
             }
             PublicPager {
+                page_level: true,
                 page: page_number,
                 page_size,
                 total: page.total,

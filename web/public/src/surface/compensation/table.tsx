@@ -138,6 +138,7 @@ export function CompensationPoolTable(props: {
         </div>
       </Show>
       <PublicPager
+        pageLevel
         page={props.page.page ?? 1}
         pageSize={pageSize()}
         total={props.page.total ?? null}

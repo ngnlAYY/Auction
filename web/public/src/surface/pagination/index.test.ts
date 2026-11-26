@@ -120,6 +120,23 @@ test("地址里的页长恰好相同不能证明旧回调成功重置页码", ()
   }
 });
 
+test("page_level_marker_is_opt_in：页面级标记只在调用方显式传入时出现", async () => {
+  const base = { page: 1, pageSize: 10, total: 40, label: "分页", onPageChange: () => true };
+  for (const [props, expected] of [
+    [{ ...base, pageLevel: true }, true],
+    [base, false],
+  ] as const) {
+    const mounted = await mountPublicPagerForDiagnostics(props);
+    try {
+      const nav = mounted.find((node) => node.getAttribute("aria-label") === "分页");
+      expect(nav).not.toBeNull();
+      expect(String(nav?.attributes.class).split(" ").includes("ui-pager--page")).toBe(expected);
+    } finally {
+      mounted.dispose();
+    }
+  }
+});
+
 test("分页器的跳页被拒后恢复输入，冻结旧页长成功但提交新页长被拒时恢复下拉框", () => {
   const probe: { state?: ReturnType<typeof usePublicQueryState>["state"] } = {};
   const mounted = mountReadPage(

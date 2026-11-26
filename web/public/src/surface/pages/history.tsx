@@ -227,6 +227,7 @@ export function AuctionHistoryPage(props: {
         </div>
       </Show>
       <PublicPager
+        pageLevel
         page={props.pageNumber}
         pageSize={pageSize()}
         total={props.page.total}

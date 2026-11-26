@@ -265,6 +265,7 @@ function OwnedPager(props: {
   // 与 PublicPager 及 3C 复用底层控件；PublicPager 自身会写拍卖 URL 与偏好。
   return (
     <Pager
+      pageLevel
       page={props.query.page}
       pageSize={props.query.pageSize}
       total={props.total}
