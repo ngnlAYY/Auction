@@ -311,7 +311,7 @@ pub(crate) fn prove_take_identity_and_receipts(
 }
 
 /// 系统退回附加在原正文之后的后缀前缀与结尾（换行已规范为 LF）。
-const RETURNED_SUFFIX_PREFIX: &str = "\n\nThis message was returned from ";
+pub(crate) const RETURNED_SUFFIX_PREFIX: &str = "\n\nThis message was returned from ";
 const RETURNED_SUFFIX_END: &str = ", kupo!";
 
 /// 结算退件 Take 之后的详情页是否证明附件已被领取：与正常 Take 成功证明同等强度——收件人等于
@@ -421,25 +421,39 @@ pub(crate) fn parse_removed_attachment_markers(
     value: &str,
     world: MoogleMailWorld,
 ) -> Result<Vec<RemovedMarker>, MoogleMailError> {
-    const MARKER: &str = "Removed attachment:";
     let mut markers = Vec::new();
     for line in value.lines() {
-        let mut found = line.match_indices(MARKER);
-        let Some((start, _)) = found.next() else { continue };
-        if found.next().is_some() || !line[..start].trim().is_empty() {
-            return Err(action_proof_error(MoogleMailOperation::Take, world));
+        if !line.contains(REMOVED_ATTACHMENT_MARKER) {
+            continue;
         }
-        let rest = line[start + MARKER.len()..].trim();
-        if rest.is_empty() {
+        let Some(marker) = removed_marker_line(line) else {
             return Err(action_proof_error(MoogleMailOperation::Take, world));
-        }
-        let (canonical_eid, name) = split_marker_eid(rest);
-        if name.is_empty() {
-            return Err(action_proof_error(MoogleMailOperation::Take, world));
-        }
-        markers.push(RemovedMarker { name: name.to_owned(), canonical_eid });
+        };
+        markers.push(marker);
     }
     Ok(markers)
+}
+
+/// 回执行里附件回执的行首标记。
+pub(crate) const REMOVED_ATTACHMENT_MARKER: &str = "Removed attachment:";
+
+/// 解析一行含 `Removed attachment:` 的回执；多个 marker、marker 前有其他文字、空名称都返回 `None`。
+/// Take 证明与 Sent 回执块共用这一份拆分，错误类型由调用方决定。
+pub(crate) fn removed_marker_line(line: &str) -> Option<RemovedMarker> {
+    let mut found = line.match_indices(REMOVED_ATTACHMENT_MARKER);
+    let (start, _) = found.next()?;
+    if found.next().is_some() || !line[..start].trim().is_empty() {
+        return None;
+    }
+    let rest = line[start + REMOVED_ATTACHMENT_MARKER.len()..].trim();
+    if rest.is_empty() {
+        return None;
+    }
+    let (canonical_eid, name) = split_marker_eid(rest);
+    if name.is_empty() {
+        return None;
+    }
+    Some(RemovedMarker { name: name.to_owned(), canonical_eid })
 }
 
 fn split_marker_eid(rest: &str) -> (Option<String>, &str) {

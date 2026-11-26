@@ -3,10 +3,13 @@
 //!
 //! 不变量 4、6、7：
 //! - 本入口只读：取只读会话读 Sent 详情，不取写锁、不 POST、不 Take、不改 compose。
-//! - 只有详情的收件人、主题与正文摘要逐字等于起写冻结值，且剩余 Credits、待付 COD 与附件全为零时才算“已领取”；
-//!   仍有剩余为“未领取”；读取失败、会话失效或身份不符一律“无法确定”，调用方照旧等待。
-//! - D9 §2.3：Sent 全空本身不足以签发领取或付款证明（不能排除先空后 RTS 等形状），所以本验证器版本带
-//!   `-unsigned` 后缀，签收清单为空；在签收（成对脱敏样本）之前，Worker 不会调用本入口，存储也不认它的证据。
+//! - 收件人、主题与“回执前的原正文摘要”须逐字等于起写冻结值（无回执块时为整页正文摘要）；仍有剩余资产为“未领取”；
+//!   读取失败、会话失效或身份不符一律“无法确定”，调用方照旧等待。
+//! - 资产全空时还须有服务端回执块且逐项相符（D9 §2.3）：装备回执条数等于冻结件数（带 EID 的须属冻结集合且不重复），
+//!   Credits 回执恰一条且金额等于冻结 Credits（冻结无 Credits 则不得有），`CoD Paid` 等于冻结 COD（冻结无 COD 则不得有），
+//!   正文含系统退回附言即不认；回执缺失或格式不符是“无法确定”，不猜测为已领取。
+//! - 回执核对排除“空信”（先空后 RTS 等无回执形状），但真实样本未到位，所以本验证器版本仍带 `-unsigned` 后缀，
+//!   签收清单为空；在签收（成对脱敏样本）之前，Worker 不会调用本入口，存储也不认它的证据。
 //! - 证据摘要只含验证器版本、世界、Sent MID 与冻结请求的安全投影，不含观察时刻：同一领取事实重读得到同一摘要，
 //!   证据写口据此判重放。收件人、主题只进入本次比对，日志只记世界与固定分类码。
 
@@ -16,14 +19,16 @@ use auction_time::Timestamp;
 use sha2::{Digest, Sha256};
 
 use super::{SentRequestParts, sent_request_digest};
+use crate::clients::mooglemail::parser::parse_canonical_credits;
 use crate::clients::mooglemail::transport::types::MoogleMailDeliveryTransport;
 use crate::clients::mooglemail::{
-    MoogleMailOperation, MoogleMailSentListEntry, MoogleMailSentObservation, MoogleMailWorld,
+    MoogleMailOperation, MoogleMailSentListEntry, MoogleMailSentObservation, MoogleMailSentReceipt,
+    MoogleMailWorld,
 };
 
 /// 寄售派发领取观察的验证器版本；未签收（D9 §2.3、R5-C10）。
 pub const CONSIGNMENT_DISPATCH_COLLECTED_VALIDATOR_VERSION: &str =
-    "consignment_dispatch_collected_v1-unsigned";
+    "consignment_dispatch_collected_v2-unsigned";
 
 /// 一次观察的目标：已绑定的 Sent MID 与起写冻结的 Send 身份；`Debug` 只输出世界与 MID。
 pub struct ConsignmentCollectionTarget {
@@ -131,15 +136,20 @@ impl MoogleMailDeliveryTransport {
     }
 }
 
-/// 身份逐字相符才判定；全部领取为已领取，仍有剩余为未领取（不变量 6：身份不符不猜测）。
+/// 身份逐字相符才判定；仍有剩余为未领取；全空且回执逐项相符才是已领取（不变量 6：不符不猜测）。
 fn classify(
     target: &ConsignmentCollectionTarget,
     observation: &MoogleMailSentObservation,
 ) -> ConsignmentCollection {
+    // 领取后正文末尾多出回执块：身份比对用回执前的原正文摘要，没有回执块则用整页摘要。
+    let original_digest = match &observation.receipt {
+        MoogleMailSentReceipt::Parsed { original_body_digest, .. } => *original_body_digest,
+        MoogleMailSentReceipt::None | MoogleMailSentReceipt::Malformed => observation.body_digest,
+    };
     if observation.external_mail_id != target.sent_mid
         || observation.recipient != target.recipient
         || observation.subject != target.subject
-        || observation.body_digest != target.body_digest
+        || original_digest != target.body_digest
     {
         tracing::warn!(
             world = target.world.as_str(),
@@ -151,10 +161,48 @@ fn classify(
     if !observation.collected {
         return ConsignmentCollection::Pending;
     }
+    if observation.returned_notice || !receipt_matches_target(target, &observation.receipt) {
+        tracing::warn!(
+            world = target.world.as_str(),
+            code = "collection_receipt_mismatch",
+            "寄售领取观察的服务端回执与冻结值不符"
+        );
+        return ConsignmentCollection::Unavailable;
+    }
     ConsignmentCollection::Collected {
         validator_version: CONSIGNMENT_DISPATCH_COLLECTED_VALIDATOR_VERSION,
         evidence_digest: collected_digest(target),
     }
+}
+
+/// 回执逐项核对冻结资产：装备条数与 EID、Credits 恰一条且等额、`CoD Paid` 等于冻结 COD。
+fn receipt_matches_target(
+    target: &ConsignmentCollectionTarget,
+    receipt: &MoogleMailSentReceipt,
+) -> bool {
+    let MoogleMailSentReceipt::Parsed { removed, cod_paid, .. } = receipt else {
+        return false;
+    };
+    let mut credits = Vec::new();
+    let mut equipment = Vec::new();
+    for marker in removed {
+        match marker.name.strip_suffix(" Credits").and_then(parse_canonical_credits) {
+            Some(amount) if marker.canonical_eid.is_none() => credits.push(amount),
+            _ => equipment.push(marker),
+        }
+    }
+    let credits_ok =
+        if target.credits > 0 { credits == [target.credits] } else { credits.is_empty() };
+    let cod_ok = if target.cod > 0 { *cod_paid == Some(target.cod) } else { cod_paid.is_none() };
+    let eids_ok = equipment.iter().all(|marker| {
+        marker.canonical_eid.as_ref().is_none_or(|eid| target.equipment_ids.contains(eid))
+    });
+    // 带 EID 的回执不得重复（无 EID 的同名回执在解析阶段已按整行去重）。
+    let mut seen: Vec<&String> =
+        equipment.iter().filter_map(|marker| marker.canonical_eid.as_ref()).collect();
+    seen.sort_unstable();
+    let unique = seen.windows(2).all(|pair| pair[0] != pair[1]);
+    credits_ok && cod_ok && eids_ok && unique && equipment.len() == target.equipment_ids.len()
 }
 
 /// 证据摘要：版本、世界、Sent MID 与冻结请求的安全投影。
@@ -181,13 +229,16 @@ fn collected_digest(target: &ConsignmentCollectionTarget) -> [u8; 32] {
 
 #[cfg(test)]
 mod tests {
+    use auction_domain::consignment::RemovedMarker;
     use auction_time::Timestamp;
 
     use super::{
         CONSIGNMENT_DISPATCH_COLLECTED_VALIDATOR_VERSION, ConsignmentCollection,
         ConsignmentCollectionTarget, classify,
     };
-    use crate::clients::mooglemail::{MoogleMailSentObservation, MoogleMailWorld};
+    use crate::clients::mooglemail::{
+        MoogleMailSentObservation, MoogleMailSentReceipt, MoogleMailWorld,
+    };
 
     /// 冻结目标：一封带 COD 与一件装备的假原件派发。
     fn target() -> ConsignmentCollectionTarget {
@@ -215,7 +266,34 @@ mod tests {
             remaining_equipment_ids: if collected { Vec::new() } else { vec!["42".to_owned()] },
             collected,
             body_digest: [1; 32],
+            receipt: MoogleMailSentReceipt::None,
+            returned_notice: false,
         }
+    }
+
+    /// 已领取且带与冻结目标（COD 100、一件装备 42）逐项相符的回执；原正文摘要等于冻结摘要。
+    fn receipted() -> MoogleMailSentObservation {
+        let mut seen = observation(true);
+        seen.body_digest = [9; 32];
+        seen.receipt = MoogleMailSentReceipt::Parsed {
+            original_body_digest: [1; 32],
+            removed: vec![marker("Fake Shoes", Some("42"))],
+            cod_paid: Some(100),
+        };
+        seen
+    }
+
+    fn marker(name: &str, eid: Option<&str>) -> RemovedMarker {
+        RemovedMarker { name: name.to_owned(), canonical_eid: eid.map(str::to_owned) }
+    }
+
+    fn set_receipt(
+        seen: &mut MoogleMailSentObservation,
+        removed: Vec<RemovedMarker>,
+        cod: Option<i64>,
+    ) {
+        seen.receipt =
+            MoogleMailSentReceipt::Parsed { original_body_digest: [1; 32], removed, cod_paid: cod };
     }
 
     /// 身份任一项不符（Sent MID、收件人、主题、正文摘要）：即使已全部领取也无法确定，不产出证据摘要。
@@ -243,12 +321,88 @@ mod tests {
     /// 身份相符、全部领取：已领取，带本验证器版本；同一领取重读得到同一摘要。
     #[test]
     fn collected_twice_yields_the_same_digest() {
-        let first = classify(&target(), &observation(true));
+        let first = classify(&target(), &receipted());
         let ConsignmentCollection::Collected { validator_version, evidence_digest } = first else {
             panic!("全部领取应判为已领取");
         };
         assert_eq!(validator_version, CONSIGNMENT_DISPATCH_COLLECTED_VALIDATOR_VERSION);
         assert_ne!(evidence_digest, [0; 32]);
-        assert_eq!(classify(&target(), &observation(true)), first);
+        assert_eq!(classify(&target(), &receipted()), first);
+    }
+
+    /// 全空但没有回执（空信、先空后 RTS 等形状）、回执格式不符或带系统退回附言：无法确定，不产出证据。
+    #[test]
+    fn empty_without_valid_receipt_is_unavailable() {
+        let mut malformed = observation(true);
+        malformed.receipt = MoogleMailSentReceipt::Malformed;
+        let mut returned = receipted();
+        returned.returned_notice = true;
+        for seen in [observation(true), malformed, returned] {
+            assert_eq!(classify(&target(), &seen), ConsignmentCollection::Unavailable);
+        }
+    }
+
+    /// 回执与冻结值逐项核对：装备条数或 EID 不符、COD 金额不符或缺失、Credits 多余或不等、原正文摘要不符，都不认。
+    #[test]
+    fn receipt_items_must_match_the_frozen_target() {
+        let cases: [(Vec<RemovedMarker>, Option<i64>); 7] = [
+            (vec![], Some(100)),
+            (vec![marker("Fake Shoes", Some("43"))], Some(100)),
+            (vec![marker("Fake Shoes", Some("42")), marker("Fake Hat", None)], Some(100)),
+            (vec![marker("Fake Shoes", Some("42"))], Some(99)),
+            (vec![marker("Fake Shoes", Some("42"))], None),
+            (vec![marker("Fake Shoes", Some("42")), marker("5 Credits", None)], Some(100)),
+            (vec![marker("Fake Shoes", None)], Some(100)),
+        ];
+        let name_only_case = cases[6].clone();
+        for (removed, cod) in cases.into_iter().take(6) {
+            let mut seen = receipted();
+            set_receipt(&mut seen, removed, cod);
+            assert_eq!(classify(&target(), &seen), ConsignmentCollection::Unavailable);
+        }
+        // 无 EID 的名称回执按条数核对，等于冻结件数即认。
+        let (removed, cod) = name_only_case;
+        let mut name_only = receipted();
+        set_receipt(&mut name_only, removed, cod);
+        assert!(matches!(classify(&target(), &name_only), ConsignmentCollection::Collected { .. }));
+        let mut digest = receipted();
+        digest.receipt = MoogleMailSentReceipt::Parsed {
+            original_body_digest: [2; 32],
+            removed: vec![marker("Fake Shoes", Some("42"))],
+            cod_paid: Some(100),
+        };
+        assert_eq!(classify(&target(), &digest), ConsignmentCollection::Unavailable);
+    }
+
+    /// 冻结带 Credits 时回执须恰一条且等额；冻结无 COD 时不得出现 CoD Paid。
+    #[test]
+    fn credits_and_cod_receipts_follow_the_frozen_amounts() {
+        let mut credits_target = target();
+        credits_target.cod = 0;
+        credits_target.credits = 49_000;
+        let mut seen = receipted();
+        set_receipt(
+            &mut seen,
+            vec![marker("Fake Shoes", Some("42")), marker("49,000 Credits", None)],
+            None,
+        );
+        assert!(matches!(
+            classify(&credits_target, &seen),
+            ConsignmentCollection::Collected { .. }
+        ));
+        set_receipt(
+            &mut seen,
+            vec![marker("Fake Shoes", Some("42")), marker("48,000 Credits", None)],
+            None,
+        );
+        assert_eq!(classify(&credits_target, &seen), ConsignmentCollection::Unavailable);
+        set_receipt(&mut seen, vec![marker("Fake Shoes", Some("42"))], None);
+        assert_eq!(classify(&credits_target, &seen), ConsignmentCollection::Unavailable);
+        set_receipt(
+            &mut seen,
+            vec![marker("Fake Shoes", Some("42")), marker("49,000 Credits", None)],
+            Some(7),
+        );
+        assert_eq!(classify(&credits_target, &seen), ConsignmentCollection::Unavailable);
     }
 }

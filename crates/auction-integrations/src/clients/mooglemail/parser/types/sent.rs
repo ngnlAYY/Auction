@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use auction_domain::consignment::RemovedMarker;
 use auction_time::Timestamp;
 
 use super::MAX_SUMMARY_SUBJECT_BYTES;
@@ -43,6 +44,17 @@ impl MoogleMailSentSummary {
     }
 }
 
+/// Sent 详情正文末尾的服务端回执块（领取后由 HV 追加）；只描述形状，不判定业务含义。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MoogleMailSentReceipt {
+    /// 正文末尾没有回执块。
+    None,
+    /// 回执块格式清楚：回执前的原正文摘要、每个附件的回执行（Credits 附件写作 `N Credits`）与 `CoD Paid` 金额。
+    Parsed { original_body_digest: [u8; 32], removed: Vec<RemovedMarker>, cod_paid: Option<i64> },
+    /// 有回执块但格式不符（marker 重复、名称为空、CoD Paid 多于一行或金额格式不符）。
+    Malformed,
+}
+
 /// Sent 详情正文与当前资产的安全 proof；不保存正文，只保存其 canonical digest。
 #[derive(Clone, PartialEq, Eq)]
 pub struct MoogleMailSentContentProof {
@@ -54,6 +66,10 @@ pub struct MoogleMailSentContentProof {
     pub remaining_credits: i64,
     pub cod_pending: i64,
     pub remaining_equipment_ids: Vec<String>,
+    /// 正文末尾的服务端回执块；`body_digest` 仍是整页正文摘要，不受回执块影响。
+    pub receipt: MoogleMailSentReceipt,
+    /// 正文是否含系统退回附言（`This message was returned from`）。
+    pub returned_notice: bool,
 }
 
 impl fmt::Debug for MoogleMailSentContentProof {
@@ -68,7 +84,8 @@ impl fmt::Debug for MoogleMailSentContentProof {
             .field("remaining_credits", &self.remaining_credits)
             .field("cod_pending", &self.cod_pending)
             .field("remaining_equipment_ids", &self.remaining_equipment_ids)
-            .finish()
+            .field("returned_notice", &self.returned_notice)
+            .finish_non_exhaustive()
     }
 }
 

@@ -25,7 +25,7 @@ use super::super::returns::fixture::SIGNED_VALIDATOR;
 
 /// 生产观察端口声明的未签收版本（与 `auction-integrations` 的常量同值）。
 pub(in crate::consignment) const UNSIGNED_COLLECTION_VALIDATOR: &str =
-    "consignment_dispatch_collected_v1-unsigned";
+    "consignment_dispatch_collected_v2-unsigned";
 
 /// 回环观察替身：每次观察计一次读；`collected` 决定回答已领取还是仍有剩余，`only_mid` 给出时只有该 Sent MID
 /// 算已领取。
