@@ -4764,6 +4764,11 @@ body:has(.public-catalog-detail) .public-toast-region {
  * 只认“页面根之下、每一层都是最后一个子元素”的那一条分页条（往期拍卖、出价记录、履约进度、
  * 历史成交价、黑名单、补偿池批次、看板目录）；抽屉、展开行里的分页条不受影响，账户页有多个
  * 各自独立的列表，整页排除。
+ * 共享 Pager 传入 clampFailure 时，会在分页条（nav）之后再渲染一个兄弟节点 .ui-pager__error，
+ * 所以“最后一个子元素”放宽为：分页条自己是最后一个子元素，或其后只跟着作为最后子元素的
+ * .ui-pager__error；否则这些页面的分页条会因纠偏提示区的存在而不再匹配、退回普通文档流。
+ * :has() 里不能再嵌套 :has()，容器链与内容区规则改用“最后一个子元素是分页条，或是紧跟分页条的
+ * .ui-pager__error”来表达同一条件。
  * 这些规则要压过各页面在 surface、desktop、mobile 三层里对自身布局（display、内外边距）的声明，
  * 逐层重写既冗长又容易漏掉某一页，所以集中写在层外。
  */
@@ -4776,57 +4781,57 @@ body:has(.public-catalog-detail) .public-toast-region {
 .public-console
   .console-main
   > :not(.public-account-bids-page):is(
-    :has(> .ui-pager--numbered:last-child),
-    :has(> :last-child > .ui-pager--numbered:last-child),
-    :has(> :last-child > :last-child > .ui-pager--numbered:last-child),
-    :has(> :last-child > :last-child > :last-child > .ui-pager--numbered:last-child)
+    :has(> :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child),
+    :has(> :last-child > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child),
+    :has(> :last-child > :last-child > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child),
+    :has(> :last-child > :last-child > :last-child > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child)
   ),
 .public-console
   .console-main
   > :not(.public-account-bids-page)
   > :last-child:is(
-    :has(> .ui-pager--numbered:last-child),
-    :has(> :last-child > .ui-pager--numbered:last-child),
-    :has(> :last-child > :last-child > .ui-pager--numbered:last-child)
+    :has(> :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child),
+    :has(> :last-child > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child),
+    :has(> :last-child > :last-child > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child)
   ),
 .public-console
   .console-main
   > :not(.public-account-bids-page)
   > :last-child
   > :last-child:is(
-    :has(> .ui-pager--numbered:last-child),
-    :has(> :last-child > .ui-pager--numbered:last-child)
+    :has(> :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child),
+    :has(> :last-child > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child)
   ),
 .public-console
   .console-main
   > :not(.public-account-bids-page)
   > :last-child
   > :last-child
-  > :last-child:has(> .ui-pager--numbered:last-child) {
+  > :last-child:has(> :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child) {
   display: flex;
   flex: 1 0 auto;
   flex-direction: column;
 }
 
-.public-console .console-main > :not(.public-account-bids-page) > .ui-pager--numbered:last-child,
+.public-console .console-main > :not(.public-account-bids-page) > .ui-pager--numbered:is(:last-child, :has(+ .ui-pager__error:last-child)),
 .public-console
   .console-main
   > :not(.public-account-bids-page)
   > :last-child
-  > .ui-pager--numbered:last-child,
-.public-console
-  .console-main
-  > :not(.public-account-bids-page)
-  > :last-child
-  > :last-child
-  > .ui-pager--numbered:last-child,
+  > .ui-pager--numbered:is(:last-child, :has(+ .ui-pager__error:last-child)),
 .public-console
   .console-main
   > :not(.public-account-bids-page)
   > :last-child
   > :last-child
+  > .ui-pager--numbered:is(:last-child, :has(+ .ui-pager__error:last-child)),
+.public-console
+  .console-main
+  > :not(.public-account-bids-page)
   > :last-child
-  > .ui-pager--numbered:last-child {
+  > :last-child
+  > :last-child
+  > .ui-pager--numbered:is(:last-child, :has(+ .ui-pager__error:last-child)) {
   position: sticky;
   inset-block-end: 0;
   z-index: 2;
@@ -4837,18 +4842,23 @@ body:has(.public-catalog-detail) .public-toast-region {
   background: var(--color-bg);
 }
 
+/* 空的纠偏提示区不参与弹性布局，免得容器的 gap 把分页条从最下面顶起；有内容时恢复为普通条目。 */
+.public-console .console-main .ui-pager--numbered + .ui-pager__error:empty {
+  position: absolute;
+}
+
 /* 分页条自己贴到最下面，内容区不再另留底部空白。 */
 .public-console
   .console-main:has(
-    > :not(.public-account-bids-page) > .ui-pager--numbered:last-child,
-    > :not(.public-account-bids-page) > :last-child > .ui-pager--numbered:last-child,
-    > :not(.public-account-bids-page) > :last-child > :last-child > .ui-pager--numbered:last-child,
+    > :not(.public-account-bids-page) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child,
+    > :not(.public-account-bids-page) > :last-child > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child,
+    > :not(.public-account-bids-page) > :last-child > :last-child > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child,
     >
       :not(.public-account-bids-page)
       > :last-child
       > :last-child
       > :last-child
-      > .ui-pager--numbered:last-child
+      > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child
   ) {
   padding-block-end: 0;
 }
