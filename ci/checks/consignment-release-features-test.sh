@@ -41,8 +41,11 @@ for assignment in api_only_features embedded_features single_features; do
 		branch) stack=solid ;;
 		tag) stack=dioxus ;;
 		esac
+		# 事件固定为手动触发（候选构建）：CI 的 push 运行会继承 GITHUB_EVENT_NAME=push，
+		# tag 用例随之被识别为正式发行，先被正式发行守卫拒绝，测不到预览 feature 的拒绝。
 		if output=$(PATH="$fixture/bin:$PATH" RELEASE_TEST_ROOT="$fixture" AUCTION_WEB_STACK="$stack" \
-			GITHUB_ACTIONS=true GITHUB_REF_TYPE="$ref" bash "$fixture/ci/release/release.sh" release-check 2>&1); then
+			GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF_TYPE="$ref" \
+			bash "$fixture/ci/release/release.sh" release-check 2>&1); then
 			fail "$ref 中的 $assignment 接受了预览 feature"
 		fi
 		[[ "$output" == '发布及候选制品禁止启用 consignment-dev-preview。' ]] ||
