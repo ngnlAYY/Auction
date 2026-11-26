@@ -133,6 +133,9 @@ pub(crate) fn PublicPager(
     /// 关闭数字页码与每页数量选择器，保留经典上一页/下一页布局。
     #[props(default = true)]
     show_size_picker: bool,
+    /// 页面级分页条：只给位于页面内容末尾的列表设置，样式据此固定到页面底部。
+    #[props(default)]
+    page_level: bool,
     /// 覆盖跳页输入文案；默认使用 Public 通用 `pagination-jump`。
     #[props(default)]
     jump_label: Option<String>,
@@ -167,6 +170,7 @@ pub(crate) fn PublicPager(
             jump_label: jump_label.unwrap_or_else(|| t!("pagination-jump")),
             jump_button_label: t!("catalog-page-go"),
             total_summary: total.map_or_default(|count| t!("pagination-total", count: count)),
+            page_level,
             show_range_summary: true,
             range_summary: move |(start, end, total_count): (i64, i64, i64)| {
                 t!(

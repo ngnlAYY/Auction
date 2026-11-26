@@ -87,6 +87,8 @@ export interface PublicPagerProps {
   readonly maxOffset?: number | null;
   readonly hideWhenSingle?: boolean;
   readonly showSizePicker?: boolean;
+  /** 页面级分页条：只给位于页面内容末尾的列表传 true，样式据此固定到页面底部。 */
+  readonly pageLevel?: boolean;
   readonly jumpLabel?: string;
   readonly maxPageSize?: number | null;
   readonly label: string;
@@ -170,6 +172,7 @@ export function PublicPager(props: PublicPagerProps): JSX.Element {
       pageSizeApplyLabel={t("pagination-apply")}
       pageSizeInvalidLabel={t("pagination-size-limit", { maximum: String(maximum()) })}
       onPageChange={props.onPageChange}
+      pageLevel={props.pageLevel === true}
       onPageClamp={props.onPageClamp ?? null}
       clampFailure={{ message: t("pagination-clamp-error"), retryLabel: t("data-retry") }}
       onPageSizeChange={(size) => {

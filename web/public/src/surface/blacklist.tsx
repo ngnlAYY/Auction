@@ -160,6 +160,7 @@ function BlacklistTable(props: {
       {/* 没有任何记录时分页器只会显示“共 0 条”，不渲染；有记录但页码越界时仍需它纠偏。 */}
       <Show when={props.page.total > 0}>
         <PublicPager
+          pageLevel
           page={props.page.page}
           pageSize={props.page.page_size}
           total={props.page.total}

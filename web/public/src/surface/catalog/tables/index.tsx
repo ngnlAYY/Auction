@@ -145,6 +145,7 @@ export function CatalogTable(props: {
         </Match>
       </Switch>
       <PublicPager
+        pageLevel
         page={props.pageNumber}
         pageSize={props.pageSize}
         total={props.pageTotal}

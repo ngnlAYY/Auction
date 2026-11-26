@@ -53,6 +53,11 @@ export interface PagerProps {
    */
   readonly rangeSummary?: ((value: readonly [number, number, number]) => string) | null;
   readonly onPageSizeChange?: (size: number) => unknown;
+  /**
+   * 页面级分页条：位于页面内容末尾的列表分页，nav 增加 `ui-pager--page`，
+   * 供 Public 样式固定到页面底部。抽屉、展开行与同页有多个列表的分页不要设置。
+   */
+  readonly pageLevel?: boolean;
 }
 
 /**
@@ -154,7 +159,7 @@ export function Pager(props: PagerProps): JSX.Element {
   const pageItems = createValueMemo(() => pageEntries(validPage(), totalPages()));
 
   const controls = (
-    <nav class={numbered() ? "ui-pager ui-pager--numbered" : "ui-pager"} aria-label={props.label}>
+    <nav class={pagerClass(numbered(), props.pageLevel === true)} aria-label={props.label}>
       <Show when={numbered() && rangeText() !== null}>
         <span class="ui-pager__range">{rangeText()}</span>
       </Show>
@@ -289,6 +294,11 @@ export function Pager(props: PagerProps): JSX.Element {
       </Show>
     </>
   );
+}
+
+function pagerClass(numbered: boolean, pageLevel: boolean): string {
+  const classes = numbered ? "ui-pager ui-pager--numbered" : "ui-pager";
+  return pageLevel ? `${classes} ui-pager--page` : classes;
 }
 
 interface PageEntry {

@@ -101,6 +101,7 @@ pub(super) fn CompensationPoolTable(
                 }
             }
             PublicPager {
+                page_level: true,
                 page: page.page.unwrap_or(1),
                 page_size,
                 total: page.total,

@@ -4774,90 +4774,34 @@ body:has(.public-catalog-detail) .public-toast-region {
 
 /*
  * ===== 层外规则：页面级分页条 =====
- * 页面级的数字分页条固定在内容区最下方：内容区是纵向弹性容器，从页面根到分页条的每一层都撑满
- * 剩余高度，分页条靠 margin: auto 落到最下面；内容超过一屏时它再以 sticky 停在视口底部。
- * 只认“页面根之下、每一层都是最后一个子元素”的那一条分页条（往期拍卖、出价记录、履约进度、
- * 历史成交价、黑名单、补偿池批次、看板目录、寄售目录、我的挂单、我的订单）；抽屉、展开行里的
- * 分页条不受影响，账户页（/me）有多个各自独立的列表，整页排除。
- * 我的挂单与我的订单为了复用账户页版式，页面根同时带 .public-account-bids-page 与
- * .public-consignment-account，但它们各只有一个列表与一条分页条，所以不在排除之列：排除条件写成
- * :not(.public-account-bids-page:not(.public-consignment-account))，只排除真正的账户页。
- * 页面根因此变为纵向弹性容器；其子元素（筛选区、列表、待决命令提示）本来就是单列纵向排布，
- * 间距由 .public-consignment-account 的 gap 提供，不依赖外边距折叠，版式不受影响。
- * 共享 Pager 传入 clampFailure 时，会在分页条（nav）之后再渲染一个兄弟节点 .ui-pager__error，
- * 所以“最后一个子元素”放宽为：分页条自己是最后一个子元素，或其后只跟着作为最后子元素的
- * .ui-pager__error；否则这些页面的分页条会因纠偏提示区的存在而不再匹配、退回普通文档流。
- * :has() 里不能再嵌套 :has()，容器链与内容区规则改用“最后一个子元素是分页条，或是紧跟分页条的
- * .ui-pager__error”来表达同一条件。
+ * 页面级的数字分页条固定在内容区最下方：内容区是纵向弹性容器，从内容区到分页条的每一层祖先都撑满
+ * 剩余高度，分页条靠 margin-block-start: auto 落到最下面；内容超过一屏时它再以 sticky 停在视口底部。
+ * 以共享分页器的显式标记 .ui-pager--page 为准（调用方传 pageLevel / page_level）。旧规则靠 :has() 与
+ * :nth-last-child(1 of …) 推断“每一层都是最后一个子元素、最多四层”，页面结构稍有不同就静默失效，
+ * 还要整页排除账户页；显式标记不依赖层数与兄弟顺序，抽屉（position: fixed）排在后面也不影响。
+ * 使用约定：只给位于页面内容末尾的页面级分页条加标记（往期拍卖、出价记录、履约进度、历史成交价、
+ * 黑名单、补偿池批次、看板目录、寄售目录、我的挂单、我的订单）。账户页（/me）同页有多个各自独立的
+ * 列表、拍品详情抽屉与补偿池展开行里的分页条都不在页面末尾，不标记，保持普通文档流。
  * 这些规则要压过各页面在 surface、desktop、mobile 三层里对自身布局（display、内外边距）的声明，
  * 逐层重写既冗长又容易漏掉某一页，所以集中写在层外。
+ * 不支持 :has() 的浏览器保持分页条原来的文档流位置。
  */
-/*
- * “最后一个子元素”不计详情抽屉：抽屉与遮罩（position: fixed）挂在页面容器里，打开时排在分页条所在
- * 层级之后，若按 :last-child 判断，分页条会在抽屉打开期间退回文档流、范围文字随之跑出视口。
- * 不支持 :has() 或 :nth-last-child(… of …) 的浏览器保持分页条原来的文档流位置。
- */
-@supports selector(:has(*)) and selector(:nth-last-child(1 of *)) {
-  .public-console .console-main {
+@supports selector(:has(*)) {
+  /* 内容区纵向弹性，分页条自己贴到最下面，内容区不再另留底部空白。 */
+  .public-console .console-main:has(.ui-pager--page) {
     display: flex;
     flex-direction: column;
+    padding-block-end: 0;
   }
 
-  /* 页面根，以及页面根到分页条之间的各层容器。 */
-  .public-console
-    .console-main
-    > :not(.public-account-bids-page:not(.public-consignment-account)):is(
-      :has(> :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))),
-      :has(> :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))),
-      :has(> :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))),
-      :has(> :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)))
-    ),
-  .public-console
-    .console-main
-    > :not(.public-account-bids-page:not(.public-consignment-account))
-    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)):is(
-      :has(> :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))),
-      :has(> :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))),
-      :has(> :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)))
-    ),
-  .public-console
-    .console-main
-    > :not(.public-account-bids-page:not(.public-consignment-account))
-    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
-    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)):is(
-      :has(> :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))),
-      :has(> :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)))
-    ),
-  .public-console
-    .console-main
-    > :not(.public-account-bids-page:not(.public-consignment-account))
-    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
-    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
-    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)):has(> :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))) {
+  /* 内容区到分页条之间的每一层祖先：纵向弹性并撑满剩余高度。 */
+  .public-console .console-main :has(.ui-pager--page) {
     display: flex;
     flex: 1 0 auto;
     flex-direction: column;
   }
 
-  .public-console .console-main > :not(.public-account-bids-page:not(.public-consignment-account)) > .ui-pager--numbered:is(:nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)), :has(+ .ui-pager__error:nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)))),
-  .public-console
-    .console-main
-    > :not(.public-account-bids-page:not(.public-consignment-account))
-    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
-    > .ui-pager--numbered:is(:nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)), :has(+ .ui-pager__error:nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)))),
-  .public-console
-    .console-main
-    > :not(.public-account-bids-page:not(.public-consignment-account))
-    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
-    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
-    > .ui-pager--numbered:is(:nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)), :has(+ .ui-pager__error:nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)))),
-  .public-console
-    .console-main
-    > :not(.public-account-bids-page:not(.public-consignment-account))
-    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
-    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
-    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
-    > .ui-pager--numbered:is(:nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)), :has(+ .ui-pager__error:nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)))) {
+  .public-console .console-main .ui-pager--page {
     position: sticky;
     inset-block-end: 0;
     z-index: 2;
@@ -4869,24 +4813,8 @@ body:has(.public-catalog-detail) .public-toast-region {
   }
 
   /* 空的纠偏提示区不参与弹性布局，免得容器的 gap 把分页条从最下面顶起；有内容时恢复为普通条目。 */
-  .public-console .console-main > :not(.public-account-bids-page:not(.public-consignment-account)) .ui-pager--numbered + .ui-pager__error:empty {
+  .public-console .console-main .ui-pager--page + .ui-pager__error:empty {
     position: absolute;
-  }
-
-  /* 分页条自己贴到最下面，内容区不再另留底部空白。 */
-  .public-console
-    .console-main:has(
-      > :not(.public-account-bids-page:not(.public-consignment-account)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)),
-      > :not(.public-account-bids-page:not(.public-consignment-account)) > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)),
-      > :not(.public-account-bids-page:not(.public-consignment-account)) > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)),
-      >
-        :not(.public-account-bids-page:not(.public-consignment-account))
-        > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
-        > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
-        > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
-        > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
-    ) {
-    padding-block-end: 0;
   }
 }
 

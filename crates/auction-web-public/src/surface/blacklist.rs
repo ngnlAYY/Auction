@@ -109,6 +109,7 @@ fn BlacklistTable(
             // 没有任何记录时分页器只会显示“共 0 条”，不渲染；有记录但页码越界时仍需它纠偏。
             if page.total > 0 {
                 PublicPager {
+                    page_level: true,
                     page: page.page,
                     page_size: page.page_size,
                     total: Some(page.total),

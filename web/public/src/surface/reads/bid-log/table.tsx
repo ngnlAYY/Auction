@@ -69,6 +69,7 @@ export function BidLogTable(props: {
         </div>
       </Show>
       <PublicPager
+        pageLevel
         page={props.currentPage}
         pageSize={props.page.page_size}
         total={props.page.total}
