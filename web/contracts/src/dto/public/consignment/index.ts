@@ -29,6 +29,13 @@ export {
   WithdrawListingSchema,
 } from "./commands";
 export {
+  type DirectCommandResult,
+  DirectCommandResultSchema,
+  type DirectListingProgress,
+  type RegisterDirectListing,
+  RegisterDirectListingSchema,
+} from "./direct";
+export {
   type ListingView,
   type LookupProgress,
   type OwnedListing,

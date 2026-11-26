@@ -2156,6 +2156,7 @@ admin-error-settlement-return-observation-required = 다시 회수하려면 원�
 # 一口价挂单 · 管理
 consignment-admin-title = 위탁 판매 마켓 관리
 consignment-seller-id = 판매자 ID
+consignment-seller-unverified = 판매자 자체 입력, 미확인(사이트 계정 없음)
 consignment-stored-state = 저장된 상태
 consignment-effective-state = 현재 유효 상태
 consignment-collisions = 관련 경매 품목

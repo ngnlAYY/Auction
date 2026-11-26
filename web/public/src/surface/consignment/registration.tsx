@@ -1,17 +1,17 @@
 // Solid Public 装备登记页，能力受限时只展示说明。
 
-import type { ConsignmentStatus, ListingMode } from "@auction/contracts/dto/public/consignment";
+import type { ListingMode } from "@auction/contracts/dto/public/consignment";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { Link, useRouter } from "@auction/web-shared/router";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { For, Match, onCleanup, Show, Switch } from "solid-js";
+import { onCleanup, Show } from "solid-js";
 
 import type { ConsignmentPrivateError } from "../../api/consignment-private";
 import { type ConsignmentCapability, useConsignmentCapability } from "./capability";
+import { DirectRegistration } from "./direct-registration";
 import { consignmentWorldLabel } from "./filters";
-import { listingModeKey } from "./labels";
 import { useConsignmentPending } from "./pending";
 import { PendingCommand } from "./pending-view";
 import {
@@ -20,8 +20,8 @@ import {
   ownedConsignmentHref,
   PrivateConsignmentPage,
 } from "./private-page";
-import { ConsignmentEmpty } from "./read-view";
 import { useConsignmentRefresh } from "./refresh";
+import { CapabilityNotice, ModeChoice } from "./registration-controls";
 import {
   estimatedQuote,
   listingPrice,
@@ -29,10 +29,10 @@ import {
   registrationFee,
 } from "./registration-input";
 
-/** 登记页入口，链接草稿由当前已确认身份的表单独占。 */
+/** 登记页入口，链接草稿由当前表单独占；未登录访客只可做非寄售登记。 */
 export function RegistrationForm(): JSX.Element {
   return (
-    <PrivateConsignmentPage title={t("consignment-new")}>
+    <PrivateConsignmentPage title={t("consignment-new")} anonymous={() => <DirectRegistration />}>
       {(_userId, canUse) => <Registration canUse={canUse} />}
     </PrivateConsignmentPage>
   );
@@ -206,58 +206,5 @@ function Registration(props: { readonly canUse: () => boolean }): JSX.Element {
         <AsyncState kind="loading" title={t("data-loading")} detail="" />
       </Show>
     </>
-  );
-}
-
-function ModeChoice(props: {
-  readonly status: ConsignmentStatus;
-  readonly mode: ListingMode | null;
-  readonly onChange: (mode: ListingMode | null) => void;
-}): JSX.Element {
-  return (
-    <label>
-      {t("consignment-mode")}
-      <select
-        value={props.mode ?? ""}
-        onChange={(event) => {
-          const mode = props.status.registration_modes.find(
-            (choice) => choice === event.currentTarget.value,
-          );
-          props.onChange(mode ?? null);
-        }}
-      >
-        <option value="" disabled>
-          {t("consignment-mode")}
-        </option>
-        <For each={props.status.registration_modes} keyed={false}>
-          {(mode) => <option value={mode()}>{t(listingModeKey(mode()))}</option>}
-        </For>
-      </select>
-    </label>
-  );
-}
-
-function CapabilityNotice(props: {
-  readonly capability: ConsignmentCapability | undefined;
-  readonly refresh: () => void;
-}): JSX.Element {
-  return (
-    <Switch>
-      <Match when={props.capability === undefined}>
-        <AsyncState kind="loading" title={t("data-loading")} detail="" />
-      </Match>
-      <Match when={props.capability?.kind === "disabled"}>
-        <ConsignmentEmpty title={t("consignment-disabled")} />
-      </Match>
-      <Match when={props.capability?.kind === "failed" || props.capability?.kind === "read-only"}>
-        <AsyncState
-          kind="error"
-          title={t("consignment-unavailable")}
-          detail=""
-          retryLabel={t("data-retry")}
-          onRetry={props.refresh}
-        />
-      </Match>
-    </Switch>
   );
 }

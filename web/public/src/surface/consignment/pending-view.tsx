@@ -94,7 +94,8 @@ export function PendingCommand(
   );
 }
 
-function ReenterUrl(props: {
+/** 原样重送前重新输入装备链接；链接只交给这一次重送，不进入恢复记录。 */
+export function ReenterUrl(props: {
   readonly disabled: boolean;
   readonly onRetry: (url: string) => boolean;
 }): JSX.Element {

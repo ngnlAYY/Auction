@@ -110,9 +110,28 @@ export function consignmentLevelLabel(level: EquipmentLevel): string {
   }
 }
 
+/** 卖家名一栏；卡片、公开详情与购买确认共用同一标注。 */
+export function SellerName(props: {
+  readonly listing: Pick<ListingSummary, "seller_name" | "seller_verified">;
+}): JSX.Element {
+  return (
+    <dd>
+      {props.listing.seller_name}
+      {/* 免登录挂单的卖家名是登记人自填，未与站内账户核对。 */}
+      <Show when={!props.listing.seller_verified}>
+        {" · "}
+        {t("consignment-seller-unverified")}
+      </Show>
+    </dd>
+  );
+}
+
 /** 卡片与公开详情共用的挂单事实，仅接受公开投影。 */
 export function ListingFacts(props: {
-  readonly listing: Pick<ListingSummary, "price" | "seller_name" | "world_id" | "mode">;
+  readonly listing: Pick<
+    ListingSummary,
+    "price" | "seller_name" | "seller_verified" | "world_id" | "mode"
+  >;
 }): JSX.Element {
   return (
     <dl class="public-consignment-listing__facts">
@@ -122,7 +141,7 @@ export function ListingFacts(props: {
       </div>
       <div>
         <dt>{t("consignment-seller")}</dt>
-        <dd>{props.listing.seller_name}</dd>
+        <SellerName listing={props.listing} />
       </div>
       <div>
         <dt>{t("consignment-world")}</dt>

@@ -71,6 +71,8 @@ export function PrivateReadError(props: {
 export function PrivateConsignmentPage(props: {
   readonly title: string;
   readonly children: (userId: string, canUse: () => boolean) => JSX.Element;
+  /** 未登录时替代登录提示的公开内容；缺省时只提示登录。 */
+  readonly anonymous?: () => JSX.Element;
 }): JSX.Element {
   const session = useContext(PublicSessionResourceContext);
   const owner = useContext(PublicCommandOwnerContext);
@@ -92,12 +94,7 @@ export function PrivateConsignmentPage(props: {
           <PrivateReadError error={{ status: 0, code: "unknown_error" }} retry={session.restart} />
         </Match>
         <Match when={session()?.ok === true && user() === null}>
-          <div class="public-account-login-prompt" role="status">
-            <p>{t("command-login-required")}</p>
-            <Link class="public-account-login-cta" href={loginHrefForCurrentLocation()}>
-              {t("account-login-cta")}
-            </Link>
-          </div>
+          {props.anonymous?.() ?? <LoginPrompt message={t("command-login-required")} />}
         </Match>
         <Match when={user() !== null}>
           <Show when={user()} keyed>
@@ -110,6 +107,18 @@ export function PrivateConsignmentPage(props: {
         </Match>
       </Switch>
     </section>
+  );
+}
+
+/** 需要账户会话时的登录提示，登录后回到当前页面。 */
+export function LoginPrompt(props: { readonly message: string }): JSX.Element {
+  return (
+    <div class="public-account-login-prompt" role="status">
+      <p>{props.message}</p>
+      <Link class="public-account-login-cta" href={loginHrefForCurrentLocation()}>
+        {t("account-login-cta")}
+      </Link>
+    </div>
   );
 }
 

@@ -143,7 +143,8 @@ export async function requestPrivateConsignment<T>(
   return result;
 }
 
-function decodePrivateResponse<T>(
+/** 不变量 1、6：成功外壳按约定状态解码，错误只在完整外壳里取安全码；免登录登记复用同一口径。 */
+export function decodePrivateResponse<T>(
   response: TransportResponse,
   status: 200 | 202,
   method: Request["method"],

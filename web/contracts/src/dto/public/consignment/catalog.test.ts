@@ -179,6 +179,7 @@ test("公开 DTO 类型精确限定公开字段", () => {
     | "level"
     | "price"
     | "seller_name"
+    | "seller_verified"
     | "updated_at"
     | "expires_at"
     | "purchasable"

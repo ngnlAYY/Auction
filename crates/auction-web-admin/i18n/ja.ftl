@@ -2156,6 +2156,7 @@ admin-error-settlement-return-observation-required = 再回収には、元の Ta
 # 一口价挂单 · 管理
 consignment-admin-title = 委託販売マーケット管理
 consignment-seller-id = 出品者 ID
+consignment-seller-unverified = 出品者の自己申告・未確認（サイトアカウントなし）
 consignment-stored-state = 記録上の状態
 consignment-effective-state = 現在の有効状態
 consignment-collisions = 関連するオークション出品

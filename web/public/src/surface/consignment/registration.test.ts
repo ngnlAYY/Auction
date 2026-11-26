@@ -40,17 +40,22 @@ const NEW = "/consignment/new";
 const SUBMIT = "Submit registration";
 const REPRICE = "Change asking price";
 const WITHDRAW = "Cancel listing";
-test("匿名登记沿用登录后返回原页，不启动本人请求", async () => {
+test("匿名选择寄售时沿用登录后返回原页，不启动本人请求", async () => {
   const transport = fakeFetch(() => response(status(true)));
   const page = await mountPrivate(NEW, null);
   try {
     await settle();
     expect(page.errors).toEqual([]);
+    controlEvent(
+      page.find((node) => node.tag === "select"),
+      "onChange",
+      "consigned",
+    );
     expect(
       page.find((node) => node.attributes.href === "/login?return_to=%2Fconsignment%2Fnew"),
     ).not.toBeNull();
     expect(page.input("password")).toBeNull();
-    expect(transport.requests).toHaveLength(0);
+    expect(transport.requests.map(({ url }) => url.pathname)).toEqual([STATUS_PATH]);
   } finally {
     page.dispose();
     transport.restore();

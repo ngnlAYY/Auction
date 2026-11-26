@@ -342,6 +342,7 @@ const LISTING_SUMMARY_V2_FIELDS = strictStruct({
   level: EquipmentLevelSchema,
   price: ListingPriceSchema,
   seller_name: v.string(),
+  seller_verified: v.boolean(),
   updated_at: ConsignmentTimestampSchema,
   expires_at: ConsignmentTimestampSchema,
   generation: requiredNullable(ListingGenerationSchema),

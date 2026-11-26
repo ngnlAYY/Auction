@@ -30,7 +30,8 @@ export const DELIST_REASON = v.pipe(
 export const AdminListingSchema = v.pipe(
   strictStruct({
     listing: OwnedListingSchema,
-    seller_user_id: ConsignmentUuidSchema,
+    // 免登录非寄售挂单没有站内账户。
+    seller_user_id: requiredNullable(ConsignmentUuidSchema),
     seller_name: v.string(),
     admin_delist_reason: requiredNullable(DELIST_REASON),
     can_delist: v.boolean(),

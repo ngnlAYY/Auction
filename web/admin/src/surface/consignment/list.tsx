@@ -236,7 +236,12 @@ function ListingRow(props: { readonly row: AdminListingV2 }): JSX.Element {
   });
   return (
     <tr>
-      <td data-label={t("consignment-seller")}>{props.row.seller_name}</td>
+      <td data-label={t("consignment-seller")}>
+        {props.row.seller_name}
+        <Show when={props.row.seller_user_id === null}>
+          <div>{t("consignment-seller-unverified")}</div>
+        </Show>
+      </td>
       <td data-label={t("consignment-eid")}>
         <Link href={`/consignment/listings/${listing().listing_id}`}>
           {listing().external_equipment_id}

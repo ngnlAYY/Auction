@@ -334,6 +334,26 @@ test.each([
   }
 });
 
+for (const verified of [false, true]) {
+  test(`购买确认的卖家一栏${verified ? "不标" : "标注"}卖家自填、未验证`, async () => {
+    const listing = detail(LISTING_A, true);
+    const transport = fakeFetch(({ url }) =>
+      url.pathname === STATUS_PATH
+        ? purchasableStatus()
+        : response({ ...listing, summary: { ...listing.summary, seller_verified: verified } }),
+    );
+    const page = await purchasePage();
+    try {
+      await settle();
+      expect(page.text()).toContain("Buy now");
+      expect(page.text().includes("Self-reported by the seller, not verified")).toBe(!verified);
+    } finally {
+      page.dispose();
+      transport.restore();
+    }
+  });
+}
+
 test("确定拒绝 price_changed 结案并允许重新确认，旧命令不再重放", async () => {
   let writes = 0;
   const commands: unknown[] = [];

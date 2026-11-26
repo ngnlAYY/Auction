@@ -43,7 +43,8 @@ export function ListingDetailSections(props: {
           <dt>{t("consignment-seller")}</dt>
           <dd>{record().seller_name}</dd>
           <dt>{t("consignment-seller-id")}</dt>
-          <dd>{record().seller_user_id}</dd>
+          {/* 免登录非寄售挂单没有站内账户，卖家名是登记人自填的游戏角色名。 */}
+          <dd>{record().seller_user_id ?? t("consignment-seller-unverified")}</dd>
           <dt>{t("consignment-world")}</dt>
           <dd>{adminWorldLabel(listing().world_id)}</dd>
           <dt>{t("consignment-eid")}</dt>
