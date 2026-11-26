@@ -102,6 +102,8 @@ export function LiveCatalogActions(props: {
   /** 详情抽屉出价入口的投影。本组件是出价资格判定的唯一 owner：行内按钮与抽屉按钮读取
    * 同一份结果，卸载时失败关闭。 */
   readonly detailBid: CatalogDetailBidSlot;
+  /** 只维护出价资格与抽屉投影、不渲染操作栏：没有目录行的入口（“我的”页的查看抽屉）使用。 */
+  readonly headless?: boolean;
 }): JSX.Element {
   const refreshGeneration = useContext(PublicRefreshGenerationContext);
   const identity = useContext(PublicCommandIdentityContext);
@@ -334,6 +336,9 @@ export function LiveCatalogActions(props: {
     detailSlot.set({ kind: "unavailable" });
   });
   const bidLabel = () => t("catalog-bid-lot", { code: props.lotCode });
+  if (props.headless === true) {
+    return null;
+  }
   return (
     <span class="public-auction-catalog__actions-list">
       {/* 目录行使用「查看 / 出价 / 标记」三个图标：查看入口属于行（任何阶段都有），
