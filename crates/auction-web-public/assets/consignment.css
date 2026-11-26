@@ -204,7 +204,7 @@
 }
 
 /* 登记装备入口：外观同成交历史页的主按钮，停在世界与挂单模式工具栏右端；
-   换行时仍靠右。高度与同行筛选标签一致，触控断点经 --size-control-compact 恢复 44px。 */
+   换行时仍靠右。桌面高度与同行筛选标签一致。 */
 .public-auction-group-toolbar > .public-consignment-register {
   display: inline-flex;
   align-items: center;
@@ -222,11 +222,18 @@
   white-space: nowrap;
 }
 
-/* 手机上工具栏是带标签列的网格：登记入口独占最后一行，整宽并达到触控尺寸，不挤占世界与模式两行。 */
+/* 触控断点与 mobile.css 一致（手机与粗指针平板）：该处把 --size-control-compact 设为 36px，
+   入口改用触控尺寸，与同行的世界、模式按钮同高。 */
+@media screen and (max-width: 48rem), screen and (max-width: 64rem) and (pointer: coarse) {
+  .public-auction-group-toolbar > .public-consignment-register {
+    min-block-size: var(--size-target);
+  }
+}
+
+/* 手机上工具栏是带标签列的网格：登记入口独占最后一行并整宽，不挤占世界与模式两行。 */
 @media screen and (max-width: 48rem) {
   .public-auction-live .public-auction-group-toolbar > .public-consignment-register {
     grid-column: 1 / -1;
-    min-block-size: var(--size-target);
     margin: 0 0 var(--space-2);
   }
 }
