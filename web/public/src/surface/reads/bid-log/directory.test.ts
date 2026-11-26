@@ -89,6 +89,26 @@ async function settleRead() {
   }
 }
 
+test("履约进度页在目录确认为空时不渲染场次下拉框，有场次时渲染", async () => {
+  for (const [auctions, rendered] of [
+    [[], false],
+    [[LATEST], true],
+  ] as const) {
+    const reads = mockReadRequests(auctions, undefined, auctions.length);
+    const page = await mountRoundPage("/fulfillment", false);
+    try {
+      await settleRead();
+      const select = page.find(
+        (element) => element.tag === "select" && element.attributes.name === "auction",
+      );
+      expect(select !== null).toBe(rendered);
+    } finally {
+      page.dispose();
+      reads.dispose();
+    }
+  }
+});
+
 const pages = [
   ["/bidlog", "bid-log", BidLog],
   ["/fulfillment", "fulfillment", Fulfillment],

@@ -219,55 +219,64 @@ export function Fulfillment(): JSX.Element {
         <RoundWorldFilter state={queryStateSignal} routeStillOnPage={routeStillOnPage} />
         <div class="public-fulfillment__heading">
           <div class="public-fulfillment__round">
-            <select
-              id="public-fulfillment-round"
-              class="public-fulfillment__round-select"
-              name="auction"
-              autocomplete="off"
-              aria-label={t("fulfillment-round")}
-              aria-invalid={rounds.invalidAuction() ? "true" : undefined}
-              aria-describedby={rounds.invalidAuction() ? INVALID_READ_AUCTION_ERROR_ID : undefined}
-              value={selectedAuctionId()}
-              disabled={auctionOptions().length === 0}
-              onFocus={rounds.loadOptions}
-              onPointerDown={rounds.loadOptions}
-              onChange={(event) => rounds.choose(event.currentTarget)}
-            >
-              <Show when={selectedAuctionId() === "" && auctionOptions().length > 0}>
-                <option value="" disabled selected>
-                  {t("round-select-placeholder")}
-                </option>
-              </Show>
-              <Show
-                when={worldScope() === "all"}
-                fallback={
-                  <For each={auctionOptions()} keyed={(auction) => auction.id}>
-                    {(auction) => (
-                      <option value={auction().id} selected={selectedAuctionId() === auction().id}>
-                        {t("fulfillment-round-option", { number: auction().sequence })}
-                      </option>
+            {/* 目录确认为空时没有可选场次，下拉框只会是一个空的禁用控件，不渲染；选项按需加载，
+                故以目录的“确认为空”而不是选项数量判断。 */}
+            <Show when={!rounds.empty()}>
+              <select
+                id="public-fulfillment-round"
+                class="public-fulfillment__round-select"
+                name="auction"
+                autocomplete="off"
+                aria-label={t("fulfillment-round")}
+                aria-invalid={rounds.invalidAuction() ? "true" : undefined}
+                aria-describedby={
+                  rounds.invalidAuction() ? INVALID_READ_AUCTION_ERROR_ID : undefined
+                }
+                value={selectedAuctionId()}
+                disabled={auctionOptions().length === 0}
+                onFocus={rounds.loadOptions}
+                onPointerDown={rounds.loadOptions}
+                onChange={(event) => rounds.choose(event.currentTarget)}
+              >
+                <Show when={selectedAuctionId() === "" && auctionOptions().length > 0}>
+                  <option value="" disabled selected>
+                    {t("round-select-placeholder")}
+                  </option>
+                </Show>
+                <Show
+                  when={worldScope() === "all"}
+                  fallback={
+                    <For each={auctionOptions()} keyed={(auction) => auction.id}>
+                      {(auction) => (
+                        <option
+                          value={auction().id}
+                          selected={selectedAuctionId() === auction().id}
+                        >
+                          {t("fulfillment-round-option", { number: auction().sequence })}
+                        </option>
+                      )}
+                    </For>
+                  }
+                >
+                  <For each={auctionGroups()} keyed={(group) => group.world}>
+                    {(group) => (
+                      <optgroup label={worldLabel(group().world)}>
+                        <For each={group().auctions} keyed={(auction) => auction.id}>
+                          {(auction) => (
+                            <option
+                              value={auction().id}
+                              selected={selectedAuctionId() === auction().id}
+                            >
+                              {t("fulfillment-round-option", { number: auction().sequence })}
+                            </option>
+                          )}
+                        </For>
+                      </optgroup>
                     )}
                   </For>
-                }
-              >
-                <For each={auctionGroups()} keyed={(group) => group.world}>
-                  {(group) => (
-                    <optgroup label={worldLabel(group().world)}>
-                      <For each={group().auctions} keyed={(auction) => auction.id}>
-                        {(auction) => (
-                          <option
-                            value={auction().id}
-                            selected={selectedAuctionId() === auction().id}
-                          >
-                            {t("fulfillment-round-option", { number: auction().sequence })}
-                          </option>
-                        )}
-                      </For>
-                    </optgroup>
-                  )}
-                </For>
-              </Show>
-            </select>
+                </Show>
+              </select>
+            </Show>
             <Show when={rounds.optionsFailed()}>
               <button type="button" onClick={() => refreshPublicReads(refreshGeneration)}>
                 {t("data-retry")}

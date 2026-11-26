@@ -165,29 +165,32 @@ pub(crate) fn fulfillment() -> Element {
                         }
                     }
                 }
-                label { r#for: "public-fulfillment-round",
-                    span { {t!("fulfillment-round")} }
-                    select {
-                        id: "public-fulfillment-round",
-                        name: "auction",
-                        autocomplete: "off",
-                        value: selected.clone(),
-                        disabled: auction_options.is_empty(),
-                        onfocus: move |_| directory.load_options(),
-                        onchange: move |event| {
-                            let id = event.value();
-                            if !directory.selectable(&id) || !ReadSelection::Auction(id).select(query_state_signal, pathname) {
-                                let applied = directory.selected().map_or_else(String::new, |round| round.id);
-                                restore_select_value(&event, &applied);
+                // 目录确认为空时没有可选场次，不渲染空的禁用下拉框；选项按需加载，故不以选项数量判断。
+                if !directory.empty() {
+                    label { r#for: "public-fulfillment-round",
+                        span { {t!("fulfillment-round")} }
+                        select {
+                            id: "public-fulfillment-round",
+                            name: "auction",
+                            autocomplete: "off",
+                            value: selected.clone(),
+                            disabled: auction_options.is_empty(),
+                            onfocus: move |_| directory.load_options(),
+                            onchange: move |event| {
+                                let id = event.value();
+                                if !directory.selectable(&id) || !ReadSelection::Auction(id).select(query_state_signal, pathname) {
+                                    let applied = directory.selected().map_or_else(String::new, |round| round.id);
+                                    restore_select_value(&event, &applied);
+                                }
+                            },
+                            option { value: "", disabled: true, selected: selected.is_empty(),
+                                {t!("round-select-placeholder")}
                             }
-                        },
-                        option { value: "", disabled: true, selected: selected.is_empty(),
-                            {t!("round-select-placeholder")}
-                        }
-                        for auction in auction_options.iter() {
-                            option {
-                                value: auction.id.clone(), selected: auction.id == selected,
-                                {t!("fulfillment-round-option", number: auction.sequence)}
+                            for auction in auction_options.iter() {
+                                option {
+                                    value: auction.id.clone(), selected: auction.id == selected,
+                                    {t!("fulfillment-round-option", number: auction.sequence)}
+                                }
                             }
                         }
                     }
