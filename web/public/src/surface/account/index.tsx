@@ -377,6 +377,7 @@ function BidSection(props: BidSectionProps): JSX.Element {
         pageSize={props.pageSize}
         hideWhenSingle={true}
         showSizePicker={false}
+        numberedLayout
         jumpLabel={t("catalog-page-input")}
         onPageChange={props.onPageChange}
         onPageClamp={props.onPageClamp}
@@ -480,6 +481,7 @@ function ProxySection(props: ProxySectionProps): JSX.Element {
         pageSize={props.pageSize}
         hideWhenSingle={true}
         showSizePicker={false}
+        numberedLayout
         jumpLabel={t("catalog-page-input")}
         onPageChange={props.onPageChange}
         onPageClamp={props.onPageClamp}
