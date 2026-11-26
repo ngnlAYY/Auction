@@ -190,30 +190,29 @@ export function Filters(props: {
           focusRequest={categoryFocusRequest}
           onChange={changeCategory}
         />
-      </div>
-      <form
-        class="public-consignment-search"
-        autocomplete="off"
-        novalidate
-        onSubmit={(event) => {
-          event.preventDefault();
-          const q = name.peek();
-          if (hasCredentialFragment(q)) {
-            name.set("");
-            props.onReject("name");
-          } else if (!validSearch(q)) {
-            invalid.set(true);
-            const form = event.currentTarget;
-            onSettled(() => form.querySelector<HTMLElement>(`#${NAME_ID}`)?.focus());
-          } else {
-            invalid.set(false);
-            apply({ q });
-          }
-        }}
-      >
-        <div class="public-history-primary-filters">
-          <label for={NAME_ID}>
-            <span>{t("history-filter-name")}</span>
+        {/* 名称搜索与装备分类同在类型栏一行；说明文字作输入框的无障碍描述与悬停提示。 */}
+        <form
+          class="public-consignment-search"
+          autocomplete="off"
+          novalidate
+          onSubmit={(event) => {
+            event.preventDefault();
+            const q = name.peek();
+            if (hasCredentialFragment(q)) {
+              name.set("");
+              props.onReject("name");
+            } else if (!validSearch(q)) {
+              invalid.set(true);
+              const form = event.currentTarget;
+              onSettled(() => form.querySelector<HTMLElement>(`#${NAME_ID}`)?.focus());
+            } else {
+              invalid.set(false);
+              apply({ q });
+            }
+          }}
+        >
+          <div class="public-history-primary-filters">
+            <label for={NAME_ID}>{t("history-filter-name")}</label>
             <input
               id={NAME_ID}
               name="name"
@@ -221,6 +220,7 @@ export function Filters(props: {
               enterkeyhint="search"
               autocapitalize="none"
               spellcheck="false"
+              title={t("consignment-name-hint")}
               value={name()}
               aria-invalid={nameInvalid() || props.rejected !== null ? "true" : "false"}
               aria-describedby={
@@ -236,22 +236,22 @@ export function Filters(props: {
                 invalid.set(!hasCredentialFragment(name.peek()) && !validSearch(name.peek()))
               }
             />
-          </label>
-          <div class="public-history-filter-toolbar">
-            <button type="submit" class="public-history-filter-actions__apply">
-              {t("history-filter-apply")}
-            </button>
+            <div class="public-history-filter-toolbar">
+              <button type="submit" class="public-history-filter-actions__apply">
+                {t("history-filter-apply")}
+              </button>
+            </div>
           </div>
-        </div>
-        <p id={NAME_HINT_ID} class="public-history-name-hint">
-          {t("consignment-name-hint")}
-        </p>
-        <Show when={nameInvalid() || props.rejected !== null}>
-          <p id={NAME_ERROR_ID} class="public-history-field-error" role="alert">
-            {t("history-filter-error-name-invalid")}
+          <p id={NAME_HINT_ID} class="public-consignment-search__hint">
+            {t("consignment-name-hint")}
           </p>
-        </Show>
-      </form>
+          <Show when={nameInvalid() || props.rejected !== null}>
+            <p id={NAME_ERROR_ID} class="public-history-field-error" role="alert">
+              {t("history-filter-error-name-invalid")}
+            </p>
+          </Show>
+        </form>
+      </div>
     </div>
   );
 }
