@@ -97,8 +97,9 @@
 | `deposit_ttl_days` | `7` | 整数 1–30 天，寄售挂单进入待寄时冻结 |
 | `reservation_ttl_hours` | `24` | 整数 1–168 小时，寄件预约的最长有效期；签发时仍取待寄截止与季末的更早者 |
 | `isekai_preclose_days` | `3` | 整数 1–90 天，isekai 换季前停止新预约与购买并通知的提前本地日历日数；参与冻结季窗的日历版本 |
-| `max_open_per_user` | `20` | 整数 1–100，每位卖家跨世界的有效活动挂单上限 |
+| `max_open_per_user` | `20` | 整数 1–100，每位卖家跨世界的有效活动挂单上限；免登录挂单按自填游戏名（不区分大小写）同样计数，并计入同名本站账户的挂单（账户额度不计入免登录挂单），`registrations_per_hour` 亦同 |
 | `registrations_per_hour` | `10` | 整数 1–100，以数据库时刻计算每位卖家过去一小时的已接受登记数，窗口左开右闭 |
+| `anonymous_resolving_limit` | `50` | 整数 1–1000，全站处于 `resolving` 的免登录非寄售挂单上限，达到后新的免登录登记返回 `429 registration_rate_limited`。只约束 Public 登记准入，不进入寄售配置段摘要，修改不影响已冻结的自动重列决定 |
 | `lookup_timeout_seconds` | `10` | 整数 1–30 秒，一次解析的端到端预算，底层更紧的限制继续生效 |
 | `lookup_max_response_bytes` | `65536` | 整数 4096–262144，解压后响应体的字节上限 |
 | `lookup_min_interval_ms` | `1000` | 整数 250–60000 毫秒，全服务两次解析起始许可之间的最小间隔 |
@@ -158,7 +159,7 @@
 | 区块 | 用途 |
 | --- | --- |
 | `[listener]` | `mode = "tcp"`（`address`，默认 Public 8090、Admin 8091）或 `"unix"`（运行目录、socket 路径、组）；Unix 运行目录须归 root 或运行账号、禁止 group/other 写入、无符号链接 |
-| `[http_security]` | origin allowlist（≤16 个精确 origin）、登录/写请求限流、匿名读限流与并发（仅 Public，IPv6 按 /64）、`cookie_secure`（生产必须 true）、请求超时、`trusted_proxy_cidrs`（≤64）、`trusted_unix_proxy` |
+| `[http_security]` | origin allowlist（≤16 个精确 origin）、登录/写请求限流、匿名读限流与并发（仅 Public，IPv6 按 /64）、免登录非寄售登记每来源每小时的新命令上限 `anonymous_listing_rate_limit`（已入账命令的原样重试不计入；只有 Public 生效，Admin 读取并校验范围但不使用；默认 3，范围 1–1000，IPv6 按 /64，按可信代理解析的来源计数，与写请求限流独立）、`cookie_secure`（生产必须 true）、请求超时、`trusted_proxy_cidrs`（≤64）、`trusted_unix_proxy` |
 | `[session]` | Public `max_public_sessions`（默认 10，满额注销最久未活动会话）；Admin `idle_ttl_seconds`（默认 900，人工活动或通过守卫的写入推进空闲截止）与 `absolute_ttl_seconds`（默认 28800，自登录起算）。GET 只校验会话。Admin 角色文件写 `max_public_sessions` 会被拒绝 |
 | `[tracing]` | OTLP/HTTP 导出（开关、endpoint、批量与超时、队列容量、采样百万分率） |
 | `[realtime]`（Public） | `consumer_key`（每实例唯一）、轮询间隔、每页流数与事件数、每连接缓冲 |
