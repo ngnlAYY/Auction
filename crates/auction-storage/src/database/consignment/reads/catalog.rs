@@ -44,7 +44,7 @@ fn filters(sql: &mut QueryBuilder<Postgres>, query: &PublicListingQuery) {
         sql.push(" AND l.mode = ").push_bind(mode.as_str());
     }
     if let Some(category) = &query.category {
-        sql.push(" AND p.category = ").push_bind(category.as_str().to_owned());
+        sql.push(" AND p.category = ANY(").push_bind(category.as_slice().to_vec()).push(")");
     }
     if let Some(name) = &query.name {
         let name = name.as_str();

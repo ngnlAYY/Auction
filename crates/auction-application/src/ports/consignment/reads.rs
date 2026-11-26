@@ -103,9 +103,12 @@ impl ListingPageWindow {
     }
 }
 
-/// 目录中规范的分类精确筛选。
+/// 一次目录请求最多可选的分类数，等于装备分类闭集（七类）的大小。
+const MAX_LISTING_CATEGORIES: usize = 7;
+
+/// 目录中规范的分类精确筛选，可含多个分类（命中任一即可）。
 #[derive(Clone, PartialEq, Eq)]
-pub struct ListingCategoryFilter(String);
+pub struct ListingCategoryFilter(Vec<String>);
 
 impl fmt::Debug for ListingCategoryFilter {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -115,16 +118,26 @@ impl fmt::Debug for ListingCategoryFilter {
 }
 
 impl ListingCategoryFilter {
-    /// 校验分类最多 128 UTF-8 字节。
-    pub fn new(category: String) -> Result<Self, ConsignmentError> {
-        if !valid_text(&category, 128) || category.contains(['\u{2028}', '\u{2029}']) {
-            return Err(ConsignmentError::InvalidQuery);
+    /// 解析逗号分隔的分类；单个值即旧写法。每项最多 128 UTF-8 字节，去重后保持首次出现
+    /// 的顺序，空项、非法项与超过 `MAX_LISTING_CATEGORIES` 项（去重前计数）一律失败关闭。
+    pub fn new(categories: String) -> Result<Self, ConsignmentError> {
+        let mut items: Vec<String> = Vec::new();
+        for (index, category) in categories.split(',').enumerate() {
+            if index >= MAX_LISTING_CATEGORIES
+                || !valid_text(category, 128)
+                || category.contains(['\u{2028}', '\u{2029}'])
+            {
+                return Err(ConsignmentError::InvalidQuery);
+            }
+            if !items.iter().any(|item| item == category) {
+                items.push(category.to_owned());
+            }
         }
-        Ok(Self(category))
+        Ok(Self(items))
     }
 
-    /// 借用精确匹配的分类。
-    pub fn as_str(&self) -> &str {
+    /// 借用精确匹配的分类列表，至少一项。
+    pub fn as_slice(&self) -> &[String] {
         &self.0
     }
 }
@@ -167,7 +180,7 @@ pub struct PublicListingQuery {
     pub world: Option<ListingWorld>,
     /// 可选的模式筛选。
     pub mode: Option<ListingMode>,
-    /// 可选的精确装备分类。
+    /// 可选的精确装备分类（命中任一）。
     pub category: Option<ListingCategoryFilter>,
     /// 可选的装备名或别名子串。
     pub name: Option<ListingNameQuery>,

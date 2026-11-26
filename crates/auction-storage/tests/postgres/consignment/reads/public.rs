@@ -209,6 +209,13 @@ async fn postgres_public_filters_world_mode_category_and_literal_names() {
         ),
         (
             PublicListingQuery {
+                category: Some(ListingCategoryFilter::new("Armor,Weapon".into()).unwrap()),
+                ..public_query()
+            },
+            vec![a.id, b.id, c.id],
+        ),
+        (
+            PublicListingQuery {
                 category: Some(ListingCategoryFilter::new("armor".into()).unwrap()),
                 ..public_query()
             },
@@ -243,6 +250,10 @@ async fn postgres_public_filters_world_mode_category_and_literal_names() {
             vec![a.id],
         ),
     ];
+    // 非法或超量的分类列表在构造时失败关闭，不会到达 SQL。
+    for invalid in ["Armor,", ",Armor", "Armor,,Weapon", "a,b,c,d,e,f,g,h"] {
+        assert!(ListingCategoryFilter::new(invalid.into()).is_err(), "{invalid}");
+    }
     for (query, expected) in cases {
         let page = fixture.store.list_public(query).await.unwrap();
         assert_eq!(page.total, expected.len() as u64);

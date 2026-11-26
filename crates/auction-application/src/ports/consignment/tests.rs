@@ -414,7 +414,7 @@ fn filters_use_distinct_byte_and_character_budgets() {
     assert_eq!("main".parse::<ListingWorld>(), Ok(ListingWorld::Main));
     assert_eq!("isekai".parse::<ListingWorld>(), Ok(ListingWorld::Isekai));
     assert_eq!("Main".parse::<ListingWorld>(), Err(ConsignmentError::InvalidQuery));
-    assert_eq!(ListingCategoryFilter::new("é".repeat(64)).fixture().as_str().len(), 128);
+    assert_eq!(ListingCategoryFilter::new("é".repeat(64)).fixture().as_slice()[0].len(), 128);
     assert_eq!(ListingCategoryFilter::new("é".repeat(65)), Err(ConsignmentError::InvalidQuery));
     assert_eq!(ListingNameQuery::new("装".repeat(80)).fixture().as_str().chars().count(), 80);
     assert_eq!(ListingNameQuery::new("装".repeat(81)), Err(ConsignmentError::InvalidQuery));

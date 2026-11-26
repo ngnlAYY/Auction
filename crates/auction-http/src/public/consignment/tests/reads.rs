@@ -363,6 +363,9 @@ async fn query_rejects_all_invalid_values_before_a_reader_even_when_disabled() {
             "category=",
             "category=%20Cloth",
             "category=Cloth%0A",
+            "category=Cloth,",
+            "category=Cloth,,Staff",
+            "category=a,b,c,d,e,f,g,h",
             "category=%E2%80%A8x",
             &long_category,
             "q=",
@@ -460,8 +463,13 @@ async fn page_limits_and_literal_name_query_reach_the_correct_port() {
     let [Call::PublicList(query)] = calls.as_slice() else { panic!("目录筛选未到端口") };
     assert_eq!(query.world, Some(ListingWorld::Isekai));
     assert_eq!(query.mode, Some(ListingMode::Consigned));
-    assert_eq!(query.category.as_ref().expect("分类").as_str(), "水".repeat(42) + "ab");
+    assert_eq!(query.category.as_ref().expect("分类").as_slice(), ["水".repeat(42) + "ab"]);
     assert_eq!(query.name.as_ref().expect("原样子串").as_str(), "水".repeat(77) + "A%_");
+
+    send(&app, get(&format!("{LISTINGS}?category=Cloth,Staff,Cloth"))).await.assert(200, "ok");
+    let calls = backend.take_calls();
+    let [Call::PublicList(query)] = calls.as_slice() else { panic!("多分类未到端口") };
+    assert_eq!(query.category.as_ref().expect("分类").as_slice(), ["Cloth", "Staff"]);
 
     let mut req = get(&format!("{OWNED}?world=main&mode=direct&state=expired"));
     login(&mut req, SELLER);
