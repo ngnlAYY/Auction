@@ -45,7 +45,7 @@ export function ConsignmentReadNotice(props: {
   };
   const canRetry = () => props.error.kind !== "disabled" && props.error.kind !== "not-found";
   return (
-    <Switch fallback={<AsyncState kind="empty" title={title()} detail="" />}>
+    <Switch fallback={<ConsignmentEmpty title={title()} />}>
       <Match when={canRetry()}>
         <AsyncState
           kind="error"
@@ -61,6 +61,15 @@ export function ConsignmentReadNotice(props: {
   );
 }
 
+/** 寄售页的空状态；与往期拍卖等页面共用 public-auction-empty 的居中虚线面板。 */
+export function ConsignmentEmpty(props: { readonly title: string }): JSX.Element {
+  return (
+    <div class="public-auction-empty" role="status">
+      <p class="public-auction-empty__title">{props.title}</p>
+    </div>
+  );
+}
+
 /** 未确认开启前只显示能力状态，不渲染公开读取的内容。 */
 export function ConsignmentCapabilityGate(props: {
   readonly capability: ConsignmentCapability | undefined;
@@ -71,7 +80,7 @@ export function ConsignmentCapabilityGate(props: {
     <Switch fallback={<AsyncState kind="loading" title={t("data-loading")} detail="" />}>
       <Match when={consignmentEnabled(props.capability)}>{props.children}</Match>
       <Match when={props.capability?.kind === "disabled"}>
-        <AsyncState kind="empty" title={t("consignment-disabled")} detail="" />
+        <ConsignmentEmpty title={t("consignment-disabled")} />
       </Match>
       <Match when={props.capability?.kind === "failed"}>
         <AsyncState

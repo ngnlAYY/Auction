@@ -17,6 +17,7 @@ import { consignmentWorldLabel } from "./filters";
 import { type ConsignmentIntent, useConsignmentPending } from "./pending";
 import { PendingCommand } from "./pending-view";
 import { consignmentErrorMessage, PrivateConsignmentPage, PrivateReadError } from "./private-page";
+import { ConsignmentEmpty } from "./read-view";
 import { useConsignmentRefresh } from "./refresh";
 
 interface Loaded {
@@ -36,7 +37,7 @@ export function DepositInstructionsPage(props: RoutePageProps): JSX.Element {
         <Show
           when={listingId()}
           keyed
-          fallback={<AsyncState kind="empty" title={t("consignment-not-found")} detail="" />}
+          fallback={<ConsignmentEmpty title={t("consignment-not-found")} />}
         >
           {(id) => <Instructions userId={userId} listingId={id} canUse={canUse} />}
         </Show>

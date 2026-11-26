@@ -20,6 +20,7 @@ import {
   ownedConsignmentHref,
   PrivateConsignmentPage,
 } from "./private-page";
+import { ConsignmentEmpty } from "./read-view";
 import { useConsignmentRefresh } from "./refresh";
 import {
   estimatedQuote,
@@ -246,7 +247,7 @@ function CapabilityNotice(props: {
         <AsyncState kind="loading" title={t("data-loading")} detail="" />
       </Match>
       <Match when={props.capability?.kind === "disabled"}>
-        <AsyncState kind="empty" title={t("consignment-disabled")} detail="" />
+        <ConsignmentEmpty title={t("consignment-disabled")} />
       </Match>
       <Match when={props.capability?.kind === "failed" || props.capability?.kind === "read-only"}>
         <AsyncState

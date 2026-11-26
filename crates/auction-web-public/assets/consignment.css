@@ -20,15 +20,20 @@
   display: none;
 }
 
+/* 筛选条与出价记录、履约进度的工具条同一外观：无外框，控件沿用 --color-border-control 与
+   --size-target，标签为次要文字色。 */
 .public-consignment-filters {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: var(--space-2) var(--space-4);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: var(--space-3);
-  background: var(--color-surface);
+  gap: var(--space-2) var(--space-3);
+}
+
+.public-consignment-filters label,
+.public-consignment-account__filters label,
+.public-consignment-account__form label {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
 }
 
 .public-consignment-filters label {
@@ -37,15 +42,95 @@
   min-width: 0;
 }
 
-.public-consignment-filters input,
-.public-consignment-filters select {
-  min-width: 0;
-  max-width: 100%;
+:is(
+    .public-consignment-filters,
+    .public-consignment-account__filters,
+    .public-consignment-account__form
+  )
+  :is(input:not([type="checkbox"], [type="radio"]), select, button),
+.public-consignment-catalog__actions a {
+  min-inline-size: 0;
+  min-block-size: var(--size-target);
+  max-inline-size: 100%;
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  font: inherit;
+}
+
+:is(
+    .public-consignment-filters,
+    .public-consignment-account__filters,
+    .public-consignment-account__form
+  )
+  :is(button, select),
+.public-consignment-catalog__actions a {
+  cursor: pointer;
+}
+
+.public-consignment-catalog__actions a {
+  display: inline-flex;
+  align-items: center;
+  padding-inline: var(--space-3);
+  text-decoration: none;
+}
+
+:is(
+    .public-consignment-filters,
+    .public-consignment-account__filters,
+    .public-consignment-account__form
+  )
+  input::placeholder {
+  color: var(--color-text-muted);
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  :is(
+      .public-consignment-filters,
+      .public-consignment-account__filters,
+      .public-consignment-account__form
+    )
+    button:hover:not(:disabled),
+  .public-consignment-catalog__actions a:hover {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+}
+
+/* 与页内其他筛选控件同高（桌面紧凑尺寸），窄屏每个字段独占一行。 */
+@media screen and (width > 64rem) {
+  :is(
+      .public-consignment-filters,
+      .public-consignment-account__filters,
+      .public-consignment-account__form
+    )
+    :is(input:not([type="checkbox"], [type="radio"]), select, button),
+  .public-consignment-catalog__actions a {
+    min-block-size: var(--size-control-compact);
+    padding-block: 0;
+    font-size: var(--text-sm);
+  }
+}
+
+@media screen and (max-width: 48rem), screen and (max-width: 64rem) and (pointer: coarse) {
+  .public-consignment-filters label,
+  .public-consignment-filters p {
+    flex-basis: 100%;
+  }
+
+  .public-consignment-filters :is(input, select) {
+    inline-size: 100%;
+  }
 }
 
 .public-consignment-filters p {
   flex-basis: 100%;
   margin: 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
 }
 
 .public-consignment-catalog__grid {

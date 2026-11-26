@@ -45,6 +45,7 @@ import {
   PrivateConsignmentPage,
   PrivateReadError,
 } from "./private-page";
+import { ConsignmentEmpty } from "./read-view";
 
 const STORAGE_KEY = "hv.consignment.relist.pending.";
 const PENDING = strictStruct({
@@ -78,7 +79,7 @@ export function RelistPage(props: RoutePageProps): JSX.Element {
         <Show
           when={listingId()}
           keyed
-          fallback={<AsyncState kind="empty" title={t("consignment-not-found")} detail="" />}
+          fallback={<ConsignmentEmpty title={t("consignment-not-found")} />}
         >
           {(id) => <Relist userId={userId} listingId={id} canUse={canUse} />}
         </Show>

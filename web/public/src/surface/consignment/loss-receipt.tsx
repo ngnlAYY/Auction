@@ -14,6 +14,7 @@ import { fetchLossCase } from "../../api/consignment-loss";
 import { validConsignmentUuid } from "../../api/consignment-private";
 
 import { PrivateConsignmentPage, PrivateReadError } from "./private-page";
+import { ConsignmentEmpty } from "./read-view";
 
 function stateKey(state: LossCase["state"]): string {
   switch (state) {
@@ -38,7 +39,7 @@ export function LossReceiptPage(props: RoutePageProps): JSX.Element {
         <Show
           when={positionId()}
           keyed
-          fallback={<AsyncState kind="empty" title={t("consignment-not-found")} detail="" />}
+          fallback={<ConsignmentEmpty title={t("consignment-not-found")} />}
         >
           {(id) => <LossReceipt userId={userId} positionId={id} canUse={canUse} />}
         </Show>

@@ -83,8 +83,7 @@ export function PrivateConsignmentPage(props: {
     user() === userId && currentSessionConfirmation(session) !== null;
 
   return (
-    <section class="public-account-bids-page public-consignment-account">
-      <h1>{props.title}</h1>
+    <section class="public-account-bids-page public-consignment-account" aria-label={props.title}>
       <Switch>
         <Match when={session() === undefined}>
           <AsyncState kind="loading" title={t("data-loading")} detail="" />
