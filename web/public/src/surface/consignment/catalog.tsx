@@ -9,10 +9,9 @@ import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { Pager } from "@auction/web-shared/ui/components/pager";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { For, Match, Show, Switch, useContext } from "solid-js";
+import { For, Match, Show, Switch } from "solid-js";
 
 import { fetchConsignmentCatalogV2 } from "../../api/consignment-orders";
-import { PublicSessionResourceContext, PublicSessionView } from "..";
 import { PUBLIC_PAGE_SIZES } from "../pagination";
 import { publicOffsetLastPage } from "../pagination/parameters";
 import { consignmentEnabled, useConsignmentCapability } from "./capability";
@@ -58,7 +57,6 @@ function ListingCard(props: { readonly listing: ListingSummaryV2 }): JSX.Element
 /** 寄售公开目录；资源结果只供原请求的筛选快照使用。 */
 export function ConsignmentCatalog(): JSX.Element {
   const capability = useConsignmentCapability();
-  const session = useContext(PublicSessionResourceContext);
   const enabled = createValueMemo(() => consignmentEnabled(capability()));
   const location = useConsignmentCatalogQuery();
   const query = createValueMemo(() => {
@@ -93,15 +91,6 @@ export function ConsignmentCatalog(): JSX.Element {
   return (
     <section class="public-consignment-catalog" aria-label={t("consignment-catalog")}>
       <ConsignmentCapabilityGate capability={capability()} onRetry={() => capability.refresh()}>
-        <nav class="public-consignment-catalog__actions" aria-label={t("consignment-nav")}>
-          <Show when={capability()?.kind === "ready"}>
-            <Link href="/consignment/new">{t("consignment-new")}</Link>
-          </Show>
-          <Show when={PublicSessionView.fromSnapshot(session()).authenticated}>
-            <Link href="/consignment/me">{t("consignment-mine")}</Link>
-            <Link href="/consignment/orders">{t("consignment-orders")}</Link>
-          </Show>
-        </nav>
         <Filters
           query={query()}
           rejected={rejected()}

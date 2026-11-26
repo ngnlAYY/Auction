@@ -3,7 +3,7 @@
 import { expect, test } from "bun:test";
 import { createComponent, createRoot, type Element } from "solid-js";
 import { findElement } from "../catalog/command-scope-fixture.test";
-import { useConsignmentCapability } from "./capability";
+import { consignmentMenuEntries, useConsignmentCapability } from "./capability";
 import { pageResponse, summary } from "./order-fixture.test";
 import {
   controlEvent,
@@ -182,4 +182,21 @@ test.each([
   } finally {
     clock.restore();
   }
+});
+
+test("账号弹出框寄售信息：可登记时三项齐全并指向原路由，只读时没有登记", () => {
+  expect(consignmentMenuEntries({ kind: "ready", status: status(true) })).toEqual([
+    { href: "/consignment/new", labelKey: "consignment-new" },
+    { href: "/consignment/me", labelKey: "consignment-mine" },
+    { href: "/consignment/orders", labelKey: "consignment-orders" },
+  ]);
+  expect(
+    consignmentMenuEntries({ kind: "read-only", status: status(true, false) }).map((e) => e.href),
+  ).toEqual(["/consignment/me", "/consignment/orders"]);
+});
+
+test("账号弹出框寄售信息：关闭、读取失败或能力未知时整个分组为空", () => {
+  expect(consignmentMenuEntries({ kind: "disabled", status: status(false) })).toEqual([]);
+  expect(consignmentMenuEntries({ kind: "failed", error: { kind: "unavailable" } })).toEqual([]);
+  expect(consignmentMenuEntries(undefined)).toEqual([]);
 });

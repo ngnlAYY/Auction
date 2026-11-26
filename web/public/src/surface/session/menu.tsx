@@ -8,9 +8,10 @@ import { createTaskScope } from "@auction/web-shared/reactive/tasks";
 import { Link } from "@auction/web-shared/router";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { Match, Show, Switch, useContext } from "solid-js";
+import { For, Match, Show, Switch, useContext } from "solid-js";
 
 import { logoutPublic } from "../../api/session";
+import { consignmentMenuEntries, useConsignmentCapability } from "../consignment/capability";
 import { PublicSessionResourceContext } from "../index";
 
 /** 账号面板入口按钮与面板的元素 ID；面板关闭时按 ID 把焦点还给入口。 */
@@ -30,6 +31,9 @@ export function SessionMenu(props: { readonly scopedHref: (path: string) => stri
   const logoutBusy = createCell(false);
   const menuOpen = createCell(false);
   const tasks = createTaskScope();
+  // 与导航共用同一次能力读取；只在已登录的面板里使用结果。
+  const consignment = useConsignmentCapability();
+  const consignmentEntries = createValueMemo(() => consignmentMenuEntries(consignment()));
 
   const sessionState = createValueMemo((): SessionMenuState => {
     const snapshot = session();
@@ -131,6 +135,22 @@ export function SessionMenu(props: { readonly scopedHref: (path: string) => stri
                     >
                       {t("nav-my-bids")}
                     </Link>
+                    <Show when={consignmentEntries().length > 0}>
+                      <div class="public-account-session-heading">
+                        {t("session-menu-consignment")}
+                      </div>
+                      <For each={consignmentEntries()} keyed={(entry) => entry.href}>
+                        {(entry) => (
+                          <Link
+                            class="public-account-session-item"
+                            href={entry().href}
+                            onClick={() => menuOpen.set(false)}
+                          >
+                            {t(entry().labelKey)}
+                          </Link>
+                        )}
+                      </For>
+                    </Show>
                     <button
                       class="public-account-session-item"
                       type="button"

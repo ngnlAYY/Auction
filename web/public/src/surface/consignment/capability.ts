@@ -57,6 +57,20 @@ export function useConsignmentCapability(): ConsignmentCapabilityReader {
   return Object.assign(() => owner.resource(), { refresh: () => owner.resource.restart() });
 }
 
+/** 账号弹出框“寄售信息”分组的入口；服务关闭或能力未知时为空，登记入口另需登记能力就绪。 */
+export function consignmentMenuEntries(
+  capability: ConsignmentCapability | undefined,
+): readonly { readonly href: string; readonly labelKey: string }[] {
+  if (!consignmentEnabled(capability)) return [];
+  return [
+    ...(capability?.kind === "ready"
+      ? [{ href: "/consignment/new", labelKey: "consignment-new" }]
+      : []),
+    { href: "/consignment/me", labelKey: "consignment-mine" },
+    { href: "/consignment/orders", labelKey: "consignment-orders" },
+  ];
+}
+
 /** 导航和匿名读取共用开启判断，登记暂不可用时目录依然可读。 */
 export function consignmentEnabled(capability: ConsignmentCapability | undefined): boolean {
   return capability?.kind === "ready" || capability?.kind === "read-only";
