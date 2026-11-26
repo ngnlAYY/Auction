@@ -21,6 +21,7 @@ import { publicOffsetLastPage } from "../pagination/parameters";
 import { CategoryFilter as DesktopCategoryFilter } from "../presentation/desktop";
 import { CategoryFilter as MobileCategoryFilter } from "../presentation/mobile";
 import { normalizeCatalogCategories } from "../query";
+import { historyNameValue } from "../reads/history/filters/validation";
 import { listingModeKey } from "./labels";
 
 const KEYS = ["mode", "type", "name", "consignment_page", "consignment_page_size"];
@@ -49,8 +50,13 @@ function hasCredentialFragment(value: string): boolean {
   return /:\/\/|\/equip[/?]|key=/i.test(value);
 }
 
+/** 规范单行文本、整串不超过 80 个字符，再按成交历史页的口径拆词：1 至 8 个片段、每段不超过 128 字节。 */
 function validSearch(q: string): boolean {
-  return q === "" || (decode(SEARCH, q).ok && !/[\u2028\u2029]/u.test(q) && [...q].length <= 80);
+  if (q === "") return true;
+  if (!decode(SEARCH, q).ok || /[\u2028\u2029]/u.test(q) || [...q].length > 80) return false;
+  const terms = historyNameValue(q);
+  // 只有分隔符时历史页视为“不筛选”，目录与服务端一致按非法拒绝。
+  return terms.ok && terms.value !== null;
 }
 
 function positiveInteger(value: string, fallback: number): number {
@@ -220,7 +226,8 @@ export function Filters(props: {
               enterkeyhint="search"
               autocapitalize="none"
               spellcheck="false"
-              title={t("consignment-name-hint")}
+              placeholder={t("history-filter-name-placeholder")}
+              title={t("history-filter-name-hint")}
               value={name()}
               aria-invalid={nameInvalid() || props.rejected !== null ? "true" : "false"}
               aria-describedby={
@@ -243,7 +250,7 @@ export function Filters(props: {
             </div>
           </div>
           <p id={NAME_HINT_ID} class="public-consignment-search__hint">
-            {t("consignment-name-hint")}
+            {t("history-filter-name-hint")}
           </p>
           <Show when={nameInvalid() || props.rejected !== null}>
             <p id={NAME_ERROR_ID} class="public-history-field-error" role="alert">
