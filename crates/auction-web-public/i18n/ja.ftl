@@ -402,6 +402,7 @@ history-group-buyer = 買い手別
 history-group-seller = 売り手別
 history-results-scope = グループ分けはこのページのみです。並び順と統計は条件に一致するすべての取引に適用されます。
 history-group-count = このページに{ $count }件
+history-group-count-one = このページに{ $count }件
 history-credit-amount = { $amount } C
 history-filter-by-buyer = 買い手で絞り込み：{ $name }
 history-filter-by-seller = 売り手で絞り込み：{ $name }

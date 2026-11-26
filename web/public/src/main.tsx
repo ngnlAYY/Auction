@@ -10,6 +10,7 @@ import "../../../crates/auction-web-shared/assets/favicon.svg?url";
 // Solid 版专属的手机样式，排在共用样式之后；Rust 版不加载。
 import "./styles/mobile-topbar.css";
 import "./styles/round-pages.css";
+import "./styles/history-toolbar.css";
 import "./styles/mobile-catalog-filters.css";
 import "./styles/settings-page.css";
 import "./styles/world-tabs.css";

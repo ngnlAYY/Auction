@@ -64,6 +64,7 @@ export function PriceHistoryTable(props: {
                   {(entry) => (
                     <PriceHistoryGroupPanel
                       label={entry().group.label}
+                      showEquipmentName={props.grouping !== "equipment"}
                       rows={entry().group.rows}
                       onBuyerFilter={props.onBuyerFilter}
                       onSellerFilter={props.onSellerFilter}
@@ -77,6 +78,7 @@ export function PriceHistoryTable(props: {
                   <PriceHistoryRowsTable
                     rows={group().rows}
                     title={t("page-history-title")}
+                    showEquipmentName={true}
                     onBuyerFilter={props.onBuyerFilter}
                     onSellerFilter={props.onSellerFilter}
                   />
@@ -108,12 +110,21 @@ export function PriceHistoryTable(props: {
 /** 每组独立呈现结果框；组头始终保留，折叠只卸载本组表格，不读取其他分页。 */
 function PriceHistoryGroupPanel(props: {
   readonly label: string;
+  /** 按装备名分组时组头已是完整名称，行内只留 lot 号。 */
+  readonly showEquipmentName: boolean;
   readonly rows: readonly PublicPriceHistoryEntryResponse[];
   readonly onBuyerFilter: (buyer: string) => void;
   readonly onSellerFilter: (seller: string) => void;
 }): JSX.Element {
   const expanded = createCell(true);
   const count = createValueMemo(() => props.rows.length);
+  // 平铺子集的译文没有 select 表达式：按 CLDR 整数规则，en 的 one 只对应 1，其余四种语言只有
+  // other，单复数两条消息在这些语言里写法相同。
+  const countLabel = createValueMemo(() =>
+    count() === 1
+      ? t("history-group-count-one", { count: count() })
+      : t("history-group-count", { count: count() }),
+  );
   return (
     <section class="public-history-group-panel" aria-label={props.label}>
       <h2 class="public-history-group-heading">
@@ -125,15 +136,14 @@ function PriceHistoryGroupPanel(props: {
         >
           <span class="public-chevron" aria-hidden="true" />
           <TruncatedText value={props.label} size="wide" focusable={false} portal={true} />
-          <span class="public-history-group-count">
-            {t("history-group-count", { count: count() })}
-          </span>
+          <span class="public-history-group-count">{countLabel()}</span>
         </button>
       </h2>
       <Show when={expanded()}>
         <PriceHistoryRowsTable
           rows={props.rows}
           title={props.label}
+          showEquipmentName={props.showEquipmentName}
           onBuyerFilter={props.onBuyerFilter}
           onSellerFilter={props.onSellerFilter}
         />
@@ -146,6 +156,7 @@ function PriceHistoryGroupPanel(props: {
 function PriceHistoryRowsTable(props: {
   readonly rows: readonly PublicPriceHistoryEntryResponse[];
   readonly title: string;
+  readonly showEquipmentName: boolean;
   readonly onBuyerFilter: (buyer: string) => void;
   readonly onSellerFilter: (seller: string) => void;
 }): JSX.Element {
@@ -178,6 +189,7 @@ function PriceHistoryRowsTable(props: {
             {(row) => (
               <PriceHistoryRow
                 row={row()}
+                showEquipmentName={props.showEquipmentName}
                 onBuyerFilter={props.onBuyerFilter}
                 onSellerFilter={props.onSellerFilter}
               />
@@ -219,6 +231,7 @@ export function PriceHistoryStatsView(props: {
 /** 一条成交记录；名称不是链接，详情统一经操作栏的查看按钮在页内抽屉打开。 */
 export function PriceHistoryRow(props: {
   readonly row: PublicPriceHistoryEntryResponse;
+  readonly showEquipmentName: boolean;
   readonly onBuyerFilter: (buyer: string) => void;
   readonly onSellerFilter: (seller: string) => void;
 }): JSX.Element {
@@ -228,7 +241,9 @@ export function PriceHistoryRow(props: {
   const lotCode = createValueMemo(() =>
     lotCodeFor(props.row.equipment_category, props.row.lot_number),
   );
-  const equipmentLabel = createValueMemo(() => `${lotCode()} · ${props.row.equipment_name}`);
+  const equipmentLabel = createValueMemo(() =>
+    props.showEquipmentName ? `${lotCode()} · ${props.row.equipment_name}` : lotCode(),
+  );
   const level = createValueMemo(() =>
     props.row.equipment_level == null ? t("value-empty") : props.row.equipment_level.toString(),
   );
@@ -242,7 +257,7 @@ export function PriceHistoryRow(props: {
   return (
     <tr>
       <td class="public-history-equipment" data-label={t("history-item")}>
-        {/* 名称外没有链接承接焦点，截断时由文本自身进入 Tab 顺序查看完整名称。 */}
+        {/* 名称外没有链接承接焦点，截断时由文本自身进入 Tab 顺序查看完整名称；title 也是完整文本。 */}
         <TruncatedText value={equipmentLabel()} size="wide" portal={true} />
       </td>
       <td data-label={t("history-category")}>{category()}</td>

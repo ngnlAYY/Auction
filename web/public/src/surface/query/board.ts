@@ -31,7 +31,8 @@ export interface PublicBoardQuery {
   historyMaxPrice: string | null;
   historyBuyer: string | null;
   historySeller: string | null;
-  /** 成交历史独立的全局排序与本页展示方式，不复用目录的 type/status。 */
+  /** 成交历史独立的全局排序与本页展示方式，不复用目录的 type/status。
+   * 展示方式缺省是平铺（`flat`）；Rust 版缺省按装备名分组，Solid 版的分组须写出 `history_group`。 */
   historySort: string;
   historyGroup: string;
   bidLogLot: string | null;
@@ -67,7 +68,7 @@ export function publicBoardQueryDefault(): PublicBoardQuery {
     historyBuyer: null,
     historySeller: null,
     historySort: "closed_desc",
-    historyGroup: "equipment",
+    historyGroup: "flat",
     bidLogLot: null,
     page: 1,
     pageSize: storedPublicPageSize(false),

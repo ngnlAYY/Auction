@@ -403,6 +403,7 @@ history-group-buyer = Buyer
 history-group-seller = Seller
 history-results-scope = Grouping covers this page only; sorting and statistics cover all matching sales.
 history-group-count = { $count } sales on this page
+history-group-count-one = { $count } sale on this page
 history-credit-amount = { $amount } C
 history-filter-by-buyer = Filter by buyer: { $name }
 history-filter-by-seller = Filter by seller: { $name }

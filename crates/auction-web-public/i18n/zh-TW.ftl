@@ -402,6 +402,7 @@ history-group-buyer = 依買家
 history-group-seller = 依賣家
 history-results-scope = 分組僅針對目前頁面；排序和統計涵蓋全部符合條件的成交。
 history-group-count = 本頁 { $count } 筆
+history-group-count-one = 本頁 { $count } 筆
 history-credit-amount = { $amount } C
 history-filter-by-buyer = 篩選買家：{ $name }
 history-filter-by-seller = 篩選賣家：{ $name }

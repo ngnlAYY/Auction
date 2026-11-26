@@ -121,7 +121,8 @@ export function publicQueryPairs(query: PublicBoardQuery): [string, string][] {
   if (query.historySort !== "closed_desc") {
     pairs.push(["history_sort", query.historySort]);
   }
-  if (query.historyGroup !== "equipment") {
+  // 缺省平铺不写出；旧链接显式的 `history_group=equipment` 原样保留，仍按装备名分组。
+  if (query.historyGroup !== "flat") {
     pairs.push(["history_group", query.historyGroup]);
   }
   if (query.page > 1) {

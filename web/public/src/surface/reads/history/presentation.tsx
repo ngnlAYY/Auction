@@ -8,7 +8,10 @@ import { formatCreditAmount } from "@auction/web-shared/ui/format";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 
-/** 展示方式独立于后端查询；切换分组不会重新请求相同的成交页。 */
+const HISTORY_RESULTS_SCOPE_ID = "public-history-results-scope";
+
+/** 展示方式独立于后端查询；切换分组不会重新请求相同的成交页。
+ * 控件排在筛选卡片里；“分组只针对本页”的说明作分组框的无障碍描述与悬停提示，不占可见行。 */
 export function HistoryResultControls(props: {
   readonly sort: string;
   readonly grouping: string;
@@ -39,6 +42,8 @@ export function HistoryResultControls(props: {
           <span>{t("history-group-label")}</span>
           <select
             name="history_group"
+            title={t("history-results-scope")}
+            aria-describedby={HISTORY_RESULTS_SCOPE_ID}
             value={props.grouping}
             onChange={(event) => {
               const select = event.currentTarget;
@@ -52,7 +57,9 @@ export function HistoryResultControls(props: {
           </select>
         </label>
       </div>
-      <p class="public-history-results-scope">{t("history-results-scope")}</p>
+      <p id={HISTORY_RESULTS_SCOPE_ID} class="public-history-results-scope">
+        {t("history-results-scope")}
+      </p>
     </>
   );
 }

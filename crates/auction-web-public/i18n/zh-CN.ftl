@@ -402,6 +402,7 @@ history-group-buyer = 按买家
 history-group-seller = 按卖家
 history-results-scope = 分组仅针对当前页；排序和统计覆盖全部匹配成交。
 history-group-count = 本页 { $count } 笔
+history-group-count-one = 本页 { $count } 笔
 history-credit-amount = { $amount } C
 history-filter-by-buyer = 筛选买家：{ $name }
 history-filter-by-seller = 筛选卖家：{ $name }

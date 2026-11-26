@@ -359,7 +359,7 @@ export function historyResetChangesQuery(
     historyHasRequestCondition(query) ||
     Object.keys(errors).length !== 0 ||
     query.sort !== "closed_desc" ||
-    group !== "equipment" ||
+    group !== "flat" ||
     query.page !== 1
   );
 }
