@@ -40,7 +40,11 @@ import type { GenericSchema } from "valibot";
 
 import { sendRequest } from "./clock";
 import { COMMAND_NOT_SENT, type CommandError, commandNotSent } from "./commands";
-import type { ConsignmentCatalogQuery } from "./consignment-catalog";
+import {
+  type ConsignmentCatalogQuery,
+  categoryAccepts,
+  consignmentCatalogParams,
+} from "./consignment-catalog";
 import { type ConsignmentReadError, readPublicConsignment } from "./consignment-status";
 import { observePublicSessionFailure } from "./session";
 
@@ -103,7 +107,7 @@ function summaryMatches(query: ConsignmentCatalogQuery, listing: ListingSummaryV
   return (
     (query.world === null || listing.world_id === query.world) &&
     (query.mode === null || listing.mode === query.mode) &&
-    (query.category === "" || listing.category === query.category)
+    categoryAccepts(query, listing.category)
   );
 }
 
@@ -112,13 +116,7 @@ export async function fetchConsignmentCatalogV2(
   query: ConsignmentCatalogQuery,
   signal: AbortSignal,
 ): Promise<Result<CatalogPageV2, ConsignmentReadError>> {
-  const params = new URLSearchParams();
-  if (query.world !== null) params.set("world", query.world);
-  if (query.mode !== null) params.set("mode", query.mode);
-  if (query.category !== "") params.set("category", query.category);
-  if (query.q !== "") params.set("q", query.q);
-  params.set("page", String(query.page));
-  params.set("page_size", String(query.pageSize));
+  const params = consignmentCatalogParams(query);
   const response = await readPublicConsignment(
     `${CATALOG_V2}?${params}`,
     ListingSummaryV2PageSchema,

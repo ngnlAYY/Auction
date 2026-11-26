@@ -304,6 +304,37 @@ test("world_switch_choose_does_not_notify_an_unchanged_single_world：全部与�
   }
 });
 
+test("world_switch_choose_on_consignment_catalog_resets_only_its_page：切换世界只改 world 并回到寄售第一页", async () => {
+  const mounted = mountWorldSwitch({
+    initialUrl:
+      "/consignment?world=main&mode=direct&type=sta&name=oak&consignment_page=3&consignment_page_size=50",
+    worlds: {
+      worlds: {
+        main: { enabled: true },
+        isekai: { enabled: true },
+      },
+    },
+  });
+  try {
+    await flushWorlds();
+    mounted.controller.choose("isekai");
+    flush();
+    // 其余寄售筛选与每页条数原样保留，外壳的分页键不被写进地址。
+    expect(Object.fromEntries(new URLSearchParams(mounted.browserSearch()))).toEqual({
+      world: "isekai",
+      mode: "direct",
+      type: "sta",
+      name: "oak",
+      consignment_page_size: "50",
+    });
+    mounted.controller.choose("all");
+    flush();
+    expect(new URLSearchParams(mounted.browserSearch()).has("world")).toBe(false);
+  } finally {
+    mounted.dispose();
+  }
+});
+
 test("forum_correction_failure_can_retry_on_the_same_controller：论坛纠偏失败后同一实例可重试", async () => {
   const auctionId = "67e55044-10b1-426f-9247-bb680e5fe0c8";
   const initialUrl = `/forum?world=isekai&auction=${auctionId}`;

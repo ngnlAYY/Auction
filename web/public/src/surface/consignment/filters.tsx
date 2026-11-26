@@ -1,31 +1,35 @@
-// 寄售目录的专用 URL 查询与筛选表单。
+// 寄售目录的专用 URL 查询与筛选区：外观与交互沿用拍卖页（世界、分类）和成交历史页（名称搜索）。
+//
+// 地址栏键：`world` 归外壳管理（寄售目录与拍卖列表一样是跨世界页面，缺省为全部世界），
+// 本文件只拥有 `mode`、`type`、`name`、`consignment_page`、`consignment_page_size`。
+// `type` 与拍卖页同为分类闭集代码的逗号列表；请求时由 api/consignment-catalog 映射成后端的规范分类名。
 
 import { consignmentTextSchema } from "@auction/contracts/dto/public/consignment/scalar";
 import { MAX_PUBLIC_PAGE_SIZE } from "@auction/contracts/dto/public/pagination";
 import { decode } from "@auction/contracts/wire";
 import { type QueryPair, useQueryState, writeQueryPairs } from "@auction/web-shared/net/query";
 import { createCell } from "@auction/web-shared/reactive/cell";
+import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { createEffect } from "solid-js";
+import { createEffect, For, onSettled, Show } from "solid-js";
 
 import type { ConsignmentCatalogQuery } from "../../api/consignment-catalog";
+import { WorldTabs } from "../board/world";
 import { DEFAULT_PAGE_SIZE } from "../pagination";
 import { publicOffsetLastPage } from "../pagination/parameters";
+import { CategoryFilter as DesktopCategoryFilter } from "../presentation/desktop";
+import { CategoryFilter as MobileCategoryFilter } from "../presentation/mobile";
+import { normalizeCatalogCategories } from "../query";
 import { listingModeKey } from "./labels";
 
-const KEYS = [
-  "consignment_world",
-  "consignment_mode",
-  "consignment_category",
-  "consignment_q",
-  "consignment_page",
-  "consignment_page_size",
-];
+const KEYS = ["mode", "type", "name", "consignment_page", "consignment_page_size"];
+
+/** 寄售页自己管理的筛选与分页；世界由外壳的 `world` 键给出，请求前再并入。 */
+export type ConsignmentFilterQuery = Omit<ConsignmentCatalogQuery, "world">;
 
 /** 独立查询的空筛选和契约分页默认值。 */
-export const DEFAULT_CONSIGNMENT_QUERY: ConsignmentCatalogQuery = {
-  world: null,
+export const DEFAULT_CONSIGNMENT_QUERY: ConsignmentFilterQuery = {
   mode: null,
   category: "",
   q: "",
@@ -33,18 +37,16 @@ export const DEFAULT_CONSIGNMENT_QUERY: ConsignmentCatalogQuery = {
   pageSize: DEFAULT_PAGE_SIZE,
 };
 
-const CATEGORY = consignmentTextSchema(128);
 const SEARCH = consignmentTextSchema(320);
-const TEXT_KEYS = ["consignment_category", "consignment_q"];
-type TextFilter = "category" | "q";
+const NAME_ID = "public-consignment-name";
+const NAME_HINT_ID = "public-consignment-name-hint";
+const NAME_ERROR_ID = "public-consignment-name-error";
+/** 唯一可能带凭证片段的自由文本筛选；分类是闭集代码，不会携带。 */
+type RejectedFilter = "name";
 
 function hasCredentialFragment(value: string): boolean {
   // 不变量 7：沿用下架说明的 ASCII 片段检查，并拦截其他带协议的链接。
   return /:\/\/|\/equip[/?]|key=/i.test(value);
-}
-
-function validCategory(category: string): boolean {
-  return category === "" || decode(CATEGORY, category).ok;
 }
 
 function validSearch(q: string): boolean {
@@ -57,23 +59,21 @@ function positiveInteger(value: string, fallback: number): number {
 }
 
 /** 读取寄售专属查询；重复、非法值和越界偏移失败关闭。 */
-export function parseConsignmentQuery(pairs: readonly QueryPair[]): ConsignmentCatalogQuery | null {
+export function parseConsignmentQuery(pairs: readonly QueryPair[]): ConsignmentFilterQuery | null {
   const relevant = pairs.filter(([key]) => KEYS.includes(key));
   const values = new Map(relevant);
   if (values.size !== relevant.length || relevant.some(([, value]) => value === "")) return null;
 
-  const world = values.get("consignment_world") ?? null;
-  const mode = values.get("consignment_mode") ?? null;
-  const category = values.get("consignment_category") ?? "";
-  const q = values.get("consignment_q") ?? "";
+  const mode = values.get("mode") ?? null;
+  const type = values.get("type");
+  const category = type === undefined ? "" : normalizeCatalogCategories(type);
+  const q = values.get("name") ?? "";
   const page = positiveInteger(values.get("consignment_page") ?? "", 1);
   const pageSize = positiveInteger(values.get("consignment_page_size") ?? "", DEFAULT_PAGE_SIZE);
   if (
-    (world !== null && world !== "main" && world !== "isekai") ||
     (mode !== null && mode !== "direct" && mode !== "consigned") ||
-    hasCredentialFragment(category) ||
+    category === null ||
     hasCredentialFragment(q) ||
-    !validCategory(category) ||
     !validSearch(q) ||
     pageSize < 1 ||
     pageSize > MAX_PUBLIC_PAGE_SIZE ||
@@ -82,16 +82,15 @@ export function parseConsignmentQuery(pairs: readonly QueryPair[]): ConsignmentC
   ) {
     return null;
   }
-  return { world, mode, category, q, page, pageSize };
+  return { mode, category, q, page, pageSize };
 }
 
-function serialize(query: ConsignmentCatalogQuery | TextFilter | null): readonly QueryPair[] {
+function serialize(query: ConsignmentFilterQuery | RejectedFilter | null): readonly QueryPair[] {
   if (query === null || typeof query === "string") return [];
   const pairs: QueryPair[] = [];
-  if (query.world !== null) pairs.push(["consignment_world", query.world]);
-  if (query.mode !== null) pairs.push(["consignment_mode", query.mode]);
-  if (query.category !== "") pairs.push(["consignment_category", query.category]);
-  if (query.q !== "") pairs.push(["consignment_q", query.q]);
+  if (query.mode !== null) pairs.push(["mode", query.mode]);
+  if (query.category !== "") pairs.push(["type", query.category]);
+  if (query.q !== "") pairs.push(["name", query.q]);
   if (query.page !== 1) pairs.push(["consignment_page", String(query.page)]);
   if (query.pageSize !== DEFAULT_PAGE_SIZE) {
     pairs.push(["consignment_page_size", String(query.pageSize)]);
@@ -103,16 +102,18 @@ function serialize(query: ConsignmentCatalogQuery | TextFilter | null): readonly
 export function useConsignmentCatalogQuery() {
   return useQueryState(
     KEYS,
-    (pairs): ConsignmentCatalogQuery | TextFilter | null => {
+    (pairs): ConsignmentFilterQuery | RejectedFilter | null => {
       const query = parseConsignmentQuery(pairs);
       if (query !== null) return query;
-      const textFilters = pairs.filter(([key]) => TEXT_KEYS.includes(key));
-      const rejected = textFilters.find(([, value]) => hasCredentialFragment(value));
-      if (rejected === undefined) return null;
+      const names = pairs.filter(([key]) => key === "name");
+      if (!names.some(([, value]) => hasCredentialFragment(value))) return null;
       // 书签里的凭证已在地址栏。替换当前历史项，同时保留无效状态供用户清除。
-      const safe = textFilters.filter(([, value]) => !hasCredentialFragment(value));
-      writeQueryPairs(TEXT_KEYS, safe, "replace");
-      return rejected[0] === "consignment_category" ? "category" : "q";
+      writeQueryPairs(
+        ["name"],
+        names.filter(([, value]) => !hasCredentialFragment(value)),
+        "replace",
+      );
+      return "name";
     },
     serialize,
   );
@@ -123,116 +124,134 @@ export function consignmentWorldLabel(world: "main" | "isekai"): string {
   return world === "main" ? t("auction-world-main") : t("auction-world-isekai");
 }
 
-/** 以一次表单提交应用筛选并回到第一页。 */
+const MODES = ["direct", "consigned"] as const;
+
+/** 世界、挂单模式、装备分类即点即生效，名称搜索以一次表单提交生效；都回到第一页。 */
 export function Filters(props: {
-  readonly query: ConsignmentCatalogQuery | null;
-  readonly rejected: TextFilter | null;
-  readonly onApply: (query: ConsignmentCatalogQuery) => void;
-  readonly onReject: (field: TextFilter) => void;
+  readonly query: ConsignmentFilterQuery | null;
+  readonly rejected: RejectedFilter | null;
+  readonly onApply: (query: ConsignmentFilterQuery) => void;
+  readonly onReject: (field: RejectedFilter) => void;
 }): JSX.Element {
-  const draft = createCell(DEFAULT_CONSIGNMENT_QUERY);
-  const invalid = createCell<TextFilter | null>(null);
-  const invalidField = () => props.rejected ?? invalid();
-  createEffect(
-    () => props.query,
-    (query) => {
-      draft.set(query ?? DEFAULT_CONSIGNMENT_QUERY);
-      invalid.set(null);
-    },
-  );
+  const applied = (): ConsignmentFilterQuery => props.query ?? DEFAULT_CONSIGNMENT_QUERY;
+  const apply = (patch: Partial<ConsignmentFilterQuery>): void =>
+    props.onApply({ ...applied(), ...patch, page: 1 });
+
+  // 名称草稿只在已应用的名称改变时恢复；切换其他筛选不能打断正在输入的文字。
+  const appliedName = createValueMemo(() => props.query?.q ?? "");
+  const name = createCell(appliedName());
+  const invalid = createCell(false);
+  createEffect(appliedName, (value) => {
+    name.set(value);
+    invalid.set(false);
+  });
+  const nameInvalid = () => invalid() && props.rejected === null;
+  const categoryFocusRequest = createCell(false);
+  const activeCategory = () => (applied().category === "" ? "all" : applied().category);
+  const changeCategory = (category: string): boolean => {
+    apply({ category: category === "all" ? "" : category });
+    return true;
+  };
 
   return (
-    <form
-      class="public-consignment-filters"
-      onSubmit={(event) => {
-        event.preventDefault();
-        const query = { ...draft.peek(), page: 1 };
-        const rejected = hasCredentialFragment(query.category)
-          ? "category"
-          : hasCredentialFragment(query.q)
-            ? "q"
-            : null;
-        if (rejected !== null) {
-          draft.set(DEFAULT_CONSIGNMENT_QUERY);
-          props.onReject(rejected);
-        } else if (!validCategory(query.category)) {
-          invalid.set("category");
-        } else if (!validSearch(query.q)) {
-          invalid.set("q");
-        } else {
-          invalid.set(null);
-          props.onApply(query);
-        }
-      }}
-    >
-      <label>
-        {t("consignment-world")}
-        <select
-          name="world"
-          value={draft().world ?? ""}
-          onChange={(event) => {
-            const value = event.currentTarget.value;
-            draft.update((query) => ({
-              ...query,
-              world: value === "main" || value === "isekai" ? value : null,
-            }));
-          }}
-        >
-          <option value="">{t("filter-all")}</option>
-          <option value="main">{consignmentWorldLabel("main")}</option>
-          <option value="isekai">{consignmentWorldLabel("isekai")}</option>
-        </select>
-      </label>
-      <label>
-        {t("consignment-mode")}
-        <select
-          name="mode"
-          value={draft().mode ?? ""}
-          onChange={(event) => {
-            const value = event.currentTarget.value;
-            draft.update((query) => ({
-              ...query,
-              mode: value === "direct" || value === "consigned" ? value : null,
-            }));
-          }}
-        >
-          <option value="">{t("filter-all")}</option>
-          <option value="direct">{t(listingModeKey("direct"))}</option>
-          <option value="consigned">{t(listingModeKey("consigned"))}</option>
-        </select>
-      </label>
-      {/* 契约只定义来源分类的精确文本，暂没有可枚举的寄售分类闭集。 */}
-      <label>
-        {t("consignment-category")}
-        <input
-          name="category"
-          value={draft().category}
-          onInput={(event) => {
-            const category = event.currentTarget.value;
-            draft.update((query) => ({ ...query, category }));
-          }}
+    <div class="public-auction-live">
+      <div class="public-auction-group-toolbar">
+        <WorldTabs />
+        <nav class="public-auction-filter" aria-label={t("consignment-mode")}>
+          <span class="public-auction-filter__label">{t("consignment-mode")}</span>
+          <button
+            type="button"
+            class="public-auction-filter__tab"
+            aria-pressed={applied().mode === null ? "true" : "false"}
+            aria-current={applied().mode === null ? "true" : "false"}
+            onClick={() => apply({ mode: null })}
+          >
+            {t("filter-all")}
+          </button>
+          <For each={MODES} keyed={false}>
+            {(mode) => (
+              <button
+                type="button"
+                class="public-auction-filter__tab"
+                aria-pressed={applied().mode === mode() ? "true" : "false"}
+                aria-current={applied().mode === mode() ? "true" : "false"}
+                onClick={() => apply({ mode: mode() })}
+              >
+                {t(listingModeKey(mode()))}
+              </button>
+            )}
+          </For>
+        </nav>
+      </div>
+      <div class="public-auction-type-toolbar">
+        <DesktopCategoryFilter active={activeCategory()} onChange={changeCategory} />
+        <MobileCategoryFilter
+          active={activeCategory()}
+          focusRequest={categoryFocusRequest}
+          onChange={changeCategory}
         />
-      </label>
-      <label>
-        {t("consignment-search")}
-        <input
-          name="q"
-          type="search"
-          value={draft().q}
-          onInput={(event) => {
-            const q = event.currentTarget.value;
-            draft.update((query) => ({ ...query, q }));
-          }}
-        />
-      </label>
-      <button type="submit">{t("history-filter-apply")}</button>
-      {invalidField() !== null && (
-        <p role="alert">
-          {invalidField() === "category"
-            ? t("filter-category-invalid")
-            : t("history-filter-error-name-invalid")}
+      </div>
+      <form
+        class="public-consignment-search"
+        autocomplete="off"
+        novalidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          const q = name.peek();
+          if (hasCredentialFragment(q)) {
+            name.set("");
+            props.onReject("name");
+          } else if (!validSearch(q)) {
+            invalid.set(true);
+            const form = event.currentTarget;
+            onSettled(() => form.querySelector<HTMLElement>(`#${NAME_ID}`)?.focus());
+          } else {
+            invalid.set(false);
+            apply({ q });
+          }
+        }}
+      >
+        <div class="public-history-primary-filters">
+          <label for={NAME_ID}>
+            <span>{t("history-filter-name")}</span>
+            <input
+              id={NAME_ID}
+              name="name"
+              type="search"
+              enterkeyhint="search"
+              autocapitalize="none"
+              spellcheck="false"
+              value={name()}
+              aria-invalid={nameInvalid() || props.rejected !== null ? "true" : "false"}
+              aria-describedby={
+                nameInvalid() || props.rejected !== null
+                  ? `${NAME_HINT_ID} ${NAME_ERROR_ID}`
+                  : NAME_HINT_ID
+              }
+              onInput={(event) => {
+                name.set(event.currentTarget.value);
+                invalid.set(false);
+              }}
+              onBlur={() =>
+                invalid.set(!hasCredentialFragment(name.peek()) && !validSearch(name.peek()))
+              }
+            />
+          </label>
+          <div class="public-history-filter-toolbar">
+            <button type="submit" class="public-history-filter-actions__apply">
+              {t("history-filter-apply")}
+            </button>
+          </div>
+        </div>
+        <p id={NAME_HINT_ID} class="public-history-name-hint">
+          {t("consignment-name-hint")}
         </p>
-      )}
-    </form>
+        <Show when={nameInvalid() || props.rejected !== null}>
+          <p id={NAME_ERROR_ID} class="public-history-field-error" role="alert">
+            {t("history-filter-error-name-invalid")}
+          </p>
+        </Show>
+      </form>
+    </div>
   );
 }

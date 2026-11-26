@@ -101,7 +101,8 @@ export function Navigation(props: {
  * 计数来自同一已校验目录。 */
 export function CategoryFilter(props: {
   active: string;
-  counts: readonly [number, number, number, number, number, number, number, number];
+  /** 各分类的数量角标；缺省时不显示（寄售目录没有按分类的统计）。 */
+  counts?: readonly [number, number, number, number, number, number, number, number];
   focusRequest: Cell<boolean>;
   onChange: (category: string) => boolean;
 }): JSX.Element {
@@ -172,19 +173,20 @@ export function CategoryFilter(props: {
   );
   const categoryCount = (category: string): number => {
     const index = EQUIPMENT_CATEGORY_CODES.findIndex(([key]) => key === category);
-    return index < 0 ? 0 : (props.counts[index + 1] ?? 0);
+    return index < 0 ? 0 : (props.counts?.[index + 1] ?? 0);
   };
+  const countSuffix = (count: number): string => (props.counts === undefined ? "" : ` (${count})`);
   const summary = (): string => {
     const keys = open() ? selected() : catalogCategoryKeys(props.active);
     if (keys.length === 0) {
-      return `${t("filter-all")} (${props.counts[0]})`;
+      return `${t("filter-all")}${countSuffix(props.counts?.[0] ?? 0)}`;
     }
     const first = keys[0];
     if (keys.length === 1 && first !== undefined) {
-      return `${catalogCategoryLabel(first)} (${categoryCount(first)})`;
+      return `${catalogCategoryLabel(first)}${countSuffix(categoryCount(first))}`;
     }
     const total = keys.reduce((sum, key) => sum + categoryCount(key), 0);
-    return `${t("filter-category-selected", { count: keys.length })} (${total})`;
+    return `${t("filter-category-selected", { count: keys.length })}${countSuffix(total)}`;
   };
 
   return (
@@ -241,7 +243,9 @@ export function CategoryFilter(props: {
                 }}
               />
               <span>{t("filter-all")}</span>
-              <span class="public-catalog-category-menu__count">{props.counts[0]}</span>
+              <Show when={props.counts}>
+                {(counts) => <span class="public-catalog-category-menu__count">{counts()[0]}</span>}
+              </Show>
             </label>
             <For each={EQUIPMENT_CATEGORY_CODES} keyed={(entry) => entry[0]}>
               {(entry, index) => {
@@ -258,9 +262,13 @@ export function CategoryFilter(props: {
                       }
                     />
                     <span>{catalogCategoryLabel(category())}</span>
-                    <span class="public-catalog-category-menu__count">
-                      {props.counts[index() + 1]}
-                    </span>
+                    <Show when={props.counts}>
+                      {(counts) => (
+                        <span class="public-catalog-category-menu__count">
+                          {counts()[index() + 1]}
+                        </span>
+                      )}
+                    </Show>
                   </label>
                 );
               }}

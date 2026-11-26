@@ -4,7 +4,7 @@
 import { EQUIPMENT_CATEGORY_CODES } from "@auction/contracts/dto/public/catalog/lot";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { For } from "solid-js";
+import { For, Show } from "solid-js";
 
 import { catalogCategoryLabel } from "../catalog/presentation";
 import { catalogCategoryKeys, toggleCatalogCategory } from "../query";
@@ -12,7 +12,8 @@ import { catalogCategoryKeys, toggleCatalogCategory } from "../query";
 /** Solid 版分类标签是多选开关；Rust 版仍为单选。回调收到新的当前值。 */
 export function CategoryFilter(props: {
   active: string;
-  counts: readonly [number, number, number, number, number, number, number, number];
+  /** 各分类的数量角标；缺省时不显示（寄售目录没有按分类的统计）。 */
+  counts?: readonly [number, number, number, number, number, number, number, number];
   onChange: (category: string) => boolean;
 }): JSX.Element {
   return (
@@ -26,7 +27,9 @@ export function CategoryFilter(props: {
         onClick={() => props.onChange("all")}
       >
         {t("filter-all")}
-        <span class="public-auction-filter__count">{props.counts[0]}</span>
+        <Show when={props.counts}>
+          {(counts) => <span class="public-auction-filter__count">{counts()[0]}</span>}
+        </Show>
       </button>
       <For each={EQUIPMENT_CATEGORY_CODES} keyed={(entry) => entry[0]}>
         {(entry, index) => {
@@ -41,7 +44,11 @@ export function CategoryFilter(props: {
               onClick={() => props.onChange(toggleCatalogCategory(props.active, category()))}
             >
               {catalogCategoryLabel(category())}
-              <span class="public-auction-filter__count">{props.counts[index() + 1]}</span>
+              <Show when={props.counts}>
+                {(counts) => (
+                  <span class="public-auction-filter__count">{counts()[index() + 1]}</span>
+                )}
+              </Show>
             </button>
           );
         }}

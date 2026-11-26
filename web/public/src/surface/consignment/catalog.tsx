@@ -14,6 +14,7 @@ import { For, Match, Show, Switch } from "solid-js";
 import { fetchConsignmentCatalogV2 } from "../../api/consignment-orders";
 import { PUBLIC_PAGE_SIZES } from "../pagination";
 import { publicOffsetLastPage } from "../pagination/parameters";
+import { normalizedWorldQuery, usePublicQueryState } from "../query";
 import { consignmentEnabled, useConsignmentCapability } from "./capability";
 import { DEFAULT_CONSIGNMENT_QUERY, Filters, useConsignmentCatalogQuery } from "./filters";
 import { purchaseHref } from "./order-labels";
@@ -59,6 +60,9 @@ export function ConsignmentCatalog(): JSX.Element {
   const capability = useConsignmentCapability();
   const enabled = createValueMemo(() => consignmentEnabled(capability()));
   const location = useConsignmentCatalogQuery();
+  // 世界归外壳的 world 键管理：缺省与非法值都是全部世界，与拍卖列表一致。
+  const shellQuery = usePublicQueryState();
+  const world = createValueMemo(() => normalizedWorldQuery(shellQuery.state().world));
   const query = createValueMemo(() => {
     const selected = location.state();
     return typeof selected === "string" ? null : selected;
@@ -69,7 +73,7 @@ export function ConsignmentCatalog(): JSX.Element {
   };
   const request = createValueMemo(() => {
     const selected = query();
-    return enabled() && selected !== null ? { query: selected } : null;
+    return enabled() && selected !== null ? { query: { ...selected, world: world() } } : null;
   });
   const listings = createTaskResource(request, async (requested, context) =>
     requested === null

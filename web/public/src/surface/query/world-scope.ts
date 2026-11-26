@@ -38,12 +38,14 @@ export function normalizedWorldQuery(world: string | null): NormalizedWorldQuery
   return world === "main" || world === "isekai" ? world : null;
 }
 
-/** 路由名属于哪一类；`null`（未匹配）按 single。multi 只有 AuctionList、History、BidLog、Fulfillment。 */
+/** 路由名属于哪一类；`null`（未匹配）按 single。
+ * multi 只有 AuctionList、History、BidLog、Fulfillment、ConsignmentCatalog。 */
 export function worldScopeFamily(routeName: string | null): WorldScopeFamily {
   return routeName === "AuctionList" ||
     routeName === "History" ||
     routeName === "BidLog" ||
-    routeName === "Fulfillment"
+    routeName === "Fulfillment" ||
+    routeName === "ConsignmentCatalog"
     ? "multi"
     : "single";
 }

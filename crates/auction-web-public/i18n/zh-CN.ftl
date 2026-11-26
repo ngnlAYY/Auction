@@ -676,7 +676,7 @@ consignment-fee = 预计手续费
 consignment-net = 卖家预计到手
 consignment-expires = 有效期至
 consignment-category = 装备分类
-consignment-search = 搜索装备名称
+consignment-name-hint = 按装备名称整体子串匹配（不区分大小写），不支持缩写或拆词。
 consignment-source-time = 装备信息采集时间
 consignment-state-filter = 挂单状态
 
