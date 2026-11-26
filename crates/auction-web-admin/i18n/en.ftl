@@ -2155,7 +2155,7 @@ admin-error-settlement-return-send-unresolved = The original dispatch's send out
 admin-error-settlement-return-observation-required = Taking again needs the latest observation in the original Take session to show the full frozen assets still on the mail and claimable. Reload the case and wait for mailbox maintenance.
 
 # 一口价挂单 · 管理
-consignment-admin-title = Manage fixed-price listings
+consignment-admin-title = Consignment market management
 consignment-seller-id = Seller ID
 consignment-stored-state = Stored status
 consignment-effective-state = Effective status
@@ -2396,7 +2396,7 @@ consignment-resolve-queued = Redispatch queued, new round { $id }.
 consignment-resolve-rechecked = Recheck queued, work { $id }.
 
 # Fixed-price orders and evidence.
-consignment-orders-title = Fixed-price orders
+consignment-orders-title = Consignment orders
 consignment-order-detail-title = Order details
 consignment-order-state = Order status
 consignment-buyer = Buyer

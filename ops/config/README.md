@@ -52,7 +52,7 @@
 | `log_filter` | tracing 过滤器，默认 `info,<服务名>=debug`；语法是逗号分隔的 `级别` 或 `target=级别`（级别为 `trace`/`debug`/`info`/`warn`/`error`/`off`，target 按前缀匹配、最长者生效），不支持按 span 或字段过滤，空值、裸 target 与含空白的写法在 `config check` 与启动时被拒绝；追加 `auction_observability::log_dedup=off` 可重启后关闭重复错误去重 |
 | `[metrics]` | 进程指标开关、转发拒绝与可选附加出口（见下） |
 | `[readiness]` | 审计失败模式、迁移兼容模式与 HTTP 就绪缓存，见[就绪策略](#就绪策略) |
-| `[consignment]` | 一口价挂单开关、登记限制与后台解析预算，见[寄售服务](#寄售服务) |
+| `[consignment]` | 寄售市场开关、登记限制与后台解析预算，见[寄售服务](#寄售服务) |
 | `[web]` | 页面静态挂载根与页面栈回执位置，见[页面静态挂载](#页面静态挂载) |
 | `[backup]`、`[backup.offsite]`、`[backup.scope]` | CLI 专用定时备份（水位另被 `alert report` 与 `deploy` 复用）、异机副本与数据库之外的范围，见[定时备份策略](#定时备份策略) |
 | `[database_roles]` | `owner` 是迁移 owner 账号名（生产严格预检必填），运行账号固定 `auction_runtime` 不可配置；两者相同则拒绝 |
@@ -107,7 +107,7 @@
 | `isekai_refusal_limit` | `3` | 整数 2–100，异世界拒付上限，按触发的合同冻结；提醒次数 1 与 90 天拒付窗口是固定常量，不可配置 |
 | `auto_relist_enabled` | `false` | 严格布尔，只在启动时读取，修改须重启。Worker 处置被退回的寄售件时，与本节有效值的摘要一起冻结进处置决定；为 `false` 或摘要缺失时不自动重列，手动重列不受影响 |
 
-解析尝试次数、退避、24 小时总期限、固定来源和 schema 版本由协议定义。Public 接受登记需要 `secrets.toml` 中的 `equipment_data_key_id` 与 `equipment_data_key`，用于封装装备读取凭证及核对登记重放。Public 与 Worker 使用同一装备数据密钥环，联合预检还会核对 Admin 的装备数据密钥环。Public 缺少装备数据密钥时仍可启动，开启服务后的状态接口报告 `registration_ready=false`，有效的新登记返回 503。登记就绪还要求数据库准入开启、至少一个世界可登记及 Worker 心跳新鲜。隔离验收见[本地一口价挂单预览](../../docs/development.md#本地一口价挂单预览)。
+解析尝试次数、退避、24 小时总期限、固定来源和 schema 版本由协议定义。Public 接受登记需要 `secrets.toml` 中的 `equipment_data_key_id` 与 `equipment_data_key`，用于封装装备读取凭证及核对登记重放。Public 与 Worker 使用同一装备数据密钥环，联合预检还会核对 Admin 的装备数据密钥环。Public 缺少装备数据密钥时仍可启动，开启服务后的状态接口报告 `registration_ready=false`，有效的新登记返回 503。登记就绪还要求数据库准入开启、至少一个世界可登记及 Worker 心跳新鲜。隔离验收见[本地寄售市场预览](../../docs/development.md#本地寄售市场预览)。
 
 ### 页面静态挂载
 

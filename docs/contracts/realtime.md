@@ -30,13 +30,13 @@ Public relay（每 poll_interval_millis，默认 250ms）
 
 `stream_sequence` 在每个流内从 1 连续递增。
 
-一口价挂单的状态变化写入 `consignment_events` 供内部记录。该事件没有公开订阅或 HTTP 回放，也没有新增 WebSocket 或 SSE 入口。页面重读权威状态所用的接口见[一口价挂单](routes.md#一口价挂单)。
+寄售市场的状态变化写入 `consignment_events` 供内部记录。该事件没有公开订阅或 HTTP 回放，也没有新增 WebSocket 或 SSE 入口。页面重读权威状态所用的接口见[寄售市场](routes.md#寄售市场)。
 
-### 一口价订单阶段事件
+### 寄售订单阶段事件
 
-一口价订单（成交与撤回合同）的阶段变化写入 `realtime_events`：流 `consignment_order:<contract_id>`，kind `consignment.order_stage_changed`，版本 1，序号在业务事务内立即取号。事件与它所描述的事实同事务提交、同事务回滚：购买事务（成交、义务图、首轮、挂单转 `sale_pending` 与事件）与 COD 实收认证（`certify_cod`，付款满足、资金分账、funded 投影与事件）各追加一条；其余资金与履约写口接入时调用同一个追加入口，不另造负载。
+寄售订单（成交与撤回合同）的阶段变化写入 `realtime_events`：流 `consignment_order:<contract_id>`，kind `consignment.order_stage_changed`，版本 1，序号在业务事务内立即取号。事件与它所描述的事实同事务提交、同事务回滚：购买事务（成交、义务图、首轮、挂单转 `sale_pending` 与事件）与 COD 实收认证（`certify_cod`，付款满足、资金分账、funded 投影与事件）各追加一条；其余资金与履约写口接入时调用同一个追加入口，不另造负载。
 
-- 负载恰好六个字段：`contract_id`、`order_state`、`delivery_stage`、`payment_stage`、`payout_stage`、`refund_stage`，取值是[订单阶段闭集](routes.md#一口价挂单)的线协议码；不含金额、预约码、装备 key、对方账号与原信正文。
+- 负载恰好六个字段：`contract_id`、`order_state`、`delivery_stage`、`payment_stage`、`payout_stage`、`refund_stage`，取值是[订单阶段闭集](routes.md#寄售市场)的线协议码；不含金额、预约码、装备 key、对方账号与原信正文。
 - 订单态与阶段由领域 `project_order_stages` 在写事务内读取最新事实投影，与 `GET /api/v2/me/consignment/orders` 读到的同源；矛盾或未知的事实一律投影为 `reconcile`。
 - 订单版本 `version` 取该流的头部序号（至少为 1）；事件的 `state_version` 只作排序提示。
 - 这个流没有公开订阅、回放或推送：Public relay 只扫描 `auction:` 前缀的流，注册表（`PublicRealtimeEvent::validate`）也不接受它；它是内部持久通知，页面仍按上文“事件只是变化通知”的约定重读权威接口。

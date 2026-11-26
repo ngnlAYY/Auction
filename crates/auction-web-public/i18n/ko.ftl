@@ -655,7 +655,7 @@ stale-build-refresh = 페이지 새로 고침
 language-switch-failed = 선택한 언어를 불러오지 못했습니다. 현재 언어를 유지합니다.
 
 # 一口价挂单 · 导航与标题
-consignment-nav = 정가 판매
+consignment-nav = 위탁 판매 마켓
 consignment-catalog = 장비 판매 목록
 consignment-new = 장비 등록
 consignment-mine = 내 판매 목록
@@ -705,8 +705,8 @@ consignment-displayed = 게시됨
 consignment-awaiting-deposit = 장비 도착 대기 중
 consignment-expired = 만료됨
 consignment-closed = 종료됨
-consignment-disabled = 정가 판매 서비스가 꺼져 있습니다.
-consignment-unavailable = 정가 판매 서비스를 일시적으로 사용할 수 없습니다.
+consignment-disabled = 위탁 판매 마켓이 꺼져 있습니다.
+consignment-unavailable = 위탁 판매 마켓을 일시적으로 사용할 수 없습니다.
 consignment-not-found = 판매 항목이 없거나 더 이상 게시되지 않습니다.
 
 # 一口价挂单 · 资格原因

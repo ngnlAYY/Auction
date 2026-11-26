@@ -61,13 +61,13 @@ Bot 通过 HentaiVerse 的 MoogleMail 与玩家交互：玩家寄来投稿、注
 
 寄售候选在既有拍卖路由全部无法归属后才进入寄售自己的事务；候选门控、旧批次提交与游标推进顺序见[docs/architecture.md#寄售来信](../architecture.md#寄售来信)。
 
-1. **读取与首次决定**：寄售事务写认证观察、原信键 K、安全派生事实与首决。首决为 `accepted`、`return_decided`、`archived_empty` 或 `quarantined`，每封原信只写一次；已持久接受的重试恢复原决定，不因远端页面变化改判。整封接受、退回与空信的判定以[一口价挂单的业务规则](../business-rules.md#一口价挂单)为准；当前取得与退回能力未签收，维护者提供真实脱敏样本并签收前，需要 Take/Return 的整封在首决时即隔离（`take_unproven`/`return_unproven`），由运营处理，现状见[Worker 装配](../../apps/auction-worker/README.md#一口价挂单)。
+1. **读取与首次决定**：寄售事务写认证观察、原信键 K、安全派生事实与首决。首决为 `accepted`、`return_decided`、`archived_empty` 或 `quarantined`，每封原信只写一次；已持久接受的重试恢复原决定，不因远端页面变化改判。整封接受、退回与空信的判定以[寄售市场的业务规则](../business-rules.md#寄售市场)为准；当前取得与退回能力未签收，维护者提供真实脱敏样本并签收前，需要 Take/Return 的整封在首决时即隔离（`take_unproven`/`return_unproven`），由运营处理，现状见[Worker 装配](../../apps/auction-worker/README.md#寄售市场)。
 2. **隔离与重检**：无法安全证明身份、资产数量、编号、别名、附件或回执形状的邮件进入隔离，保留原观察、责任、重读键与零资产外写。首次隔离同事务追加系统 `recheck_quarantine` 命令与 queued 重检工作；重检只读原信，状态为 `queued`/`leased`/`done`/`cancelled`。解除时转为接受、退回、归档，或交还原 owner；没有强制解除入口。
 3. **交还旧 owner**：退款、货款、流拍或撤拍退回交回原拍卖退件案件，恢复记录的付款或交付退件交回原恢复流程；零资产动作、兼容 `inbound_mail` 补写与两支的判定见[docs/guide/settlement.md#隔离邮件交还原-owner](settlement.md#隔离邮件交还原-owner)。
 4. **外写起写一次与人工核对**：Take/Return 走专用投递，通用投递路径按 `consignment_disposition` 来源排除，不会领取或重发。每个处置工作最多取得一次持久起写许可；领取或退回只有在原信身份、资产与回执逐项匹配时才记为 `take_proven`/`return_proven`。进入远端写入后结果未知时转人工核对，只由原证据会话里的观察或既有系统证明收口，不自动重发，也不接受操作者声明。当前能力未签收（签收条件见第 1 步），需要 Take/Return 的整封在第 1 步即隔离，不会产生处置工作；签收后才进入本步。
-5. **软关闭后的续办**：寄售关闭只停止新登记、签约与首次接受；已经决定的 Take/Return、已领取的工作、隔离重检与存量交接继续。Worker 在关闭但仍有存量时仍运行处置与重检循环，启动条件见[Worker 装配](../../apps/auction-worker/README.md#一口价挂单)。数据库结构见[docs/contracts/database.md#收件代管与处置表迁移-000134](../contracts/database.md#收件代管与处置表迁移-000134)，旧 owner 的结算语义见[docs/guide/settlement.md#隔离邮件交还原-owner](settlement.md#隔离邮件交还原-owner)。
+5. **软关闭后的续办**：寄售关闭只停止新登记、签约与首次接受；已经决定的 Take/Return、已领取的工作、隔离重检与存量交接继续。Worker 在关闭但仍有存量时仍运行处置与重检循环，启动条件见[Worker 装配](../../apps/auction-worker/README.md#寄售市场)。数据库结构见[docs/contracts/database.md#收件代管与处置表迁移-000134](../contracts/database.md#收件代管与处置表迁移-000134)，旧 owner 的结算语义见[docs/guide/settlement.md#隔离邮件交还原-owner](settlement.md#隔离邮件交还原-owner)。
 
-季前撤回通知与季末关闭由同一 Worker 季任务循环驱动；通知规则、冻结界与关闭范围见[一口价挂单的业务规则](../business-rules.md#一口价挂单)。
+季前撤回通知与季末关闭由同一 Worker 季任务循环驱动；通知规则、冻结界与关闭范围见[寄售市场的业务规则](../business-rules.md#寄售市场)。
 
 ## 注册与换绑
 

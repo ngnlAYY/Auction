@@ -13,7 +13,7 @@
 | [crates/auction-domain/src/proxy](src/proxy) | 代理授权快照、追加式转换事实与生命周期 |
 | [crates/auction-domain/src/settlement](src/settlement) | 结算策略、持有时长曲线、`SettlementPlan`、义务闭集、恢复策略、人工 Sent/装备损失准入 |
 | [crates/auction-domain/src/scheduling](src/scheduling) | 排期纯规则：IANA 时区与 DST 归一化、周场次、赛季早鸟窗口 |
-| [crates/auction-domain/src/consignment](src/consignment) | 一口价挂单：装备身份与历史别名匹配、历史资格判定、`ListingMode`/`ListingState`/`ListingPrice`/`ListingVersion`、状态迁移 `transition_listing`、原因闭集 `ListingReason`、计价 `quote_v1` |
+| [crates/auction-domain/src/consignment](src/consignment) | 寄售市场：装备身份与历史别名匹配、历史资格判定、`ListingMode`/`ListingState`/`ListingPrice`/`ListingVersion`、状态迁移 `transition_listing`、原因闭集 `ListingReason`、计价 `quote_v1` |
 | [crates/auction-domain/src/equipment](src/equipment) | 自动清零的 `EquipmentKey`；[crates/auction-domain/src/equipment/taxonomy](src/equipment/taxonomy) 是装备名称与词缀的唯一词典 |
 | [crates/auction-domain/src/identity](src/identity) · [watch](src/watch) · [delivery](src/delivery) | 强类型标识与确定性派生；提醒渠道与连续领先周期；投递处置闭集与复核码 |
 | [crates/auction-domain/src/keys](src/keys) · [errors](src/errors) · [text](src/text) · [stable_name](src/stable_name) | 父密钥用途闭集；`DomainError` 闭集；全仓复用的文本谓词；闭集枚举的稳定持久化名称 |
@@ -32,7 +32,7 @@
 
 **资金与内部履约**：`FundingAccountKey`/`FundingSplit` 描述 Bot 真实现金的用途分配，冻结金额不重算；`InternalSettlementAction` 只在买方或卖方为 Bot 时选择不经邮件外发的执行方式；`equipment_loss_funding` 只接受 record_only 与显式外部买方补偿责任，不把人工责任变成 COD 实收。
 
-**一口价挂单**：`transition_listing` 是挂单状态变化的唯一入口，接收调用方给出的时刻与已核实的事实（强制终止事实、解析观察、卖家或运营命令），输出新状态、版本与原因；终态不可离开，多项强制终止事实并存时按固定顺序取原因，到期按“到达期限即失效”判定。`check_listing_history` 只依据调用方取出的历史证据摘要判定登记人是否有权挂出这件装备，不读数据库。`quote_v1` 以宽整数计算手续费并向下取整，登记时冻结计价版本与费率。规则见[docs/business-rules.md#一口价挂单](../../docs/business-rules.md#一口价挂单)。
+**寄售市场**：`transition_listing` 是挂单状态变化的唯一入口，接收调用方给出的时刻与已核实的事实（强制终止事实、解析观察、卖家或运营命令），输出新状态、版本与原因；终态不可离开，多项强制终止事实并存时按固定顺序取原因，到期按“到达期限即失效”判定。`check_listing_history` 只依据调用方取出的历史证据摘要判定登记人是否有权挂出这件装备，不读数据库。`quote_v1` 以宽整数计算手续费并向下取整，登记时冻结计价版本与费率。规则见[docs/business-rules.md#寄售市场](../../docs/business-rules.md#寄售市场)。
 
 ## 维护约定
 

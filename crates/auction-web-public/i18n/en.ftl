@@ -656,7 +656,7 @@ stale-build-refresh = Refresh page
 language-switch-failed = Failed to load the selected language. The current language is kept.
 
 # 一口价挂单 · 导航与标题
-consignment-nav = Fixed-price listings
+consignment-nav = Consignment market
 consignment-catalog = Equipment listings
 consignment-new = Register equipment
 consignment-mine = My listings
@@ -706,8 +706,8 @@ consignment-displayed = Listed
 consignment-awaiting-deposit = Awaiting equipment delivery
 consignment-expired = Expired
 consignment-closed = Closed
-consignment-disabled = The fixed-price listing service is disabled.
-consignment-unavailable = The fixed-price listing service is temporarily unavailable.
+consignment-disabled = The consignment market is disabled.
+consignment-unavailable = The consignment market is temporarily unavailable.
 consignment-not-found = This listing does not exist or is no longer displayed.
 
 # 一口价挂单 · 资格原因

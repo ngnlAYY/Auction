@@ -2154,7 +2154,7 @@ admin-error-settlement-return-send-unresolved = 原派發的寄送結果仍未�
 admin-error-settlement-return-observation-required = 再次領回需要最近一次原 Take 工作階段觀察證明原凍結資產完整仍在且可領取。請重新整理案件並等待信箱維護複核。
 
 # 一口价挂单 · 管理
-consignment-admin-title = 一口價掛單管理
+consignment-admin-title = 寄售市場管理
 consignment-seller-id = 賣家編號
 consignment-stored-state = 已記錄狀態
 consignment-effective-state = 目前有效狀態
@@ -2395,7 +2395,7 @@ consignment-resolve-queued = 補寄已排隊，新輪 { $id }。
 consignment-resolve-rechecked = 複核已排隊，工作 { $id }。
 
 # 一口價訂單與證據。
-consignment-orders-title = 一口價訂單
+consignment-orders-title = 寄售訂單
 consignment-order-detail-title = 訂單詳情
 consignment-order-state = 訂單狀態
 consignment-buyer = 買家

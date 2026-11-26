@@ -226,7 +226,7 @@ test.each(["查到成功", "查到原拒绝", "503 后继续查"] as const)("刷
     await settle();
     expect(queries).toBe(1);
     if (scenario === "503 后继续查") {
-      expect(page.text()).toContain("service is temporarily unavailable");
+      expect(page.text()).toContain("consignment market is temporarily unavailable");
       expect(page.button(RETRY)).toBeNull();
       controlEvent(page.button("Retry"), "onClick");
       await settle();

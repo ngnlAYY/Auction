@@ -122,9 +122,13 @@ test("不可登记的模式、世界、链接与价格不能绕过提交处理�
 });
 
 test.each([
-  ["关闭", () => response(status(false)), "service is disabled"],
-  ["只读", () => response(status(true, false)), "service is temporarily unavailable"],
-  ["失败", () => failure(503, "consignment_unavailable"), "service is temporarily unavailable"],
+  ["关闭", () => response(status(false)), "consignment market is disabled"],
+  ["只读", () => response(status(true, false)), "consignment market is temporarily unavailable"],
+  [
+    "失败",
+    () => failure(503, "consignment_unavailable"),
+    "consignment market is temporarily unavailable",
+  ],
 ] as const)("能力%s显示原因并且不提交", async (_name, capability, message) => {
   const transport = fakeFetch(capability);
   const page = await mountPrivate(NEW);
@@ -373,7 +377,7 @@ test.each([
   [403, "origin_forbidden", "Auction data is temporarily unavailable"],
   [403, "participant_ineligible", "currently ineligible"],
   [404, "listing_not_found", "does not exist or is no longer displayed"],
-  [404, "consignment_disabled", "service is disabled"],
+  [404, "consignment_disabled", "consignment market is disabled"],
   [409, "already_open", "already have an active registration"],
   [409, "equipment_busy", "outstanding auction obligations"],
   [409, "history_unproven", "insufficient proof"],
@@ -390,7 +394,7 @@ test.each([
   [429, "registration_rate_limited", "hourly registration limit"],
   [429, "listing_limit_reached", "limit for active listings"],
   [429, "rate_limited", "Auction data is temporarily unavailable"],
-  [503, "consignment_unavailable", "service is temporarily unavailable"],
+  [503, "consignment_unavailable", "consignment market is temporarily unavailable"],
   [503, "outcome_unknown", "Checking the result of your last submission"],
   [503, "storage_unavailable", "Auction data is temporarily unavailable"],
 ] as const)("登记响应 %i %s 只显示本地译文", async (http, code, text) => {
