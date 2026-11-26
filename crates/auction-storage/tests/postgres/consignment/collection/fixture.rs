@@ -108,6 +108,7 @@ impl CollectionObserver for Collector {
 
     fn fresh_main_cash<'a>(
         &'a self,
+        _item: &'a PendingCollection,
         _uid: &'a str,
     ) -> ConsignmentFuture<'a, Option<FreshCashObservation>> {
         Box::pin(async move { Ok(Some(cash(BALANCE))) })

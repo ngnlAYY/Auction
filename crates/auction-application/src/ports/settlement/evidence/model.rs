@@ -42,6 +42,11 @@ pub enum InternalEvidencePurpose {
         command_id: Uuid,
         expected_account_version: u64,
     },
+    /// 寄售收款认证：绑定已绑定 Sent 的那次起写尝试，只读现金观察，不授予任何资金写权限。
+    ConsignmentCollection {
+        delivery_id: Uuid,
+        fence: i64,
+    },
 }
 
 impl InternalEvidencePurpose {
@@ -59,6 +64,9 @@ impl InternalEvidencePurpose {
             }
             Self::FundingReconciliation { command_id, .. }
             | Self::FundingRecordOnlyInitialization { command_id, .. } => !command_id.is_nil(),
+            Self::ConsignmentCollection { delivery_id, fence } => {
+                !delivery_id.is_nil() && *fence > 0
+            }
         }
     }
 
@@ -94,6 +102,11 @@ impl InternalEvidencePurpose {
                     &expected_account_version.to_string(),
                 ])
             }
+            Self::ConsignmentCollection { delivery_id, fence } => facts_digest([
+                "consignment_collection",
+                &delivery_id.to_string(),
+                &fence.to_string(),
+            ]),
         }
     }
 }

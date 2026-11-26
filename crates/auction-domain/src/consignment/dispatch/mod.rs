@@ -10,7 +10,7 @@ mod evidence;
 mod round;
 mod start;
 
-pub use attempt::{AttemptKey, FrozenDispatchIdentity, dispatch_attempt_id};
+pub use attempt::{AttemptKey, FrozenDispatchIdentity, collection_attempt_id, dispatch_attempt_id};
 pub use errors::DispatchRuleError;
 pub use evidence::EvidenceCategory;
 pub use round::{
