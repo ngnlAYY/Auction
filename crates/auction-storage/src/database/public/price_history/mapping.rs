@@ -10,6 +10,8 @@ use auction_time::Timestamp;
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::database::like_patterns::contains_patterns;
+
 pub(crate) fn cursor_values(
     request: &PublicPriceHistoryListRequest,
 ) -> (Timestamp, i64, i64, Uuid) {
@@ -39,15 +41,7 @@ pub(crate) fn history_name_patterns(
     if request.name_terms.is_empty() {
         return None;
     }
-    Some(
-        request
-            .name_terms
-            .iter()
-            .map(|term| {
-                format!("%{}%", term.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"))
-            })
-            .collect(),
-    )
+    Some(contains_patterns(&request.name_terms))
 }
 
 pub(crate) fn validate_entries(

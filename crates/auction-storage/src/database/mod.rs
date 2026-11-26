@@ -5,6 +5,7 @@ mod admin;
 mod auction;
 mod consignment;
 mod delivery;
+mod like_patterns;
 mod mail;
 mod maintenance;
 mod operations;
