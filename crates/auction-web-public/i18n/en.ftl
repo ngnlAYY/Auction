@@ -677,7 +677,6 @@ consignment-fee = Estimated fee
 consignment-net = Estimated seller proceeds
 consignment-expires = Expires at
 consignment-category = Equipment category
-consignment-name-hint = Matches equipment whose name contains the whole text as typed (case-insensitive). Abbreviations and split keywords are not supported.
 consignment-source-time = Equipment data collected at
 consignment-state-filter = Listing status
 
