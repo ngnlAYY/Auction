@@ -20,59 +20,65 @@ import {
 import { loadCatalog } from "./render-fixture.test";
 
 test.each([
-  ["关闭", () => response(status(false)), "The consignment market is disabled", 0],
-  ["开启可登记", () => response(status(true)), "Fake Oak Staff", 1],
-  ["开启暂不可登记", () => response(status(true, false)), "Fake Oak Staff", 1],
+  ["关闭", () => response(status(false)), "The consignment market is disabled", 0, false],
+  ["开启可登记", () => response(status(true)), "Fake Oak Staff", 1, true],
+  ["开启暂不可登记", () => response(status(true, false)), "Fake Oak Staff", 1, false],
   [
     "查询失败",
     () => failure(503, "consignment_unavailable"),
     "The consignment market is temporarily unavailable",
     0,
+    false,
   ],
-] as const)("%s时按能力渲染并决定是否读取目录", async (_, statusReply, text, count) => {
-  const { ConsignmentCatalog } = await loadCatalog();
-  const pending = Promise.withResolvers<Response>();
-  let retry = false;
-  const transport = fakeFetch(({ url }) =>
-    url.pathname === STATUS_PATH
-      ? retry
-        ? response(status(true))
-        : pending.promise
-      : pageResponse(url, [summary()]),
-  );
-  const page = await mountConsignment(
-    "/consignment",
-    () => createComponent(ConsignmentCatalog, {}),
-    true,
-  );
-  try {
-    await settle();
-    expect(page.text()).toContain("Loading");
-    expect(transport.requests.map(({ url }) => url.pathname)).toEqual([STATUS_PATH]);
-    pending.resolve(statusReply());
-    await settle();
-    expect(page.text()).toContain(text);
-    expect(transport.requests.filter(({ url }) => url.pathname === LISTINGS_PATH)).toHaveLength(
-      count,
+] as const)(
+  "%s时按能力渲染并决定是否读取目录",
+  async (_, statusReply, text, count, registerShown) => {
+    const { ConsignmentCatalog } = await loadCatalog();
+    const pending = Promise.withResolvers<Response>();
+    let retry = false;
+    const transport = fakeFetch(({ url }) =>
+      url.pathname === STATUS_PATH
+        ? retry
+          ? response(status(true))
+          : pending.promise
+        : pageResponse(url, [summary()]),
     );
-    // 登记、我的挂单与我的订单入口已移入账号弹出框，页面本身不再出现。
-    for (const href of ["/consignment/new", "/consignment/me", "/consignment/orders"]) {
-      expect(page.find((node) => node.attributes.href === href)).toBeNull();
-    }
-    if (text.includes("temporarily unavailable")) {
-      retry = true;
-      controlEvent(
-        page.find((node) => node.tag === "button" && DOMText(node) === "Retry"),
-        "onClick",
-      );
+    const page = await mountConsignment(
+      "/consignment",
+      () => createComponent(ConsignmentCatalog, {}),
+      true,
+    );
+    try {
       await settle();
-      expect(page.text()).toContain("Fake Oak Staff");
+      expect(page.text()).toContain("Loading");
+      expect(transport.requests.map(({ url }) => url.pathname)).toEqual([STATUS_PATH]);
+      pending.resolve(statusReply());
+      await settle();
+      expect(page.text()).toContain(text);
+      expect(transport.requests.filter(({ url }) => url.pathname === LISTINGS_PATH)).toHaveLength(
+        count,
+      );
+      // 登记入口仅在登记就绪时出现在工具栏；我的挂单与我的订单在账号弹出框，页面本身始终没有。
+      const register = page.find((node) => node.attributes.href === "/consignment/new");
+      expect(register !== null).toBe(registerShown);
+      for (const href of ["/consignment/me", "/consignment/orders"]) {
+        expect(page.find((node) => node.attributes.href === href)).toBeNull();
+      }
+      if (text.includes("temporarily unavailable")) {
+        retry = true;
+        controlEvent(
+          page.find((node) => node.tag === "button" && DOMText(node) === "Retry"),
+          "onClick",
+        );
+        await settle();
+        expect(page.text()).toContain("Fake Oak Staff");
+      }
+    } finally {
+      page.dispose();
+      transport.restore();
     }
-  } finally {
-    page.dispose();
-    transport.restore();
-  }
-});
+  },
+);
 
 test("筛选由地址恢复、写回和后退，世界归外壳键，保留拍卖查询与片段", async () => {
   const { ConsignmentCatalog } = await loadCatalog();

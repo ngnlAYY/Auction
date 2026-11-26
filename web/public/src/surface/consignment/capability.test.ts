@@ -184,9 +184,8 @@ test.each([
   }
 });
 
-test("账号弹出框寄售信息：可登记时三项齐全并指向原路由，只读时没有登记", () => {
+test("账号弹出框寄售信息：只有我的挂单与我的订单，登记入口不在其中", () => {
   expect(consignmentMenuEntries({ kind: "ready", status: status(true) })).toEqual([
-    { href: "/consignment/new", labelKey: "consignment-new" },
     { href: "/consignment/me", labelKey: "consignment-mine" },
     { href: "/consignment/orders", labelKey: "consignment-orders" },
   ]);

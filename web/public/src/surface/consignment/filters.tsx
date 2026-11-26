@@ -10,6 +10,7 @@ import { decode } from "@auction/contracts/wire";
 import { type QueryPair, useQueryState, writeQueryPairs } from "@auction/web-shared/net/query";
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
+import { Link } from "@auction/web-shared/router";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
 import { createEffect, For, onSettled, Show } from "solid-js";
@@ -136,6 +137,8 @@ const MODES = ["direct", "consigned"] as const;
 export function Filters(props: {
   readonly query: ConsignmentFilterQuery | null;
   readonly rejected: RejectedFilter | null;
+  /** 寄售能力为登记就绪；仅此时在工具栏右端给出登记入口（不论是否登录，登记页自行处理身份）。 */
+  readonly registrationReady: boolean;
   readonly onApply: (query: ConsignmentFilterQuery) => void;
   readonly onReject: (field: RejectedFilter) => void;
 }): JSX.Element {
@@ -188,6 +191,11 @@ export function Filters(props: {
             )}
           </For>
         </nav>
+        <Show when={props.registrationReady}>
+          <Link class="public-consignment-register" href="/consignment/new">
+            {t("consignment-new")}
+          </Link>
+        </Show>
       </div>
       <div class="public-auction-type-toolbar">
         <DesktopCategoryFilter active={activeCategory()} onChange={changeCategory} />
