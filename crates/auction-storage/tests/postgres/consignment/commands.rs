@@ -44,6 +44,7 @@ async fn postgres_rejects_audit_failure_scenario() {
 }
 
 scenario!(postgres_constraint_mapping, "constraint_mapping");
+scenario!(postgres_anonymous_registration, "anonymous_registration");
 scenario!(postgres_error_detail_absent, "error_detail_absent");
 scenario!(postgres_commit_unknown_sqlstate, "commit_unknown_sqlstate");
 scenario!(postgres_commit_unknown_recovers_by_replay, "commit_unknown_recovers_by_replay");

@@ -101,24 +101,43 @@ pub(super) async fn register(
     seller: Uuid,
     eid: &str,
 ) -> Result<StoredReceipt, WriteError> {
-    let identity = ListingLockIdentity { seller_user_id: seller, equipment: equipment(eid) };
+    let identity = ListingLockIdentity {
+        seller_user_id: seller,
+        seller_game_name: None,
+        equipment: equipment(eid),
+    };
+    register_as(store, command_id, listing_id, &identity, ListingMode::Direct).await
+}
+
+/// 以任意卖家身份（账户或匿名自填名）和模式走登记写入者，不经过资格与额度判定。
+pub(super) async fn register_as(
+    store: &DatabaseStore,
+    command_id: Uuid,
+    listing_id: Uuid,
+    identity: &ListingLockIdentity,
+    mode: ListingMode,
+) -> Result<StoredReceipt, WriteError> {
     with_command_transaction(
         store,
         LockKeys {
             command_id,
-            sellers: &[seller],
+            sellers: &[identity.seller_user_id],
             equipment: std::slice::from_ref(&identity.equipment),
         },
-        &identity,
+        identity,
         move |operation_identity, tx| {
             Box::pin(async move {
                 let compute_mac =
                     |_, _: &auction_application::consignment::WrappedRegistrationReplayKey| {
                         Ok(registration_proof(KEY, 1).mac)
                     };
+                let actor = match operation_identity.seller_game_name.as_deref() {
+                    Some(name) => Actor::Anonymous(name),
+                    None => Actor::PublicUser(operation_identity.seller_user_id),
+                };
                 match tx
                     .arbitrate(
-                        Actor::PublicUser(seller),
+                        actor,
                         ListingOperation::Register,
                         Target::New,
                         RequestProof::Registration(&compute_mac),
@@ -136,7 +155,7 @@ pub(super) async fn register(
                                     service_epoch: 1,
                                 },
                                 ListingSnapshot {
-                                    mode: ListingMode::Direct,
+                                    mode,
                                     state: ListingState::Resolving,
                                     price: price(101),
                                     state_version: ListingVersion::FIRST,

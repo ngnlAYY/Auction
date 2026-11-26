@@ -27,6 +27,8 @@ pub(crate) enum Actor<'a> {
     Browser(&'a [u8; 32]),
     /// 已验证的受限权利人（J5）；引用是 `right_id`。
     RightHolder(Uuid),
+    /// 未登录登记人（000138）；引用是原样自填游戏名，只能登记非寄售。
+    Anonymous(&'a str),
 }
 
 impl Actor<'_> {
@@ -39,6 +41,7 @@ impl Actor<'_> {
             // 账本 `actor_kind` 的 CHECK 由第 7 期 7M-2 追加这两种；之前数据库约束拒绝，失败关闭。
             Self::Browser(_) => "browser",
             Self::RightHolder(_) => "right_holder",
+            Self::Anonymous(_) => "anonymous",
         }
     }
 
@@ -49,13 +52,30 @@ impl Actor<'_> {
             Self::Worker | Self::System => "consignment".into(),
             Self::Browser(binding_digest) => lower_hex(binding_digest),
             Self::RightHolder(right_id) => right_id.to_string(),
+            Self::Anonymous(seller_game_name) => seller_game_name.to_owned(),
         }
     }
 
     pub(super) const fn audit_source(self) -> &'static str {
         match self {
-            Self::PublicUser(_) => "public",
+            Self::PublicUser(_) | Self::Anonymous(_) => "public",
             _ => self.kind(),
+        }
+    }
+
+    /// 审计 `actor_type` 闭集没有匿名种类；匿名登记人按 Public 来源的公开用户记账。
+    pub(super) const fn audit_kind(self) -> &'static str {
+        match self {
+            Self::Anonymous(_) => "public_user",
+            _ => self.kind(),
+        }
+    }
+
+    /// 匿名审计引用带固定前缀，不会与账户 UUID 混淆。
+    pub(super) fn audit_reference(self) -> String {
+        match self {
+            Self::Anonymous(seller_game_name) => format!("anonymous:{seller_game_name}"),
+            _ => self.reference(),
         }
     }
 }

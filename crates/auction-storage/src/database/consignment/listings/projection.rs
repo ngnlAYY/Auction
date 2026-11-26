@@ -17,26 +17,63 @@ use uuid::Uuid;
 use crate::database::DatabaseStore;
 use crate::database::consignment::commands::errors::{WriteError, invalid_projection};
 
+/// 匿名卖家锁键的 UUIDv5 命名空间；派生值的版本位是 5，不会等于本站账户的 UUIDv4。
+const ANONYMOUS_SELLER_LOCK_NAMESPACE: Uuid =
+    Uuid::from_u128(0x6f1c_2b7e_94d3_4a51_8c0e_5d2f_a937_1b46);
+
 /// 只由不可变字段组成的锁键。读取结果没有授权、资格或状态含义。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ListingLockIdentity {
-    /// 固定卖家的本站 UUID。
+    /// 卖家会话锁键：账户挂单是本站 UUID，匿名挂单是 [`anonymous_seller_lock_key`]。
     pub(crate) seller_user_id: Uuid,
+    /// 匿名挂单的原样自填游戏名；账户挂单为空。
+    pub(crate) seller_game_name: Option<String>,
     /// 固定的规范世界与 EID。
     pub(crate) equipment: ListingEquipmentIdentity,
 }
 
 impl ListingLockIdentity {
-    fn from_row(row: &PgRow) -> Result<Self, WriteError> {
-        Ok(Self {
-            seller_user_id: row.try_get("seller_user_id")?,
-            equipment: ListingEquipmentIdentity::new(
-                row.try_get("world_id")?,
-                row.try_get("external_equipment_id")?,
-            )
-            .map_err(invalid_projection)?,
-        })
+    /// 匿名挂单的锁键与身份。
+    pub(crate) fn anonymous(seller_game_name: &str, equipment: ListingEquipmentIdentity) -> Self {
+        Self {
+            seller_user_id: anonymous_seller_lock_key(seller_game_name),
+            seller_game_name: Some(seller_game_name.to_owned()),
+            equipment,
+        }
     }
+
+    /// 账户挂单的卖家 ID；匿名挂单没有账户。
+    pub(crate) fn account_id(&self) -> Option<Uuid> {
+        self.seller_game_name.is_none().then_some(self.seller_user_id)
+    }
+
+    fn from_row(row: &PgRow) -> Result<Self, WriteError> {
+        let equipment = ListingEquipmentIdentity::new(
+            row.try_get("world_id")?,
+            row.try_get("external_equipment_id")?,
+        )
+        .map_err(invalid_projection)?;
+        // 不变量 6：数据库约束保证二者恰有一个；读到其他组合视为投影损坏。
+        match (
+            row.try_get::<Option<Uuid>, _>("seller_user_id")?,
+            row.try_get::<Option<String>, _>("seller_game_name")?,
+        ) {
+            (Some(seller_user_id), None) => {
+                Ok(Self { seller_user_id, seller_game_name: None, equipment })
+            }
+            (None, Some(name)) => Ok(Self::anonymous(&name, equipment)),
+            _ => Err(WriteError::invariant("consignment_listing_seller")),
+        }
+    }
+}
+
+/// 同名匿名登记的卖家会话锁键，按 Rust `to_lowercase` 折叠大小写。
+///
+/// 它与 SQL `lower` 在少数 Unicode 字符（如希腊词尾 Σ）上可能不同，只会让本应共用的锁
+/// 分成两把，影响锁粒度而不影响正确性：同件重复、按名额度与唯一性仍由装备锁、Serializable
+/// 冲突重试与数据库 `lower` 唯一索引裁定。
+pub(crate) fn anonymous_seller_lock_key(seller_game_name: &str) -> Uuid {
+    Uuid::new_v5(&ANONYMOUS_SELLER_LOCK_NAMESPACE, seller_game_name.to_lowercase().as_bytes())
 }
 
 /// 锁内读取的挂单，领域迁移所需数据在 `snapshot`。
@@ -126,7 +163,7 @@ pub(crate) async fn pre_read_listing_identity(
     let row = timeout(
         Duration::from_secs(5),
         sqlx::query(
-            "SELECT seller_user_id, world_id, external_equipment_id
+            "SELECT seller_user_id, seller_game_name, world_id, external_equipment_id
              FROM public.consignment_listings WHERE id = $1",
         )
         .bind(listing_id)
@@ -143,7 +180,7 @@ pub(crate) async fn lock_listings(
     listing_ids: &[Uuid],
 ) -> Result<Vec<LockedListing>, WriteError> {
     let rows = sqlx::query(
-        "SELECT id, seller_user_id, world_id, external_equipment_id, mode, state,
+        "SELECT id, seller_user_id, seller_game_name, world_id, external_equipment_id, mode, state,
                 state_version, price, current_snapshot_id, fee_bps, service_epoch,
                 blacklist_count_at_register, updated_at, expires_at, reason_code
          FROM public.consignment_listings WHERE id = ANY($1) ORDER BY id FOR UPDATE",
@@ -173,17 +210,21 @@ pub(in crate::database::consignment) async fn insert(
     now: Timestamp,
 ) -> Result<(), WriteError> {
     // 不变量 2、3、10：持卖家锁从同一快照冻结拉黑事实集合与计数，命令和事件同提交。
+    // 匿名挂单冻结同名账户（lower 等值，至多一个）的拉黑历史；没有同名账户时基线为空。
     sqlx::query(
         "INSERT INTO public.consignment_listings
-            (id, seller_user_id, world_id, external_equipment_id, mode, state, price,
-             pricing_version, fee_bps, state_version, service_epoch, blacklist_count_at_register,
-             blacklist_baseline_ids, created_at, updated_at, expires_at)
-         SELECT $1, $2, $3, $4, $5, $6, $7, 1, $8, $9, $10, count(*),
+            (id, seller_user_id, seller_game_name, world_id, external_equipment_id, mode, state,
+             price, pricing_version, fee_bps, state_version, service_epoch,
+             blacklist_count_at_register, blacklist_baseline_ids, created_at, updated_at,
+             expires_at)
+         SELECT $1, $2, $13, $3, $4, $5, $6, $7, 1, $8, $9, $10, count(*),
                 coalesce(array_agg(h.id ORDER BY h.id), '{}'::uuid[]), $11, $11, $12
-         FROM public.user_blacklist_history AS h WHERE h.user_id = $2",
+         FROM public.user_blacklist_history AS h
+         WHERE h.user_id = COALESCE($2, (SELECT u.id FROM public.users AS u
+                                         WHERE lower(u.username) = lower($13)))",
     )
     .bind(new.listing_id)
-    .bind(new.identity.seller_user_id)
+    .bind(new.identity.account_id())
     .bind(new.identity.equipment.world_id())
     .bind(new.identity.equipment.external_equipment_id())
     .bind(snapshot.mode.as_str())
@@ -194,6 +235,7 @@ pub(in crate::database::consignment) async fn insert(
     .bind(new.service_epoch)
     .bind(now)
     .bind(snapshot.expires_at)
+    .bind(new.identity.seller_game_name.as_deref())
     .execute(connection)
     .await?;
     Ok(())

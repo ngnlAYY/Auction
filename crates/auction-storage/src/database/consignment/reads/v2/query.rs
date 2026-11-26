@@ -57,6 +57,21 @@ fn listing_query(as_of: Timestamp, page_rows: bool, admin: bool) -> QueryBuilder
     sql
 }
 
+/// 本人视图另含自填名与账户名 lower 等值的匿名挂单（s 即该同名账户），供本人查看与撤回；
+/// Admin 的卖家筛选保持按账户 ID。
+fn owner_filter(sql: &mut QueryBuilder<Postgres>, seller: Option<UserId>, admin: bool) {
+    match seller {
+        Some(seller) if !admin => {
+            sql.push(" AND (l.seller_user_id = ")
+                .push_bind(seller.as_uuid())
+                .push(" OR (l.seller_user_id IS NULL AND s.id = ")
+                .push_bind(seller.as_uuid())
+                .push("))");
+        }
+        _ => seller_filter(sql, seller),
+    }
+}
+
 /// 行查询与 `count(*)` 共用同一组筛选；`state` 取有效态，与 v1 的筛选口径一致。
 pub(super) fn list_query(
     as_of: Timestamp,
@@ -67,7 +82,7 @@ pub(super) fn list_query(
 ) -> QueryBuilder<Postgres> {
     let mut sql = listing_query(as_of, page_rows, admin);
     sql.push(" WHERE true");
-    seller_filter(&mut sql, seller);
+    owner_filter(&mut sql, seller, admin);
     if let Some(world) = query.world {
         sql.push(" AND l.world_id = ").push_bind(world.as_str());
     }
@@ -94,7 +109,7 @@ pub(super) fn detail_query(
 ) -> QueryBuilder<Postgres> {
     let mut sql = listing_query(as_of, true, admin);
     sql.push(" WHERE true");
-    seller_filter(&mut sql, seller);
+    owner_filter(&mut sql, seller, admin);
     sql.push(" AND l.id = ").push_bind(listing_id);
     sql
 }

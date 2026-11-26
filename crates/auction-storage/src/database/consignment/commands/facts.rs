@@ -81,7 +81,7 @@ impl CommandWriter<'_, '_> {
     ) -> Result<(), WriteError> {
         self.require_locks(new.identity, true)?;
         if self.operation != ListingOperation::Register
-            || !matches!(self.actor, Actor::PublicUser(seller) if seller == new.identity.seller_user_id)
+            || !registration_actor_matches(self.actor, new.identity)
             || projection.reason.is_some()
         {
             return Err(WriteError::invariant("consignment_registration_writer"));
@@ -510,8 +510,8 @@ pub(super) async fn audit(
     )
     .bind(Uuid::new_v4())
     .bind(audit.now)
-    .bind(audit.actor.kind())
-    .bind(audit.actor.reference())
+    .bind(audit.actor.audit_kind())
+    .bind(audit.actor.audit_reference())
     .bind(audit.action)
     .bind(if audit.listing_id.is_some() { "consignment_listing" } else { "consignment_command" })
     .bind(audit.listing_id.unwrap_or(audit.command_id).to_string())
@@ -523,4 +523,13 @@ pub(super) async fn audit(
     .await
     .record_audit_failure()?;
     Ok(())
+}
+
+/// 登记写入者必须是挂单记录的卖家：账户挂单比较账户 ID，匿名挂单逐字节比较自填名。
+fn registration_actor_matches(actor: Actor<'_>, identity: &ListingLockIdentity) -> bool {
+    match (actor, identity.seller_game_name.as_deref()) {
+        (Actor::PublicUser(seller), None) => seller == identity.seller_user_id,
+        (Actor::Anonymous(name), Some(listed)) => name == listed,
+        _ => false,
+    }
 }

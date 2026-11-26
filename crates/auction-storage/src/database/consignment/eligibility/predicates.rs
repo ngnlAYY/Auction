@@ -51,10 +51,12 @@ macro_rules! listing_sql {
     (seller_eligible) => {
         concat!("(", listing_sql!(seller_active), " AND NOT ", listing_sql!(active_blacklist), ")")
     };
-    // 当前卖家资格与登记时冻结的拉黑历史共同决定旧单资格。
+    // 当前卖家资格与登记时冻结的拉黑历史共同决定旧单资格。匿名挂单（000138）只看同名账户
+    // 的拉黑事实；没有同名账户时 s 为空，当前拉黑为假、计数为零。
     (listing_seller_eligible) => {
         concat!(
-            "(", listing_sql!(seller_eligible),
+            "(CASE WHEN l.seller_user_id IS NULL THEN NOT ", listing_sql!(active_blacklist),
+            " ELSE ", listing_sql!(seller_eligible), " END",
             " AND ", listing_sql!(blacklist_count), " = l.blacklist_count_at_register)"
         )
     };
@@ -74,9 +76,15 @@ macro_rules! listing_sql {
     (stored_published) => {
         "l.state IN ('displayed', 'awaiting_deposit')"
     };
-    // 为带别名 l 的挂单补齐卖家 s 与准入单例 c。
+    // 为带别名 l 的挂单补齐卖家 s 与准入单例 c。账户挂单的 s 由外键保证存在；匿名挂单的 s
+    // 是自填名 lower 等值的本站账户（lower 唯一索引保证至多一个），可以为空。
     (eligibility_joins) => {
-        " JOIN public.users s ON s.id = l.seller_user_id
+        " LEFT JOIN LATERAL (
+              SELECT u.id, u.status, u.username FROM public.users u WHERE u.id = l.seller_user_id
+              UNION ALL
+              SELECT u.id, u.status, u.username FROM public.users u
+              WHERE l.seller_user_id IS NULL AND lower(u.username) = lower(l.seller_game_name)
+          ) s ON true
           LEFT JOIN public.consignment_lookup_control c ON c.id = 1 "
     };
     // 返回活动挂单最高优先级的强制原因码，持久终态及有效活动均为 NULL。
@@ -94,6 +102,15 @@ macro_rules! listing_sql {
                        WHEN 'displayed' THEN 'display_expired'
                        WHEN 'awaiting_deposit' THEN 'deposit_expired' END
               END)"
+        )
+    };
+    // 匿名按名额度的计数对象：自填名 lower 等值的匿名挂单，加上 username lower 等值的本站账户
+    // 的账户挂单（lower 唯一索引保证至多一个账户；没有同名账户时子查询为 NULL，只数匿名挂单）。
+    (anonymous_name_quota, $name:literal) => {
+        concat!(
+            "((l.seller_user_id IS NULL AND lower(l.seller_game_name) = lower(", $name, "))
+              OR l.seller_user_id = (SELECT u.id FROM public.users u
+                                     WHERE lower(u.username) = lower(", $name, ")))"
         )
     };
     // 跨世界活动额度与同件有效占用共用的谓词。

@@ -5,12 +5,12 @@ use auction_application::consignment::{
     OperationsHoldReceipt, ReceiptDisposition, ReleaseOperationsHoldCommand,
     SetOperationsHoldCommand, WithdrawDepositCommand, WithdrawDepositReceipt, WithdrawDisposition,
 };
-use auction_domain::CommandId;
 use auction_domain::consignment::deposit::{
     WithdrawalIntentOutcome, decide_withdrawal_intent, operations_hold_reason,
     release_operations_hold_reason,
 };
 use auction_domain::consignment::{HeldOffMarketReason, ListingState};
+use auction_domain::{CommandId, UserId};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -27,6 +27,7 @@ use crate::database::consignment::commands::DepositWriter;
 use crate::database::consignment::commands::errors::WriteError;
 use crate::database::consignment::commands::ledger::StoredReceipt;
 use crate::database::consignment::eligibility::claims::cancel_active_reservations;
+use crate::database::consignment::listings::projection::ListingLockIdentity;
 use crate::database::consignment::recovery::withdrawal::{
     DirectWithdrawal, direct_withdrawal, position_in_custody,
 };
@@ -81,6 +82,25 @@ pub(super) enum WithdrawalChildren {
     Direct,
 }
 
+/// 撤回人必须是挂单卖家；匿名挂单（000138）只认自填名与账户名 lower 等值的本站账户，
+/// 数据库关闭事件门以同一口径复核（不变量 2、6）。
+async fn withdrawer_owns(
+    connection: &mut sqlx::PgConnection,
+    identity: &ListingLockIdentity,
+    withdrawer: UserId,
+) -> Result<bool, WriteError> {
+    let Some(name) = identity.seller_game_name.as_deref() else {
+        return Ok(identity.seller_user_id == withdrawer.as_uuid());
+    };
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM public.users WHERE id = $1 AND lower(username) = lower($2))",
+    )
+    .bind(withdrawer.as_uuid())
+    .bind(name)
+    .fetch_one(connection)
+    .await?)
+}
+
 pub(super) async fn withdrawal_stage(
     repository: &DepositRepository,
     command: &WithdrawDepositCommand,
@@ -90,7 +110,7 @@ pub(super) async fn withdrawal_stage(
     let Some(current) = lock_listing(writer.connection(), command.listing_id).await? else {
         return reject(writer, DepositBusinessRejection::ListingNotActive, now).await;
     };
-    if current.identity.seller_user_id != command.seller_user_id.as_uuid() {
+    if !withdrawer_owns(writer.connection(), &current.identity, command.seller_user_id).await? {
         return reject(writer, DepositBusinessRejection::ListingNotActive, now).await;
     }
     if current.snapshot.state_version != command.expected_version {

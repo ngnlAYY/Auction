@@ -1,12 +1,13 @@
 //! 登记仲裁、准入、额度顺序及凭证原子性。
 
+use auction_application::consignment::RegistrationSeller;
 use auction_application::consignment::{
     ConsignmentError, ListingBusinessRejection as Rejection, ListingCommandOutcome,
     ListingCommandRejection, ListingCommandStore, StoredListingDecision,
     UnrecordedListingRejection,
 };
 use auction_domain::EquipmentKey;
-use auction_domain::consignment::{FeeBps, ListingMode};
+use auction_domain::consignment::{FeeBps, ListingMode, ListingSellerName};
 use uuid::Uuid;
 
 use super::fixture::{
@@ -298,6 +299,50 @@ async fn postgres_register_priority_and_effective_cross_world_limits() {
     assert_eq!(
         attempt(new_id(), SELLER, &g, 1).await.unwrap().into_result(),
         Err(Rejection::EquipmentBusy.into())
+    );
+}
+
+#[tokio::test]
+async fn postgres_anonymous_name_quota_includes_same_name_account_one_way() {
+    // 不变量 2、6：匿名按名额度计入同名本站账户的挂单，账户额度不计入同名匿名挂单。
+    let f = Fixture::new().await;
+    f.registered(new_id(), &gear("main", "431"), SELLER, ListingMode::Direct).await;
+    // SELLER 的 username 是 FakeWriteSeller；大小写不同仍是同一角色名。
+    let name = ListingSellerName::new("fakewriteseller").unwrap();
+    let anonymous_gear = gear("isekai", "431");
+    let anonymous = |hourly, open| {
+        let mut cmd =
+            register(new_id(), new_id(), &anonymous_gear, &f.key, SELLER, ListingMode::Direct);
+        cmd.input.seller = RegistrationSeller::GameName(&name);
+        cmd.policy.registrations_per_hour = hourly;
+        cmd.policy.max_open_per_user = open;
+        f.store.register(cmd, Some(&f.crypto), Some(&f.crypto))
+    };
+
+    // 正例：同名账户已占满每小时或活动额度时，免登录登记同名被拒。
+    assert_eq!(
+        anonymous(1, 2).await.unwrap().into_result(),
+        Err(Rejection::RegistrationRateLimited.into())
+    );
+    assert_eq!(
+        anonymous(2, 1).await.unwrap().into_result(),
+        Err(Rejection::ListingLimitReached.into())
+    );
+
+    // 反例：未达上限时受理；随后账户在同一额度下仍可登记，匿名挂单不占账户额度。
+    assert!(anonymous(2, 2).await.unwrap().into_result().is_ok());
+    let account_gear = gear("main", "432");
+    let mut account =
+        register(new_id(), new_id(), &account_gear, &f.key, SELLER, ListingMode::Direct);
+    account.policy.registrations_per_hour = 2;
+    account.policy.max_open_per_user = 2;
+    assert!(
+        f.store
+            .register(account, Some(&f.crypto), Some(&f.crypto))
+            .await
+            .unwrap()
+            .into_result()
+            .is_ok()
     );
 }
 

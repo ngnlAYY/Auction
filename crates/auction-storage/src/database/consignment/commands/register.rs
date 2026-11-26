@@ -8,9 +8,10 @@ use auction_application::consignment::{
 };
 use auction_domain::UserId;
 use auction_domain::consignment::{
-    FeeBps, ForcedTerminationFacts, ListingTransition, ListingTrigger, check_listing_history,
-    transition_listing,
+    FeeBps, ForcedTerminationFacts, ListingEquipmentIdentity, ListingError, ListingTransition,
+    ListingTrigger, check_anonymous_listing_history, check_listing_history, transition_listing,
 };
+use sqlx::PgConnection;
 
 use super::credentials::{insert_secret, registration_proof};
 use super::errors::{WriteError, invalid_projection};
@@ -21,11 +22,15 @@ use super::session::{CommandTransaction, LockKeys, with_command_transaction};
 use super::target::{now, result};
 use super::termination::retire_occupants;
 use crate::database::DatabaseStore;
-use crate::database::consignment::eligibility::accounts::lock_seller_eligibility;
+use crate::database::consignment::eligibility::accounts::{
+    lock_same_name_account, lock_seller_eligibility,
+};
 use crate::database::consignment::eligibility::history::read_listing_history;
 use crate::database::consignment::eligibility::lots::insert_registration_baselines;
 use crate::database::consignment::eligibility::occupancy::{
-    effective_activity_count, hourly_registration_count, lock_equipment_occupants,
+    EquipmentOccupant, anonymous_activity_count, anonymous_hourly_registration_count,
+    anonymous_resolving_count, effective_activity_count, hourly_registration_count,
+    lock_equipment_occupants,
 };
 use crate::database::consignment::listings::projection::{ListingLockIdentity, NewListing};
 use crate::database::consignment::lookup::control::{lock_control, read_admission};
@@ -36,29 +41,33 @@ struct Registration<'a> {
     sealer: Option<&'a dyn EquipmentKeySealerPort>,
     crypto: Option<&'a dyn RegistrationReplayCrypto>,
     identity: ListingLockIdentity,
-    seller_user_id: UserId,
 }
 
 /// 先全局比较原登记，再核当前准入。不变量 1、2、3、5、6、7、10。
+/// 匿名登记以自填名派生的锁键串行同名登记；同名同件唯一与只许非寄售由数据库约束兜底。
 pub(super) async fn register(
     store: &DatabaseStore,
     command: RegisterListingCommand<'_>,
     sealer: Option<&dyn EquipmentKeySealerPort>,
     crypto: Option<&dyn RegistrationReplayCrypto>,
 ) -> Result<ListingCommandOutcome<ListingRegistered>, ConsignmentError> {
-    let RegistrationSeller::Account(seller_user_id) = command.input.seller else {
-        return Err(ConsignmentError::Unavailable);
+    let equipment = command.input.identity.clone();
+    let identity = match command.input.seller {
+        RegistrationSeller::Account(seller_user_id) => ListingLockIdentity {
+            seller_user_id: seller_user_id.as_uuid(),
+            seller_game_name: None,
+            equipment,
+        },
+        RegistrationSeller::GameName(name) => {
+            ListingLockIdentity::anonymous(name.as_str(), equipment)
+        }
     };
     let keys = LockKeys {
         command_id: command.command_id.as_uuid(),
-        sellers: &[seller_user_id.as_uuid()],
+        sellers: &[identity.seller_user_id],
         equipment: std::slice::from_ref(command.input.identity),
     };
-    let identity = ListingLockIdentity {
-        seller_user_id: seller_user_id.as_uuid(),
-        equipment: command.input.identity.clone(),
-    };
-    let input = Registration { command, sealer, crypto, identity, seller_user_id };
+    let input = Registration { command, sealer, crypto, identity };
     result(
         with_command_transaction(store, keys, &input, |input, tx| Box::pin(execute(input, tx)))
             .await,
@@ -78,9 +87,14 @@ async fn execute(
             &command.input,
         )
     };
+    let anonymous_name = input.identity.seller_game_name.as_deref();
+    let actor = match anonymous_name {
+        Some(name) => Actor::Anonymous(name),
+        None => Actor::PublicUser(input.identity.seller_user_id),
+    };
     let mut writer = match tx
         .arbitrate(
-            Actor::PublicUser(input.seller_user_id.as_uuid()),
+            actor,
             ListingOperation::Register,
             Target::New,
             RequestProof::Registration(&compute_mac),
@@ -99,23 +113,15 @@ async fn execute(
         return Err(ConsignmentError::Unavailable.into());
     };
 
-    let seller = lock_seller_eligibility(writer.connection(), input.seller_user_id).await?;
-    let mut rejection = None;
-    let mut baseline_count = 0;
-    if seller.as_ref().is_some_and(|seller| seller.active && !seller.active_blacklist) {
-        let history = read_listing_history(writer.connection(), command.input.identity).await?;
-        baseline_count = history.lot_ids.len();
-        if let Err(error) =
-            check_listing_history(command.input.identity, input.seller_user_id, &history.aliases)
-        {
-            let ConsignmentError::Business(reason) = error.into() else {
-                return Err(WriteError::invariant("consignment_registration_history"));
-            };
-            rejection = Some(reason);
+    let (mut rejection, baseline_count) = match anonymous_name {
+        None => {
+            let seller = UserId::from_uuid(input.identity.seller_user_id);
+            account_admission(writer.connection(), command.input.identity, seller).await?
         }
-    } else {
-        rejection = Some(ListingBusinessRejection::ParticipantIneligible);
-    }
+        Some(name) => {
+            anonymous_admission(writer.connection(), command.input.identity, name).await?
+        }
+    };
     // 先锁同件挂单，再取单例及锁内墙钟；同一快照内重读其有效占用，覆盖等待期间的到期。
     if rejection.is_none() {
         let as_of = now(writer.connection()).await?;
@@ -142,21 +148,21 @@ async fn execute(
         let occupants =
             lock_equipment_occupants(writer.connection(), command.input.identity, now).await?;
         collisions = retire_occupants(&mut writer, &occupants, None, now).await?;
-        rejection = if occupants
-            .iter()
-            .any(|row| row.forced_reason.is_none() && row.seller_user_id == input.seller_user_id)
-        {
+        let quota = seller_quota(writer.connection(), &input.identity, now).await?;
+        rejection = if already_open(writer.connection(), &input.identity, &occupants).await? {
             Some(ListingBusinessRejection::AlreadyOpen)
         } else if occupants.iter().any(|row| row.forced_reason.is_none() && row.published) {
             Some(ListingBusinessRejection::EquipmentBusy)
-        } else if hourly_registration_count(writer.connection(), input.seller_user_id, now).await?
-            >= i64::from(command.policy.registrations_per_hour)
-        {
+        } else if quota.hourly >= i64::from(command.policy.registrations_per_hour) {
             Some(ListingBusinessRejection::RegistrationRateLimited)
-        } else if effective_activity_count(writer.connection(), input.seller_user_id, now).await?
-            >= i64::from(command.policy.max_open_per_user)
-        {
+        } else if quota.active >= i64::from(command.policy.max_open_per_user) {
             Some(ListingBusinessRejection::ListingLimitReached)
+        } else if quota
+            .anonymous_resolving
+            .is_some_and(|count| count >= i64::from(command.policy.anonymous_resolving_limit))
+        {
+            // 全站匿名解析总量是共享额度，按登记限流拒绝。
+            Some(ListingBusinessRejection::RegistrationRateLimited)
         } else if fee != command.input.expected_fee_bps {
             Some(ListingBusinessRejection::FeeChanged)
         } else if !world_available(&mut writer, command).await? {
@@ -226,6 +232,95 @@ async fn execute(
         )
         .await?;
     Ok(ListingCommandOutcome::Accepted(ListingRegistered::new(command.listing_id, listing.price)?))
+}
+
+/// 账户登记：当前账户有效且未被拉黑，再核装备历史。返回拒绝与历史 lot 基线数。
+async fn account_admission(
+    conn: &mut PgConnection,
+    identity: &ListingEquipmentIdentity,
+    seller: UserId,
+) -> Result<(Option<ListingBusinessRejection>, usize), WriteError> {
+    let eligible = lock_seller_eligibility(conn, seller)
+        .await?
+        .is_some_and(|seller| seller.active && !seller.active_blacklist);
+    if !eligible {
+        return Ok((Some(ListingBusinessRejection::ParticipantIneligible), 0));
+    }
+    let history = read_listing_history(conn, identity).await?;
+    let rejection = history_rejection(check_listing_history(identity, seller, &history.aliases))?;
+    Ok((rejection, history.lot_ids.len()))
+}
+
+/// 匿名登记（000138）：同名账户被拉黑即拒绝，没有同名账户不受拉黑约束；
+/// 历史门要求最近一次证明的持有人就是自填名（以同名账户为证明主体）。
+async fn anonymous_admission(
+    conn: &mut PgConnection,
+    identity: &ListingEquipmentIdentity,
+    seller_game_name: &str,
+) -> Result<(Option<ListingBusinessRejection>, usize), WriteError> {
+    let same_name = lock_same_name_account(conn, seller_game_name).await?;
+    if same_name.as_ref().is_some_and(|(_, seller)| seller.active_blacklist) {
+        return Ok((Some(ListingBusinessRejection::ParticipantIneligible), 0));
+    }
+    let account = same_name.map(|(user_id, _)| user_id);
+    let history = read_listing_history(conn, identity).await?;
+    let rejection =
+        history_rejection(check_anonymous_listing_history(identity, account, &history.aliases))?;
+    Ok((rejection, history.lot_ids.len()))
+}
+
+fn history_rejection(
+    checked: Result<(), ListingError>,
+) -> Result<Option<ListingBusinessRejection>, WriteError> {
+    let Err(error) = checked else {
+        return Ok(None);
+    };
+    let ConsignmentError::Business(reason) = error.into() else {
+        return Err(WriteError::invariant("consignment_registration_history"));
+    };
+    Ok(Some(reason))
+}
+
+/// 本卖家在同件装备上已有有效活动挂单：账户比较 ID，匿名按自填名 lower 等值比较。
+async fn already_open(
+    conn: &mut PgConnection,
+    identity: &ListingLockIdentity,
+    occupants: &[EquipmentOccupant],
+) -> Result<bool, WriteError> {
+    let mut active = occupants.iter().filter(|row| row.forced_reason.is_none());
+    let Some(name) = identity.seller_game_name.as_deref() else {
+        let seller = UserId::from_uuid(identity.seller_user_id);
+        return Ok(active.any(|row| row.seller_user_id == Some(seller)));
+    };
+    let key: String = sqlx::query_scalar("SELECT lower($1)").bind(name).fetch_one(conn).await?;
+    Ok(active.any(|row| row.seller_game_key.as_deref() == Some(key.as_str())))
+}
+
+/// 卖家在锁内的滚动登记数与有效活动数；匿名登记另带全站匿名解析数。
+struct SellerQuota {
+    hourly: i64,
+    active: i64,
+    anonymous_resolving: Option<i64>,
+}
+
+async fn seller_quota(
+    conn: &mut PgConnection,
+    identity: &ListingLockIdentity,
+    now: auction_time::Timestamp,
+) -> Result<SellerQuota, WriteError> {
+    let Some(name) = identity.seller_game_name.as_deref() else {
+        let seller = UserId::from_uuid(identity.seller_user_id);
+        return Ok(SellerQuota {
+            hourly: hourly_registration_count(conn, seller, now).await?,
+            active: effective_activity_count(conn, seller, now).await?,
+            anonymous_resolving: None,
+        });
+    };
+    Ok(SellerQuota {
+        hourly: anonymous_hourly_registration_count(conn, name, now).await?,
+        active: anonymous_activity_count(conn, name, now).await?,
+        anonymous_resolving: Some(anonymous_resolving_count(conn, now).await?),
+    })
 }
 
 async fn world_available(

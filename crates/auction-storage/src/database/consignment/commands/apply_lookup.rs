@@ -8,7 +8,7 @@ use auction_application::consignment::{
 };
 use auction_domain::consignment::{
     ListingChange, ListingError, ListingReason, ListingSnapshot, ListingState, ListingTransition,
-    ListingTrigger, check_listing_history, transition_listing,
+    ListingTrigger, check_anonymous_listing_history, check_listing_history, transition_listing,
 };
 use auction_domain::{LotId, UserId};
 use auction_time::Timestamp;
@@ -25,7 +25,9 @@ use super::snapshot;
 use super::target::{existing, lock_seller, lock_target, now};
 use super::termination::{forced_facts, retire_occupants, stage_closure};
 use crate::database::DatabaseStore;
-use crate::database::consignment::eligibility::accounts::{OwnerMatch, match_current_owner};
+use crate::database::consignment::eligibility::accounts::{
+    OwnerMatch, lock_same_name_account, match_current_owner, same_game_name,
+};
 use crate::database::consignment::eligibility::history::read_listing_history;
 use crate::database::consignment::eligibility::lots::unassociated_collision_lots;
 use crate::database::consignment::eligibility::occupancy::{
@@ -312,7 +314,8 @@ async fn closure_evidence(
         ListingReason::SellerIneligible => {
             return Ok(sqlx::query_scalar(
                 "SELECT h.id FROM public.user_blacklist_history h
-                 JOIN public.consignment_listings l ON l.seller_user_id = h.user_id
+                 JOIN public.consignment_listings l ON h.user_id = COALESCE(l.seller_user_id,
+                     (SELECT u.id FROM public.users u WHERE lower(u.username) = lower(l.seller_game_name)))
                  WHERE l.id = $1 AND NOT (h.id = ANY(l.blacklist_baseline_ids))
                  ORDER BY h.id LIMIT 1",
             )
@@ -353,12 +356,27 @@ async fn publication_rejection(
     if !snapshot.details().label().tradeable {
         return Ok(Some(ListingReason::NotTradeable));
     }
-    let seller = UserId::from_uuid(current.identity.seller_user_id);
-    if match_current_owner(conn, seller, snapshot.owner_name()).await? != OwnerMatch::Seller {
-        return Ok(Some(ListingReason::OwnerMismatch));
-    }
-    let history = read_listing_history(conn, snapshot.identity()).await?;
-    match check_listing_history(snapshot.identity(), seller, &history.aliases) {
+    // 匿名挂单（000138）：当前持有人与自填名 lower 等值，历史门以同名账户为证明主体。
+    let checked = match current.identity.seller_game_name.as_deref() {
+        None => {
+            let seller = UserId::from_uuid(current.identity.seller_user_id);
+            if match_current_owner(conn, seller, snapshot.owner_name()).await? != OwnerMatch::Seller
+            {
+                return Ok(Some(ListingReason::OwnerMismatch));
+            }
+            let history = read_listing_history(conn, snapshot.identity()).await?;
+            check_listing_history(snapshot.identity(), seller, &history.aliases)
+        }
+        Some(name) => {
+            if !same_game_name(conn, name, snapshot.owner_name()).await? {
+                return Ok(Some(ListingReason::OwnerMismatch));
+            }
+            let account = lock_same_name_account(conn, name).await?.map(|(user_id, _)| user_id);
+            let history = read_listing_history(conn, snapshot.identity()).await?;
+            check_anonymous_listing_history(snapshot.identity(), account, &history.aliases)
+        }
+    };
+    match checked {
         Ok(()) => {}
         Err(ListingError::HistoryAliasConflict) => {
             return Ok(Some(ListingReason::HistoryAliasConflict));

@@ -4,12 +4,10 @@ use auction_application::consignment::{
     AutoCloseCandidate, AutoCloseEvidence, ListingOperation, LookupFence,
 };
 use auction_application::core::RequestHash;
-use auction_domain::UserId;
 use auction_domain::consignment::{
     ForcedTerminationFacts, ListingChange, ListingReason, ListingTransition, ListingTrigger,
     transition_listing,
 };
-use uuid::Uuid;
 
 use super::admission::db_now;
 use super::control::lock_control;
@@ -25,16 +23,16 @@ use crate::database::consignment::commands::ledger::{Actor, Arbitration, Request
 use crate::database::consignment::commands::session::{
     CommandTransaction, LockKeys, with_command_transaction,
 };
-use crate::database::consignment::eligibility::accounts::lock_seller_eligibility;
+use crate::database::consignment::eligibility::accounts::lock_listing_seller;
 use crate::database::consignment::listings::projection::{
-    lock_listings, pre_read_listing_identity,
+    ListingLockIdentity, lock_listings, pre_read_listing_identity,
 };
 
 struct Terminal {
     fence: LookupFence,
     mode: ReclaimMode,
     evidence: TerminalEvidence,
-    seller_user_id: Uuid,
+    seller: ListingLockIdentity,
     request_hash: RequestHash,
 }
 
@@ -55,7 +53,7 @@ pub(super) async fn finish(
         return Ok(false);
     };
     let sellers = [identity.seller_user_id];
-    let equipment = [identity.equipment];
+    let equipment = [identity.equipment.clone()];
     let mut evidence = evidence;
     loop {
         let (command_id, request_hash) = match evidence {
@@ -74,7 +72,7 @@ pub(super) async fn finish(
         };
         let keys =
             LockKeys { command_id: command_id.as_uuid(), sellers: &sellers, equipment: &equipment };
-        let input = Terminal { fence, mode, evidence, seller_user_id: sellers[0], request_hash };
+        let input = Terminal { fence, mode, evidence, seller: identity.clone(), request_hash };
         match with_command_transaction(store, keys, &input, |input, tx| Box::pin(write(tx, input)))
             .await?
         {
@@ -116,7 +114,8 @@ async fn write(tx: &mut CommandTransaction<'_>, input: &Terminal) -> Result<Outc
         return Ok(Outcome::Lost);
     };
     let conn = writer.connection();
-    if lock_seller_eligibility(conn, UserId::from_uuid(input.seller_user_id)).await?.is_none() {
+    let name = input.seller.seller_game_name.as_deref();
+    if lock_listing_seller(conn, input.seller.seller_user_id, name).await?.is_none() {
         return Err(WriteError::invariant("consignment_lookup_missing_seller"));
     }
     let Some(current) = lock_listings(conn, &[listing_id]).await?.pop() else {
