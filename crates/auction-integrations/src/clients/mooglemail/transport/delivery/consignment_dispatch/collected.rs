@@ -136,20 +136,25 @@ impl MoogleMailDeliveryTransport {
     }
 }
 
-/// 身份逐字相符才判定；仍有剩余为未领取；全空且回执逐项相符才是已领取（不变量 6：不符不猜测）。
+/// 身份逐字相符才判定；仍有剩余只有“整页摘要等于冻结摘要且无回执块”才是未领取；全空且回执逐项相符才是已领取
+/// （不变量 6：任何不清即无法确定，只读）。
 fn classify(
     target: &ConsignmentCollectionTarget,
     observation: &MoogleMailSentObservation,
 ) -> ConsignmentCollection {
-    // 领取后正文末尾多出回执块：身份比对用回执前的原正文摘要，没有回执块则用整页摘要。
-    let original_digest = match &observation.receipt {
-        MoogleMailSentReceipt::Parsed { original_body_digest, .. } => *original_body_digest,
-        MoogleMailSentReceipt::None | MoogleMailSentReceipt::Malformed => observation.body_digest,
+    // 剩余资产非零却已有回执（任何形状）说明页面状态自相矛盾，不猜测；领取后正文末尾多出回执块，
+    // 所以资产全零时身份比对用回执前的原正文摘要，没有回执块则用整页摘要。
+    let original_digest = match (&observation.receipt, observation.collected) {
+        (MoogleMailSentReceipt::None, _) => Some(observation.body_digest),
+        (MoogleMailSentReceipt::Parsed { original_body_digest, .. }, true) => {
+            Some(*original_body_digest)
+        }
+        _ => None,
     };
     if observation.external_mail_id != target.sent_mid
         || observation.recipient != target.recipient
         || observation.subject != target.subject
-        || original_digest != target.body_digest
+        || original_digest != Some(target.body_digest)
     {
         tracing::warn!(
             world = target.world.as_str(),
@@ -312,10 +317,17 @@ mod tests {
         }
     }
 
-    /// 身份相符、仍有剩余资产：未领取。
+    /// 身份相符、仍有剩余资产且无回执：未领取；资产未清却已有回执（Parsed 或 Malformed）无法确定。
     #[test]
-    fn remaining_assets_are_pending() {
+    fn remaining_assets_are_pending_only_without_receipt() {
         assert_eq!(classify(&target(), &observation(false)), ConsignmentCollection::Pending);
+        let mut parsed = receipted();
+        parsed.collected = false;
+        let mut malformed = observation(false);
+        malformed.receipt = MoogleMailSentReceipt::Malformed;
+        for seen in [parsed, malformed] {
+            assert_eq!(classify(&target(), &seen), ConsignmentCollection::Unavailable);
+        }
     }
 
     /// 身份相符、全部领取：已领取，带本验证器版本；同一领取重读得到同一摘要。

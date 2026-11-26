@@ -163,55 +163,69 @@ impl CollectionObserver for MoogleMailCollectionObserver {
         item: &'a PendingCollection,
         uid: &'a str,
     ) -> ConsignmentFuture<'a, Option<FreshCashObservation>> {
-        Box::pin(async move {
-            let Some(identity) = CashRequestIdentity::for_item(item) else {
-                tracing::warn!(
-                    code = "collection_cash_fence_invalid",
-                    "收款认证的尝试围栏越界，等待"
-                );
-                return Ok(None);
-            };
-            let request = InternalEvidenceRequest {
-                operation_id: identity.operation_id,
-                purpose: identity.purpose.clone(),
-                world: SettlementWorld::Main,
-                equipment: None,
-                observe_main_cash: true,
-                deadline: internal_evidence_deadline(Instant::now() + CASH_EVIDENCE_BUDGET),
-            };
-            // 会话随 `prepared` 在本作用域结束时释放；只读，不取提交守卫。
-            let prepared = match self.evidence.prepare_internal_evidence(request).await {
-                Ok(prepared) => prepared,
-                Err(error) => {
-                    tracing::warn!(code = error.safe_kind(), "收款认证读取现金证据失败，等待");
-                    return Ok(None);
-                }
-            };
-            if let Err(error) = prepared.check_current().await {
-                tracing::warn!(code = error.safe_kind(), "收款认证的现金证据已不当前，等待");
-                return Ok(None);
-            }
-            let observation =
-                cash_observation(prepared.snapshot(), uid, &identity, Timestamp::now());
-            if observation.is_none() {
-                tracing::warn!(code = "collection_cash_rejected", "收款认证的现金证据不符，等待");
-            }
-            Ok(observation)
-        })
+        Box::pin(async move { Ok(read_fresh_main_cash(self.evidence.as_ref(), item, uid).await) })
     }
+}
+
+/// 严格现金认证的现金观察读取：只读，任一环节失败都返回 `None` 等待（不变量 6）。
+async fn read_fresh_main_cash(
+    evidence: &dyn SettlementInternalEvidenceReader,
+    item: &PendingCollection,
+    uid: &str,
+) -> Option<FreshCashObservation> {
+    let Some(identity) = CashRequestIdentity::for_item(item) else {
+        tracing::warn!(code = "collection_cash_fence_invalid", "收款认证的尝试围栏越界，等待");
+        return None;
+    };
+    let request = InternalEvidenceRequest {
+        operation_id: identity.operation_id,
+        purpose: identity.purpose.clone(),
+        world: SettlementWorld::Main,
+        equipment: None,
+        observe_main_cash: true,
+        deadline: internal_evidence_deadline(Instant::now() + CASH_EVIDENCE_BUDGET),
+    };
+    // 会话随 `prepared` 在本作用域结束时释放；只读，不取提交守卫。
+    let prepared = match evidence.prepare_internal_evidence(request).await {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            tracing::warn!(code = error.safe_kind(), "收款认证读取现金证据失败，等待");
+            return None;
+        }
+    };
+    if let Err(error) = prepared.check_current().await {
+        tracing::warn!(code = error.safe_kind(), "收款认证的现金证据已不当前，等待");
+        return None;
+    }
+    let observation = cash_observation(prepared.snapshot(), uid, &identity, Timestamp::now());
+    if observation.is_none() {
+        tracing::warn!(code = "collection_cash_rejected", "收款认证的现金证据不符，等待");
+    }
+    observation
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    use auction_application::consignment::{CollectionLeg, PendingCollection};
+    use auction_application::delivery::DeliverySendExpectation;
     use auction_application::settlement::{
-        INTERNAL_EVIDENCE_PROTOCOL, InternalEvidencePurpose, MailAccountEvidenceBinding,
-        MailRuntimeBinding, SettlementInternalEvidenceSnapshot, VerifiedMainCashObservation,
+        INTERNAL_EVIDENCE_PROTOCOL, InternalEvidenceError, InternalEvidenceFuture,
+        InternalEvidenceLease, InternalEvidencePurpose, InternalEvidenceRequest,
+        MailAccountEvidenceBinding, MailRuntimeBinding, PreparedSettlementInternalEvidence,
+        SettlementInternalEvidenceReader, SettlementInternalEvidenceSnapshot,
+        VerifiedMainCashObservation,
     };
     use auction_domain::SettlementWorld;
+    use auction_domain::consignment::dispatch::{
+        AttemptKey, DispatchRoundKey, collection_attempt_id,
+    };
     use auction_time::{Duration, Timestamp};
     use uuid::Uuid;
 
-    use super::{CashRequestIdentity, cash_observation};
+    use super::{CashRequestIdentity, cash_observation, read_fresh_main_cash};
 
     const RECEIPT_UID: &str = "7001";
 
@@ -313,5 +327,126 @@ mod tests {
         observed: Timestamp,
     ) -> SettlementInternalEvidenceSnapshot {
         snapshot(request, RECEIPT_UID, true, observed)
+    }
+
+    /// 假内部证据入口的行为。
+    #[derive(Clone, Copy)]
+    enum Mode {
+        Good,
+        PrepareFails,
+        CheckFails,
+        NoCash,
+    }
+
+    /// 记录收到的请求；按 `mode` 返回绑定该请求的快照。
+    struct FakeEvidence {
+        mode: Mode,
+        requests: Mutex<Vec<InternalEvidenceRequest>>,
+    }
+
+    struct FakeLease {
+        check_ok: bool,
+    }
+
+    impl InternalEvidenceLease for FakeLease {
+        fn is_current(&self) -> bool {
+            true
+        }
+
+        fn check_current(&self, _deadline: Instant) -> InternalEvidenceFuture<'_, ()> {
+            let result = if self.check_ok { Ok(()) } else { Err(InternalEvidenceError::Revoked) };
+            Box::pin(async move { result })
+        }
+
+        fn revoke(&self) {}
+    }
+
+    impl SettlementInternalEvidenceReader for FakeEvidence {
+        fn prepare_internal_evidence(
+            &self,
+            request: InternalEvidenceRequest,
+        ) -> InternalEvidenceFuture<'_, PreparedSettlementInternalEvidence> {
+            let bound = CashRequestIdentity {
+                operation_id: request.operation_id,
+                purpose: request.purpose.clone(),
+            };
+            let deadline = request.deadline;
+            self.requests.lock().expect("记录请求").push(request);
+            let result = match self.mode {
+                Mode::PrepareFails => Err(InternalEvidenceError::Unavailable),
+                mode => {
+                    let observed = Timestamp::now() - Duration::seconds(1);
+                    let with_cash = !matches!(mode, Mode::NoCash);
+                    let lease = FakeLease { check_ok: !matches!(mode, Mode::CheckFails) };
+                    PreparedSettlementInternalEvidence::new(
+                        snapshot(&bound, RECEIPT_UID, with_cash, observed),
+                        Box::new(lease),
+                        deadline,
+                    )
+                }
+            };
+            Box::pin(async move { result })
+        }
+    }
+
+    fn pending() -> PendingCollection {
+        PendingCollection {
+            key: DispatchRoundKey {
+                contract_id: Uuid::from_u128(1),
+                obligation_id: Uuid::from_u128(2),
+                round: 1,
+            },
+            attempt: AttemptKey { delivery_id: Uuid::from_u128(0xd1), fence: 3 },
+            leg: CollectionLeg::MainOriginalCod,
+            send_world: SettlementWorld::Main,
+            sent_mid: "9001".to_owned(),
+            sending_at: Timestamp::now(),
+            expectation: DeliverySendExpectation {
+                world_id: "main".to_owned(),
+                recipient: "FakeBuyer".to_owned(),
+                subject: "Fake subject".to_owned(),
+                body_digest: [1; 32],
+                credits: 0,
+                cod: 100,
+                equipment_ids: vec!["42".to_owned()],
+                credential: None,
+            },
+            evidence: None,
+            certify: None,
+        }
+    }
+
+    /// 不变量 4、6：请求只读 main 现金且绑定本次尝试，得到同 UID 观察。
+    #[tokio::test]
+    async fn fresh_cash_request_is_bound_to_the_attempt() {
+        let evidence = FakeEvidence { mode: Mode::Good, requests: Mutex::new(Vec::new()) };
+        let item = pending();
+        let observation = read_fresh_main_cash(&evidence, &item, RECEIPT_UID).await;
+        let observation = observation.expect("同 UID 现金观察");
+        assert_eq!(observation.uid, RECEIPT_UID);
+        assert_eq!(observation.credits, 1_000);
+
+        let requests = evidence.requests.lock().expect("读取请求");
+        let [request] = requests.as_slice() else { panic!("应恰好发出一次请求") };
+        assert_eq!(request.world, SettlementWorld::Main);
+        assert!(request.observe_main_cash);
+        assert!(request.equipment.is_none());
+        assert_eq!(request.operation_id, collection_attempt_id(&item.attempt));
+        assert_eq!(
+            request.purpose,
+            InternalEvidencePurpose::ConsignmentCollection {
+                delivery_id: Uuid::from_u128(0xd1),
+                fence: 3,
+            }
+        );
+    }
+
+    /// 不变量 6：准备失败、会话已不当前、快照缺现金都按无法确定等待。
+    #[tokio::test]
+    async fn fresh_cash_failures_wait() {
+        for mode in [Mode::PrepareFails, Mode::CheckFails, Mode::NoCash] {
+            let evidence = FakeEvidence { mode, requests: Mutex::new(Vec::new()) };
+            assert_eq!(read_fresh_main_cash(&evidence, &pending(), RECEIPT_UID).await, None);
+        }
     }
 }
