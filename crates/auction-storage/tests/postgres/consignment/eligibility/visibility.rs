@@ -436,11 +436,16 @@ async fn postgres_same_equipment_occupancy_distinguishes_cleanup_and_cross_mode_
     assert_eq!(rows.len(), 2);
     assert_eq!(
         (rows[0].listing_id, rows[0].seller_user_id, rows[0].published, rows[0].forced_reason),
-        (active.listing_id, UserId::from_uuid(SELLER), false, None)
+        (active.listing_id, Some(UserId::from_uuid(SELLER)), false, None)
     );
     assert_eq!(
         (rows[1].listing_id, rows[1].seller_user_id, rows[1].published, rows[1].forced_reason),
-        (expired.listing_id, UserId::from_uuid(OTHER), true, Some(ListingReason::DepositExpired))
+        (
+            expired.listing_id,
+            Some(UserId::from_uuid(OTHER)),
+            true,
+            Some(ListingReason::DepositExpired)
+        )
     );
     let rows =
         lock_equipment_occupants(&mut tx, &gear("main", "44"), as_of).await.expect("核验占用");

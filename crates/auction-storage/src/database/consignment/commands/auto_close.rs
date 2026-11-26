@@ -153,7 +153,9 @@ async fn observe(
             (seller_ineligible || listing.snapshot.reason == Some(ListingReason::SellerIneligible))
                 && sqlx::query_scalar(
                     "SELECT EXISTS(SELECT 1 FROM public.user_blacklist_history h
-                      JOIN public.consignment_listings l ON l.seller_user_id = h.user_id
+                      JOIN public.consignment_listings l ON h.user_id = COALESCE(l.seller_user_id,
+                          (SELECT u.id FROM public.users u
+                           WHERE lower(u.username) = lower(l.seller_game_name)))
                       WHERE h.id = $1 AND l.id = $2 AND NOT (h.id = ANY(l.blacklist_baseline_ids)))",
                 )
                 .bind(fact_id)
@@ -223,6 +225,7 @@ mod tests {
             listing_id: Uuid::from_u128(1),
             identity: ListingLockIdentity {
                 seller_user_id: Uuid::from_u128(2),
+                seller_game_name: None,
                 equipment: ListingEquipmentIdentity::new("main", "42").unwrap(),
             },
             snapshot: ListingSnapshot {

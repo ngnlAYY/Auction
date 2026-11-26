@@ -49,7 +49,7 @@ VALUES (76, 'breaking');
 
 ## 索引
 
-当前 head 为 `000137`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。
+当前 head 为 `000138`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。
 
 | 版本 | 主题 |
 | --- | --- |
@@ -190,3 +190,4 @@ VALUES (76, 'breaking');
 | 000135 | 寄售第 5 期合同与结算来源：新增 `consignment_contracts`、`consignment_sales`、`consignment_withdrawals`（只追加，运行账号仅 `SELECT`、`INSERT`）；`settlement_obligations` 的拍卖四列放宽为可空并新增 `contract_id`、`contract_kind`、`custody_equipment_id`，来源恰为拍卖或寄售之一、来源列由触发器冻结；Sale 金额守恒（`F=floor(P*fee_bps/10000)`、`S=P-F`）；合同图（合同、子项、义务、履约）由延迟约束触发器在提交前核对；`position` 在季末等号及之后可由 `in_custody`/`reconcile` 进入 `season_ended`，占用释放仅对该终态免邮件证明；`position.listing_id` 唯一；授权入口再包装 000134；登记 breaking |
 | 000136 | 寄售第 6 期购买、资金、退件与拒收：放开 `available→sale_pending`、`sale_pending→closed(sold)` 与 position 的 `committed/in_transit/handed_over/reconcile` 及 `awaiting_take` 季末迁移，买家确领改认新表 `consignment_handoff_proofs`；命令账本增加购买、派发、退件、资金与处罚操作及回执；资金分配唯一键改为含 `consignment_contract_id` 的四列并新增过渡/手续费/核销用途与 `claimed` 分录，累计 issue 上限触发器加跨 source 守卫；新增 COD 收据与 opening 份额、手续费与本金事实、现金退件阻断与原资金消费、派发轮次/尝试/证据、退件接管/消费、拒收周期/事实/裁决/处罚/构成项/账号工作等 23 张表；`consignment_sales` 追加资金边界列；授权入口再包装 000135；登记 breaking |
 | 000137 | 寄售第 7 期：独立表段新增损失证据/事实/案件/结果/回执、受限权利及其状态/挑战/尝试/会话/令牌、权利通知 outbox 与结果、付款提醒、重列决定、找回预算命中共 16 张表（全部只追加，outbox 仅租约三列可更新），共享替换段再新增处罚效果与账号工作结果 2 张表；定义 `c7_sha1` 与 `c7_right_id`（权利 ID 的确定性 UUIDv5），并为既有合同回填失败关闭的权利；共享替换段放宽命令账本 actor / 目标 / 操作 / 回执闭集、挂单迁移与事件、处分代 g+1、position `lost`、占用释放与交接边，并放宽通知投递载荷；统一处置种类闭集新增 `season_closed`（季末关闭从未起写的寄售取得投递，插入守卫限定绑定，写入时固定解除告警）；授权入口再包装 000136；末尾追加 ㉑ 寄售 record_carrier 校验接受 `equipment_ids`、㉒ 放开撤回件 position `in_custody ↔ in_transit`（限当前代 Withdrawal）、㉓ 未付取消封闭后拒写 funded；登记 breaking。表与派生规则见 [docs/contracts/database.md](../../docs/contracts/database.md#寄售损失受限权利与通知迁移-000137) |
+| 000138 | 匿名非寄售登记：`consignment_listings.seller_user_id` 改为可空并新增不可变的 `seller_game_name`（二选一、自填名只允许非寄售），新增同名同装备未终结唯一索引与计数索引；命令账本 v1 增加 `anonymous` actor（只允许登记），登记事件门与 v2 撤回门增加匿名分支；登记 breaking。见 [docs/contracts/database.md](../../docs/contracts/database.md#匿名非寄售登记迁移-000138) |

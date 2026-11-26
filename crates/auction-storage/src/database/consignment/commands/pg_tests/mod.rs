@@ -1,5 +1,6 @@
 //! 由 PostgreSQL 集成测试入口驱动的寄售内部事务场景。
 
+mod anonymous;
 mod diagnostics;
 mod fixture;
 mod locks;
@@ -52,6 +53,7 @@ impl DatabaseStore {
                 writes::audit_failure_rolls_back(self, maintenance).await
             }
             "constraint_mapping" => writes::constraint_mapping(self, maintenance).await,
+            "anonymous_registration" => anonymous::anonymous_registration(self, maintenance).await,
             "error_detail_absent" => diagnostics::verify(self).await,
             "commit_unknown_sqlstate" => diagnostics::commit_unknown_sqlstate(self).await,
             "commit_unknown_recovers_by_replay" => {

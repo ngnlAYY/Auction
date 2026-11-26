@@ -581,7 +581,9 @@ pub(super) async fn pre_read_reservation(
     Ok(Some((
         row.try_get("listing_id")?,
         ListingLockIdentity {
+            // 预约只属于寄售挂单，卖家必然是本站账户。
             seller_user_id: row.try_get("seller_user_id")?,
+            seller_game_name: None,
             equipment: ListingEquipmentIdentity::new(
                 row.try_get("world_id")?,
                 row.try_get("external_equipment_id")?,

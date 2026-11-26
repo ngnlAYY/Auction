@@ -3,7 +3,7 @@
 use auction_application::consignment::{
     ConsignmentError, ListingCommandOutcome, ListingCommandRejection, UnrecordedListingRejection,
 };
-use auction_domain::{CommandId, UserId};
+use auction_domain::CommandId;
 use auction_time::Timestamp;
 use futures_util::future::BoxFuture;
 use sqlx::PgConnection;
@@ -12,9 +12,7 @@ use uuid::Uuid;
 use super::errors::WriteError;
 use super::session::{CommandTransaction, LockKeys, with_command_transaction};
 use crate::database::DatabaseStore;
-use crate::database::consignment::eligibility::accounts::{
-    SellerEligibility, lock_seller_eligibility,
-};
+use crate::database::consignment::eligibility::accounts::{SellerEligibility, lock_listing_seller};
 use crate::database::consignment::listings::projection::{
     ListingLockIdentity, LockedListing, lock_listings, pre_read_listing_identity,
 };
@@ -77,7 +75,8 @@ pub(super) async fn lock_seller(
     listing_id: Uuid,
 ) -> Result<Option<SellerEligibility>, WriteError> {
     if let Some(identity) = identity {
-        return Ok(lock_seller_eligibility(conn, UserId::from_uuid(identity.seller_user_id)).await?);
+        let name = identity.seller_game_name.as_deref();
+        return Ok(lock_listing_seller(conn, identity.seller_user_id, name).await?);
     }
     let appeared: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM public.consignment_listings WHERE id = $1)",

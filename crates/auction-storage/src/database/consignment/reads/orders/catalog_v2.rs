@@ -29,7 +29,7 @@ use crate::database::consignment::reads::projection::equipment;
 use crate::database::consignment::reads::{page_order, snapshot, storage_error, unavailable};
 
 const COLUMNS: &str = "SELECT l.id, l.world_id, l.external_equipment_id, l.state_version, l.state,
-        l.mode, l.price, l.updated_at, l.expires_at, s.username AS seller_name,
+        l.mode, l.price, l.updated_at, l.expires_at, COALESCE(l.seller_game_name, s.username) AS seller_name,
         pos.current_generation AS generation,
         p.name, p.category, p.alt_name, p.level_kind, p.level_number, p.tradeable, p.observed_at";
 

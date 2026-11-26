@@ -14,14 +14,14 @@ use uuid::Uuid;
 
 use crate::database::DatabaseStore;
 use crate::database::consignment::eligibility::predicates::listing_sql;
-use crate::database::consignment::reads::availability;
 use crate::database::consignment::reads::projection::equipment;
+use crate::database::consignment::reads::{availability, private};
 use crate::database::consignment::reads::{page_order, snapshot, storage_error, unavailable};
 use crate::database::like_patterns::contains_patterns;
 
 const PUBLIC_COLUMNS: &str =
     "SELECT l.id, l.world_id, l.external_equipment_id, l.state_version, l.state, l.price,
-            l.updated_at, l.expires_at, s.username AS seller_name,
+            l.updated_at, l.expires_at, COALESCE(l.seller_game_name, s.username) AS seller_name,
             l.seller_user_id IS NOT NULL AS seller_verified,
             p.name, p.category, p.alt_name, p.level_kind, p.level_number, p.tradeable, p.observed_at";
 
@@ -192,9 +192,8 @@ impl PublicListingRead for DatabaseStore {
 
     fn anonymous_command(
         &self,
-        _command_id: CommandId,
+        command_id: CommandId,
     ) -> ConsignmentFuture<'_, Option<AnonymousRegistrationReceipt>> {
-        // 匿名登记的账本与挂单读取随存储迁移落地；此前只能报告不可用，不能谎报未找到。
-        Box::pin(async { Err(ConsignmentError::Unavailable) })
+        Box::pin(private::anonymous_registration(self, command_id))
     }
 }

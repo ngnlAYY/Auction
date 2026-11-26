@@ -146,6 +146,29 @@ pub(super) async fn owned_command(
     .fetch_optional(store.pool())
     .await
     .map_err(storage_error)?;
+    checked_receipt(found, command_id)
+}
+
+/// 匿名登记（000138）只凭命令 ID 读取原决定；自填名不参与查询，也不随回执返回。
+pub(super) async fn anonymous_command(
+    store: &DatabaseStore,
+    command_id: CommandId,
+) -> Result<Option<OwnedListingCommandReceipt>, ConsignmentError> {
+    let found: Option<(i16, String, Json<Receipt>)> = sqlx::query_as(
+        "SELECT result_status, result_code, result_body FROM public.consignment_commands
+         WHERE command_id = $1 AND actor_kind = 'anonymous' AND operation = 'register'",
+    )
+    .bind(command_id.as_uuid())
+    .fetch_optional(store.pool())
+    .await
+    .map_err(storage_error)?;
+    checked_receipt(found, command_id)
+}
+
+fn checked_receipt(
+    found: Option<(i16, String, Json<Receipt>)>,
+    command_id: CommandId,
+) -> Result<Option<OwnedListingCommandReceipt>, ConsignmentError> {
     let Some((status, code, Json(receipt))) = found else {
         return Ok(None);
     };

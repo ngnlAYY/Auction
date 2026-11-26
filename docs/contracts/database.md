@@ -85,7 +85,7 @@
 
 | 表 | 内容 |
 | --- | --- |
-| `consignment_listings` | 挂单投影：卖家、世界、装备正十进制编号、不可变模式、标价、冻结的计价版本与费率、状态版本、启用代次、登记时拉黑历史 ID 集合与计数、当前快照与期限 |
+| `consignment_listings` | 挂单投影：卖家（本站账户或匿名自填游戏名，迁移 000138）、世界、装备正十进制编号、不可变模式、标价、冻结的计价版本与费率、状态版本、启用代次、登记时拉黑历史 ID 集合与计数、当前快照与期限 |
 | `consignment_listing_lot_baselines` | 两种模式各自在首笔登记命令事务中已见的 lot 集合，只追加。由数据库写入的登记事务标识与首版命令校验共同约束写入 |
 | `consignment_listing_auction_conflicts` | 基线外已提交的 lot 关联，按挂单与 lot 去重，只追加；每条关联绑定观察事实的命令 |
 | `consignment_snapshots` | 同一挂单每个解析代次最多一份只追加的安全观察，绑定世界和装备编号。当前快照使用延迟复合外键，必须属于本单 |
@@ -235,6 +235,13 @@
 
 `right_id = UUIDv5(NAMESPACE_URL, "auction.consignment.right.v1" ‖ 0x00 ‖ contract_id 的 16 个原字节 ‖ role)`，其中 `NAMESPACE_URL` 为 `6ba7b811-9dad-11d1-80b4-00c04fd430c8`，`role` 的 UTF-8 文本只能是 `buyer` 或 `seller`（其他值抛 `22023`）。SQL 函数 `public.c7_right_id(contract_id uuid, role text)` 由库内 `c7_sha1` 按 FIPS 180-4 实现（库内无 pgcrypto）；Rust 侧派生放在领域 `consignment::rights`，登记新权利必须使用同一派生，并以 PG 测试与 SQL 函数对照。字节格式冻结，改变须以新的域前缀版本表达。
 
+#### 匿名非寄售登记（迁移 000138）
+
+- `consignment_listings.seller_user_id` 改为可空，新增 `seller_game_name`：两者恰有一个非空（`consignment_listing_seller`）。只有自填名的挂单是未登录登记人的匿名挂单，必须是非寄售，名称为不超过 128 字节、不含装备链接、key 与行分隔符的原样文本；登记后不可修改（`consignment_guard_listing_seller_name`）。
+- 命令账本 v1 新增 `actor_kind = 'anonymous'`：只允许 `register`，`actor_ref` 是原样自填名，命令 ID 为 UUIDv4。匿名登记的 `registered` 事件要求挂单无账户且 `actor_ref` 与 `seller_game_name` 逐字节相等；改价仍要求账户 ID，匿名挂单因此无法改价。v2 撤回关闭匿名挂单时，命令的账户必须与自填名 lower 等值。
+- 匿名审计行沿用 `actor_type = 'public_user'`，`actor_id` 为 `anonymous:<自填名>`，来源 `public`。
+- 新增索引：`consignment_listings_anonymous_active_idx`（同自填名 lower、同世界、同装备的未终结匿名挂单唯一）、`consignment_listings_anonymous_seller_idx`（按自填名计数与列出）、`consignment_listings_anonymous_resolving_idx`（全站匿名 resolving 计数）。业务规则见[docs/business-rules.md](../business-rules.md)。
+
 #### 寄售约束名
 
 应用错误映射使用 PostgreSQL 报告的名字。列级与表级 CHECK 都显式命名。
@@ -324,6 +331,8 @@
 | --- | --- |
 | `consignment_listings_seller_active_idx` | 同卖家在同世界、同件装备的活动挂单唯一 |
 | `consignment_listings_equipment_published_idx` | 同世界、同件装备的已发布挂单唯一 |
+| `consignment_listings_anonymous_active_idx` | 同自填名（lower）在同世界、同件装备的未终结匿名挂单唯一 |
+| `consignment_listing_seller` | 挂单卖家账户与自填名恰有一个；自填名只用于非寄售，登记后不可修改 |
 | `consignment_replay_keys_write_current_idx` | 写入使用的当前重放比较密钥最多一项 |
 | `consignment_listing_current_snapshot_fk` | 当前快照必须属于本单 |
 | `consignment_listing_transition` | 挂单首写、版本递增、冻结字段与旧截止保护 |

@@ -64,9 +64,14 @@ impl From<sqlx::Error> for WriteError {
         let constraint = error.as_database_error().and_then(sqlx::error::DatabaseError::constraint);
         // 仅按 SQLSTATE 和显式约束名分类。不变量 6、7：不读取 MESSAGE、DETAIL 或错误链。
         let business = match (sqlstate.as_ref(), constraint) {
-            ("23505", Some("consignment_listings_seller_active_idx")) => {
-                ListingBusinessRejection::AlreadyOpen
-            }
+            // 匿名挂单（000138）的同名同件占用与账户挂单同义。
+            (
+                "23505",
+                Some(
+                    "consignment_listings_seller_active_idx"
+                    | "consignment_listings_anonymous_active_idx",
+                ),
+            ) => ListingBusinessRejection::AlreadyOpen,
             ("23505", Some("consignment_listings_equipment_published_idx")) => {
                 ListingBusinessRejection::EquipmentBusy
             }

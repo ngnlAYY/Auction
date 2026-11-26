@@ -59,7 +59,7 @@ impl DatabaseStore {
             "WITH db_clock AS MATERIALIZED (SELECT clock_timestamp() AS at),
              page AS MATERIALIZED (
                  SELECT l.id, l.world_id, l.external_equipment_id, l.seller_user_id,
-                        l.state, l.expires_at, l.service_epoch, l.blacklist_count_at_register,
+                        l.seller_game_name, l.state, l.expires_at, l.service_epoch, l.blacklist_count_at_register,
                         l.blacklist_baseline_ids
                  FROM public.consignment_listings l WHERE ",
             listing_sql!(stored_active),
@@ -85,7 +85,9 @@ impl DatabaseStore {
                 " ORDER BY a.id LIMIT 1)
                          WHEN l.reason = 'seller_ineligible' THEN (
                              SELECT h.id FROM public.user_blacklist_history h
-                             WHERE h.user_id = l.seller_user_id
+                             WHERE h.user_id = COALESCE(l.seller_user_id,
+                                 (SELECT u.id FROM public.users u
+                                  WHERE lower(u.username) = lower(l.seller_game_name)))
                                AND NOT (h.id = ANY(l.blacklist_baseline_ids))
                              ORDER BY h.blacklisted_at, h.id LIMIT 1
                          )

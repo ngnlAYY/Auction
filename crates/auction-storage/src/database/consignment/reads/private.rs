@@ -1,10 +1,11 @@
 //! 本人与运营读取复用有效态筛选，按会话权限分别投影。
 
 use auction_application::consignment::{
-    AdminListingDetail, AdminListingQuery, AdminListingRead, AdminListingRecord, ConsignmentError,
-    ConsignmentFuture, ListingAuctionConflict, ListingDelistReason, ListingReadPage,
-    OwnedListingCommandReceipt, OwnedListingRead, OwnedListingRecord, PrivateListingQuery,
-    SellerListingAction,
+    AdminListingDetail, AdminListingQuery, AdminListingRead, AdminListingRecord,
+    AnonymousRegistrationReceipt, ConsignmentError, ConsignmentFuture, ListingAuctionConflict,
+    ListingDelistReason, ListingReadPage, OwnedListingCommandReceipt, OwnedListingDecision,
+    OwnedListingRead, OwnedListingRecord, PrivateListingQuery, SellerListingAction,
+    StoredListingDecision,
 };
 use auction_domain::consignment::ListingReason;
 use auction_domain::{CommandId, LotId, UserId};
@@ -21,7 +22,8 @@ use crate::database::consignment::reads::projection::{
 };
 use crate::database::consignment::reads::{page_order, snapshot, storage_error, unavailable};
 
-pub(super) const ADMIN_COLUMNS: &str = ", l.seller_user_id, s.username AS seller_name,
+pub(super) const ADMIN_COLUMNS: &str =
+    ", l.seller_user_id, COALESCE(l.seller_game_name, s.username) AS seller_name,
     a.metadata->>'admin_delist_reason' AS admin_delist_reason";
 
 // 只从实际终结事件指向的成功审计读取说明。拒绝审计与其他挂单不能覆盖它。
@@ -231,6 +233,31 @@ pub(super) async fn read_conflicts(
         })
         .collect();
     Ok((conflicts, truncated))
+}
+
+/// 匿名登记的原决定；受理时附带挂单当前事实（与 v1 私有视图同一投影）。
+pub(super) async fn anonymous_registration(
+    store: &DatabaseStore,
+    command_id: CommandId,
+) -> Result<Option<AnonymousRegistrationReceipt>, ConsignmentError> {
+    let Some(command) = commands::anonymous_command(store, command_id).await? else {
+        return Ok(None);
+    };
+    let OwnedListingDecision::Register(StoredListingDecision::Accepted(registered)) =
+        command.decision
+    else {
+        return Ok(Some(AnonymousRegistrationReceipt { command, listing: None }));
+    };
+    let (mut tx, as_of) = snapshot(store, false).await?;
+    let row = detail_query(as_of, registered.listing_id(), None, false)
+        .build()
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(storage_error)?;
+    tx.commit().await.map_err(storage_error)?;
+    let paused = store.runtime_switches().external_access_paused();
+    let listing = row.as_ref().map(|row| private(row, paused)).transpose()?;
+    Ok(Some(AnonymousRegistrationReceipt { command, listing }))
 }
 
 impl OwnedListingRead for DatabaseStore {
