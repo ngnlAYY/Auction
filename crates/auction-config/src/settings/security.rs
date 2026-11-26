@@ -8,6 +8,9 @@ use super::Role;
 /// 匿名读取的默认每来源窗口上限；足以覆盖正常浏览的并发资源读取，仍限制批量抓取。
 const DEFAULT_ANONYMOUS_READ_RATE_LIMIT: u32 = 300;
 
+/// 免登录登记的默认每来源每小时上限。
+const DEFAULT_ANONYMOUS_LISTING_RATE_LIMIT: u32 = 3;
+
 /// 浏览器写请求和公开会话使用的非敏感 HTTP 安全策略。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -26,6 +29,9 @@ pub struct HttpSecurityConfig {
     /// 匿名公开读取的进程内并发上限；省略时取服务池可用连接的一半（至少 1）。
     /// 该上限只约束读请求，出价等写请求不占用此额度。
     pub anonymous_read_concurrency: Option<u32>,
+    /// 免登录非寄售登记每来源每小时的最大请求数；省略时为 3 次。按可信代理解析的来源计数，
+    /// IPv6 按 /64 聚合。位于三角色共用的区块：Admin 同样解析并校验范围，但不使用该值。
+    pub anonymous_listing_rate_limit: u32,
     /// 速率限制窗口秒数；省略时为 60 秒。
     pub rate_limit_window_seconds: u64,
     /// 是否为浏览器 Cookie 设置 Secure；省略时关闭，生产环境应开启。
@@ -56,6 +62,7 @@ impl From<&AdminRuntimeSecurityConfig> for HttpSecurityConfig {
             mutation_rate_limit: security.mutation_rate_limit,
             anonymous_read_rate_limit: DEFAULT_ANONYMOUS_READ_RATE_LIMIT,
             anonymous_read_concurrency: None,
+            anonymous_listing_rate_limit: DEFAULT_ANONYMOUS_LISTING_RATE_LIMIT,
             rate_limit_window_seconds: security.rate_limit_window_seconds,
             cookie_secure: security.cookie_secure,
             request_timeout_seconds: security.request_timeout_seconds,

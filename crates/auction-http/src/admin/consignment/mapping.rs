@@ -11,6 +11,7 @@ use auction_contracts::{
     ListingDisposition, ListingFeeBps, ListingOperation, ListingPage, ListingPrice,
     ListingPricingVersion, ListingState, ListingVersion, ListingView, LookupProgress, OwnedListing,
 };
+use auction_domain::UserId;
 use auction_domain::consignment::{ListingVersion as DomainVersion, quote_v1};
 use serde::de::{DeserializeOwned, value::StrDeserializer};
 use uuid::Uuid;
@@ -84,16 +85,16 @@ pub(super) fn closed(
 }
 
 fn record(result: AdminListingRecord) -> Result<AdminListing, ConsignmentError> {
-    // 匿名非寄售挂单的可空卖家随 Admin 契约变更开放；此前失败关闭。
-    let seller_user_id = result.seller_user_id.ok_or(ConsignmentError::Unavailable)?;
-    if result.listing().listing_id.is_nil() || seller_user_id.is_nil() {
+    // 匿名非寄售挂单没有站内账户；有账户时仍拒绝 nil 标识。
+    let seller_user_id = result.seller_user_id.map(UserId::as_uuid);
+    if result.listing().listing_id.is_nil() || seller_user_id.is_some_and(|id| id.is_nil()) {
         return Err(ConsignmentError::Unavailable);
     }
     let listing = owned_projection(result.listing())?;
     let can_delist = result.can_delist();
     Ok(AdminListing {
         listing,
-        seller_user_id: seller_user_id.as_uuid(),
+        seller_user_id,
         seller_name: result.seller_name,
         admin_delist_reason: result.admin_delist_reason.map(|reason| reason.as_str().to_owned()),
         can_delist,

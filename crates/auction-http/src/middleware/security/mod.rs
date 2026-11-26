@@ -31,6 +31,10 @@ const BROWSER_ERROR_LIMIT_PER_WINDOW: u32 = 30;
 const DEFAULT_ANONYMOUS_READ_LIMIT: u32 = 300;
 const DEFAULT_ANONYMOUS_READ_CONCURRENCY: usize = 8;
 
+/// 免登录登记的每来源默认上限与固定窗口；与 mutation 限流独立计数，原样重试同样消耗额度。
+const DEFAULT_ANONYMOUS_LISTING_LIMIT: u32 = 3;
+const ANONYMOUS_LISTING_WINDOW: Duration = Duration::from_secs(60 * 60);
+
 /// 装配根传入 HTTP 安全适配器的非敏感参数。
 pub struct HttpSecurityOptions<'a> {
     /// 是否为浏览器 Cookie 设置 `Secure`。
@@ -67,6 +71,7 @@ pub struct PublicHttpSecurity {
     mutation_limiter: RateLimiter,
     realtime_connection_limiter: RateLimiter,
     browser_error_limiter: RateLimiter,
+    anonymous_listing_limiter: RateLimiter,
     // 读闸门与写路径完全独立：匿名读突发只能等待自己的许可，不会占用出价连接。
     anonymous_read_gate: AnonymousReadGate,
 }
@@ -123,6 +128,10 @@ impl Default for PublicHttpSecurity {
                 BROWSER_ERROR_LIMIT_PER_WINDOW,
                 Duration::from_secs(60),
             ),
+            anonymous_listing_limiter: RateLimiter::new(
+                DEFAULT_ANONYMOUS_LISTING_LIMIT,
+                ANONYMOUS_LISTING_WINDOW,
+            ),
             anonymous_read_gate: AnonymousReadGate::new(
                 DEFAULT_ANONYMOUS_READ_LIMIT,
                 Duration::from_secs(60),
@@ -171,12 +180,25 @@ impl PublicHttpSecurity {
                 BROWSER_ERROR_LIMIT_PER_WINDOW,
                 rate_limit_window,
             ),
+            anonymous_listing_limiter: RateLimiter::new(
+                DEFAULT_ANONYMOUS_LISTING_LIMIT,
+                ANONYMOUS_LISTING_WINDOW,
+            ),
             anonymous_read_gate: AnonymousReadGate::new(
                 anonymous_read_limit,
                 rate_limit_window,
                 read_concurrency,
             ),
         })
+    }
+
+    /// 覆盖免登录登记的每来源一小时上限；只有 Public 装配调用，零值在启动期拒绝。
+    pub fn with_anonymous_listing_limit(mut self, limit: u32) -> Result<Self, &'static str> {
+        if limit == 0 {
+            return Err("免登录登记限流配置无效");
+        }
+        self.anonymous_listing_limiter = RateLimiter::new(limit, ANONYMOUS_LISTING_WINDOW);
+        Ok(self)
     }
 
     pub(crate) fn cookie_secure(&self) -> bool {
@@ -201,6 +223,11 @@ impl PublicHttpSecurity {
 
     pub(crate) fn allow_mutation(&self, address: IpAddr) -> Option<u64> {
         self.mutation_limiter.allow(address)
+    }
+
+    /// 免登录登记使用独立账本，按可信代理解析后的来源计数，IPv6 按 /64 聚合。
+    pub(crate) fn allow_anonymous_listing(&self, address: IpAddr) -> Option<u64> {
+        self.anonymous_listing_limiter.allow(address)
     }
 
     /// 路由装配使用的闸门句柄；不暴露其余安全策略。

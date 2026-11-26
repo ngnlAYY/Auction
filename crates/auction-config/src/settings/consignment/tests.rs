@@ -377,3 +377,20 @@ fn section_digest_follows_effective_values() {
     // 开关以外的字段变化同样改变摘要，自动重列决定才能辨认冻结时的整节配置。
     assert_ne!(load("[consignment]\nfee_bps = 501\n").section_digest(), omitted.section_digest());
 }
+
+#[test]
+fn anonymous_resolving_limit_is_bounded_and_outside_the_digest() {
+    let fixture = ConfigFixture::new();
+    fixture.write_common("");
+    let omitted = fixture.load(Role::Public).unwrap();
+    assert_eq!(omitted.anonymous_resolving_limit(), 50);
+    fixture.write_common("[consignment]\nanonymous_resolving_limit = 7\n");
+    let custom = fixture.load(Role::Public).unwrap();
+    assert_eq!(custom.anonymous_resolving_limit(), 7);
+    // 只约束 Public 免登录准入，不改变已冻结重列决定所比对的摘要。
+    assert_eq!(custom.section_digest(), omitted.section_digest());
+    for invalid in [0, 1_001] {
+        fixture.write_common(&format!("[consignment]\nanonymous_resolving_limit = {invalid}\n"));
+        assert!(fixture.load(Role::Public).is_err());
+    }
+}

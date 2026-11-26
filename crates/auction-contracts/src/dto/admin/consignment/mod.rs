@@ -23,6 +23,7 @@ use crate::ListingVersion;
 use crate::OwnedListing;
 use crate::dto::public::consignment::wire::checked_text;
 use crate::dto::public::consignment::wire::json_object;
+use crate::dto::public::consignment::wire::optional_uuid;
 use crate::dto::public::consignment::wire::timestamp;
 use crate::dto::public::consignment::wire::uuid;
 use crate::dto::public::consignment::write::redact_error;
@@ -38,8 +39,9 @@ json_object! {
     #[derive(Clone, PartialEq)]
     pub struct AdminListing {
         pub listing: OwnedListing,
-        #[serde(deserialize_with = "uuid")]
-        pub seller_user_id: Uuid,
+        /// 匿名非寄售挂单没有站内账户，为 `null`。
+        #[serde(deserialize_with = "optional_uuid")]
+        pub seller_user_id: Option<Uuid>,
         pub seller_name: String,
         #[serde(deserialize_with = "optional_delist_reason")]
         pub admin_delist_reason: Option<String>,

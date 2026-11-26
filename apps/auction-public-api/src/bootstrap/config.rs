@@ -3,7 +3,8 @@
 use std::time::Duration;
 
 use anyhow::Context;
-use auction_config::AppConfig;
+use auction_application::consignment::{ListingRegistrationPolicy, ListingWorlds};
+use auction_config::{AppConfig, ConsignmentConfig};
 use auction_http::{HttpSecurityOptions, PublicHttpSecurity};
 
 pub(super) fn configure_security(config: &AppConfig) -> anyhow::Result<PublicHttpSecurity> {
@@ -24,5 +25,29 @@ pub(super) fn configure_security(config: &AppConfig) -> anyhow::Result<PublicHtt
         trusted_proxy_cidrs: &config.http_security.trusted_proxy_cidrs,
         trusted_unix_proxy: config.http_security.trusted_unix_proxy,
     })
+    .and_then(|security| {
+        security.with_anonymous_listing_limit(config.http_security.anonymous_listing_rate_limit)
+    })
     .map_err(anyhow::Error::msg)
+}
+
+/// 由已校验的寄售配置生成登记准入策略；各额度收窄失败时给出可定位的启动错误。
+pub(super) fn registration_policy(
+    config: &ConsignmentConfig,
+) -> anyhow::Result<ListingRegistrationPolicy> {
+    Ok(ListingRegistrationPolicy {
+        enabled: config.enabled(),
+        // 决定 4 对两世界开放，寄售节没有独立世界配置。实际准入由数据库的世界可用性再收紧。
+        worlds: ListingWorlds { main: true, isekai: true },
+        consigned_fee_bps: config.fee_bps(),
+        max_open_per_user: config.max_open_per_user().try_into().context("寄售活动挂单额度无效")?,
+        registrations_per_hour: config
+            .registrations_per_hour()
+            .try_into()
+            .context("寄售每小时登记额度无效")?,
+        anonymous_resolving_limit: config
+            .anonymous_resolving_limit()
+            .try_into()
+            .context("免登录解析中挂单上限无效")?,
+    })
 }

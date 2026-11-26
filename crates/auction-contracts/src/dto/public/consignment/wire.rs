@@ -176,7 +176,7 @@ pub(in crate::dto) fn uuid<'de, D: Deserializer<'de>>(deserializer: D) -> Result
     Err(D::Error::custom("寄售标识必须为规范小写的非零 UUID"))
 }
 
-pub(super) fn optional_uuid<'de, D: Deserializer<'de>>(
+pub(in crate::dto) fn optional_uuid<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Uuid>, D::Error> {
     #[derive(Deserialize)]

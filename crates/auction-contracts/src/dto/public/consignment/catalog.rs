@@ -125,6 +125,8 @@ json_object! {
         pub level: EquipmentLevel,
         pub price: ListingPrice,
         pub seller_name: String,
+        /// 卖家经站内账户登记；为否时卖家名是免登录登记的自填游戏名，未经验证。
+        pub seller_verified: bool,
         #[serde(deserialize_with = "timestamp")]
         pub updated_at: Timestamp,
         #[serde(deserialize_with = "timestamp")]

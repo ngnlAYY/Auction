@@ -7,18 +7,18 @@ use std::time::Duration;
 
 use auction_application::admin::{AdminIntakeError, EquipmentKeySealerPort};
 use auction_application::consignment::{
-    AdminDelistListingCommand, ApplyListingLookupCommand, AutoCloseListingCommand,
-    ConsignmentError, ConsignmentFuture, ListingAutoCloseEffect, ListingBusinessRejection,
-    ListingClosed, ListingCommandOutcome, ListingCommandRejection, ListingCommandStore,
-    ListingCredentialError, ListingEquipmentReference, ListingEquipmentUrlValidator,
-    ListingLookupEffect, ListingPageWindow, ListingPriceDisposition, ListingPriceReceipt,
-    ListingReadPage, ListingRegistered, ListingRegistrationAvailability, ListingRegistrationPolicy,
-    ListingWorlds, ManageListingService, OwnedListingCommandReceipt, OwnedListingRead,
-    OwnedListingRecord, PrivateListingQuery, PublicListingDetail, PublicListingQuery,
-    PublicListingRead, PublicListingSummary, RegisterListingCommand, RegisterListingService,
-    RegistrationInput, RegistrationReplayCrypto, RegistrationRequestMac, RepriceListingCommand,
-    StoredListingDecision, UnrecordedListingRejection, WithdrawListingCommand,
-    WrappedRegistrationReplayKey,
+    AdminDelistListingCommand, AnonymousRegistrationReceipt, ApplyListingLookupCommand,
+    AutoCloseListingCommand, ConsignmentError, ConsignmentFuture, ListingAutoCloseEffect,
+    ListingBusinessRejection, ListingClosed, ListingCommandOutcome, ListingCommandRejection,
+    ListingCommandStore, ListingCredentialError, ListingEquipmentReference,
+    ListingEquipmentUrlValidator, ListingLookupEffect, ListingPageWindow, ListingPriceDisposition,
+    ListingPriceReceipt, ListingReadPage, ListingRegistered, ListingRegistrationAvailability,
+    ListingRegistrationPolicy, ListingWorlds, ManageListingService, OwnedListingCommandReceipt,
+    OwnedListingRead, OwnedListingRecord, PrivateListingQuery, PublicListingDetail,
+    PublicListingQuery, PublicListingRead, PublicListingSummary, RegisterListingCommand,
+    RegisterListingService, RegistrationInput, RegistrationReplayCrypto, RegistrationRequestMac,
+    RegistrationSeller, RepriceListingCommand, StoredListingDecision, UnrecordedListingRejection,
+    WithdrawListingCommand, WrappedRegistrationReplayKey,
 };
 use auction_application::core::{ApplicationFuture, SessionError};
 use auction_application::public::{
@@ -47,6 +47,8 @@ use crate::state::PublicApiState;
 pub(super) const LISTINGS: &str = "/api/v1/consignment/listings";
 pub(super) const OWNED: &str = "/api/v1/me/consignment/listings";
 pub(super) const COMMANDS: &str = "/api/v1/me/consignment/commands";
+pub(super) const DIRECT_LISTINGS: &str = "/api/v1/consignment/direct-listings";
+pub(super) const DIRECT_COMMANDS: &str = "/api/v1/consignment/direct-commands";
 pub(super) const STATUS: &str = "/api/v1/consignment/status";
 pub(super) const LISTING: Uuid = fixture_uuid(1);
 pub(super) const SELLER: Uuid = fixture_uuid(0xfa);
@@ -84,6 +86,8 @@ pub(super) enum Call {
     OwnedCommand(UserId, CommandId),
     ValidateUrl,
     Register(UserId, CommandId, ListingMode, i64, u16, bool, u16),
+    RegisterAnonymous(String, CommandId, ListingMode, i64, u16),
+    AnonymousCommand(CommandId),
     Reprice(UserId, CommandId, Uuid, u64, i64, bool),
     Withdraw(UserId, CommandId, Uuid, u64),
 }
@@ -110,6 +114,7 @@ pub(super) struct Backend {
     pub(super) public: Option<PublicListingDetail>,
     pub(super) owned: Option<OwnedListingRecord>,
     pub(super) command: Option<OwnedListingCommandReceipt>,
+    pub(super) anonymous: Option<AnonymousRegistrationReceipt>,
     pub(super) return_wrong_command_id: bool,
     pub(super) read_error: Option<ConsignmentError>,
     pub(super) command_outcome: Mutex<WriteOutcome>,
@@ -130,6 +135,7 @@ impl Default for Backend {
             public: None,
             owned: None,
             command: None,
+            anonymous: None,
             return_wrong_command_id: false,
             read_error: None,
             command_outcome: Mutex::default(),
@@ -223,11 +229,10 @@ impl PublicListingRead for Backend {
 
     fn anonymous_command(
         &self,
-
-        _command_id: CommandId,
-    ) -> ConsignmentFuture<'_, Option<auction_application::consignment::AnonymousRegistrationReceipt>>
-    {
-        Box::pin(async { Err(ConsignmentError::Unavailable) })
+        command_id: CommandId,
+    ) -> ConsignmentFuture<'_, Option<AnonymousRegistrationReceipt>> {
+        self.record(Call::AnonymousCommand(command_id));
+        self.read(self.anonymous.clone().filter(|receipt| receipt.command.command_id == command_id))
     }
 
     fn registration_availability<'a>(
@@ -297,20 +302,24 @@ impl ListingCommandStore for Backend {
         _sealer: Option<&'a dyn EquipmentKeySealerPort>,
         _crypto: Option<&'a dyn RegistrationReplayCrypto>,
     ) -> ConsignmentFuture<'a, ListingCommandOutcome<ListingRegistered>> {
-        self.record(Call::Register(
-            match command.input.seller {
-                auction_application::consignment::RegistrationSeller::Account(seller) => seller,
-                auction_application::consignment::RegistrationSeller::GameName(_) => {
-                    panic!("账户登记夹具不接收匿名登记")
-                }
-            },
-            command.command_id,
-            command.input.mode,
-            command.input.price.value(),
-            command.input.expected_fee_bps.value(),
-            command.policy.enabled,
-            command.policy.consigned_fee_bps.value(),
-        ));
+        self.record(match command.input.seller {
+            RegistrationSeller::Account(seller) => Call::Register(
+                seller,
+                command.command_id,
+                command.input.mode,
+                command.input.price.value(),
+                command.input.expected_fee_bps.value(),
+                command.policy.enabled,
+                command.policy.consigned_fee_bps.value(),
+            ),
+            RegistrationSeller::GameName(name) => Call::RegisterAnonymous(
+                name.as_str().to_owned(),
+                command.command_id,
+                command.input.mode,
+                command.input.price.value(),
+                command.input.expected_fee_bps.value(),
+            ),
+        });
         self.request_ids.lock().expect("命令请求号").push(command.request_id);
         if matches!(self.outcome(), WriteOutcome::Accepted)
             && command.policy.enabled

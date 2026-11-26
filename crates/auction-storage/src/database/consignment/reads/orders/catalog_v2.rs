@@ -30,7 +30,7 @@ use crate::database::consignment::reads::{page_order, snapshot, storage_error, u
 
 const COLUMNS: &str = "SELECT l.id, l.world_id, l.external_equipment_id, l.state_version, l.state,
         l.mode, l.price, l.updated_at, l.expires_at, COALESCE(l.seller_game_name, s.username) AS seller_name,
-        pos.current_generation AS generation,
+        l.seller_user_id IS NOT NULL AS seller_verified, pos.current_generation AS generation,
         p.name, p.category, p.alt_name, p.level_kind, p.level_number, p.tradeable, p.observed_at";
 
 /// 世界的购买能力门（R5-C10）：验证器已签收 ∧ 收件协议就绪 ∧ 资金账户就绪 ∧ 季态可购。
@@ -182,6 +182,7 @@ fn entry(
         price: ListingPrice::new(row.try_get("price").map_err(storage_error)?)
             .map_err(unavailable)?,
         seller_name: row.try_get("seller_name").map_err(storage_error)?,
+        seller_verified: row.try_get("seller_verified").map_err(storage_error)?,
         updated_at: row.try_get("updated_at").map_err(storage_error)?,
         expires_at: row.try_get("expires_at").map_err(storage_error)?,
         generation: generation.map(i64::cast_unsigned),

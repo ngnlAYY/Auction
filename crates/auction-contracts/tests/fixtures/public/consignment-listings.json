@@ -17,6 +17,7 @@
         },
         "price": 101,
         "seller_name": "FixtureSeller",
+        "seller_verified": true,
         "updated_at": "2026-11-20T18:10:00Z",
         "expires_at": "2026-11-27T18:10:00Z",
         "purchasable": false
@@ -36,6 +37,7 @@
         },
         "price": 101,
         "seller_name": "FixtureSeller",
+        "seller_verified": true,
         "updated_at": "2026-11-20T18:10:00Z",
         "expires_at": "2026-12-20T18:10:00Z",
         "purchasable": false

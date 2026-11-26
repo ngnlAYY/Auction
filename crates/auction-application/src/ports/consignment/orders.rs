@@ -307,6 +307,8 @@ pub struct PublicCatalogEntryV2 {
     pub price: ListingPrice,
     /// 卖家名。
     pub seller_name: String,
+    /// 卖家经站内账户登记；匿名非寄售挂单为否，卖家名是未经验证的自填游戏名。
+    pub seller_verified: bool,
     /// 最近持久变化。
     pub updated_at: Timestamp,
     /// 本态截止。
