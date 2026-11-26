@@ -236,6 +236,7 @@ const SOURCES = new Set(
   [
     "./registration.tsx",
     "./owned.tsx",
+    "./orders.tsx",
     "./owned-detail.tsx",
     "./private-page.tsx",
     "./pending-view.tsx",
@@ -308,7 +309,12 @@ export async function mountPrivate(
   );
   // 先完成测试模块的初始加载，路由出口仍经生产加载器挂载页面。
   await Promise.all(
-    ["ConsignmentRegistration", "ConsignmentMine", "ConsignmentOwnedDetail"].map((name) => {
+    [
+      "ConsignmentRegistration",
+      "ConsignmentMine",
+      "ConsignmentOrders",
+      "ConsignmentOwnedDetail",
+    ].map((name) => {
       const route = PUBLIC_PAGES[name];
       if (route?.kind !== "lazy") throw new Error(`本人寄售路由未懒加载：${name}`);
       return route.load();

@@ -3,6 +3,7 @@
 import { expect, test } from "bun:test";
 import type { ListingView } from "@auction/contracts/dto/public/consignment";
 
+import { buyerOrder } from "./order-fixture.test";
 import {
   ALICE,
   BOB,
@@ -159,6 +160,51 @@ test.each([
   } finally {
     page.dispose();
     transport.restore();
+  }
+});
+
+test("本人挂单分页条显示条目范围，没有挂单时显示 0 项", async () => {
+  for (const [total, pageNumber, text] of [
+    [91, 2, "21–40 / 91 items"],
+    [0, 1, "0–0 / 0 items"],
+  ] as const) {
+    const transport = fakeFetch(({ url }) =>
+      response(pageData(url, total === 0 ? [] : [listing("resolving")], total)),
+    );
+    const page = await mountPrivate(`${MINE}?consignment_page=${pageNumber}`);
+    try {
+      await settle();
+      const range = page.find((node) => node.attributes.class === "ui-pager__range");
+      expect(DOMText(range)).toBe(text);
+    } finally {
+      page.dispose();
+      transport.restore();
+    }
+  }
+});
+
+test("本人订单分页条显示条目范围，没有订单时显示 0 项", async () => {
+  for (const [total, items, text] of [
+    [1, [buyerOrder()], "1–1 / 1 items"],
+    [0, [], "0–0 / 0 items"],
+  ] as const) {
+    const transport = fakeFetch(({ url }) =>
+      response({
+        items,
+        total,
+        page: Number(url.searchParams.get("page")),
+        page_size: Number(url.searchParams.get("page_size")),
+      }),
+    );
+    const page = await mountPrivate("/consignment/orders");
+    try {
+      await settle();
+      const range = page.find((node) => node.attributes.class === "ui-pager__range");
+      expect(DOMText(range)).toBe(text);
+    } finally {
+      page.dispose();
+      transport.restore();
+    }
   }
 });
 

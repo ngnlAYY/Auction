@@ -261,6 +261,13 @@ function OrderPager(props: {
       nextLabel={t("catalog-next")}
       jumpLabel={t("pagination-jump")}
       jumpButtonLabel={t("catalog-page-go")}
+      rangeSummary={(value) =>
+        t("pagination-range", {
+          start: String(value[0]),
+          end: String(value[1]),
+          total: String(value[2]),
+        })
+      }
       pageSizeOptions={PUBLIC_PAGE_SIZES}
       pageSizeLabel={t("pagination-size")}
       pageSizeOptionLabel={(count) => t("pagination-size-option", { count: String(count) })}
