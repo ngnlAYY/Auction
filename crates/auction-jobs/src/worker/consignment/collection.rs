@@ -12,7 +12,8 @@
 //! - 全部幂等：证据按尝试、类别与远端观察身份去重；认证与确领的命令 ID 只由原义务与原投递 / 原轮决定，重放、
 //!   重启与并发 Worker 只读原结果；已记录的已签收证据直接复用，不重读远端。待办与进度全部持久在数据库；一次扫描
 //!   内按 `(started_at, attempt_id)` 键集分页走完全部待办，游标只活在本次扫描里，不跨轮、不作为任何事实来源。
-//! - 读不到、未领取或证据不足（写口按临时缺证回滚）都照旧等待，不改事实；严格现金认证缺新鲜现金观察时不认证。
+//! - 读不到、未领取或证据不足（写口按临时缺证回滚）都照旧等待，不改事实；严格现金认证缺同 UID
+//!   新鲜现金观察时不认证（观察由 Worker 适配器经内部证据入口取得，绑定本次起写尝试）。
 //! - 外部访问暂停时不读远端（含现金观察）；只用已落库证据的推进照常。寄售关闭时有存量照常运行（续办已成交订单）。
 //!
 //! 日志只记错误码，不含收件人、主题、装备或 Sent MID。
@@ -90,9 +91,11 @@ pub trait CollectionObserver: Send + Sync {
         pending: &'a PendingCollection,
     ) -> ConsignmentFuture<'a, CollectionRead>;
 
-    /// 严格现金认证所需的新鲜 main 现金观察（认证 UID 必须等于 `uid`）；取不到返回 `None`，不认证。
+    /// 严格现金认证所需的新鲜 main 现金观察（认证 UID 必须等于 `uid`，证据绑定 `item` 的起写尝试）；
+    /// 取不到返回 `None`，不认证。
     fn fresh_main_cash<'a>(
         &'a self,
+        item: &'a PendingCollection,
         uid: &'a str,
     ) -> ConsignmentFuture<'a, Option<FreshCashObservation>>;
 }
@@ -246,7 +249,7 @@ impl CollectionRuntime {
                 if (self.paused)() {
                     return Ok(None);
                 }
-                match self.observer.fresh_main_cash(&facts.receipt.uid).await {
+                match self.observer.fresh_main_cash(item, &facts.receipt.uid).await {
                     Ok(Some(cash)) => Some(cash),
                     Ok(None) => return Ok(None),
                     Err(error) => {

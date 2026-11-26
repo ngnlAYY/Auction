@@ -18,6 +18,7 @@ use auction_application::core::ApplicationFuture;
 use auction_application::core::diagnostics::DiagnosticError;
 use auction_application::mail::{DispositionMaintenanceService, QuarantineRecheckService};
 use auction_application::runtime_switches::RuntimeSwitches;
+use auction_application::settlement::SettlementInternalEvidenceReader;
 use auction_config::{AppConfig, DataKeyDomain};
 use auction_domain::consignment::ConsignmentCalendar;
 use auction_integrations::{
@@ -279,6 +280,7 @@ pub(super) async fn attach_loops(
         mail: Arc::clone(&mail.notices),
         disposition: transport,
         clock: Arc::new(SystemClock),
+        evidence: Arc::clone(&mail.evidence_gateway) as Arc<dyn SettlementInternalEvidenceReader>,
         worker_id: worker_id.to_owned(),
         lease_duration,
         paused,

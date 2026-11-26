@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use auction_application::consignment::{DispatchService, DispatchWorkStore, ReturnService};
 use auction_application::core::Clock;
+use auction_application::settlement::SettlementInternalEvidenceReader;
 use auction_integrations::mooglemail::MoogleMailDeliveryTransport;
 use auction_jobs::consignment::{
     COLLECTION_PAGE_SIZE, CollectionRuntime, ConsignmentDispatchRuntime, DownstreamRoundRuntime,
@@ -40,6 +41,8 @@ pub struct ExecutorInputs {
     pub disposition: Arc<MoogleMailConsignmentTransport>,
     /// 时刻来源。
     pub clock: Arc<dyn Clock>,
+    /// 内部证据入口：Worker 已装配的同一个 MoogleMailGateway（严格现金收款认证读 main 现金）。
+    pub evidence: Arc<dyn SettlementInternalEvidenceReader>,
     /// 当前 Worker 实例名。
     pub worker_id: String,
     /// 每次领取的持久租约时长（也作写前准备的外部截止）。
@@ -66,8 +69,16 @@ pub struct ExecutorRuntimes {
 
 /// 装配派发、补寄、退件 Take 三个 executor 与订单复核消费端。
 pub fn executor_runtimes(inputs: ExecutorInputs) -> ExecutorRuntimes {
-    let ExecutorInputs { store, mail, disposition, clock, worker_id, lease_duration, paused } =
-        inputs;
+    let ExecutorInputs {
+        store,
+        mail,
+        disposition,
+        clock,
+        evidence,
+        worker_id,
+        lease_duration,
+        paused,
+    } = inputs;
     // 补寄新轮在存储备好事务里渲染，内容来源与 Public 购买冻结首轮是同一实现。
     let work: Arc<dyn DispatchWorkStore> = Arc::new(DispatchWorkRepository::new(
         store.as_ref().clone(),
@@ -115,6 +126,7 @@ pub fn executor_runtimes(inputs: ExecutorInputs) -> ExecutorRuntimes {
         observer: Arc::new(MoogleMailCollectionObserver {
             transport: mail.clone(),
             clock: clock.clone(),
+            evidence,
         }),
         service: service.clone(),
         funding: store.clone(),

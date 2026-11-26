@@ -45,6 +45,8 @@ pub(super) struct MailControlRemoteReads {
     /// 寄售权利通知的纯文本发信入口；与 delivery 循环是同一 transport 实例，凭据独占锁与发送器
     /// 状态只有一份，不为通知另建第二套写入通道。
     pub(super) notices: Arc<MoogleMailDeliveryTransport>,
+    /// 内部证据入口：与 `notices` 的现金证据入口是同一个 gateway 实例（寄售严格现金收款认证读 main 现金）。
+    pub(super) evidence_gateway: Arc<MoogleMailGateway>,
 }
 
 /// 根据 Worker 配置装配 MoogleMail 轮询、业务处理、delivery 和履约证据读取端口。
@@ -186,6 +188,7 @@ pub(super) async fn configure_mail_poll(
         fetch_timeout: std::time::Duration::from_secs(mail_config.fetch_timeout_seconds),
         credential_check,
         notices,
+        evidence_gateway: Arc::clone(&gateway),
     };
     let inventory_reader: Arc<dyn auction_application::reconciliation::AssetInventoryReader> =
         Arc::new(super::fulfillment::MoogleMailAssetInventoryReader { gateways: gateways.clone() });

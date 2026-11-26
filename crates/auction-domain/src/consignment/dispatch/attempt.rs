@@ -8,6 +8,7 @@ use super::errors::DispatchRuleError;
 use crate::{SettlementWorld, legacy_natural_key_uuid};
 
 const DISPATCH_ATTEMPT_NAMESPACE: &str = "consignment.dispatch-attempt.v1";
+const COLLECTION_ATTEMPT_NAMESPACE: &str = "consignment.collection-attempt.v1";
 const FROZEN_IDENTITY_DOMAIN: &[u8] = b"consignment.dispatch-identity.v1\0";
 
 /// 尝试的唯一键：`UNIQUE(delivery, fence)`。
@@ -23,6 +24,15 @@ pub struct AttemptKey {
 pub fn dispatch_attempt_id(key: &AttemptKey) -> Uuid {
     legacy_natural_key_uuid(
         DISPATCH_ATTEMPT_NAMESPACE,
+        &[key.delivery_id.as_bytes(), &key.fence.to_be_bytes()],
+    )
+}
+
+/// 收款认证的现金证据操作 ID：由尝试确定性派生，且与派发现金证据的 [`dispatch_attempt_id`] 不同，
+/// 两类证据不会共用同一操作身份；字节冻结。
+pub fn collection_attempt_id(key: &AttemptKey) -> Uuid {
+    legacy_natural_key_uuid(
+        COLLECTION_ATTEMPT_NAMESPACE,
         &[key.delivery_id.as_bytes(), &key.fence.to_be_bytes()],
     )
 }
