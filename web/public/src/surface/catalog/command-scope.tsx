@@ -140,6 +140,9 @@ export function CatalogCommandScope(props: {
   readonly userId: string | null;
   readonly auction: CurrentAuctionItemResponse | null;
   readonly auctionInvalid: boolean;
+  /** 目标是否必须与地址栏的世界与场次一致；缺省一致（看板）。“我的”页的查看抽屉不在看板地址上，
+   * 目标由抽屉自己的拍品固定，传 false 只比较弹窗打开时的场次。 */
+  readonly followsPageQuery?: boolean;
   readonly children: JSX.Element;
 }): JSX.Element {
   const dialog = createCell<CommandDialogInput | null>(null);
@@ -167,6 +170,7 @@ export function CatalogCommandScope(props: {
                     dialog={dialog}
                     auction={props.auction}
                     auctionInvalid={props.auctionInvalid}
+                    followsPageQuery={props.followsPageQuery !== false}
                   />
                 )}
               </Show>
@@ -184,6 +188,7 @@ function CatalogCommandDialog(props: {
   readonly dialog: Cell<CommandDialogInput | null>;
   readonly auction: CurrentAuctionItemResponse | null;
   readonly auctionInvalid: boolean;
+  readonly followsPageQuery: boolean;
 }): JSX.Element {
   const input = () => props.input;
   const refreshGeneration = useContext(PublicRefreshGenerationContext);
@@ -197,6 +202,14 @@ function CatalogCommandDialog(props: {
   const openedAuction = props.auction;
   // popstate 已改地址时，不能用新场次或世界替换打开弹窗时的目标。
   const targetAllowsBid = () => {
+    if (!props.followsPageQuery) {
+      return (
+        !props.auctionInvalid &&
+        openedAuction !== null &&
+        props.auction?.id === openedAuction.id &&
+        props.auction.world === openedAuction.world
+      );
+    }
     const query = readPublicQuery();
     const selected = queryAuctionId(query);
     return (

@@ -118,14 +118,14 @@ function AccountPreferenceScope(props: { readonly userId: string }): JSX.Element
 
 /** 整组只读列表以账号隔离；换号时同时重建标记及竞价读取，避免复用另一账号的快照。 */
 function AccountReadScope(props: { readonly userId: string }): JSX.Element {
-  // 标记、出价与代理三张列表共用一个只读详情抽屉；宿主在各自的读取分支之外，
+  // 标记、出价与代理三张列表共用一个详情抽屉（带出价入口）；宿主在各自的读取分支之外，
   // 换页或重读进入加载分支时已打开的抽屉不被卸载。
   const lookup = useLotDetailLookup();
   return (
     <LotDetailLookupContext value={lookup}>
       <CurrentWatches userId={props.userId} />
       <AuthenticatedAccountData userId={props.userId} />
-      <LotDetailLookupHost lookup={lookup} />
+      <LotDetailLookupHost lookup={lookup} userId={props.userId} />
     </LotDetailLookupContext>
   );
 }

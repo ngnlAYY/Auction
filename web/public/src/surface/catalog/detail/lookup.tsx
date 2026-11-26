@@ -1,6 +1,6 @@
 // 目录之外按拍品 ID 打开的只读详情抽屉：账户页这类列表只有拍品 ID，没有目录行快照。
-// 先读取拍品详情，就绪后才渲染抽屉，避免空外壳滑入后再换内容；抽屉不带出价与标记入口，
-// 出价资格仍只由目录操作栏在拍卖作用域内判定。
+// 先读取拍品详情，就绪后才渲染抽屉，避免空外壳滑入后再换内容；抽屉不带标记入口。出价入口
+// 只在宿主声明了账号（`userId`）时提供，资格与命令仍复用目录的判定与命令作用域（见 lookup-bid.tsx）。
 
 import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createCell } from "@auction/web-shared/reactive/cell";
@@ -33,6 +33,7 @@ import { CatalogActionIcon } from "../actions";
 import type { CatalogDetailBid, DetailWorld } from ".";
 import { catalogDetailBidDefault } from ".";
 import { CatalogDetailDrawer } from "./drawer";
+import { LookupBiddingDrawer } from "./lookup-bid";
 import type { LotViewRequest, LotViewTarget } from "./lot-view";
 
 /** 一次查看请求指向的拍品。`auctionId` 用于抽屉内的竞价历史读取；`world` 是入口已知的
@@ -191,8 +192,12 @@ export function LotDetailLookupButton(props: {
   );
 }
 
-/** 只读详情抽屉的宿主。切换拍品或离开深链条目时，卸载读取任务并丢弃展示。 */
-export function LotDetailLookupHost(props: { readonly lookup: LotDetailLookup }): JSX.Element {
+/** 详情抽屉的宿主。切换拍品或离开深链条目时，卸载读取任务并丢弃展示。
+ * `userId` 为已确认的账号时抽屉带出价与代理入口，缺省为只读。 */
+export function LotDetailLookupHost(props: {
+  readonly lookup: LotDetailLookup;
+  readonly userId?: string | undefined;
+}): JSX.Element {
   const state = lookupState(props.lookup);
   const currentEntry = useRouter().currentEntryKey;
   createEffect(currentEntry, (entryKey) => {
@@ -222,7 +227,9 @@ export function LotDetailLookupHost(props: { readonly lookup: LotDetailLookup })
           `${current.auctionId}:${current.lotId}:${current.world}:${current.entryKey ?? ""}`
         }
       >
-        {(current) => <LotDetailLookupSession target={current()} lookup={props.lookup} />}
+        {(current) => (
+          <LotDetailLookupSession target={current()} lookup={props.lookup} userId={props.userId} />
+        )}
       </For>
     </>
   );
@@ -278,6 +285,7 @@ function LotDetailFailure(props: { readonly lookup: LotDetailLookup }): JSX.Elem
 function LotDetailLookupSession(props: {
   readonly target: LotDetailTarget;
   readonly lookup: LotDetailLookup;
+  readonly userId?: string | undefined;
 }): JSX.Element {
   const refreshGeneration = useContext(PublicRefreshGenerationContext);
   const state = lookupState(props.lookup);
@@ -341,6 +349,19 @@ function LotDetailLookupSession(props: {
   return (
     <Show when={shown()?.row}>
       {(row) => {
+        const userId = props.userId;
+        // 带账号的宿主整个生命周期都走同一棵树：拍品状态变化只改变出价入口，不重建抽屉。
+        if (userId !== undefined) {
+          return (
+            <LookupBiddingDrawer
+              userId={userId}
+              auctionId={props.target.auctionId}
+              row={row()}
+              world={world()}
+              onClose={() => state.set({ kind: "closed" })}
+            />
+          );
+        }
         return (
           <CatalogDetailDrawer
             auctionId={props.target.auctionId}
