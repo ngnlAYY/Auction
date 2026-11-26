@@ -441,6 +441,7 @@ session-error = セッションサービスを一時的に利用できません�
 session-lock-unavailable = 今回のセッション更新リクエストは送信されていません。Web Locks に対応したブラウザーで HTTPS または localhost を使用してください。
 session-lock-timeout = 今回のセッション更新リクエストは送信されていません。別のタブのセッション操作の待機がタイムアウトしました。しばらくしてから再試行してください。
 session-menu-label = アカウントセッション
+session-menu-consignment = 委託販売情報
 session-login = ログイン
 logout = ログアウト
 logout-error = ログアウトを確認できませんでした。現在のログイン状態を確認してから再試行してください。

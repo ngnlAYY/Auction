@@ -441,6 +441,7 @@ session-error = 会话服务暂时不可用。
 session-lock-unavailable = 本次会话更新请求未发送。请通过 HTTPS 或 localhost 使用支持 Web Locks 的浏览器。
 session-lock-timeout = 本次会话更新请求未发送。等待其他标签页的会话操作超时，请稍后重试。
 session-menu-label = 账户会话
+session-menu-consignment = 寄售信息
 session-login = 登录
 logout = 退出登录
 logout-error = 未能确认已退出。请核对当前会话后重试。

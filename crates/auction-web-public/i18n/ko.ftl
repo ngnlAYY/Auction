@@ -441,6 +441,7 @@ session-error = 세션 서비스를 일시적으로 사용할 수 없습니다.
 session-lock-unavailable = 이번 세션 변경 요청은 전송되지 않았습니다. Web Locks를 지원하는 브라우저에서 HTTPS 또는 localhost를 사용하세요.
 session-lock-timeout = 이번 세션 변경 요청은 전송되지 않았습니다. 다른 탭의 세션 작업을 기다리다 시간이 초과되었습니다. 잠시 후 다시 시도하세요.
 session-menu-label = 계정 세션
+session-menu-consignment = 위탁 판매 정보
 session-login = 로그인
 logout = 로그아웃
 logout-error = 로그아웃을 확인하지 못했어요. 현재 로그인 상태를 확인한 뒤 다시 시도해 주세요.

@@ -441,6 +441,7 @@ session-error = 工作階段服務暫時無法使用。
 session-lock-unavailable = 本次工作階段更新請求尚未送出。請透過 HTTPS 或 localhost 使用支援 Web Locks 的瀏覽器。
 session-lock-timeout = 本次工作階段更新請求尚未送出。等候其他分頁的工作階段操作逾時，請稍後重試。
 session-menu-label = 帳戶工作階段
+session-menu-consignment = 寄售資訊
 session-login = 登入
 logout = 登出
 logout-error = 未能確認已登出。請核對目前的工作階段後重試。

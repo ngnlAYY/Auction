@@ -442,6 +442,7 @@ session-error = The session service is temporarily unavailable.
 session-lock-unavailable = This session-changing request was not sent. Use HTTPS or localhost in a browser that supports Web Locks.
 session-lock-timeout = This session-changing request was not sent. Waiting for another tab's session operation timed out; wait and retry.
 session-menu-label = Account session
+session-menu-consignment = Consignment
 session-login = Log in
 logout = Log out
 logout-error = Sign-out could not be confirmed. Check your current session and try again.
