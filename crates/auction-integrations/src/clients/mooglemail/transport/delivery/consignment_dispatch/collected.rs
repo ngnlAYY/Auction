@@ -191,9 +191,14 @@ fn receipt_matches_target(
     let mut credits = Vec::new();
     let mut equipment = Vec::new();
     for marker in removed {
-        match marker.name.strip_suffix(" Credits").and_then(parse_canonical_credits) {
+        let Some(amount) = marker.name.strip_suffix(" Credits") else {
+            equipment.push(marker);
+            continue;
+        };
+        // 以 Credits 结尾却不是规范金额或带 EID：回执形状不清，失败关闭（不变量 6），不当作装备计数。
+        match parse_canonical_credits(amount) {
             Some(amount) if marker.canonical_eid.is_none() => credits.push(amount),
-            _ => equipment.push(marker),
+            _ => return false,
         }
     }
     let credits_ok =
@@ -354,20 +359,21 @@ mod tests {
         }
     }
 
-    /// 回执与冻结值逐项核对：装备条数或 EID 不符、COD 金额不符或缺失、Credits 多余或不等、原正文摘要不符，都不认。
+    /// 回执与冻结值逐项核对：装备条数或 EID 不符、COD 金额不符或缺失、Credits 多余、不等或金额格式不符、原正文摘要不符，都不认。
     #[test]
     fn receipt_items_must_match_the_frozen_target() {
-        let cases: [(Vec<RemovedMarker>, Option<i64>); 7] = [
+        let cases: [(Vec<RemovedMarker>, Option<i64>); 8] = [
             (vec![], Some(100)),
             (vec![marker("Fake Shoes", Some("43"))], Some(100)),
             (vec![marker("Fake Shoes", Some("42")), marker("Fake Hat", None)], Some(100)),
             (vec![marker("Fake Shoes", Some("42"))], Some(99)),
             (vec![marker("Fake Shoes", Some("42"))], None),
             (vec![marker("Fake Shoes", Some("42")), marker("5 Credits", None)], Some(100)),
+            (vec![marker("49,00 Credits", None)], Some(100)),
             (vec![marker("Fake Shoes", None)], Some(100)),
         ];
-        let name_only_case = cases[6].clone();
-        for (removed, cod) in cases.into_iter().take(6) {
+        let name_only_case = cases[7].clone();
+        for (removed, cod) in cases.into_iter().take(7) {
             let mut seen = receipted();
             set_receipt(&mut seen, removed, cod);
             assert_eq!(classify(&target(), &seen), ConsignmentCollection::Unavailable);
