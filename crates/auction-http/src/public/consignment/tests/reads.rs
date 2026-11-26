@@ -69,6 +69,7 @@ fn detail(consigned: bool) -> PublicListingDetail {
             level,
             price: price(101),
             seller_name: "FixtureSeller".to_owned(),
+            seller_verified: true,
             updated_at: observed_at,
             expires_at: time(expires),
         },

@@ -17,7 +17,7 @@ use crate::ports::consignment::commands::{
     ListingClosed, ListingCommandOutcome, ListingCommandRejection, ListingCommandStore,
     ListingDelistReason, ListingOperation, ListingPriceDisposition, ListingPriceReceipt,
     ListingRegistered, ListingRegistrationPolicy, OwnedListingDecision, RegisterListingCommand,
-    RegistrationInput, StoredListingDecision,
+    RegistrationInput, RegistrationSeller, StoredListingDecision,
 };
 use crate::ports::consignment::equipment::{
     ListingCredentialError, ListingEquipmentDetails, ListingEquipmentLabel, ListingEquipmentLevel,
@@ -961,7 +961,7 @@ fn terminal_projections_require_tradeable_published_snapshots() {
         let owned = OwnedListingRecord::new(listing.clone(), vec![]).fixture();
         let admin = AdminListingRecord::new(
             listing,
-            UserId::from_uuid(Uuid::from_u128(10)),
+            Some(UserId::from_uuid(Uuid::from_u128(10))),
             "测试卖家".to_owned(),
             None,
             false,
@@ -1015,7 +1015,7 @@ fn terminal_projections_cannot_expose_write_actions() {
         let owned = OwnedListingRecord::new(listing.clone(), vec![action]);
         let admin = AdminListingRecord::new(
             listing.clone(),
-            UserId::from_uuid(Uuid::from_u128(10)),
+            Some(UserId::from_uuid(Uuid::from_u128(10))),
             "测试卖家".to_owned(),
             None,
             true,
@@ -1039,7 +1039,7 @@ fn terminal_projections_cannot_expose_write_actions() {
             assert!(
                 !AdminListingRecord::new(
                     listing,
-                    UserId::from_uuid(Uuid::from_u128(10)),
+                    Some(UserId::from_uuid(Uuid::from_u128(10))),
                     "测试卖家".to_owned(),
                     None,
                     false,
@@ -1091,6 +1091,7 @@ fn registration_fake_records_every_policy_field() {
         consigned_fee_bps: FeeBps::DEFAULT_CONSIGNED,
         max_open_per_user: 20,
         registrations_per_hour: 10,
+        anonymous_resolving_limit: 50,
     };
     let policies = [
         baseline,
@@ -1111,9 +1112,9 @@ fn registration_fake_records_every_policy_field() {
         commands.register.reply(Err(ConsignmentError::OutcomeUnknown));
         let command = RegisterListingCommand {
             command_id: CommandId::from_uuid(CLIENT_COMMAND_ID),
-            seller_user_id: UserId::from_uuid(Uuid::from_u128(10)),
             request_id: None,
             input: RegistrationInput {
+                seller: RegistrationSeller::Account(UserId::from_uuid(Uuid::from_u128(10))),
                 identity: &identity,
                 key: &key,
                 mode: ListingMode::Consigned,
@@ -1155,9 +1156,9 @@ fn scripted_ports_report_calls_and_preserve_unknown_outcomes() {
     let reference = equipment.validate("https://example.invalid/fixture").fixture();
     let registration = || RegisterListingCommand {
         command_id,
-        seller_user_id,
         request_id: None,
         input: RegistrationInput {
+            seller: RegistrationSeller::Account(seller_user_id),
             identity: &reference.identity,
             key: &reference.key,
             mode: ListingMode::Direct,
@@ -1174,6 +1175,7 @@ fn scripted_ports_report_calls_and_preserve_unknown_outcomes() {
             consigned_fee_bps: FeeBps::DEFAULT_CONSIGNED,
             max_open_per_user: 20,
             registrations_per_hour: 10,
+            anonymous_resolving_limit: 50,
         },
     };
     commands.register.reply(Err(ConsignmentError::OutcomeUnknown));
@@ -1194,7 +1196,7 @@ fn scripted_ports_report_calls_and_preserve_unknown_outcomes() {
     let calls = commands.register.take_calls();
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0].command_id, calls[1].command_id);
-    assert_eq!(calls[1].seller_user_id, seller_user_id);
+    assert_eq!(calls[1].seller_user_id, Some(seller_user_id));
     assert!(calls[0].sealer);
     assert!(!calls[1].sealer);
     assert!(calls[1].replay_crypto);

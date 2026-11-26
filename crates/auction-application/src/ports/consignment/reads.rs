@@ -264,8 +264,10 @@ pub struct PublicListingSummary {
     pub level: crate::ports::consignment::equipment::ListingEquipmentLevel,
     /// 标价。
     pub price: ListingPrice,
-    /// 当前本站卖家游戏名。
+    /// 当前本站卖家游戏名；匿名挂单为登记人自填的名称。
     pub seller_name: String,
+    /// 卖家经站内账户登记；匿名非寄售挂单为否，展示为“卖家自填、未验证”。
+    pub seller_verified: bool,
     /// 最后一次持久变化。
     pub updated_at: Timestamp,
     /// 本态截止。
@@ -352,9 +354,9 @@ impl OwnedListingRecord {
 pub struct AdminListingRecord {
     /// 管理员可读的挂单共同事实。
     listing: PrivateListing,
-    /// 真正的本地卖家。
-    pub seller_user_id: UserId,
-    /// 当前本站卖家名。
+    /// 真正的本地卖家；匿名非寄售挂单没有本站账户。
+    pub seller_user_id: Option<UserId>,
+    /// 当前本站卖家名；匿名挂单为登记人自填的名称。
     pub seller_name: String,
     /// 仅运营会话可查看的下架说明。
     pub admin_delist_reason: Option<ListingDelistReason>,
@@ -366,7 +368,7 @@ impl AdminListingRecord {
     /// 不变量 6：有效终态不得提供运营下架动作。
     pub fn new(
         listing: PrivateListing,
-        seller_user_id: UserId,
+        seller_user_id: Option<UserId>,
         seller_name: String,
         admin_delist_reason: Option<ListingDelistReason>,
         can_delist: bool,
@@ -408,6 +410,15 @@ pub struct AdminListingDetail {
     pub conflicts_truncated: bool,
 }
 
+/// 匿名登记的原决定及挂单当前事实。
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnonymousRegistrationReceipt {
+    /// 账本中的原登记决定。
+    pub command: OwnedListingCommandReceipt,
+    /// 受理后挂单的当前状态与原因；被拒绝的登记没有挂单。
+    pub listing: Option<PrivateListing>,
+}
+
 /// 匿名公开读，缺少依赖时返回错误而非空目录。
 pub trait PublicListingRead: Send + Sync {
     /// 公开行和总数均使用 §4.2 的完整可见性谓词。
@@ -426,6 +437,13 @@ pub trait PublicListingRead: Send + Sync {
         &'a self,
         replay_crypto: &'a dyn RegistrationReplayCrypto,
     ) -> ConsignmentFuture<'a, ListingRegistrationAvailability>;
+
+    /// 只读匿名 actor 的登记命令；不可猜测的 UUIDv4 命令号即读取凭据。
+    /// 未读取到行不证明未知提交已经失败。
+    fn anonymous_command(
+        &self,
+        command_id: CommandId,
+    ) -> ConsignmentFuture<'_, Option<AnonymousRegistrationReceipt>>;
 }
 
 /// 仅从当前已守卫的会话取得卖家 ID，再读取本人历史。

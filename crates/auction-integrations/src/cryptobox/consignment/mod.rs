@@ -15,7 +15,7 @@ use std::hint::black_box;
 
 use auction_application::consignment::{
     ListingCredentialError, ListingEquipmentKeyOpener, ListingRegistrationSecret,
-    RegistrationInput, RegistrationReplayCrypto, RegistrationRequestMac,
+    RegistrationInput, RegistrationReplayCrypto, RegistrationRequestMac, RegistrationSeller,
     WrappedRegistrationReplayKey,
 };
 use auction_domain::{DataKeyDomain, EquipmentKey};
@@ -31,6 +31,7 @@ const REPLAY_KEY_LENGTH: usize = 32;
 const WRAP_PURPOSE: &[u8] = b"auction/consignment/registration-replay-key\0";
 const WRAP_VERSION: u8 = 1;
 const REGISTER_V1: &[u8] = b"auction/consignment/register/v1\0";
+const REGISTER_ANONYMOUS_V1: &[u8] = b"auction/consignment/register-anonymous/v1\0";
 
 impl ListingEquipmentKeyOpener for EquipmentKeyOpener {
     fn open(
@@ -139,20 +140,29 @@ impl LogicalReplayKey {
 
     /// V1 按世界、装备编号、key、模式、标价、预期费率编码；改动即破坏已有账本的登记重放。
     /// 文本按 UTF-8 字节加大端 `u32` 长度前缀，整数按各自值类型的大端定长编码。
+    /// 自填游戏名的匿名登记换用独立前缀，并在 V1 字段之后追加原样名称。
     fn registration_mac(
         &self,
         input: &RegistrationInput<'_>,
     ) -> Result<RegistrationRequestMac, ListingCredentialError> {
         let key = self.hmac_key();
         let mut mac = hmac::Context::with_key(&key);
-        mac.update(REGISTER_V1);
-        // 不变量 1、7：冻结 v1 的字段顺序和编码，直接向 HMAC 喂入借用的凭证。
+        // 不变量 1、7：账户登记冻结 v1 的前缀、字段顺序和编码，直接向 HMAC 喂入借用的凭证；
+        // 匿名登记的独立前缀保证两类请求的 MAC 不会相互冒充。
+        let anonymous_name = match input.seller {
+            RegistrationSeller::Account(_) => None,
+            RegistrationSeller::GameName(name) => Some(name),
+        };
+        mac.update(if anonymous_name.is_some() { REGISTER_ANONYMOUS_V1 } else { REGISTER_V1 });
         update_text(&mut mac, input.identity.world_id().as_bytes())?;
         update_text(&mut mac, input.identity.external_equipment_id().as_bytes())?;
         input.key.with_bytes(|bytes| update_text(&mut mac, bytes)).map_err(unavailable)??;
         update_text(&mut mac, input.mode.as_str().as_bytes())?;
         mac.update(&input.price.value().to_be_bytes());
         mac.update(&input.expected_fee_bps.value().to_be_bytes());
+        if let Some(name) = anonymous_name {
+            update_text(&mut mac, name.as_str().as_bytes())?;
+        }
         let tag = mac.sign();
         let bytes = tag.as_ref().try_into().map_err(unavailable)?;
         Ok(RegistrationRequestMac::new(bytes))

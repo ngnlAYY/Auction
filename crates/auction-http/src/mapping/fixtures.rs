@@ -46,6 +46,7 @@ fn listing(
         updated_at: time(),
         expires_at: time(),
         view,
+        seller_verified: true,
         custody,
     }
     .validated()

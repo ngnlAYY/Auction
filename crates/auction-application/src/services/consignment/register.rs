@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use auction_domain::consignment::{FeeBps, ListingMode, ListingPrice};
+use auction_domain::consignment::{FeeBps, ListingMode, ListingPrice, ListingSellerName};
 use auction_domain::{CommandId, EquipmentId, UserId};
 use uuid::Uuid;
 
@@ -10,7 +10,8 @@ use crate::ports::admin::EquipmentKeySealerPort;
 use crate::ports::consignment::{
     ConsignmentError, ListingCommandStore, ListingEquipmentReference, ListingEquipmentUrlValidator,
     ListingRegistered, ListingRegistrationPolicy, RegisterListingCommand, RegistrationInput,
-    RegistrationReplayCrypto, validate_listing_client_command_id, validate_listing_request_id,
+    RegistrationReplayCrypto, RegistrationSeller, validate_listing_client_command_id,
+    validate_listing_request_id,
 };
 use crate::ports::public::PublicSessionIdentity;
 
@@ -26,6 +27,28 @@ pub struct RegisterListingInput<'a> {
     pub price: i64,
     /// 待领域校验的预期费率。
     pub expected_fee_bps: i64,
+}
+
+/// 未登录登记人的非寄售输入。模式固定为非寄售、费率固定为零，不由请求决定。
+pub struct AnonymousRegisterListingInput<'a> {
+    /// 客户端原命令身份，须为 UUIDv4。
+    pub command_id: CommandId,
+    /// 待领域校验的自填游戏角色名。
+    pub seller_game_name: &'a str,
+    /// 待本地校验的装备链接，含敏感读取凭证。
+    pub equipment_url: &'a str,
+    /// 待领域校验的整型标价。
+    pub price: i64,
+}
+
+/// 两个登记入口共用的、卖家与模式已确定的输入。
+struct RegistrationDraft<'a> {
+    command_id: CommandId,
+    seller: RegistrationSeller<'a>,
+    mode: ListingMode,
+    equipment_url: &'a str,
+    price: i64,
+    expected_fee_bps: i64,
 }
 
 /// 把经认证的登记交给寄售命令账本。
@@ -70,14 +93,50 @@ impl RegisterListingService {
         input: RegisterListingInput<'_>,
         request_id: Option<String>,
     ) -> Result<ListingRegistered, ConsignmentError> {
-        let ListingEquipmentReference { identity, key } =
-            self.validator.validate(input.equipment_url)?;
-        validate_listing_client_command_id(input.command_id)?;
-        if seller.user_id.is_nil() {
+        let draft = RegistrationDraft {
+            command_id: input.command_id,
+            seller: RegistrationSeller::Account(UserId::from_uuid(seller.user_id)),
+            mode: input.mode,
+            equipment_url: input.equipment_url,
+            price: input.price,
+            expected_fee_bps: input.expected_fee_bps,
+        };
+        self.submit(draft, request_id).await
+    }
+
+    /// 未登录登记人的非寄售登记。卖家名只是自填标识，资格、历史门与额度由仓储按名判定。
+    pub async fn register_anonymous(
+        &self,
+        input: AnonymousRegisterListingInput<'_>,
+        request_id: Option<String>,
+    ) -> Result<ListingRegistered, ConsignmentError> {
+        // 不变量 6：名称不规范失败关闭；模式与零费率固定，请求无法借匿名入口登记寄售。
+        let name = ListingSellerName::new(input.seller_game_name)?;
+        let draft = RegistrationDraft {
+            command_id: input.command_id,
+            seller: RegistrationSeller::GameName(&name),
+            mode: ListingMode::Direct,
+            equipment_url: input.equipment_url,
+            price: input.price,
+            expected_fee_bps: i64::from(FeeBps::DIRECT.value()),
+        };
+        self.submit(draft, request_id).await
+    }
+
+    async fn submit(
+        &self,
+        draft: RegistrationDraft<'_>,
+        request_id: Option<String>,
+    ) -> Result<ListingRegistered, ConsignmentError> {
+        let RegistrationDraft { command_id, seller, mode, equipment_url, price, expected_fee_bps } =
+            draft;
+        let ListingEquipmentReference { identity, key } = self.validator.validate(equipment_url)?;
+        validate_listing_client_command_id(command_id)?;
+        if matches!(seller, RegistrationSeller::Account(user_id) if user_id.is_nil()) {
             return Err(ConsignmentError::InvalidListingRequest);
         }
-        let price = ListingPrice::new(input.price)?;
-        let expected_fee_bps = FeeBps::new(input.expected_fee_bps)?;
+        let price = ListingPrice::new(price)?;
+        let expected_fee_bps = FeeBps::new(expected_fee_bps)?;
         validate_listing_request_id(request_id.as_deref())?;
 
         let [listing_id, work_id, aad_uuid, candidate_replay_key_id] =
@@ -86,13 +145,13 @@ impl RegisterListingService {
             return Err(ConsignmentError::Unavailable);
         }
         let command = RegisterListingCommand {
-            command_id: input.command_id,
-            seller_user_id: UserId::from_uuid(seller.user_id),
+            command_id,
             request_id,
             input: RegistrationInput {
+                seller,
                 identity: &identity,
                 key: &key,
-                mode: input.mode,
+                mode,
                 price,
                 expected_fee_bps,
             },

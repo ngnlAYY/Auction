@@ -342,7 +342,7 @@ async fn postgres_v2_reads_are_owner_scoped_and_admin_sees_the_seller_and_hold()
         .await
         .expect("Admin 列表");
     assert_eq!((admin.total, admin.items.len()), (1, 1));
-    assert_eq!(admin.items[0].seller_user_id, fixture.seller);
+    assert_eq!(admin.items[0].seller_user_id, Some(fixture.seller));
     assert_eq!(admin.items[0].listing.custody.hold.map(|found| found.hold_id), Some(hold.hold_id));
     // 本人与 Admin 各看各的动作：卖家只能撤回，运营只能解除止售。
     assert_eq!(record.seller_actions(), vec![SellerAction::Withdraw]);

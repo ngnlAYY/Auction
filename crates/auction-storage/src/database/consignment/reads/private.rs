@@ -198,7 +198,9 @@ fn admin(row: &PgRow, paused: bool) -> Result<AdminListingRecord, ConsignmentErr
     let can_delist = listing.view.effective_state().0.is_active();
     AdminListingRecord::new(
         listing,
-        UserId::from_uuid(row.try_get("seller_user_id").map_err(storage_error)?),
+        row.try_get::<Option<Uuid>, _>("seller_user_id")
+            .map_err(storage_error)?
+            .map(UserId::from_uuid),
         row.try_get("seller_name").map_err(storage_error)?,
         reason,
         can_delist,

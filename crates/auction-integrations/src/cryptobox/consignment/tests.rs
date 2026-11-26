@@ -5,11 +5,13 @@ use std::sync::Arc;
 
 use auction_application::consignment::{
     ListingCredentialError, ListingEquipmentKeyOpener, ListingRegistrationSecret,
-    RegistrationInput, RegistrationReplayCrypto, WrappedRegistrationReplayKey,
+    RegistrationInput, RegistrationReplayCrypto, RegistrationSeller, WrappedRegistrationReplayKey,
 };
 use auction_application::core::lower_hex;
-use auction_domain::consignment::{FeeBps, ListingEquipmentIdentity, ListingMode, ListingPrice};
-use auction_domain::{DataKeyDomain, EquipmentId, EquipmentKey, EquipmentKeyEnvelope};
+use auction_domain::consignment::{
+    FeeBps, ListingEquipmentIdentity, ListingMode, ListingPrice, ListingSellerName,
+};
+use auction_domain::{DataKeyDomain, EquipmentId, EquipmentKey, EquipmentKeyEnvelope, UserId};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use ring::{aead, hmac};
 use uuid::Uuid;
@@ -238,6 +240,7 @@ fn registration_mac_matches_rfc4231_and_the_canonical_input_vector() {
     let identity = ListingEquipmentIdentity::new("isekai", "42").expect("规范 EID");
     let key = EquipmentKey::new("ABCDEF0123").expect("假装备 key");
     let value = RegistrationInput {
+        seller: RegistrationSeller::Account(UserId::from_uuid(REPLAY_ID)),
         identity: &identity,
         key: &key,
         mode: ListingMode::Consigned,
@@ -271,6 +274,30 @@ fn registration_mac_matches_rfc4231_and_the_canonical_input_vector() {
             "{field} 必须参与比较"
         );
     }
+    // 账户登记的 MAC 不含账户 ID，换账户仍是同一冻结向量；匿名登记换前缀并纳入名称。
+    let other_account = RegistrationSeller::Account(UserId::from_uuid(Uuid::from_u128(7)));
+    assert!(
+        tag.matches(
+            &logical
+                .registration_mac(&RegistrationInput { seller: other_account, ..value })
+                .expect("账户 MAC")
+        )
+    );
+    let alice = ListingSellerName::new("Alice").expect("合法名");
+    let bob = ListingSellerName::new("alice").expect("合法名");
+    let anonymous = |name| {
+        logical
+            .registration_mac(&RegistrationInput {
+                seller: RegistrationSeller::GameName(name),
+                ..value
+            })
+            .expect("匿名 MAC")
+    };
+    let alice_tag = anonymous(&alice);
+    assert!(!tag.matches(&alice_tag), "匿名登记不得与账户登记共用 MAC");
+    assert!(alice_tag.matches(&anonymous(&alice)));
+    assert!(!alice_tag.matches(&anonymous(&bob)), "名称原样参与比较");
+
     let mut cleared = EquipmentKey::new("abcdef0123").expect("假凭证");
     cleared.clear();
     assert!(logical.registration_mac(&RegistrationInput { key: &cleared, ..value }).is_err());
@@ -337,6 +364,7 @@ fn replay_rewrap_preserves_mac_when_only_the_new_data_key_is_available() {
     let identity = ListingEquipmentIdentity::new("main", "73").expect("测试装备身份");
     let key = EquipmentKey::new("aabbccddee").expect("假装备 key");
     let input = RegistrationInput {
+        seller: RegistrationSeller::Account(UserId::from_uuid(REPLAY_ID)),
         identity: &identity,
         key: &key,
         mode: ListingMode::Direct,

@@ -1445,7 +1445,7 @@ async fn admin_detail_without_session_is_401_before_business() {
 fn admin_record(listing: PrivateListingV2) -> AdminListingRecordV2 {
     AdminListingRecordV2 {
         listing,
-        seller_user_id: UserId::from_uuid(fixture_uuid(0xfa)),
+        seller_user_id: Some(UserId::from_uuid(fixture_uuid(0xfa))),
         seller_name: "FixtureSeller".to_owned(),
         admin_delist_reason: None,
     }

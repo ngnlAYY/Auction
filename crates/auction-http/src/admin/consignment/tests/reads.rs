@@ -183,7 +183,7 @@ async fn detail_preserves_conflict_order_truncation_and_private_reason() {
     .unwrap();
     let record = AdminListingRecord::new(
         private,
-        SELLER.into(),
+        Some(SELLER.into()),
         "fixture-seller".to_owned(),
         Some(ListingDelistReason::new(REASON.to_owned()).unwrap()),
         false,
@@ -385,7 +385,7 @@ async fn detail_projects_safe_snapshot_and_active_or_terminal_view_variants() {
         port.detail = Ok(Some(AdminListingDetail {
             record: AdminListingRecord::new(
                 private,
-                SELLER.into(),
+                Some(SELLER.into()),
                 "fixture-seller".to_owned(),
                 None,
                 false,

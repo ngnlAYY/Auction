@@ -24,7 +24,8 @@ pub(super) const PRIVATE_COLUMNS: &str = "SELECT l.id, l.world_id, l.external_eq
     l.mode, l.state, l.reason_code, l.state_version, l.price, l.fee_bps, l.pricing_version,
     l.created_at, l.updated_at, l.expires_at, l.current_snapshot_id, effective.forced_reason,
     p.name, p.category, p.alt_name, p.level_kind, p.level_number, p.tradeable, p.observed_at,
-    p.stat_groups, w.attempt_count, w.next_attempt_at, w.last_reason";
+    p.stat_groups, w.attempt_count, w.next_attempt_at, w.last_reason,
+    l.seller_user_id IS NOT NULL AS seller_verified";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
