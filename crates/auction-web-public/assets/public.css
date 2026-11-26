@@ -7,6 +7,14 @@
   display: none;
 }
 
+/* 页面不显示常驻滚动条：详情抽屉等弹层打开时会给 body 加 overflow: hidden 锁定背景滚动，
+ * 滚动条随之消失会让整页横向跳动；隐藏后页面照常滚动。不支持该属性的浏览器保持原外观。 */
+@supports (scrollbar-width: none) {
+  html {
+    scrollbar-width: none;
+  }
+}
+
 /* ===== 壳层：页头 / 导航 / 世界切换 / 连接与会话控件 ===== */
 
 .public-shell {
