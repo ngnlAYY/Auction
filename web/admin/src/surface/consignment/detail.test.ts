@@ -258,6 +258,24 @@ test("待寄详情的已记录状态和有效状态都显示等待寄来装备�
   });
 });
 
+test("免登录挂单没有站内账户：卖家编号处标注自填未验证，账户挂单显示 UUID", async () => {
+  await withDetail(async (tree, mount) => {
+    tree.requests.installFetch([
+      success(adminDetail(adminListing({}, { seller_user_id: null, seller_name: "Fixture Hero" }))),
+    ]);
+    mount();
+    await settle();
+    expect(present(tree, "Fixture Hero")).toBe(true);
+    expect(present(tree, "卖家自填、未验证（无站内账户）")).toBe(true);
+  });
+  await withDetail(async (tree, mount) => {
+    tree.requests.installFetch([success(adminDetail(adminListing()))]);
+    mount();
+    await settle();
+    expect(present(tree, "卖家自填、未验证（无站内账户）")).toBe(false);
+  });
+});
+
 test("有效活动但 admin_actions 为空时仍没有下架入口", async () => {
   await withDetail(async (tree, mount) => {
     tree.requests.installFetch([success(adminDetail(adminListing({}, { admin_actions: [] })))]);

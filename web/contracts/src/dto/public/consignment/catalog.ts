@@ -103,6 +103,7 @@ export const ListingSummarySchema = v.pipe(
     level: EquipmentLevelSchema,
     price: ListingPriceSchema,
     seller_name: v.string(),
+    seller_verified: v.boolean(),
     updated_at: ConsignmentTimestampSchema,
     expires_at: ConsignmentTimestampSchema,
     purchasable: v.literal(false),

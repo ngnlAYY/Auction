@@ -321,7 +321,7 @@ test("非寄售与待寄卡片使用不同告知且待寄没有交易控件", as
   const transport = fakeFetch(({ url }) =>
     url.pathname === STATUS_PATH
       ? response(status(true))
-      : pageResponse(url, [summary(), summary(LISTING_B)]),
+      : pageResponse(url, [{ ...summary(), seller_verified: false }, summary(LISTING_B)]),
   );
   const page = await mountConsignment("/consignment", () =>
     createComponent(ConsignmentCatalog, {}),
@@ -335,7 +335,8 @@ test("非寄售与待寄卡片使用不同告知且待寄没有交易控件", as
       (node) => node.tag === "article" && DOMText(node).includes("Fake Iron Shield"),
     );
     expect(DOMText(direct)).toContain("1,234c");
-    expect(DOMText(direct)).toContain("Fake Seller");
+    expect(DOMText(direct)).toContain("Fake Seller · Self-reported by the seller, not verified");
+    expect(DOMText(deposit)).not.toContain("not verified");
     expect(DOMText(direct)).toContain("Contact the seller in game");
     expect(DOMText(direct)).not.toContain("does not yet hold");
     expect(DOMText(deposit)).toContain("does not yet hold the equipment");

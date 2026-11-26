@@ -2157,6 +2157,7 @@ admin-error-settlement-return-observation-required = 再次领回需要最近一
 # 一口价挂单 · 管理
 consignment-admin-title = 寄售市场管理
 consignment-seller-id = 卖家编号
+consignment-seller-unverified = 卖家自填、未验证（无站内账户）
 consignment-stored-state = 已记录状态
 consignment-effective-state = 当前有效状态
 consignment-collisions = 关联拍卖 lot

@@ -2157,6 +2157,7 @@ admin-error-settlement-return-observation-required = Taking again needs the late
 # 一口价挂单 · 管理
 consignment-admin-title = Consignment market management
 consignment-seller-id = Seller ID
+consignment-seller-unverified = Self-reported, not verified (no site account)
 consignment-stored-state = Stored status
 consignment-effective-state = Effective status
 consignment-collisions = Related auction lots

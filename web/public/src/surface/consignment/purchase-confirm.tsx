@@ -20,7 +20,7 @@ import { purchaseQuote } from "./order-amounts";
 import { orderHref, purchaseErrorKey, purchaseHref } from "./order-labels";
 import { consignmentErrorMessage, PrivateConsignmentPage } from "./private-page";
 import { type PurchasePending, usePurchasePending } from "./purchase-pending";
-import { ConsignmentCapabilityGate, ConsignmentReadNotice } from "./read-view";
+import { ConsignmentCapabilityGate, ConsignmentReadNotice, SellerName } from "./read-view";
 import { useConsignmentRefresh } from "./refresh";
 
 /** 路由 `/consignment/listings/:listing_id/purchase`：认证买家的购买确认页。 */
@@ -165,7 +165,7 @@ function PurchaseSummary(props: {
       <dl class="public-consignment-account__facts">
         <div>
           <dt>{t("consignment-seller")}</dt>
-          <dd>{summary().seller_name}</dd>
+          <SellerName listing={summary()} />
         </div>
         <div>
           <dt>{t("consignment-world")}</dt>

@@ -62,7 +62,8 @@ const DELISTABLE_STATES = new Set([
 
 const ADMIN_LISTING_V2_FIELDS = strictStruct({
   listing: OwnedListingV2Schema,
-  seller_user_id: ConsignmentUuidSchema,
+  // 免登录非寄售挂单没有站内账户。
+  seller_user_id: requiredNullable(ConsignmentUuidSchema),
   seller_name: v.string(),
   admin_delist_reason: requiredNullable(DELIST_REASON),
   hold: requiredNullable(AdminHoldV2Schema),

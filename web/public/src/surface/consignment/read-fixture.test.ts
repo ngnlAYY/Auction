@@ -52,6 +52,7 @@ export function summary(listingId = LISTING_A): ListingSummary {
     level: direct ? { kind: "assigned", value: 42 } : { kind: "unassigned" },
     price: direct ? 1234 : 9999,
     seller_name: direct ? "Fake Seller" : "Fake Trader",
+    seller_verified: true,
     updated_at: TIME,
     expires_at: TIME,
     purchasable: false,

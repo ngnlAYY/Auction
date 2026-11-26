@@ -235,6 +235,8 @@ const NAMESPACE = "private-consignment-render";
 const SOURCES = new Set(
   [
     "./registration.tsx",
+    "./registration-controls.tsx",
+    "./direct-registration.tsx",
     "./owned.tsx",
     "./orders.tsx",
     "./owned-detail.tsx",
