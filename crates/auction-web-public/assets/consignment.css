@@ -96,35 +96,55 @@
   }
 }
 
-/* 目录的名称搜索：外框与拍卖页的分组工具栏同款，输入框、应用按钮与提示沿用成交历史页的样式。 */
+/* 目录的名称搜索：与装备分类同在类型栏一行并停在右端；输入框与应用按钮沿用成交历史页的样式。
+   说明文字只作输入框的无障碍描述（悬停时由 title 提示），不占可见行。 */
 .public-consignment-search {
-  padding: 0.375rem 0.625rem;
-  border: var(--border-width) solid var(--color-border);
-  border-radius: 0.5rem;
-  background: var(--color-surface);
-  box-shadow: var(--shadow-1);
+  position: relative;
+  flex: 0 1 28rem;
+  min-inline-size: 0;
 }
 
 .public-consignment-search .public-history-primary-filters {
-  grid-template-columns: minmax(15rem, 1fr) auto;
+  grid-template-columns: auto minmax(8rem, 1fr) auto;
+  align-items: center;
 }
 
-.public-consignment-search :is(.public-history-name-hint, .public-history-field-error) {
+.public-consignment-search__hint {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.public-consignment-search .public-history-field-error {
   margin-block: var(--space-1) 0;
 }
 
 @media screen and (max-width: 48rem) {
-  /* 与手机上的看板筛选区一致：不画卡片，控件直接落在页面背景上。 */
-  .public-consignment-search {
-    padding: var(--space-2) var(--space-3);
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
+  /* 手机的类型栏是“标签 | 控件 | 按钮”三列网格：表单与控件行不生成盒子，名称标签、输入框与应用按钮
+     直接落进网格，与装备分类一行对齐；错误提示占满整行。 */
+  .public-consignment-search,
+  .public-consignment-search .public-history-primary-filters {
+    display: contents;
   }
 
-  .public-consignment-search .public-history-primary-filters {
-    grid-template-columns: minmax(0, 1fr);
+  .public-consignment-search label {
+    grid-column: 1;
+  }
+
+  .public-consignment-search input {
+    grid-column: 2;
+  }
+
+  .public-consignment-search .public-history-filter-toolbar {
+    grid-column: 3;
+  }
+
+  .public-consignment-search .public-history-field-error {
+    grid-column: 1 / -1;
+    margin: 0;
   }
 }
 
