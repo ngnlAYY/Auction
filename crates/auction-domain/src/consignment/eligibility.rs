@@ -101,10 +101,33 @@ pub fn check_listing_history(
     registrant_user_id: UserId,
     aliases: &[HistoryAliasEvidence],
 ) -> Result<(), ListingError> {
+    check_history(identity, Some(registrant_user_id), registrant_user_id.is_nil(), aliases)
+}
+
+/// 判定匿名非寄售登记能否通过拍卖历史门，证据口径与 [`check_listing_history`] 相同。
+///
+/// `same_name_account` 是与填写的游戏名同名（数据库 `lower` 等值）的本站账户。本站已证的
+/// 最后持有人必须就是该账户；没有同名账户时，任何已证持有人都算持有人不符，历史为空仍可继续。
+pub fn check_anonymous_listing_history(
+    identity: &ListingEquipmentIdentity,
+    same_name_account: Option<UserId>,
+    aliases: &[HistoryAliasEvidence],
+) -> Result<(), ListingError> {
+    // 不变量 6：同名账户 ID 为零值时无法证明身份，按历史不足失败关闭。
+    let unproven = same_name_account.is_some_and(UserId::is_nil);
+    check_history(identity, same_name_account, unproven, aliases)
+}
+
+fn check_history(
+    identity: &ListingEquipmentIdentity,
+    registrant_user_id: Option<UserId>,
+    registrant_unproven: bool,
+    aliases: &[HistoryAliasEvidence],
+) -> Result<(), ListingError> {
     // 不变量 6：身份和实物责任有疑义时失败关闭，历史为空仅表示可以继续预检。
     let mut terminals = BTreeMap::new();
     let mut busy = false;
-    let mut unproven = registrant_user_id.is_nil();
+    let mut unproven = registrant_unproven;
     for alias in aliases {
         if alias.has_conflicting_original_equipment {
             return Err(ListingError::HistoryAliasConflict);
@@ -154,7 +177,7 @@ pub fn check_listing_history(
     if unproven {
         return Err(ListingError::HistoryUnproven);
     }
-    if holder.is_some_and(|holder| holder != registrant_user_id) {
+    if holder.is_some_and(|holder| Some(holder) != registrant_user_id) {
         return Err(ListingError::HistoryOwnerMismatch);
     }
     Ok(())
@@ -279,7 +302,7 @@ mod tests {
 
     use super::{
         HistoryAliasEvidence, HistoryAliasHandoff, HistoryLotEvidence, HistoryLotOutcome,
-        HistoryTransferEvidence, check_listing_history,
+        HistoryTransferEvidence, check_anonymous_listing_history, check_listing_history,
     };
     use crate::consignment::{ListingEquipmentIdentity, ListingError};
     use crate::{AuctionStatus, LotId, SettlementObligationKind, UserId};
@@ -798,6 +821,27 @@ mod tests {
         assert_eq!(
             check_listing_history(&equipment, user(3), &[alias(Some(cycle)), alias(Some(second))]),
             Err(ListingError::HistoryAliasConflict)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn anonymous_history_requires_the_proven_holder_to_be_the_same_name_account()
+    -> Result<(), ListingError> {
+        let equipment = ListingEquipmentIdentity::new("main", "42")?;
+        let history = [alias(Some(sold(5, 1, 2)))];
+        assert_eq!(check_anonymous_listing_history(&equipment, None, &[]), Ok(()));
+        assert_eq!(check_anonymous_listing_history(&equipment, Some(user(2)), &history), Ok(()));
+        for account in [None, Some(user(3))] {
+            assert_eq!(
+                check_anonymous_listing_history(&equipment, account, &history),
+                Err(ListingError::HistoryOwnerMismatch),
+                "{account:?}"
+            );
+        }
+        assert_eq!(
+            check_anonymous_listing_history(&equipment, Some(user(0)), &[]),
+            Err(ListingError::HistoryUnproven)
         );
         Ok(())
     }

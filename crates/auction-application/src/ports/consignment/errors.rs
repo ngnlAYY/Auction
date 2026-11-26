@@ -372,6 +372,7 @@ impl From<ListingError> for ConsignmentError {
                 ListingBusinessRejection::HistoryAliasConflict.into()
             }
             ListingError::AlreadyOpen => ListingBusinessRejection::AlreadyOpen.into(),
+            ListingError::InvalidSellerName => Self::InvalidListingRequest,
         }
     }
 }

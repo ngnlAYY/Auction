@@ -48,6 +48,9 @@ pub enum ListingError {
     /// 同一卖家已有同件装备的活动挂单。
     #[error("卖家已有该装备的活动挂单")]
     AlreadyOpen,
+    /// 匿名登记自填的游戏角色名不符合规则。
+    #[error("卖家游戏角色名无效")]
+    InvalidSellerName,
 }
 
 /// 挂单终态原因的闭集，稳定名称用于数据库和 DTO。
@@ -390,6 +393,7 @@ mod tests {
             (ListingError::HistoryOwnerMismatch, "本站最后已证持有人与登记人不符"),
             (ListingError::HistoryAliasConflict, "本站同件装备的历史记录互相矛盾"),
             (ListingError::AlreadyOpen, "卖家已有该装备的活动挂单"),
+            (ListingError::InvalidSellerName, "卖家游戏角色名无效"),
         ];
         for (error, message) in cases {
             assert_eq!(error.to_string(), message, "{error:?}");

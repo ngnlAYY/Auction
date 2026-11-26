@@ -14,6 +14,7 @@ pub mod recovery;
 pub mod refusal;
 pub mod returns;
 pub mod rights;
+mod seller;
 mod transition;
 
 pub use contract::*;
@@ -24,6 +25,7 @@ pub use identity::*;
 pub use listing::*;
 pub use order_stage::*;
 pub use pricing::*;
+pub use seller::*;
 pub use transition::*;
 
 pub use crate::delivery::{OriginalMailKey, parse_settlement_world, settlement_world_code};
