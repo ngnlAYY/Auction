@@ -4780,95 +4780,102 @@ body:has(.public-catalog-detail) .public-toast-region {
  * 这些规则要压过各页面在 surface、desktop、mobile 三层里对自身布局（display、内外边距）的声明，
  * 逐层重写既冗长又容易漏掉某一页，所以集中写在层外。
  */
-.public-console .console-main {
-  display: flex;
-  flex-direction: column;
-}
+/*
+ * “最后一个子元素”不计详情抽屉：抽屉与遮罩（position: fixed）挂在页面容器里，打开时排在分页条所在
+ * 层级之后，若按 :last-child 判断，分页条会在抽屉打开期间退回文档流、范围文字随之跑出视口。
+ * 不支持 :has() 或 :nth-last-child(… of …) 的浏览器保持分页条原来的文档流位置。
+ */
+@supports selector(:has(*)) and selector(:nth-last-child(1 of *)) {
+  .public-console .console-main {
+    display: flex;
+    flex-direction: column;
+  }
 
-/* 页面根，以及页面根到分页条之间的各层容器。 */
-.public-console
-  .console-main
-  > :not(.public-account-bids-page):is(
-    :has(> :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child),
-    :has(> :last-child > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child),
-    :has(> :last-child > :last-child > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child),
-    :has(> :last-child > :last-child > :last-child > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child)
-  ),
-.public-console
-  .console-main
-  > :not(.public-account-bids-page)
-  > :last-child:is(
-    :has(> :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child),
-    :has(> :last-child > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child),
-    :has(> :last-child > :last-child > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child)
-  ),
-.public-console
-  .console-main
-  > :not(.public-account-bids-page)
-  > :last-child
-  > :last-child:is(
-    :has(> :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child),
-    :has(> :last-child > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child)
-  ),
-.public-console
-  .console-main
-  > :not(.public-account-bids-page)
-  > :last-child
-  > :last-child
-  > :last-child:has(> :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child) {
-  display: flex;
-  flex: 1 0 auto;
-  flex-direction: column;
-}
+  /* 页面根，以及页面根到分页条之间的各层容器。 */
+  .public-console
+    .console-main
+    > :not(.public-account-bids-page):is(
+      :has(> :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))),
+      :has(> :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))),
+      :has(> :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))),
+      :has(> :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)))
+    ),
+  .public-console
+    .console-main
+    > :not(.public-account-bids-page)
+    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)):is(
+      :has(> :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))),
+      :has(> :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))),
+      :has(> :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)))
+    ),
+  .public-console
+    .console-main
+    > :not(.public-account-bids-page)
+    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
+    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)):is(
+      :has(> :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))),
+      :has(> :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)))
+    ),
+  .public-console
+    .console-main
+    > :not(.public-account-bids-page)
+    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
+    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
+    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)):has(> :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))) {
+    display: flex;
+    flex: 1 0 auto;
+    flex-direction: column;
+  }
 
-.public-console .console-main > :not(.public-account-bids-page) > .ui-pager--numbered:is(:last-child, :has(+ .ui-pager__error:last-child)),
-.public-console
-  .console-main
-  > :not(.public-account-bids-page)
-  > :last-child
-  > .ui-pager--numbered:is(:last-child, :has(+ .ui-pager__error:last-child)),
-.public-console
-  .console-main
-  > :not(.public-account-bids-page)
-  > :last-child
-  > :last-child
-  > .ui-pager--numbered:is(:last-child, :has(+ .ui-pager__error:last-child)),
-.public-console
-  .console-main
-  > :not(.public-account-bids-page)
-  > :last-child
-  > :last-child
-  > :last-child
-  > .ui-pager--numbered:is(:last-child, :has(+ .ui-pager__error:last-child)) {
-  position: sticky;
-  inset-block-end: 0;
-  z-index: 2;
-  flex: none;
-  margin-block-start: auto;
-  padding-block: var(--space-2) max(var(--space-2), env(safe-area-inset-bottom, 0px));
-  border-block-start: var(--border-width) solid var(--color-border);
-  background: var(--color-bg);
-}
+  .public-console .console-main > :not(.public-account-bids-page) > .ui-pager--numbered:is(:nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)), :has(+ .ui-pager__error:nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)))),
+  .public-console
+    .console-main
+    > :not(.public-account-bids-page)
+    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
+    > .ui-pager--numbered:is(:nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)), :has(+ .ui-pager__error:nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)))),
+  .public-console
+    .console-main
+    > :not(.public-account-bids-page)
+    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
+    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
+    > .ui-pager--numbered:is(:nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)), :has(+ .ui-pager__error:nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)))),
+  .public-console
+    .console-main
+    > :not(.public-account-bids-page)
+    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
+    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
+    > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
+    > .ui-pager--numbered:is(:nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)), :has(+ .ui-pager__error:nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)))) {
+    position: sticky;
+    inset-block-end: 0;
+    z-index: 2;
+    flex: none;
+    margin-block-start: auto;
+    padding-block: var(--space-2) max(var(--space-2), env(safe-area-inset-bottom, 0px));
+    border-block-start: var(--border-width) solid var(--color-border);
+    background: var(--color-bg);
+  }
 
-/* 空的纠偏提示区不参与弹性布局，免得容器的 gap 把分页条从最下面顶起；有内容时恢复为普通条目。 */
-.public-console .console-main .ui-pager--numbered + .ui-pager__error:empty {
-  position: absolute;
-}
+  /* 空的纠偏提示区不参与弹性布局，免得容器的 gap 把分页条从最下面顶起；有内容时恢复为普通条目。 */
+  .public-console .console-main > :not(.public-account-bids-page) .ui-pager--numbered + .ui-pager__error:empty {
+    position: absolute;
+  }
 
-/* 分页条自己贴到最下面，内容区不再另留底部空白。 */
-.public-console
-  .console-main:has(
-    > :not(.public-account-bids-page) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child,
-    > :not(.public-account-bids-page) > :last-child > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child,
-    > :not(.public-account-bids-page) > :last-child > :last-child > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child,
-    >
-      :not(.public-account-bids-page)
-      > :last-child
-      > :last-child
-      > :last-child
-      > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):last-child
-  ) {
-  padding-block-end: 0;
+  /* 分页条自己贴到最下面，内容区不再另留底部空白。 */
+  .public-console
+    .console-main:has(
+      > :not(.public-account-bids-page) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)),
+      > :not(.public-account-bids-page) > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)),
+      > :not(.public-account-bids-page) > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)) > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim)),
+      >
+        :not(.public-account-bids-page)
+        > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
+        > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
+        > :nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
+        > :is(.ui-pager--numbered, .ui-pager--numbered + .ui-pager__error):nth-last-child(1 of :not(.public-catalog-detail, .public-catalog-detail__scrim))
+    ) {
+    padding-block-end: 0;
+  }
 }
 
 /*
