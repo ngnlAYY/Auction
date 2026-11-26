@@ -20,6 +20,7 @@ import { DEFAULT_CONSIGNMENT_QUERY, Filters, useConsignmentCatalogQuery } from "
 import { purchaseHref } from "./order-labels";
 import {
   ConsignmentCapabilityGate,
+  ConsignmentEmpty,
   ConsignmentReadNotice,
   consignmentLevelLabel,
   ListingFacts,
@@ -90,8 +91,7 @@ export function ConsignmentCatalog(): JSX.Element {
   };
 
   return (
-    <section class="public-consignment-catalog">
-      <h1>{t("consignment-catalog")}</h1>
+    <section class="public-consignment-catalog" aria-label={t("consignment-catalog")}>
       <ConsignmentCapabilityGate capability={capability()} onRetry={() => capability.refresh()}>
         <nav class="public-consignment-catalog__actions" aria-label={t("consignment-nav")}>
           <Show when={capability()?.kind === "ready"}>
@@ -142,9 +142,7 @@ export function ConsignmentCatalog(): JSX.Element {
                       <>
                         <Show
                           when={value().items.length > 0}
-                          fallback={
-                            <AsyncState kind="empty" title={t("consignment-empty")} detail="" />
-                          }
+                          fallback={<ConsignmentEmpty title={t("consignment-empty")} />}
                         >
                           <div class="public-consignment-catalog__grid">
                             <For each={value().items} keyed={(item) => item.listing_id}>

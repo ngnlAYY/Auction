@@ -16,6 +16,7 @@ import { consignmentWorldLabel } from "./filters";
 import { orderAmountRows } from "./order-amounts";
 import { orderKindKey, orderRoleKey, orderStateKey, stageKey } from "./order-labels";
 import { PrivateConsignmentPage, PrivateReadError } from "./private-page";
+import { ConsignmentEmpty } from "./read-view";
 import { useConsignmentRefresh } from "./refresh";
 
 /** 路由 `/consignment/orders/:contract_id`：认证的本人订单详情。 */
@@ -82,7 +83,7 @@ function OrderView(props: {
                       when={error().status === 404}
                       fallback={<PrivateReadError error={error()} retry={read.restart} />}
                     >
-                      <AsyncState kind="empty" title={t("consignment-order-not-found")} detail="" />
+                      <ConsignmentEmpty title={t("consignment-order-not-found")} />
                     </Show>
                   )}
                 </Show>

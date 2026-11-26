@@ -38,6 +38,7 @@ import {
   PrivateConsignmentPage,
   PrivateReadError,
 } from "./private-page";
+import { ConsignmentEmpty } from "./read-view";
 import { useConsignmentRefresh } from "./refresh";
 import { listingPrice } from "./registration-input";
 
@@ -53,7 +54,7 @@ export function OwnedDetail(props: RoutePageProps): JSX.Element {
         <Show
           when={listingId()}
           keyed
-          fallback={<AsyncState kind="empty" title={t("consignment-not-found")} detail="" />}
+          fallback={<ConsignmentEmpty title={t("consignment-not-found")} />}
         >
           {(id) => <Detail userId={userId} listingId={id} canUse={canUse} />}
         </Show>

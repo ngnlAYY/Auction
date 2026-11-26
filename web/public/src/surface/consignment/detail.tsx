@@ -100,9 +100,8 @@ export function PublicDetail(props: RoutePageProps): JSX.Element {
   };
 
   return (
-    <section class="public-consignment-detail">
+    <section class="public-consignment-detail" aria-label={t("consignment-detail")}>
       <header class="public-consignment-detail__header">
-        <h1>{t("consignment-detail")}</h1>
         <Link href="/consignment">{t("consignment-catalog")}</Link>
       </header>
       <ConsignmentCapabilityGate capability={capability()} onRetry={() => capability.refresh()}>

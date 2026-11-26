@@ -273,8 +273,10 @@ export function RightsPage(): JSX.Element {
   };
 
   return (
-    <section class="public-account-bids-page public-consignment-account">
-      <h1>{t("consignment-right-title")}</h1>
+    <section
+      class="public-account-bids-page public-consignment-account"
+      aria-label={t("consignment-right-title")}
+    >
       <Show when={notice()}>{(key) => <p role="status">{t(key())}</p>}</Show>
       <Show when={error()}>
         {(current) => (
