@@ -9,9 +9,10 @@ import type { JSX } from "@solidjs/web";
 import { createComponent, createEffect, Show, untrack, useContext } from "solid-js";
 
 import type { CatalogRow } from "../../../api/model";
-import { fetchHistoricalAuction } from "../../../api/queries/current";
+import { fetchHistoricalAuction, refetchKnownAuction } from "../../../api/queries/current";
 import { PublicSessionResourceContext, PublicSessionView } from "../..";
 import { PublicRefreshGenerationContext } from "../../board/refresh";
+import { CompetitionCommandsContext } from "../../commands/host";
 import { CatalogProxyScope, LiveCatalogActions } from "../actions";
 import { CatalogCommandScope } from "../command-scope";
 import type { DetailWorld } from ".";
@@ -29,14 +30,27 @@ export function LookupBiddingDrawer(props: {
   readonly onClose: () => void;
 }): JSX.Element {
   const refreshGeneration = useContext(PublicRefreshGenerationContext);
+  const competition = useContext(CompetitionCommandsContext);
   const live = createValueMemo(() => props.row.status === "live");
-  // 只有进行中的拍品需要场次上下文；结束后的拍品不发读取，与目录里已结束的行一样没有出价入口。
+  const pending = createValueMemo(
+    () => (competition?.current()?.command(props.row.lotId) ?? null) !== null,
+  );
+  // 进行中的拍品需要场次上下文判定出价资格；已结束但仍有未结命令的拍品也需要，恢复入口
+  // 的复查与重发要用到所在世界与场次。其余结束后的拍品不发读取，与目录里已结束的行一致。
+  const needsAuction = createValueMemo(() => lookupNeedsAuction(live(), pending()));
+  // 首次读取后已知所在世界，之后的刷新只读该世界的当前场次，不再重读 lots 与全部世界。
+  let known: CurrentAuctionItemResponse | null = null;
   const auctionRead = createTaskResource(
-    () => (live() ? { auctionId: props.auctionId, refresh: refreshGeneration() } : null),
+    () => (needsAuction() ? { auctionId: props.auctionId, refresh: refreshGeneration() } : null),
     async (dependencies, context) => {
       if (dependencies === null) return null;
-      const read = await fetchHistoricalAuction(dependencies.auctionId, context.signal);
-      return context.alive() ? read : null;
+      const read =
+        known === null || known.id !== dependencies.auctionId
+          ? await fetchHistoricalAuction(dependencies.auctionId, context.signal)
+          : await refetchKnownAuction(known, context.signal);
+      if (!context.alive()) return null;
+      if (read.ok) known = read.value;
+      return read;
     },
   );
   const auction = createValueMemo(() => {
@@ -44,7 +58,7 @@ export function LookupBiddingDrawer(props: {
     return read?.ok === true ? read.value : null;
   });
   // 首次场次读取完成前不展示抽屉，避免出价入口在打开后才出现而整块重排。
-  const ready = createValueMemo(() => !live() || auctionRead() !== undefined);
+  const ready = createValueMemo(() => !needsAuction() || auctionRead() !== undefined);
   return (
     <CatalogCommandScope
       userId={props.userId}
@@ -58,6 +72,11 @@ export function LookupBiddingDrawer(props: {
       </CatalogProxyScope>
     </CatalogCommandScope>
   );
+}
+
+/** 是否需要读取所在场次：进行中的拍品，或已结束但仍有未结命令（恢复入口要用场次）的拍品。 */
+export function lookupNeedsAuction(live: boolean, hasPendingCommand: boolean): boolean {
+  return live || hasPendingCommand;
 }
 
 /** 写入抽屉快照与出价投影：与目录行相同，行快照由 `useCatalogDetailEntry` 维护，出价资格由

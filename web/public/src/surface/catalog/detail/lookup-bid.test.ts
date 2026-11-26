@@ -34,7 +34,7 @@ import { CatalogDetailDialogContext, type CatalogDetailInput } from ".";
 import { LotViewRequestContext } from "./lot-view";
 
 const { CatalogProxyScope } = await import("../actions");
-const { LookupBidProjection } = await import("./lookup-bid");
+const { LookupBidProjection, lookupNeedsAuction } = await import("./lookup-bid");
 
 const USER = "00000000-0000-4000-8000-000000000001";
 const AUCTION_ID = "00000000-0000-4000-8000-000000000003";
@@ -176,4 +176,9 @@ test("lookup_drawer_hides_the_bid_entry_when_the_lot_cannot_be_bid：不可出�
       mounted.dispose();
     }
   }
+});
+
+test("lookup_drawer_reads_the_auction_for_an_ended_lot_only_with_an_open_command：已结束拍品仅在有未结命令时读取场次以支撑恢复入口", () => {
+  expect(lookupNeedsAuction(false, true)).toBe(true);
+  expect(lookupNeedsAuction(false, false)).toBe(false);
 });

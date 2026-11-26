@@ -69,6 +69,25 @@ export function currentAuctionUrl(worldId: string): string {
   return `/api/v1/auctions/current?${query.toString()}`;
 }
 
+/** 已知场次所在世界后的再次读取：未结算的场次只读该世界的当前场次（一次带缓存的 GET），
+ * 不再重读 lots 页与全部世界；当前场次已换成别的场次或读取失败时回退到完整读取。 */
+export async function refetchKnownAuction(
+  known: CurrentAuctionItemResponse,
+  signal: AbortSignal,
+): Promise<Result<CurrentAuctionItemResponse, string>> {
+  if (known.status !== "settled") {
+    const current = await fetchCurrentAuction(known.world, signal);
+    if (
+      current.ok &&
+      current.value !== null &&
+      isTargetCurrent(current.value, known.id, known.status)
+    ) {
+      return ok(current.value);
+    }
+  }
+  return fetchHistoricalAuction(known.id, signal);
+}
+
 /** 读取指定历史拍卖的公开投影；世界、场次号和有效结束时间由目录或已结算摘要提供。 */
 export async function fetchHistoricalAuction(
   auctionId: string,
