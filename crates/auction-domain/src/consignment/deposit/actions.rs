@@ -70,6 +70,8 @@ pub struct ActionFacts {
     pub relist_allowed: bool,
     /// 关联的损失案件；第 7 期之前恒为 `None`。
     pub loss_case_id: Option<Uuid>,
+    /// 卖家经站内账户登记；匿名非寄售挂单为否。
+    pub seller_verified: bool,
 }
 
 /// 代管态的命令都要求 position 仍在未终结的代管阶段；终态 position 不再接受控制命令。
@@ -104,6 +106,10 @@ pub fn seller_actions(facts: &ActionFacts) -> Vec<SellerAction> {
         && facts.held_reason != Some(HeldOffMarketReason::OperationsHold)
     {
         actions.push(SellerAction::Relist);
+    }
+    // 匿名非寄售挂单不可改价，同名账户只能撤回（维护者决定 2）。
+    if !facts.seller_verified {
+        actions.retain(|action| *action == SellerAction::Withdraw);
     }
     actions
 }
@@ -143,7 +149,19 @@ mod tests {
             position,
             relist_allowed: false,
             loss_case_id: None,
+            seller_verified: true,
         }
+    }
+
+    #[test]
+    fn anonymous_listings_offer_withdraw_but_never_reprice() {
+        for state in [ListingState::Resolving, ListingState::Displayed] {
+            let anonymous = ActionFacts { seller_verified: false, ..facts(state, None) };
+            assert_eq!(seller_actions(&anonymous), vec![SellerAction::Withdraw], "{state:?}");
+            assert_eq!(admin_actions(&anonymous), vec![AdminAction::Delist], "{state:?}");
+        }
+        let closed = ActionFacts { seller_verified: false, ..facts(ListingState::Closed, None) };
+        assert!(seller_actions(&closed).is_empty());
     }
 
     #[test]
