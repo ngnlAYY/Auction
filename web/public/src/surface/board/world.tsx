@@ -27,6 +27,7 @@ import {
   type WorldScope,
   type WorldSwitchInput,
   type WorldSwitchOption,
+  worldQueryForScope,
   worldScopeFamily,
   worldScopeFromQuery,
   worldScopeSwitchQuery,
@@ -228,6 +229,21 @@ export function createWorldSwitch(props: CreateWorldSwitchOptions): WorldSwitchC
     const historicalBoard =
       isBoardRouteName(currentRouteName) && readPublicQuery().auction.kind === "selected";
     // 用户主动切换要建立可返回的历史条目；写入口同时推进共享位置版本。
+    if (currentRouteName === "ConsignmentCatalog") {
+      // 寄售目录的页码 consignment_page 不归外壳管理，旧世界下的页码在新世界可能越界，
+      // 与 world 一次写入：只改这两个键，其余寄售筛选与外壳分页键原样保留。
+      const world = worldQueryForScope("multi", scope);
+      const consignmentWritten = updatePublicQueryPairs(
+        props.shellQueryState,
+        ["world", "consignment_page"],
+        world === null ? [] : [["world", world]],
+        "push",
+      );
+      if (consignmentWritten) {
+        setSelectedWorld(nextSelected);
+      }
+      return;
+    }
     const { auction, ...fields } = worldScopeSwitchQuery(currentRouteName, scope, historicalBoard);
     const update = (query: Omit<PublicBoardQuery, "auction">) => {
       Object.assign(query, fields);

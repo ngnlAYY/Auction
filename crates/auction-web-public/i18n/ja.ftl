@@ -676,7 +676,7 @@ consignment-fee = 手数料の見込み
 consignment-net = 出品者の受取見込額
 consignment-expires = 有効期限
 consignment-category = 装備カテゴリ
-consignment-search = 装備名で検索
+consignment-name-hint = 装備名に入力した文字列全体が含まれるものを検索します（大文字小文字は区別しません）。略称や語の分割には対応していません。
 consignment-source-time = 装備情報の取得日時
 consignment-state-filter = 出品状態
 

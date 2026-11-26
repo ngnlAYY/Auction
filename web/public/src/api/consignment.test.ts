@@ -23,7 +23,7 @@ import { fetchConsignmentStatus } from "./consignment-status";
 const QUERY = {
   world: "main",
   mode: "direct",
-  category: "Staff",
+  category: "sta,shd",
   q: "a%_+ 剑",
   page: 3,
   pageSize: 37,
@@ -48,7 +48,7 @@ test("三个公开读取按契约编码，匿名、禁缓存且成功严格解�
     });
     expect(transport.requests.map(({ url }) => url.pathname + url.search)).toEqual([
       STATUS_PATH,
-      `${LISTINGS_PATH}?world=main&mode=direct&category=Staff&q=a%25_%2B+%E5%89%91&page=3&page_size=37`,
+      `${LISTINGS_PATH}?world=main&mode=direct&category=Staff%2CShield&q=a%25_%2B+%E5%89%91&page=3&page_size=37`,
       `${LISTINGS_PATH}/${LISTING_A}`,
     ]);
     for (const { init } of transport.requests) {
@@ -174,7 +174,7 @@ test.each([
   ["页长", MATCHED_QUERY, summary(), 20],
   ["世界", MATCHED_QUERY, { ...summary(), world_id: "isekai" }, 37],
   ["模式", { ...MATCHED_QUERY, mode: "consigned" }, summary(), 37],
-  ["分类", MATCHED_QUERY, { ...summary(), category: "Shield" }, 37],
+  ["分类", MATCHED_QUERY, { ...summary(), category: "Cloth" }, 37],
 ] as const)("目录响应与请求仅有%s不匹配时拒绝", async (_, query, listing, pageSize) => {
   const transport = fakeFetch(() =>
     response({ items: [listing], total: 121, page: 3, page_size: pageSize }),

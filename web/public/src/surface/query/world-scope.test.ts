@@ -24,7 +24,13 @@ const {
 } = await import("./world-scope");
 const { publicAuctionHomeQuery } = await import("./links");
 
-const MULTI_ROUTES = ["AuctionList", "History", "BidLog", "Fulfillment"] as const;
+const MULTI_ROUTES = [
+  "AuctionList",
+  "History",
+  "BidLog",
+  "Fulfillment",
+  "ConsignmentCatalog",
+] as const;
 const SINGLE_ROUTES = [
   null,
   "AuctionIndex",
@@ -34,7 +40,7 @@ const SINGLE_ROUTES = [
   "Settings",
 ] as const;
 
-test("world_scope_family_matches_the_four_multi_world_routes：只有四个跨世界路由属于 multi", () => {
+test("world_scope_family_matches_the_multi_world_routes：只有五个跨世界路由属于 multi（含寄售目录）", () => {
   for (const routeName of MULTI_ROUTES) {
     expect(worldScopeFamily(routeName)).toBe("multi");
   }

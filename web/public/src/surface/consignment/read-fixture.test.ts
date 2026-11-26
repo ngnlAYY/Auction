@@ -16,6 +16,7 @@ import { children, createComponent, createEffect, createRoot, type Element, flus
 import { PublicSessionResourceContext, type PublicSessionResult } from "..";
 import { findElement, TestElement } from "../catalog/command-scope-fixture.test";
 import { PUBLIC_ROUTES } from "../router/route";
+import { WorldSwitchContext } from "../shell/contexts";
 
 export const LISTING_A = "00000000-0000-4000-8000-0000000000a1";
 export const LISTING_B = "00000000-0000-4000-8000-0000000000b2";
@@ -216,15 +217,27 @@ export function mountConsignment(initialUrl: string, render: () => Element, auth
         createComponent(RouterContext, {
           value: router,
           get children() {
-            return createComponent(PublicSessionResourceContext, {
-              value: Object.assign(session, {
-                state: () => "ready" as const,
-                restart() {},
-                cancel() {},
-                clear: () => session.set(undefined),
-              }),
+            return createComponent(WorldSwitchContext, {
+              // 世界按钮组由外壳装配；寄售目录测试只需要它存在。
+              value: {
+                options: () =>
+                  ["all", "main", "isekai"].map((value) => ({ value, disabled: false })),
+                current: () => "all",
+                choose() {},
+                selectable: () => true,
+              },
               get children() {
-                return render();
+                return createComponent(PublicSessionResourceContext, {
+                  value: Object.assign(session, {
+                    state: () => "ready" as const,
+                    restart() {},
+                    cancel() {},
+                    clear: () => session.set(undefined),
+                  }),
+                  get children() {
+                    return render();
+                  },
+                });
               },
             });
           },

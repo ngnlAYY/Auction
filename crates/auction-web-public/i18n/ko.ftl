@@ -676,7 +676,7 @@ consignment-fee = 예상 수수료
 consignment-net = 판매자 예상 수령액
 consignment-expires = 유효 기한
 consignment-category = 장비 분류
-consignment-search = 장비 이름 검색
+consignment-name-hint = 장비 이름에 입력한 문자열 전체가 포함된 항목을 찾습니다(대소문자 구분 없음). 약어나 단어 분리 검색은 지원하지 않습니다.
 consignment-source-time = 장비 정보 수집 시각
 consignment-state-filter = 판매 상태
 

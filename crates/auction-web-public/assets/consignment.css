@@ -20,30 +20,15 @@
   display: none;
 }
 
-/* 筛选条与出价记录、履约进度的工具条同一外观：无外框，控件沿用 --color-border-control 与
-   --size-target，标签为次要文字色。 */
-.public-consignment-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--space-2) var(--space-3);
-}
-
-.public-consignment-filters label,
+/* 账户页的筛选与表单：与出价记录、履约进度的工具条同一外观，无外框，控件沿用
+   --color-border-control 与 --size-target，标签为次要文字色。 */
 .public-consignment-account__filters label,
 .public-consignment-account__form label {
   color: var(--color-text-muted);
   font-size: var(--text-sm);
 }
 
-.public-consignment-filters label {
-  display: grid;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
 :is(
-    .public-consignment-filters,
     .public-consignment-account__filters,
     .public-consignment-account__form
   )
@@ -61,7 +46,6 @@
 }
 
 :is(
-    .public-consignment-filters,
     .public-consignment-account__filters,
     .public-consignment-account__form
   )
@@ -78,7 +62,6 @@
 }
 
 :is(
-    .public-consignment-filters,
     .public-consignment-account__filters,
     .public-consignment-account__form
   )
@@ -89,7 +72,6 @@
 
 @media (hover: hover) {
   :is(
-      .public-consignment-filters,
       .public-consignment-account__filters,
       .public-consignment-account__form
     )
@@ -103,7 +85,6 @@
 /* 与页内其他筛选控件同高（桌面紧凑尺寸），窄屏每个字段独占一行。 */
 @media screen and (width > 64rem) {
   :is(
-      .public-consignment-filters,
       .public-consignment-account__filters,
       .public-consignment-account__form
     )
@@ -115,22 +96,36 @@
   }
 }
 
-@media screen and (max-width: 48rem), screen and (max-width: 64rem) and (pointer: coarse) {
-  .public-consignment-filters label,
-  .public-consignment-filters p {
-    flex-basis: 100%;
-  }
-
-  .public-consignment-filters :is(input, select) {
-    inline-size: 100%;
-  }
+/* 目录的名称搜索：外框与拍卖页的分组工具栏同款，输入框、应用按钮与提示沿用成交历史页的样式。 */
+.public-consignment-search {
+  padding: 0.375rem 0.625rem;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-1);
 }
 
-.public-consignment-filters p {
-  flex-basis: 100%;
-  margin: 0;
-  color: var(--color-danger);
-  font-size: var(--text-sm);
+.public-consignment-search .public-history-primary-filters {
+  grid-template-columns: minmax(15rem, 1fr) auto;
+}
+
+.public-consignment-search :is(.public-history-name-hint, .public-history-field-error) {
+  margin-block: var(--space-1) 0;
+}
+
+@media screen and (max-width: 48rem) {
+  /* 与手机上的看板筛选区一致：不画卡片，控件直接落在页面背景上。 */
+  .public-consignment-search {
+    padding: var(--space-2) var(--space-3);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .public-consignment-search .public-history-primary-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .public-consignment-catalog__grid {

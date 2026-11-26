@@ -676,7 +676,7 @@ consignment-fee = 預計手續費
 consignment-net = 賣家預計實收
 consignment-expires = 有效期限
 consignment-category = 裝備分類
-consignment-search = 搜尋裝備名稱
+consignment-name-hint = 依裝備名稱整體子字串比對（不分大小寫），不支援縮寫或拆詞。
 consignment-source-time = 裝備資料擷取時間
 consignment-state-filter = 掛單狀態
 
