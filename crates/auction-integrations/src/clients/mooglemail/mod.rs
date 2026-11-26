@@ -35,6 +35,7 @@ pub use gateway::{
     MoogleMailRuntimeCredential, MoogleMailSentLookupReport, MoogleMailSentLookupRequest,
     MoogleMailSentLookupStatus, MoogleMailSentRecoveryScan, PreparedConsignmentDisposition,
 };
+pub use parser::MoogleMailSentReceipt;
 pub use parser::{
     CONSIGNMENT_PARSER_VERSION, ConsignmentAttachmentObservation, ConsignmentDetailObservation,
     ConsignmentListRow, FrozenMailAttachment, FrozenMailManifest, MoogleMailActionState,

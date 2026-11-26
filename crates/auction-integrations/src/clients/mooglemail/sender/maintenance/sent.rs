@@ -8,7 +8,8 @@ use tokio::time::{Instant, timeout_at};
 
 use super::super::{MoogleMailSender, proof};
 use crate::clients::mooglemail::{
-    MoogleMailCookie, MoogleMailError, MoogleMailWorld, parser::MoogleMailSentSummary,
+    MoogleMailCookie, MoogleMailError, MoogleMailWorld,
+    parser::{MoogleMailSentReceipt, MoogleMailSentSummary},
 };
 use crate::safe_diagnostics;
 
@@ -56,6 +57,10 @@ pub struct MoogleMailSentObservation {
     pub collected: bool,
     /// 详情正文的规范摘要；通知类恢复证明据此逐字比对，正文本身不返回。
     pub body_digest: [u8; 32],
+    /// 正文末尾的服务端回执块（寄售领取判定逐项核对）；`body_digest` 仍是整页正文摘要。
+    pub receipt: MoogleMailSentReceipt,
+    /// 正文是否含系统退回附言。
+    pub returned_notice: bool,
 }
 
 impl fmt::Debug for MoogleMailSentObservation {
@@ -70,7 +75,8 @@ impl fmt::Debug for MoogleMailSentObservation {
             .field("remaining_equipment_ids", &self.remaining_equipment_ids)
             .field("collected", &self.collected)
             .field("body_digest", &self.body_digest)
-            .finish()
+            .field("returned_notice", &self.returned_notice)
+            .finish_non_exhaustive()
     }
 }
 
@@ -450,6 +456,8 @@ impl MoogleMailSender {
                 remaining_equipment_ids: proof.remaining_equipment_ids,
                 collected,
                 body_digest: proof.body_digest,
+                receipt: proof.receipt,
+                returned_notice: proof.returned_notice,
             })
         })
         .await

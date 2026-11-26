@@ -10,7 +10,7 @@ use crate::clients::mooglemail::parser::{
     MoogleMailSentSummary, canonical_mail_body_digest, detail_error_for, executable_javascript,
     normalize_text, parse_attachment_manifest, parse_current_cod, parse_detail_fields_for,
     parse_token_for_operation, read_selector, required_script_value, script_text,
-    subject_is_list_projection, unique_element, valid_message_body,
+    split_sent_receipt, subject_is_list_projection, unique_element, valid_message_body,
 };
 use crate::clients::mooglemail::{MoogleMailError, MoogleMailErrorCategory, MoogleMailOperation};
 use crate::safe_diagnostics;
@@ -96,6 +96,7 @@ impl MoogleMailParser {
             ));
         }
         let body_digest = canonical_mail_body_digest(&body);
+        let (receipt, returned_notice) = split_sent_receipt(&body);
         clear_sent_body(&mut body);
 
         let script = script_text(&document, summary.world, operation)?;
@@ -183,6 +184,8 @@ impl MoogleMailParser {
             remaining_credits,
             cod_pending: cod,
             remaining_equipment_ids,
+            receipt,
+            returned_notice,
         };
         if !proof.validate() {
             return Err(detail_error_for(
