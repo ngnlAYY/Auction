@@ -1,6 +1,6 @@
 // Public 与 Admin 长列表共用分页器。
 // 文案一律由调用方经 props 传入，本 crate 不持有任何 i18n key；DOM class 保持
-// `ui-pager*` 契约不变。调用方显式提供每页数量选项时才启用数字页码布局。
+// `ui-pager*` 契约不变。调用方显式提供每页数量选项（或 numberedLayout）时才启用数字页码布局。
 // 页码导航位于数量和跳页之前；数字组独立换行，响应式样式不复制或重挂载表单。
 
 import type { JSX } from "@solidjs/web";
@@ -53,6 +53,8 @@ export interface PagerProps {
    */
   readonly rangeSummary?: ((value: readonly [number, number, number]) => string) | null;
   readonly onPageSizeChange?: (size: number) => unknown;
+  /** 不提供每页数量选项时也启用数字页码布局（不渲染数量选择器）；省略保持“有选项才数字布局”。 */
+  readonly numberedLayout?: boolean;
   /**
    * 页面级分页条：位于页面内容末尾的列表分页，nav 增加 `ui-pager--page`，
    * 供 Public 样式固定到页面底部。抽屉、展开行与同页有多个列表的分页不要设置。
@@ -130,7 +132,8 @@ export function Pager(props: PagerProps): JSX.Element {
     const target = Number(clean);
     return Number.isSafeInteger(target) && target >= 1 && target <= totalPages() ? target : null;
   });
-  const numbered = createValueMemo(() => (props.pageSizeOptions?.length ?? 0) > 0);
+  const hasSizeOptions = createValueMemo(() => (props.pageSizeOptions?.length ?? 0) > 0);
+  const numbered = createValueMemo(() => hasSizeOptions() || props.numberedLayout === true);
   // 只有已提交的页仍在范围内，才给它显示条目序号。
   const itemRange = createValueMemo((): readonly [number, number, number] | null => {
     const total = props.total ?? null;
@@ -228,18 +231,20 @@ export function Pager(props: PagerProps): JSX.Element {
         >
           <span class="ui-pager__total">{props.totalSummary}</span>
         </Show>
-        <PageSizePicker
-          pageSize={pageSize()}
-          options={props.pageSizeOptions ?? []}
-          label={props.pageSizeLabel ?? ""}
-          optionLabel={props.pageSizeOptionLabel}
-          allowCustom={props.allowCustomPageSize === true}
-          maxPageSize={props.maxPageSize}
-          customLabel={props.pageSizeCustomLabel ?? ""}
-          applyLabel={props.pageSizeApplyLabel ?? ""}
-          invalidLabel={props.pageSizeInvalidLabel ?? ""}
-          onChange={props.onPageSizeChange}
-        />
+        <Show when={hasSizeOptions()}>
+          <PageSizePicker
+            pageSize={pageSize()}
+            options={props.pageSizeOptions ?? []}
+            label={props.pageSizeLabel ?? ""}
+            optionLabel={props.pageSizeOptionLabel}
+            allowCustom={props.allowCustomPageSize === true}
+            maxPageSize={props.maxPageSize}
+            customLabel={props.pageSizeCustomLabel ?? ""}
+            applyLabel={props.pageSizeApplyLabel ?? ""}
+            invalidLabel={props.pageSizeInvalidLabel ?? ""}
+            onChange={props.onPageSizeChange}
+          />
+        </Show>
       </Show>
       <form
         class="ui-pager__jump"

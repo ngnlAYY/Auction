@@ -6,6 +6,8 @@ import { createCell } from "@auction/web-shared/reactive/cell";
 import { installFakeWindow } from "@auction/web-shared/router/test-window";
 import { Pager } from "@auction/web-shared/ui/components/pager";
 import { PageSizePicker } from "@auction/web-shared/ui/components/pager/size";
+import { buildBundle } from "@auction/web-shared/ui/i18n/resource";
+import { createLocaleSession } from "@auction/web-shared/ui/i18n/session";
 import { flush } from "solid-js";
 
 import { mountPublicPagerForDiagnostics } from "../shell/navigation-fixture.test";
@@ -134,6 +136,65 @@ test("page_level_marker_is_opt_in：页面级标记只在调用方显式传入�
     } finally {
       mounted.dispose();
     }
+  }
+});
+
+test("account_pager_is_numbered_with_range_without_size_picker：账户页列表是带条目范围的数字分页，无数量选择器", async () => {
+  // 与账户页出价、代理、关注三个列表相同的配置：每页 10 条固定，单页时隐藏。
+  const ftl = await Bun.file(
+    `${import.meta.dir}/../../../../../crates/auction-web-public/i18n/en.ftl`,
+  ).text();
+  const bundle = buildBundle("en", ftl, "en", null);
+  if (!bundle.ok) throw new Error("分页测试加载译文失败");
+  const locale = createLocaleSession(bundle.value, "en");
+  const accountProps = {
+    page: 1,
+    pageSize: 10,
+    label: "分页",
+    hideWhenSingle: true,
+    showSizePicker: false,
+    onPageChange: () => true,
+  };
+  const mountAccountPager = (total: number, numberedLayout?: boolean) =>
+    mountPublicPagerForDiagnostics(
+      { ...accountProps, total, ...(numberedLayout === undefined ? {} : { numberedLayout }) },
+      locale,
+    );
+  const multi = await mountAccountPager(25, true);
+  try {
+    const nav = multi.find((node) => node.getAttribute("aria-label") === "分页");
+    expect(nav).not.toBeNull();
+    const classes = String(nav?.attributes.class).split(" ");
+    expect(classes).toContain("ui-pager--numbered");
+    // 不固定到页面底部，也没有每页数量选择器。
+    expect(classes).not.toContain("ui-pager--page");
+    expect(multi.find((node) => node.getAttribute("name") === "page_size")).toBeNull();
+    const range = multi.find((node) => node.getAttribute("class") === "ui-pager__range");
+    expect(range).not.toBeNull();
+    expect(String(range?.nodes[0]?.())).toBe("1–10 / 25 items");
+    expect(range?.nodes).toHaveLength(1);
+    // 多页时外层包装不隐藏。
+    expect(multi.find((node) => node.tag === "div" && node.attributes.hidden === true)).toBeNull();
+  } finally {
+    multi.dispose();
+  }
+  // 反例：省略 numberedLayout 且无数量选择器时仍是经典布局，没有数字页码与条目范围。
+  const classic = await mountAccountPager(25);
+  try {
+    const nav = classic.find((node) => node.getAttribute("aria-label") === "分页");
+    expect(nav).not.toBeNull();
+    expect(String(nav?.attributes.class).split(" ")).not.toContain("ui-pager--numbered");
+    expect(classic.find((node) => node.getAttribute("class") === "ui-pager__range")).toBeNull();
+  } finally {
+    classic.dispose();
+  }
+  const single = await mountAccountPager(8, true);
+  try {
+    expect(
+      single.find((node) => node.tag === "div" && node.attributes.hidden === true),
+    ).not.toBeNull();
+  } finally {
+    single.dispose();
   }
 });
 

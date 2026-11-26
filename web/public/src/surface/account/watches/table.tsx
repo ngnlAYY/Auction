@@ -104,6 +104,7 @@ export function WatchedTable(props: { readonly watched: WatchedAuction }): JSX.E
         pageSize={PAGE_SIZE}
         hideWhenSingle={true}
         showSizePicker={false}
+        numberedLayout
         maxOffset={null}
         jumpLabel={t("catalog-page-input")}
         onPageChange={(nextPage) => requestedPage.set(nextPage)}

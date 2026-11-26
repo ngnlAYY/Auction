@@ -87,6 +87,8 @@ export interface PublicPagerProps {
   readonly maxOffset?: number | null;
   readonly hideWhenSingle?: boolean;
   readonly showSizePicker?: boolean;
+  /** 不显示每页数量选择器时仍用数字页码与条目范围布局；缺省保持经典布局。 */
+  readonly numberedLayout?: boolean;
   /** 页面级分页条：只给位于页面内容末尾的列表传 true，样式据此固定到页面底部。 */
   readonly pageLevel?: boolean;
   readonly jumpLabel?: string;
@@ -121,7 +123,7 @@ export function commitPublicPageSizeChoice(
 }
 
 /** 注入 Public 五语言文案、1 到契约上限的数量与本地偏好，分页计算及键盘交互由共享组件负责。
- * `hideWhenSingle` 保留挂载但隐藏控件；`showSizePicker` 关闭数字页码与数量选择器时保留经典布局。
+ * `hideWhenSingle` 保留挂载但隐藏控件；`showSizePicker` 关闭数量选择器时默认保留经典布局，`numberedLayout` 则保留数字页码与条目范围。
  */
 export function PublicPager(props: PublicPagerProps): JSX.Element {
   const pageSize = createValueMemo(() => Math.max(props.pageSize, 1));
@@ -172,6 +174,7 @@ export function PublicPager(props: PublicPagerProps): JSX.Element {
       pageSizeApplyLabel={t("pagination-apply")}
       pageSizeInvalidLabel={t("pagination-size-limit", { maximum: String(maximum()) })}
       onPageChange={props.onPageChange}
+      numberedLayout={props.numberedLayout === true}
       pageLevel={props.pageLevel === true}
       onPageClamp={props.onPageClamp ?? null}
       clampFailure={{ message: t("pagination-clamp-error"), retryLabel: t("data-retry") }}

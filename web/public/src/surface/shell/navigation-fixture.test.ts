@@ -279,7 +279,10 @@ function observeNodes(render: () => Element) {
 }
 
 /** 挂载实际编译的 Public 分页控件，开发模式保留组件体与 ref 诊断。 */
-export async function mountPublicPagerForDiagnostics(props: PublicPagerProps) {
+export async function mountPublicPagerForDiagnostics(
+  props: PublicPagerProps,
+  locale?: LocaleSession,
+) {
   const pagerModule = `${NAMESPACE}:${resolve(import.meta.dir, "../pagination/index.tsx")}`;
   const { PublicPager }: typeof import("../pagination") = await import(pagerModule);
   const previous = pagerDiagnostics;
@@ -296,7 +299,16 @@ export async function mountPublicPagerForDiagnostics(props: PublicPagerProps) {
   try {
     const find = createRoot((cleanup) => {
       disposeRoot = cleanup;
-      return observeNodes(() => mount(PublicPager, props));
+      return observeNodes(() =>
+        locale === undefined
+          ? mount(PublicPager, props)
+          : mount(LocaleSessionContext, {
+              value: locale,
+              get children() {
+                return mount(PublicPager, props);
+              },
+            }),
+      );
     });
     return { find, dispose };
   } catch (error) {
