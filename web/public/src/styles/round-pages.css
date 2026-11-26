@@ -4,8 +4,8 @@
  * 历史成交价的世界在“筛选条件”面板里），并把“场次下拉框”与“场次标题”合并成一个控件——
  * Rust 版没有这些改动，所以这里的规则只对 Solid 版的结构成立：
  * - 场次下拉框就是场次标题：加粗、与其他字段同高，后面跟着世界、结算时间等说明。
- * - 历史成交价的主筛选行没有世界一列，装备名称占满剩余宽度；世界是“筛选条件”面板里的第一项，
- *   画成一组相连的按钮，选中项用强调色（面板里的选择点「应用」才生效）。
+ * - 历史成交价的世界是“筛选条件”面板里的第一项，画成一组相连的按钮，选中项用强调色
+ *   （面板里的选择点「应用」才生效）；主筛选行的排版见 styles/history-toolbar.css。
  * - 手机上两页去掉卡片与边框，控件直接落在页面背景上：第一行是浅底的场次下拉框和说明，
  *   第二行是带放大镜和边框的搜索框；搜索框的标签只对读屏保留。
  * 手机上字段字号保持 16px：小于它时 iOS 在聚焦时会放大整个页面。
@@ -35,10 +35,6 @@
   .public-fulfillment__round-select:hover:not(:disabled) {
     border-color: var(--color-accent);
   }
-}
-
-.public-history-page .public-history-primary-filters {
-  grid-template-columns: minmax(15rem, 1fr) auto;
 }
 
 /* “筛选条件”里的世界：独占一行，按钮连成一组，高度与同面板的输入框一致。 */
@@ -202,9 +198,5 @@
     background-size:
       0.75rem 0.75rem,
       0.375rem 0.375rem;
-  }
-
-  .public-history-page .public-history-primary-filters {
-    grid-template-columns: minmax(0, 1fr);
   }
 }

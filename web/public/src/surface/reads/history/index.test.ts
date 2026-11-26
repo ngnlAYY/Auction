@@ -232,7 +232,7 @@ test("成交历史分组、排序、翻页各自修改地址键并保持查询�
     mounted.rejectWrites("push");
     group({ currentTarget: groupSelect });
     sort({ currentTarget: sortSelect });
-    expect(groupSelect.value).toBe("equipment");
+    expect(groupSelect.value).toBe("flat");
     expect(sortSelect.value).toBe("closed_desc");
     expect(mounted.location.search).toBe(`?${raw}&page=3&page_size=10`);
     await settleRead();
@@ -360,7 +360,11 @@ test("仅有空格买家的原始筛选也需要写址才能清除", async () =>
     await settleRead();
     expect(draft()).toMatchObject({ buyer: "" });
     expect(mounted.location.search).toBe("?other=%2f");
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    // 清空后没有任何条件，页面回到全部成交的第一页。
+    expect(fetcher.mock.calls.map(([input]) => String(input))).toEqual([
+      "/api/v1/price-history?buyer=+&sort=closed_desc&page=1&page_size=20",
+      "/api/v1/price-history?sort=closed_desc&page=1&page_size=20",
+    ]);
   } finally {
     mounted.dispose();
     fetcher.mockRestore();
@@ -445,5 +449,63 @@ test.each([
     expect(mounted.location.searchParams.get(field === "to" ? "to" : "max_price")).toBe(value);
   } finally {
     mounted.dispose();
+  }
+});
+
+test("没有任何筛选条件时直接读取全部成交的第一页，取回后装配结果并保持缺省地址", async () => {
+  resetStoreForTest();
+  const row = {
+    auction_id: "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2b",
+    auction_sequence: 5,
+    buyer_name: "buyer",
+    closed_at: "2025-11-14T12:50:40.11Z",
+    equipment_category: "Staff",
+    equipment_level: 450,
+    equipment_name: "Legendary Staff",
+    lot_id: "0190f2b4-1c2d-4e5f-8a6b-7c8d9e0f1a2c",
+    lot_number: 1,
+    price: 2000,
+    seller_name: "seller",
+    world_id: "main",
+  };
+  const body = JSON.stringify({
+    code: "ok",
+    message: "价格历史已加载",
+    data: {
+      page: 1,
+      page_size: 20,
+      rows: [row],
+      stats: { count: 1, min: 2000, max: 2000, median: 2000, median_exact: "2000" },
+      total: 1,
+    },
+  });
+  const fetcher = spyOn(globalThis, "fetch").mockImplementation(
+    Object.assign(async () => new Response(body, { status: 200 }), { preconnect() {} }),
+  );
+  const mounted = mountReadPage("/history", History);
+  const requests = () =>
+    fetcher.mock.calls
+      .map(([input]) => new URL(String(input), mounted.location))
+      .filter((url) => url.pathname === "/api/v1/price-history")
+      .map((url) => url.search);
+  try {
+    // 发出读取后顶栏显示加载；取回与页码吻合的第一页后清除，说明结果已装配到表格分支。
+    expect(mounted.loading.peek().size).toBe(1);
+    await settleRead();
+    expect(requests()).toEqual(["?sort=closed_desc&page=1&page_size=20"]);
+    expect(mounted.loading.peek().size).toBe(0);
+    expect(mounted.location.search).toBe("");
+    const controls = mounted.elements.find(({ tag }) => tag === HistoryResultControls)?.props;
+    expect(controls?.grouping).toBe("flat");
+    const table = mounted.elements.find(({ tag }) => tag === For)?.children[0];
+    if (typeof table !== "function") throw new Error("未装配成交列表");
+    const page = JSON.parse(body).data;
+    table(() => ({ key: "first", page }));
+    const rendered = mounted.elements.find(({ tag }) => tag === PriceHistoryTable)?.props;
+    expect(rendered).toMatchObject({ grouping: "flat", currentPage: 1, page: { total: 1 } });
+  } finally {
+    mounted.dispose();
+    fetcher.mockRestore();
+    resetStoreForTest();
   }
 });

@@ -13,7 +13,7 @@ test("default_query_state_serializes_only_stable_page_sizes：默认查询只写
   const query = publicBoardQueryDefault();
   expect(query.includeUnleveled).toBe("true");
   expect(query.historySort).toBe("closed_desc");
-  expect(query.historyGroup).toBe("equipment");
+  expect(query.historyGroup).toBe("flat");
   expect(publicQueryPairs(query)).toEqual(
     pairs([
       ["page_size", "20"],

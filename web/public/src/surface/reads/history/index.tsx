@@ -1,6 +1,7 @@
 // Public 价格历史页面及其筛选、值规范化、结果表格和详情查找宿主。
 // 世界是本页“筛选条件”面板里的一项，点「应用」才写入地址栏，缺省为全部世界；其他跨世界页仍用
 // 页面顶部的世界按钮组。Rust 版把世界下拉框放在表单的主筛选行。
+// 没有任何筛选条件时也读取：进入页面即按当前排序显示全部成交的第一页与统计（Rust 版要求先搜索）。
 
 import type { PublicPriceHistoryListResponse } from "@auction/contracts/dto/public/catalog/history";
 import { structuralEquals } from "@auction/web-shared/reactive/equality";
@@ -31,7 +32,7 @@ import { PriceHistoryFilters } from "./filters/components";
 import { useHistoryFilters } from "./filters/state";
 import { HistoryResultControls } from "./presentation";
 import { PriceHistoryTable } from "./table";
-import { historyActiveFilterCount, historyHasRequestCondition } from "./values";
+import { historyActiveFilterCount } from "./values";
 
 interface HistorySnapshot {
   readonly query: PriceHistoryQuery;
@@ -60,11 +61,8 @@ export function History(): JSX.Element {
   const filters = useHistoryFilters(queryStateSignal, worldOptions);
   const appliedQuery = createValueMemo(() => filters.applied().query);
   const activeFilterCount = createValueMemo(() => historyActiveFilterCount(appliedQuery()));
-  const hasSearch = createValueMemo(
-    () =>
-      historyHasRequestCondition(appliedQuery()) &&
-      Object.keys(filters.applied().errors).length === 0,
-  );
+  // 只有深链或草稿校验失败时不读取：非法或重复的条件不能被放宽成更大的查询。
+  const queryValid = createValueMemo(() => Object.keys(filters.applied().errors).length === 0);
   const bounds = usePublicPageBounds(queryStateSignal, "History", (query) => [
     ["page", query.pageSize],
   ]);
@@ -72,14 +70,14 @@ export function History(): JSX.Element {
   const historyDependencies = createValueMemo(() => {
     return {
       query: appliedQuery(),
-      readable: hasSearch() && !bounds.blocked("page"),
+      readable: queryValid() && !bounds.blocked("page"),
       pageSize: pageSize(),
       // 刷新代数参与依赖身份：同一查询也必须因权威重读请求重新发起读取。
       refreshGeneration: refreshGeneration(),
     };
   });
   const history = createTaskResource(historyDependencies, async (dependencies, context) => {
-    // 没有已应用的筛选条件时只展示搜索入口，不发起查询。
+    // 已应用条件非法或页码等待纠偏时不发起查询。
     if (!dependencies.readable) {
       return null;
     }
@@ -122,9 +120,9 @@ export function History(): JSX.Element {
     const page = loadedPage();
     return page === null ? [] : [{ key: tableScopeKey(), page }];
   });
-  // 已提交的搜索还没有结果（含等待页码纠偏后的重读）时由顶栏提示加载，正文留空。
+  // 合法查询还没有结果（含等待页码纠偏后的重读）时由顶栏提示加载，正文留空。
   const contentLoading = createValueMemo(() => {
-    if (!hasSearch() || bounds.failed("page")) {
+    if (!queryValid() || bounds.failed("page")) {
       return false;
     }
     const result = historyResult();
@@ -146,10 +144,7 @@ export function History(): JSX.Element {
             filters={filters}
             worldOptions={worldOptions()}
             activeFilterCount={activeFilterCount()}
-          />
-        </div>
-        <Show when={hasSearch()}>
-          <div class="public-history-output">
+          >
             <HistoryResultControls
               sort={appliedQuery().sort}
               grouping={queryStateSignal().historyGroup}
@@ -162,15 +157,19 @@ export function History(): JSX.Element {
                 )
               }
               onGroupChange={(group) =>
-                // 分组只重排已取回的本页，地址写入也不能改变其他请求条件。
+                // 分组只重排已取回的本页，地址写入也不能改变其他请求条件；缺省平铺不写出。
                 updatePublicQueryPairs(
                   queryStateSignal,
                   ["history_group"],
-                  group === "equipment" ? [] : [["history_group", group]],
+                  group === "flat" ? [] : [["history_group", group]],
                   "push",
                 )
               }
             />
+          </PriceHistoryFilters>
+        </div>
+        <Show when={queryValid()}>
+          <div class="public-history-output">
             <Switch>
               <Match when={bounds.failed("page")}>
                 <AsyncState

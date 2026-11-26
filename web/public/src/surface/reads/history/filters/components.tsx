@@ -30,11 +30,14 @@ interface FieldFeedback {
   blur(): void;
 }
 
-/** 历史筛选表单；深链错误随原文显示，交互后再标记输入控件。 */
+/** 历史筛选表单；深链错误随原文显示，交互后再标记输入控件。
+ * 表单即筛选卡片：名称、筛选条件、应用与 `children`（排序、分组）同处一行；名称的分词说明作
+ * 输入框的无障碍描述与悬停提示，字段错误仍可见。 */
 export function PriceHistoryFilters(props: {
   readonly filters: ReturnType<typeof useHistoryFilters>;
   readonly worldOptions: readonly WorldSwitchOption[];
   readonly activeFilterCount: number;
+  readonly children?: JSX.Element;
 }): JSX.Element {
   const filters = props.filters;
   const draft = filters.draft;
@@ -140,6 +143,7 @@ export function PriceHistoryFilters(props: {
             spellcheck="false"
             value={draft().name}
             placeholder={t("history-filter-name-placeholder")}
+            title={t("history-filter-name-hint")}
             aria-invalid={name.invalid()}
             aria-describedby={
               name.message() === null
@@ -173,6 +177,7 @@ export function PriceHistoryFilters(props: {
             {t("history-filter-apply")}
           </button>
         </div>
+        {props.children}
       </div>
       <p id="public-history-name-hint" class="public-history-name-hint">
         {t("history-filter-name-hint")}

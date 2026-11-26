@@ -335,7 +335,9 @@ test("历史成交价的世界筛选由应用提交，外壳进出链接都省�
     const settings = () =>
       page.find((node) => node.getAttribute("class") === "public-history-settings-toggle");
     await waitFor(() => settings() !== null);
-    expect(priceReads()).toEqual([]);
+    // 没有任何条件时页面先读取全部世界的最近成交，请求不带 world。
+    await waitFor(() => priceReads().length > 0);
+    expect(priceReads().map((url) => url.searchParams.has("world"))).toEqual([false]);
     press(
       requireElement(
         page,
@@ -351,13 +353,13 @@ test("历史成交价的世界筛选由应用提交，外壳进出链接都省�
       ),
     );
     expect(page.router.currentLocationString()).toBe("/history");
-    expect(priceReads()).toEqual([]);
+    expect(priceReads()).toHaveLength(1);
     requireElement(
       page,
       (node) => node.tag === "form" && node.getAttribute("class") === "public-history-filters",
     ).submit();
-    await waitFor(() => priceReads().length > 0);
-    const selectedWorld = priceReads()[0]?.searchParams.get("world");
+    await waitFor(() => priceReads().length > 1);
+    const selectedWorld = priceReads()[1]?.searchParams.get("world");
     expect(selectedWorld).toBe("main");
     expect(page.router.currentLocationString()).toBe("/history?world=main");
     // 成交价请求与会话读取独立；会话确认后手机导航才会用账户链接替换登录入口。

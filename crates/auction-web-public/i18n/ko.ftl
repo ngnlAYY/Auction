@@ -402,6 +402,7 @@ history-group-buyer = 구매자별
 history-group-seller = 판매자별
 history-results-scope = 그룹은 현재 페이지에만 적용됩니다. 정렬과 통계는 조건에 맞는 전체 거래에 적용됩니다.
 history-group-count = 현재 페이지 { $count }건
+history-group-count-one = 현재 페이지 { $count }건
 history-credit-amount = { $amount } C
 history-filter-by-buyer = 구매자로 검색: { $name }
 history-filter-by-seller = 판매자로 검색: { $name }

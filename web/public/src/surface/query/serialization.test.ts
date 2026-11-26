@@ -5,6 +5,7 @@ import { expect, test } from "bun:test";
 import type { PublicBoardQuery } from "./board";
 
 const { normalizeWorldQuery, publicBoardQueryDefault } = await import("./board");
+const { parsePublicQuery } = await import("./parse");
 const { publicQueryPairs, publicQueryString } = await import("./serialization");
 
 function pairs(values: readonly (readonly [string, string])[]): [string, string][] {
@@ -77,4 +78,15 @@ test("passthrough_parameters_survive_round_trip_encode：透传参数原样编�
   expect(pageSize).toBeGreaterThanOrEqual(0);
   expect(passthrough).toBeGreaterThanOrEqual(0);
   expect(pageSize).toBeLessThan(passthrough);
+});
+
+test("history_group 缺省平铺不写出，旧链接显式的 equipment 仍按装备名分组并原样写回", () => {
+  const flat = parsePublicQuery("History", "");
+  expect(flat.historyGroup).toBe("flat");
+  expect(publicQueryPairs(flat).map(([key]) => key)).not.toContain("history_group");
+  expect(parsePublicQuery("History", "?history_group=flat").historyGroup).toBe("flat");
+
+  const grouped = parsePublicQuery("History", "?history_group=equipment");
+  expect(grouped.historyGroup).toBe("equipment");
+  expect(publicQueryPairs(grouped)).toContainEqual(["history_group", "equipment"]);
 });
