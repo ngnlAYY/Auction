@@ -4,6 +4,7 @@ use std::fmt;
 
 use auction_domain::consignment::{
     FeeBps, ListingEquipmentIdentity, ListingMode, ListingPrice, ListingPublicationTtls,
+    ListingSellerName,
 };
 use auction_domain::consignment::{ListingSnapshot, ListingState, ListingVersion};
 use auction_domain::{CommandId, EquipmentId, EquipmentKey, LotId, UserId, valid_text};
@@ -55,9 +56,20 @@ impl ListingOperation {
     }
 }
 
+/// 登记卖家：已认证的站内账户，或匿名非寄售登记自填的游戏角色名。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegistrationSeller<'a> {
+    /// 从当前 Public 会话取得的账户。
+    Account(UserId),
+    /// 未登录登记人自填、未经验证的游戏角色名，只允许非寄售。
+    GameName(&'a ListingSellerName),
+}
+
 /// 经 URL 校验后用于登记仲裁和 MAC 的语义字段。凭证只借用到本次命令结束。
 #[derive(Debug)]
 pub struct RegistrationInput<'a> {
+    /// 登记卖家；账户登记沿用 v1 MAC 编码，自填名另用独立前缀并纳入名称。
+    pub seller: RegistrationSeller<'a>,
     /// 规范世界和 EID。
     pub identity: &'a ListingEquipmentIdentity,
     /// 已规范化的读取凭证。
@@ -83,6 +95,8 @@ pub struct ListingRegistrationPolicy {
     pub max_open_per_user: u8,
     /// 数据库时钟滚动一小时的登记额度。
     pub registrations_per_hour: u8,
+    /// 全站处于解析中的匿名挂单上限，超出按登记限速拒绝。
+    pub anonymous_resolving_limit: u16,
 }
 
 /// 登记命令及首次执行候选 ID。重放必须比较固定目标 `new`。
@@ -90,8 +104,6 @@ pub struct ListingRegistrationPolicy {
 pub struct RegisterListingCommand<'a> {
     /// 玩家提供的 UUIDv4，与 Worker 和系统派生的 UUIDv5 分属不同命名空间。
     pub command_id: CommandId,
-    /// 从当前会话取得的卖家。
-    pub seller_user_id: UserId,
     /// 仅用于审计关联，不参与摘要、MAC 或重放比较，重放保留首次审计关联号。
     /// 关联标识，不是秘密，会进入日志与审计；不得把业务输入写进它。
     pub request_id: Option<String>,

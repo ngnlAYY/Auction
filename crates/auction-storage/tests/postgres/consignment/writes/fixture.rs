@@ -390,8 +390,10 @@ pub(super) fn register<'a>(
     RegisterListingCommand {
         request_id: None,
         command_id: CommandId::from_uuid(command_id),
-        seller_user_id: UserId::from_uuid(seller_user_id),
         input: RegistrationInput {
+            seller: auction_application::consignment::RegistrationSeller::Account(
+                UserId::from_uuid(seller_user_id),
+            ),
             identity: equipment,
             key,
             mode,
@@ -408,6 +410,7 @@ pub(super) fn register<'a>(
             consigned_fee_bps: FeeBps::DEFAULT_CONSIGNED,
             max_open_per_user: 20,
             registrations_per_hour: 10,
+            anonymous_resolving_limit: 50,
         },
     }
 }

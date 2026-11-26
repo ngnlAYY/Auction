@@ -221,6 +221,15 @@ impl PublicListingRead for Backend {
         self.read(self.public.clone())
     }
 
+    fn anonymous_command(
+        &self,
+
+        _command_id: CommandId,
+    ) -> ConsignmentFuture<'_, Option<auction_application::consignment::AnonymousRegistrationReceipt>>
+    {
+        Box::pin(async { Err(ConsignmentError::Unavailable) })
+    }
+
     fn registration_availability<'a>(
         &'a self,
         _crypto: &'a dyn RegistrationReplayCrypto,
@@ -289,7 +298,12 @@ impl ListingCommandStore for Backend {
         _crypto: Option<&'a dyn RegistrationReplayCrypto>,
     ) -> ConsignmentFuture<'a, ListingCommandOutcome<ListingRegistered>> {
         self.record(Call::Register(
-            command.seller_user_id,
+            match command.input.seller {
+                auction_application::consignment::RegistrationSeller::Account(seller) => seller,
+                auction_application::consignment::RegistrationSeller::GameName(_) => {
+                    panic!("账户登记夹具不接收匿名登记")
+                }
+            },
             command.command_id,
             command.input.mode,
             command.input.price.value(),
@@ -602,6 +616,7 @@ pub(super) fn register_service(
             consigned_fee_bps: fee,
             max_open_per_user: 20,
             registrations_per_hour: 10,
+            anonymous_resolving_limit: 50,
         },
         true,
         move || {

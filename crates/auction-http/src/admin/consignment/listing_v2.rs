@@ -127,7 +127,9 @@ fn detail_dto(
 
 fn record_dto(record: &AdminListingRecordV2) -> Result<AdminListingV2, ConsignmentError> {
     let listing = &record.listing;
-    if listing.listing_id.is_nil() || record.seller_user_id.is_nil() {
+    // 匿名非寄售挂单的可空卖家随 Admin 契约变更开放；此前失败关闭。
+    let seller_user_id = record.seller_user_id.ok_or(ConsignmentError::Unavailable)?;
+    if listing.listing_id.is_nil() || seller_user_id.is_nil() {
         return Err(ConsignmentError::Unavailable);
     }
     // Admin 视图不带卖家动作；止售只在在库下架态展示，hold_id 只在这里出现。
@@ -151,7 +153,7 @@ fn record_dto(record: &AdminListingRecordV2) -> Result<AdminListingV2, Consignme
         .transpose()?;
     Ok(AdminListingV2 {
         listing: owned_v2(listing, &[])?,
-        seller_user_id: record.seller_user_id.as_uuid(),
+        seller_user_id: seller_user_id.as_uuid(),
         seller_name: record.seller_name.clone(),
         admin_delist_reason: record
             .admin_delist_reason

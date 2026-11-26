@@ -84,14 +84,16 @@ pub(super) fn closed(
 }
 
 fn record(result: AdminListingRecord) -> Result<AdminListing, ConsignmentError> {
-    if result.listing().listing_id.is_nil() || result.seller_user_id.is_nil() {
+    // 匿名非寄售挂单的可空卖家随 Admin 契约变更开放；此前失败关闭。
+    let seller_user_id = result.seller_user_id.ok_or(ConsignmentError::Unavailable)?;
+    if result.listing().listing_id.is_nil() || seller_user_id.is_nil() {
         return Err(ConsignmentError::Unavailable);
     }
     let listing = owned_projection(result.listing())?;
     let can_delist = result.can_delist();
     Ok(AdminListing {
         listing,
-        seller_user_id: result.seller_user_id.as_uuid(),
+        seller_user_id: seller_user_id.as_uuid(),
         seller_name: result.seller_name,
         admin_delist_reason: result.admin_delist_reason.map(|reason| reason.as_str().to_owned()),
         can_delist,

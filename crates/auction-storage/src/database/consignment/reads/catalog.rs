@@ -1,10 +1,11 @@
 //! 公开列表与详情复用资格谓词，数据库仅返回公开字段。
 
 use auction_application::consignment::{
-    ConsignmentError, ConsignmentFuture, ListingNameQuery, ListingReadPage,
-    ListingRegistrationAvailability, PublicListingDetail, PublicListingQuery, PublicListingRead,
-    PublicListingState, PublicListingSummary, RegistrationReplayCrypto,
+    AnonymousRegistrationReceipt, ConsignmentError, ConsignmentFuture, ListingNameQuery,
+    ListingReadPage, ListingRegistrationAvailability, PublicListingDetail, PublicListingQuery,
+    PublicListingRead, PublicListingState, PublicListingSummary, RegistrationReplayCrypto,
 };
+use auction_domain::CommandId;
 use auction_domain::consignment::{ListingEquipmentIdentity, ListingPrice, ListingVersion};
 use auction_time::Timestamp;
 use sqlx::postgres::PgRow;
@@ -21,6 +22,7 @@ use crate::database::like_patterns::contains_patterns;
 const PUBLIC_COLUMNS: &str =
     "SELECT l.id, l.world_id, l.external_equipment_id, l.state_version, l.state, l.price,
             l.updated_at, l.expires_at, s.username AS seller_name,
+            l.seller_user_id IS NOT NULL AS seller_verified,
             p.name, p.category, p.alt_name, p.level_kind, p.level_number, p.tradeable, p.observed_at";
 
 fn visible(query: &mut QueryBuilder<Postgres>, as_of: Timestamp) {
@@ -110,6 +112,7 @@ fn summary(
         price: ListingPrice::new(row.try_get("price").map_err(storage_error)?)
             .map_err(unavailable)?,
         seller_name: row.try_get("seller_name").map_err(storage_error)?,
+        seller_verified: row.try_get("seller_verified").map_err(storage_error)?,
         updated_at: row.try_get("updated_at").map_err(storage_error)?,
         expires_at: row.try_get("expires_at").map_err(storage_error)?,
     })
@@ -185,5 +188,13 @@ impl PublicListingRead for DatabaseStore {
         replay_crypto: &'a dyn RegistrationReplayCrypto,
     ) -> ConsignmentFuture<'a, ListingRegistrationAvailability> {
         Box::pin(availability::registration(self, replay_crypto))
+    }
+
+    fn anonymous_command(
+        &self,
+        _command_id: CommandId,
+    ) -> ConsignmentFuture<'_, Option<AnonymousRegistrationReceipt>> {
+        // 匿名登记的账本与挂单读取随存储迁移落地；此前只能报告不可用，不能谎报未找到。
+        Box::pin(async { Err(ConsignmentError::Unavailable) })
     }
 }

@@ -67,7 +67,10 @@ fn admin_record(row: &PgRow, paused: bool) -> Result<AdminListingRecordV2, Consi
     }
     Ok(AdminListingRecordV2 {
         listing,
-        seller_user_id: UserId::from_uuid(row.try_get("seller_user_id").map_err(storage_error)?),
+        seller_user_id: row
+            .try_get::<Option<Uuid>, _>("seller_user_id")
+            .map_err(storage_error)?
+            .map(UserId::from_uuid),
         seller_name: row.try_get("seller_name").map_err(storage_error)?,
         admin_delist_reason: reason,
     })

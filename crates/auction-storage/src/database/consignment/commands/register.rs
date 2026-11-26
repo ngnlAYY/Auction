@@ -4,8 +4,9 @@ use auction_application::admin::{AdminIntakeError, EquipmentKeySealerPort};
 use auction_application::consignment::{
     ConsignmentError, ListingBusinessRejection, ListingCommandOutcome, ListingCommandRejection,
     ListingCredentialError, ListingOperation, ListingRegistered, RegisterListingCommand,
-    RegistrationReplayCrypto,
+    RegistrationReplayCrypto, RegistrationSeller,
 };
+use auction_domain::UserId;
 use auction_domain::consignment::{
     FeeBps, ForcedTerminationFacts, ListingTransition, ListingTrigger, check_listing_history,
     transition_listing,
@@ -35,6 +36,7 @@ struct Registration<'a> {
     sealer: Option<&'a dyn EquipmentKeySealerPort>,
     crypto: Option<&'a dyn RegistrationReplayCrypto>,
     identity: ListingLockIdentity,
+    seller_user_id: UserId,
 }
 
 /// 先全局比较原登记，再核当前准入。不变量 1、2、3、5、6、7、10。
@@ -44,16 +46,19 @@ pub(super) async fn register(
     sealer: Option<&dyn EquipmentKeySealerPort>,
     crypto: Option<&dyn RegistrationReplayCrypto>,
 ) -> Result<ListingCommandOutcome<ListingRegistered>, ConsignmentError> {
+    let RegistrationSeller::Account(seller_user_id) = command.input.seller else {
+        return Err(ConsignmentError::Unavailable);
+    };
     let keys = LockKeys {
         command_id: command.command_id.as_uuid(),
-        sellers: &[command.seller_user_id.as_uuid()],
+        sellers: &[seller_user_id.as_uuid()],
         equipment: std::slice::from_ref(command.input.identity),
     };
     let identity = ListingLockIdentity {
-        seller_user_id: command.seller_user_id.as_uuid(),
+        seller_user_id: seller_user_id.as_uuid(),
         equipment: command.input.identity.clone(),
     };
-    let input = Registration { command, sealer, crypto, identity };
+    let input = Registration { command, sealer, crypto, identity, seller_user_id };
     result(
         with_command_transaction(store, keys, &input, |input, tx| Box::pin(execute(input, tx)))
             .await,
@@ -75,7 +80,7 @@ async fn execute(
     };
     let mut writer = match tx
         .arbitrate(
-            Actor::PublicUser(command.seller_user_id.as_uuid()),
+            Actor::PublicUser(input.seller_user_id.as_uuid()),
             ListingOperation::Register,
             Target::New,
             RequestProof::Registration(&compute_mac),
@@ -94,14 +99,14 @@ async fn execute(
         return Err(ConsignmentError::Unavailable.into());
     };
 
-    let seller = lock_seller_eligibility(writer.connection(), command.seller_user_id).await?;
+    let seller = lock_seller_eligibility(writer.connection(), input.seller_user_id).await?;
     let mut rejection = None;
     let mut baseline_count = 0;
     if seller.as_ref().is_some_and(|seller| seller.active && !seller.active_blacklist) {
         let history = read_listing_history(writer.connection(), command.input.identity).await?;
         baseline_count = history.lot_ids.len();
         if let Err(error) =
-            check_listing_history(command.input.identity, command.seller_user_id, &history.aliases)
+            check_listing_history(command.input.identity, input.seller_user_id, &history.aliases)
         {
             let ConsignmentError::Business(reason) = error.into() else {
                 return Err(WriteError::invariant("consignment_registration_history"));
@@ -139,17 +144,16 @@ async fn execute(
         collisions = retire_occupants(&mut writer, &occupants, None, now).await?;
         rejection = if occupants
             .iter()
-            .any(|row| row.forced_reason.is_none() && row.seller_user_id == command.seller_user_id)
+            .any(|row| row.forced_reason.is_none() && row.seller_user_id == input.seller_user_id)
         {
             Some(ListingBusinessRejection::AlreadyOpen)
         } else if occupants.iter().any(|row| row.forced_reason.is_none() && row.published) {
             Some(ListingBusinessRejection::EquipmentBusy)
-        } else if hourly_registration_count(writer.connection(), command.seller_user_id, now)
-            .await?
+        } else if hourly_registration_count(writer.connection(), input.seller_user_id, now).await?
             >= i64::from(command.policy.registrations_per_hour)
         {
             Some(ListingBusinessRejection::RegistrationRateLimited)
-        } else if effective_activity_count(writer.connection(), command.seller_user_id, now).await?
+        } else if effective_activity_count(writer.connection(), input.seller_user_id, now).await?
             >= i64::from(command.policy.max_open_per_user)
         {
             Some(ListingBusinessRejection::ListingLimitReached)

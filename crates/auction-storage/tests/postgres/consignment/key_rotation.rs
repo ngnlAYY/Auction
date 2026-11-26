@@ -161,6 +161,9 @@ fn input<'a>(
     key: &'a EquipmentKey,
 ) -> RegistrationInput<'a> {
     RegistrationInput {
+        seller: auction_application::consignment::RegistrationSeller::Account(
+            auction_domain::UserId::from_uuid(Uuid::from_u128(1)),
+        ),
         identity,
         key,
         mode: ListingMode::Direct,

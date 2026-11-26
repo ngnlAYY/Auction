@@ -349,9 +349,14 @@ fn read_port(enabled: bool) -> ReadPort {
         view: PrivateListingView::new(ListingMode::Consigned, ListingState::Resolving, view)
             .unwrap(),
     };
-    let record =
-        AdminListingRecord::new(private, SELLER.into(), "fixture-seller".to_owned(), None, enabled)
-            .unwrap();
+    let record = AdminListingRecord::new(
+        private,
+        Some(SELLER.into()),
+        "fixture-seller".to_owned(),
+        None,
+        enabled,
+    )
+    .unwrap();
     let detail = AdminListingDetail {
         record: record.clone(),
         conflicts: Vec::new(),

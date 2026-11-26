@@ -47,7 +47,7 @@ pub use recovery::{
     apply_sanction_command, deliver_right_notice_command, open_sanction_command,
     reset_cycle_command,
 };
-pub use register::{RegisterListingInput, RegisterListingService};
+pub use register::{AnonymousRegisterListingInput, RegisterListingInput, RegisterListingService};
 pub use resolve::{ListingLookupRound, ResolveListingService};
 pub use returns::{ConsumeReturnInput, ReturnService, StartTakeInput};
 pub use rights::{

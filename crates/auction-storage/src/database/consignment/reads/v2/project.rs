@@ -81,8 +81,9 @@ pub(super) fn private_v2(row: &PgRow, paused: bool) -> Result<PrivateListingV2, 
         None => stored,
     };
     let custody = custody_facts(row)?;
+    let seller_verified = row.try_get("seller_verified").map_err(storage_error)?;
     if is_legacy_effective(effective) {
-        return PrivateListingV2::from_legacy(private(row, paused)?, custody);
+        return PrivateListingV2::from_legacy(private(row, paused)?, seller_verified, custody);
     }
     // 强制终结只作用于 v1 活动态与 available，代管态的有效态必等于持久态。
     if forced.is_some() {
@@ -125,6 +126,7 @@ pub(super) fn private_v2(row: &PgRow, paused: bool) -> Result<PrivateListingV2, 
         updated_at: row.try_get("updated_at").map_err(storage_error)?,
         expires_at: row.try_get("expires_at").map_err(storage_error)?,
         view,
+        seller_verified,
         custody,
     }
     .validated()

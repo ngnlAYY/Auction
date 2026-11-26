@@ -24,7 +24,9 @@ use crate::services::consignment::tests::{
     FAKE_KEY, FAKE_URL, INVALID_CLIENT_COMMAND_IDS, LISTING_ID, SELLER_ID, command_id, identity,
     price, run, seller,
 };
-use crate::services::consignment::{RegisterListingInput, RegisterListingService};
+use crate::services::consignment::{
+    AnonymousRegisterListingInput, RegisterListingInput, RegisterListingService,
+};
 
 struct RegistrationFixture {
     store: Arc<DebugRegistrationStore>,
@@ -81,6 +83,7 @@ fn policy(enabled: bool) -> ListingRegistrationPolicy {
         consigned_fee_bps: FeeBps::new(615).unwrap(),
         max_open_per_user: 24,
         registrations_per_hour: 9,
+        anonymous_resolving_limit: 50,
     }
 }
 
@@ -199,7 +202,7 @@ fn register_preserves_request_id_and_mac_input_across_replay() {
         );
         let [call] = fixture.store.0.register.take_calls().try_into().unwrap();
         assert_eq!(call.command_id, command_id);
-        assert_eq!(call.seller_user_id, UserId::from_uuid(SELLER_ID));
+        assert_eq!(call.seller_user_id, Some(UserId::from_uuid(SELLER_ID)));
         assert_eq!(call.request_id.as_deref(), request_id);
         // 登记及两次重放对 MAC 提供相同的五项语义值；凭证由仓储替身在交接时核对。
         assert_eq!(call.identity, identity());
@@ -532,4 +535,45 @@ fn register_preserves_safe_port_failure_without_retry() {
         assert_eq!(run(service.register(&seller(), input(), None)), Err(error));
     }
     assert_eq!(fixture.store.0.register.take_calls().len(), 2);
+}
+
+#[test]
+fn anonymous_register_fixes_direct_mode_zero_fee_and_passes_the_game_name() {
+    let fixture = RegistrationFixture::new();
+    let service = fixture.service(true, true);
+    let receipt = ListingRegistered::new(LISTING_ID, price(101)).unwrap();
+    fixture.url_ok();
+    fixture.store.0.register.reply(Ok(ListingCommandOutcome::Accepted(receipt)));
+    let input = AnonymousRegisterListingInput {
+        command_id: command_id(),
+        seller_game_name: "Alice Zero",
+        equipment_url: FAKE_URL,
+        price: 101,
+    };
+    assert_eq!(run(service.register_anonymous(input, None)), Ok(receipt));
+    let [call] = fixture.store.0.register.take_calls().try_into().unwrap();
+    assert_eq!(call.seller_user_id, None);
+    assert_eq!(call.seller_game_name.as_deref(), Some("Alice Zero"));
+    assert_eq!(call.mode, ListingMode::Direct);
+    assert_eq!(call.expected_fee_bps, FeeBps::DIRECT);
+    assert_eq!(call.policy, policy(true));
+}
+
+#[test]
+fn anonymous_register_rejects_an_invalid_game_name_before_the_store() {
+    let fixture = RegistrationFixture::new();
+    let service = fixture.service(true, true);
+    for name in ["", " Alice", "https://hentaiverse.org/equip/1/abcdef0123"] {
+        fixture.url_ok();
+        let input = AnonymousRegisterListingInput {
+            command_id: command_id(),
+            seller_game_name: name,
+            equipment_url: FAKE_URL,
+            price: 101,
+        };
+        let result = run(service.register_anonymous(input, None));
+        assert_eq!(result, Err(ConsignmentError::InvalidListingRequest), "{name:?}");
+    }
+    assert!(fixture.store.0.register.take_calls().is_empty());
+    assert_eq!(fixture.uuid_calls.load(Ordering::Relaxed), 0);
 }

@@ -277,6 +277,8 @@ fn configure_consignment<
             .registrations_per_hour()
             .try_into()
             .context("寄售每小时登记额度无效")?,
+        // 匿名入口与其配置尚未接入；零额度让匿名登记失败关闭。
+        anonymous_resolving_limit: 0,
     };
     let registration_sealer_available = sealer.is_some();
     // 不变量 1、6：停用仍交给原命令账本仲裁，首次登记与改价受有效开关约束。
@@ -997,6 +999,16 @@ mod tests {
             panic!("测试不读公开详情")
         }
 
+        fn anonymous_command(
+            &self,
+            _command_id: CommandId,
+        ) -> ConsignmentFuture<
+            '_,
+            Option<auction_application::consignment::AnonymousRegistrationReceipt>,
+        > {
+            panic!("测试不读匿名登记回执")
+        }
+
         fn registration_availability<'a>(
             &'a self,
             _crypto: &'a dyn RegistrationReplayCrypto,
@@ -1056,7 +1068,10 @@ mod tests {
             sealer: Option<&'a dyn EquipmentKeySealerPort>,
             replay_crypto: Option<&'a dyn RegistrationReplayCrypto>,
         ) -> ConsignmentFuture<'a, ListingCommandOutcome<ListingRegistered>> {
-            assert_eq!(command.seller_user_id.as_uuid(), SELLER);
+            assert_eq!(
+                command.input.seller,
+                auction_application::consignment::RegistrationSeller::Account(SELLER.into())
+            );
             assert_eq!(command.command_id.as_uuid(), REGISTER_COMMAND);
             let sealer = sealer.is_some();
             let replay_crypto = replay_crypto.is_some();

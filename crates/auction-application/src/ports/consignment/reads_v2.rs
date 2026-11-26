@@ -147,6 +147,8 @@ pub struct PrivateListingV2 {
     pub expires_at: Timestamp,
     /// 有效视图。
     pub view: PrivateListingViewV2,
+    /// 卖家经站内账户登记；匿名非寄售挂单为否，只能由同名账户撤回。
+    pub seller_verified: bool,
     /// 代管事实。
     pub custody: CustodyFacts,
 }
@@ -155,6 +157,7 @@ impl PrivateListingV2 {
     /// 把 v1 已核验的挂单与代管事实组合成 v2 记录；v1 视图只能带历史 position，不会带活动止售。
     pub fn from_legacy(
         listing: PrivateListing,
+        seller_verified: bool,
         custody: CustodyFacts,
     ) -> Result<Self, ConsignmentError> {
         let PrivateListing {
@@ -180,6 +183,7 @@ impl PrivateListingV2 {
             updated_at,
             expires_at,
             view: PrivateListingViewV2::Legacy(view),
+            seller_verified,
             custody,
         }
         .validated()
@@ -193,8 +197,10 @@ impl PrivateListingV2 {
             return Err(ConsignmentError::Unavailable);
         }
         let generation = custody.position.and_then(|position| position.generation);
+        // 匿名登记只有非寄售，不可能进入代管视图。
         let valid = match &self.view {
             PrivateListingViewV2::Legacy(_) => true,
+            _ if !self.seller_verified => false,
             // 代管态必有 position；取得后才有处分代，已接受未取得的件只能没有。
             PrivateListingViewV2::DepositAccepted(_) => custody.position.is_some(),
             PrivateListingViewV2::Available(_)
@@ -236,6 +242,7 @@ impl PrivateListingV2 {
             // 重列许可与损失案件都按读快照填充（J3）；重列最终仍由写端锁内裁决。
             relist_allowed: self.custody.relist_allowed,
             loss_case_id: self.custody.loss_case_id,
+            seller_verified: self.seller_verified,
         }
     }
 
@@ -255,8 +262,8 @@ impl PrivateListingV2 {
 pub struct AdminListingRecordV2 {
     /// 管理员可读的挂单事实。
     pub listing: PrivateListingV2,
-    /// 真正的本地卖家。
-    pub seller_user_id: UserId,
+    /// 真正的本地卖家；匿名非寄售挂单没有本站账户。
+    pub seller_user_id: Option<UserId>,
     /// 当前本站卖家名。
     pub seller_name: String,
     /// 仅运营会话可查看的下架说明。
@@ -356,6 +363,7 @@ mod tests {
             updated_at: time(),
             expires_at: time(),
             view: PrivateListingViewV2::HeldOffMarket { equipment, reason },
+            seller_verified: true,
             custody: CustodyFacts {
                 position: Some(PositionSummary {
                     position_id: Uuid::from_u128(2),

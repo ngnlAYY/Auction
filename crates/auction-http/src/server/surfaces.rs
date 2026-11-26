@@ -1342,6 +1342,7 @@ mod tests {
                             level: ListingEquipmentLevel::Unassigned,
                             price: amount(101),
                             seller_name: "FixtureSeller".to_owned(),
+                            seller_verified: true,
                             updated_at: timestamp("2026-11-20T18:10:00Z"),
                             expires_at: timestamp("2026-11-27T18:10:00Z"),
                         }],
@@ -1356,6 +1357,17 @@ mod tests {
                 _listing_id: Uuid,
             ) -> ConsignmentFuture<'_, Option<PublicListingDetail>> {
                 panic!("正式接线夹具只提供公开目录")
+            }
+
+            fn anonymous_command(
+                &self,
+
+                _command_id: CommandId,
+            ) -> ConsignmentFuture<
+                '_,
+                Option<auction_application::consignment::AnonymousRegistrationReceipt>,
+            > {
+                Box::pin(async { Err(ConsignmentError::Unavailable) })
             }
 
             fn registration_availability<'a>(
@@ -1453,7 +1465,14 @@ mod tests {
                 assert!(sealer.is_some());
                 assert!(crypto.is_some());
                 self.record(Call::Register(
-                    command.seller_user_id,
+                    match command.input.seller {
+                        auction_application::consignment::RegistrationSeller::Account(seller) => {
+                            seller
+                        }
+                        auction_application::consignment::RegistrationSeller::GameName(_) => {
+                            panic!("账户登记夹具不接收匿名登记")
+                        }
+                    },
                     command.command_id,
                     command.input.mode,
                     command.input.price.value(),
@@ -1610,6 +1629,7 @@ mod tests {
                         consigned_fee_bps: fee_bps,
                         max_open_per_user: 20,
                         registrations_per_hour: 10,
+                        anonymous_resolving_limit: 50,
                     },
                     true,
                     move || fixture_uuid(next_uuid.fetch_add(1, Ordering::Relaxed)),

@@ -14,7 +14,7 @@ use crate::ports::consignment::commands::{
     ListingAutoCloseEffect, ListingClosed, ListingCommandOutcome, ListingCommandRejection,
     ListingCommandStore, ListingLookupEffect, ListingPriceReceipt, ListingRegistered,
     ListingRegistrationPolicy, OwnedListingCommandReceipt, RegisterListingCommand,
-    RegistrationInput, RepriceListingCommand, WithdrawListingCommand,
+    RegistrationInput, RegistrationSeller, RepriceListingCommand, WithdrawListingCommand,
 };
 use crate::ports::consignment::equipment::{
     ListingCredentialError, ListingEquipmentKeyOpener, ListingEquipmentLookup,
@@ -29,9 +29,10 @@ use crate::ports::consignment::maintenance::{
     ListingAdmission, ListingMaintenance, ListingMaintenancePage,
 };
 use crate::ports::consignment::reads::{
-    AdminListingDetail, AdminListingQuery, AdminListingRead, AdminListingRecord, ListingReadPage,
-    ListingRegistrationAvailability, OwnedListingRead, OwnedListingRecord, PrivateListingQuery,
-    PublicListingDetail, PublicListingQuery, PublicListingRead, PublicListingSummary,
+    AdminListingDetail, AdminListingQuery, AdminListingRead, AdminListingRecord,
+    AnonymousRegistrationReceipt, ListingReadPage, ListingRegistrationAvailability,
+    OwnedListingRead, OwnedListingRecord, PrivateListingQuery, PublicListingDetail,
+    PublicListingQuery, PublicListingRead, PublicListingSummary,
 };
 use crate::ports::consignment::work::{
     ListingLookupClaim, ListingWorkerReadiness, LookupAbandonment, LookupClaimRequest,
@@ -118,7 +119,8 @@ pub(crate) fn invalid_listing_request_ids() -> impl Iterator<Item = String> {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct RegistrationCall {
     pub command_id: CommandId,
-    pub seller_user_id: UserId,
+    pub seller_user_id: Option<UserId>,
+    pub seller_game_name: Option<String>,
     pub request_id: Option<String>,
     pub identity: ListingEquipmentIdentity,
     pub price: auction_domain::consignment::ListingPrice,
@@ -150,7 +152,14 @@ impl ListingCommandStore for FakeListingCommands {
     ) -> ConsignmentFuture<'a, ListingCommandOutcome<ListingRegistered>> {
         let outcome = self.register.call(RegistrationCall {
             command_id: command.command_id,
-            seller_user_id: command.seller_user_id,
+            seller_user_id: match command.input.seller {
+                RegistrationSeller::Account(user_id) => Some(user_id),
+                RegistrationSeller::GameName(_) => None,
+            },
+            seller_game_name: match command.input.seller {
+                RegistrationSeller::Account(_) => None,
+                RegistrationSeller::GameName(name) => Some(name.as_str().to_owned()),
+            },
             request_id: command.request_id,
             identity: command.input.identity.clone(),
             price: command.input.price,
@@ -231,6 +240,7 @@ pub(crate) struct FakeListingReads {
     pub list_public: Reply<PublicListingQuery, ListingReadPage<PublicListingSummary>>,
     pub public_detail: Reply<Uuid, Option<PublicListingDetail>>,
     pub registration_availability: Reply<(), ListingRegistrationAvailability>,
+    pub anonymous_command: Reply<CommandId, Option<AnonymousRegistrationReceipt>>,
     pub list_owned: OwnedQueries,
     pub owned_detail: Reply<(UserId, Uuid), Option<OwnedListingRecord>>,
     pub owned_command: Reply<(UserId, CommandId), Option<OwnedListingCommandReceipt>>,
@@ -258,6 +268,13 @@ impl PublicListingRead for FakeListingReads {
         _replay_crypto: &'a dyn RegistrationReplayCrypto,
     ) -> ConsignmentFuture<'a, ListingRegistrationAvailability> {
         self.registration_availability.run(())
+    }
+
+    fn anonymous_command(
+        &self,
+        command_id: CommandId,
+    ) -> ConsignmentFuture<'_, Option<AnonymousRegistrationReceipt>> {
+        self.anonymous_command.run(command_id)
     }
 }
 

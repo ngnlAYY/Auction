@@ -109,8 +109,10 @@ fn replay_command() -> RegisterListingCommand<'static> {
     RegisterListingCommand {
         request_id: None,
         command_id: CommandId::from_uuid(Uuid::parse_str(REGISTER).expect("命令")),
-        seller_user_id: UserId::from_uuid(Uuid::parse_str(USER_1).expect("卖家")),
         input: RegistrationInput {
+            seller: auction_application::consignment::RegistrationSeller::Account(
+                UserId::from_uuid(Uuid::parse_str(USER_1).expect("卖家")),
+            ),
             identity: gear,
             key,
             mode: ListingMode::Consigned,
@@ -127,6 +129,7 @@ fn replay_command() -> RegisterListingCommand<'static> {
             consigned_fee_bps: FeeBps::new(500).expect("费率"),
             max_open_per_user: 20,
             registrations_per_hour: 10,
+            anonymous_resolving_limit: 50,
         },
     }
 }

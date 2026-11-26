@@ -73,7 +73,7 @@ async fn postgres_private_and_admin_scope_filters_and_effective_actions() {
         results.items.iter().map(|row| row.listing().listing_id).collect::<Vec<_>>(),
         [c.id, a.id, b.id]
     );
-    assert_eq!(results.items[0].seller_user_id.as_uuid(), OTHER);
+    assert_eq!(results.items[0].seller_user_id.map(UserId::as_uuid), Some(OTHER));
     assert!(results.items[0].can_delist());
     assert!(!results.items[2].can_delist());
     assert_eq!(results.items[2].listing().view.stored_state(), ListingState::AwaitingDeposit);
