@@ -46,6 +46,14 @@
   min-width: 0;
 }
 
+/* 筛选字段的隐式列下限是 select 按最长选项算出的最小内容宽度，窄屏会把字段撑出视口
+   （我的挂单的“挂单状态”在手机上撑到 641px）；显式 minmax(0, 1fr) 让列与 select 收缩到容器宽度，
+   select 本身另有 max-inline-size: 100%。 */
+.public-consignment-account__filters label {
+  grid-template-columns: minmax(0, 1fr);
+  max-inline-size: 100%;
+}
+
 .public-consignment-account__form button {
   justify-self: start;
 }
