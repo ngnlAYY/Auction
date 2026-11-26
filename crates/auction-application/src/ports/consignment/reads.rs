@@ -10,6 +10,7 @@ use auction_domain::{CommandId, LotId, UserId, valid_text};
 use auction_time::Timestamp;
 use uuid::Uuid;
 
+use crate::ports::auction::MAX_PUBLIC_HISTORY_NAME_TERMS;
 use crate::ports::consignment::commands::{ListingDelistReason, OwnedListingCommandReceipt};
 use crate::ports::consignment::equipment::{ListingEquipmentDetails, RegistrationReplayCrypto};
 use crate::ports::consignment::errors::{ConsignmentError, ConsignmentFuture};
@@ -142,9 +143,12 @@ impl ListingCategoryFilter {
     }
 }
 
-/// 目录名称和别名的字面子串查询。
+/// 目录名称查询的最多片段数，与价格历史的名称词条上限相同。
+const MAX_LISTING_NAME_TERMS: usize = MAX_PUBLIC_HISTORY_NAME_TERMS;
+
+/// 目录名称查询拆出的片段；每段都须是名称或别名同一字段的字面子串。
 #[derive(Clone, PartialEq, Eq)]
-pub struct ListingNameQuery(String);
+pub struct ListingNameQuery(Vec<String>);
 
 impl fmt::Debug for ListingNameQuery {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -154,7 +158,9 @@ impl fmt::Debug for ListingNameQuery {
 }
 
 impl ListingNameQuery {
-    /// 校验名称查询最多 80 个 Unicode 字符。
+    /// 校验整串最多 80 个 Unicode 字符，再按空白或英文逗号拆成片段（与价格历史同口径）：
+    /// 丢弃空片段，每段最多 128 UTF-8 字节；没有片段或超过 `MAX_LISTING_NAME_TERMS` 段时
+    /// 失败关闭（不变量 6），不静默截断。
     pub fn new(query: String) -> Result<Self, ConsignmentError> {
         if !valid_text(&query, 80 * 4)
             || query.chars().count() > 80
@@ -162,11 +168,22 @@ impl ListingNameQuery {
         {
             return Err(ConsignmentError::InvalidQuery);
         }
-        Ok(Self(query))
+        let terms = query
+            .split(|character: char| character == ',' || character.is_whitespace())
+            .filter(|term| !term.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        if terms.is_empty()
+            || terms.len() > MAX_LISTING_NAME_TERMS
+            || terms.iter().any(|term| term.len() > 128)
+        {
+            return Err(ConsignmentError::InvalidQuery);
+        }
+        Ok(Self(terms))
     }
 
-    /// 借用字面子串。数据库大小写折叠，`%` 和 `_` 不作通配符。
-    pub fn as_str(&self) -> &str {
+    /// 借用片段，至少一项。数据库大小写折叠，`%`、`_`、`\` 不作通配符或转义。
+    pub fn terms(&self) -> &[String] {
         &self.0
     }
 }
@@ -182,7 +199,7 @@ pub struct PublicListingQuery {
     pub mode: Option<ListingMode>,
     /// 可选的精确装备分类（命中任一）。
     pub category: Option<ListingCategoryFilter>,
-    /// 可选的装备名或别名子串。
+    /// 可选的名称片段，须全部落在装备名或全部落在别名中。
     pub name: Option<ListingNameQuery>,
 }
 

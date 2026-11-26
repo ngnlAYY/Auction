@@ -249,6 +249,37 @@ async fn postgres_public_filters_world_mode_category_and_literal_names() {
             },
             vec![a.id],
         ),
+        // 分词：各片段都在名称中即命中，顺序无关；c 的名称 "Fake Blade" 不含 "100"。
+        (
+            PublicListingQuery {
+                name: Some(ListingNameQuery::new("bla,100% fak".into()).unwrap()),
+                ..public_query()
+            },
+            vec![a.id],
+        ),
+        (
+            PublicListingQuery {
+                name: Some(ListingNameQuery::new("bla fak".into()).unwrap()),
+                ..public_query()
+            },
+            vec![a.id, b.id, c.id],
+        ),
+        // b 的名称含 "Blade"、别名含 "Plate"，但没有同一字段同时包含两者，不跨字段拼凑。
+        (
+            PublicListingQuery {
+                name: Some(ListingNameQuery::new("blade plate".into()).unwrap()),
+                ..public_query()
+            },
+            vec![],
+        ),
+        // 片段中的 "%" 按字面匹配，不会把 "Fake%Blade" 当作通配符命中所有 "Fake…Blade"。
+        (
+            PublicListingQuery {
+                name: Some(ListingNameQuery::new("fake%blade".into()).unwrap()),
+                ..public_query()
+            },
+            vec![],
+        ),
     ];
     // 非法或超量的分类列表在构造时失败关闭，不会到达 SQL。
     for invalid in ["Armor,", ",Armor", "Armor,,Weapon", "a,b,c,d,e,f,g,h"] {

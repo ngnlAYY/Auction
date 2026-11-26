@@ -24,6 +24,7 @@ use crate::database::consignment::deposit::primitives::{
     current_season, mail_readiness, season_state,
 };
 use crate::database::consignment::eligibility::predicates::listing_sql;
+use crate::database::consignment::reads::catalog::name_filter;
 use crate::database::consignment::reads::projection::equipment;
 use crate::database::consignment::reads::{page_order, snapshot, storage_error, unavailable};
 
@@ -123,12 +124,7 @@ fn filters(sql: &mut QueryBuilder<Postgres>, query: &PublicListingQuery) {
         sql.push(" AND p.category = ANY(").push_bind(category.as_slice().to_vec()).push(")");
     }
     if let Some(name) = &query.name {
-        let name = name.as_str();
-        sql.push(" AND (strpos(lower(p.name), lower(")
-            .push_bind(name.to_owned())
-            .push(")) > 0 OR strpos(lower(p.alt_name), lower(")
-            .push_bind(name.to_owned())
-            .push(")) > 0)");
+        name_filter(sql, name);
     }
 }
 

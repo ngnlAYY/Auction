@@ -416,16 +416,33 @@ fn filters_use_distinct_byte_and_character_budgets() {
     assert_eq!("Main".parse::<ListingWorld>(), Err(ConsignmentError::InvalidQuery));
     assert_eq!(ListingCategoryFilter::new("é".repeat(64)).fixture().as_slice()[0].len(), 128);
     assert_eq!(ListingCategoryFilter::new("é".repeat(65)), Err(ConsignmentError::InvalidQuery));
-    assert_eq!(ListingNameQuery::new("装".repeat(80)).fixture().as_str().chars().count(), 80);
-    assert_eq!(ListingNameQuery::new("装".repeat(81)), Err(ConsignmentError::InvalidQuery));
-    assert_eq!(ListingNameQuery::new("A%_".to_owned()).fixture().as_str(), "A%_");
-    for text in ["", " a", "a ", "a\nb", "a\u{2028}b"] {
+    // 整串 80 个 Unicode 字符，单段 128 UTF-8 字节（与价格历史同口径）。
+    let longest = format!("{} {}", "装".repeat(42), "装".repeat(37));
+    assert_eq!(ListingNameQuery::new(longest.clone()).fixture().terms().len(), 2);
+    assert_eq!(ListingNameQuery::new(format!("{longest}装")), Err(ConsignmentError::InvalidQuery));
+    assert_eq!(ListingNameQuery::new("装".repeat(43)), Err(ConsignmentError::InvalidQuery));
+    assert_eq!(ListingNameQuery::new("A%_".to_owned()).fixture().terms(), ["A%_"]);
+    for text in ["", " a", "a ", ",", "a\nb", "a\u{2028}b"] {
         assert_eq!(ListingNameQuery::new(text.to_owned()), Err(ConsignmentError::InvalidQuery));
         assert_eq!(
             ListingCategoryFilter::new(text.to_owned()),
             Err(ConsignmentError::InvalidQuery)
         );
     }
+}
+
+#[test]
+fn name_query_splits_terms_like_price_history() {
+    assert_eq!(
+        ListingNameQuery::new("Leg Kat,,Sta\u{3000}fen".to_owned()).fixture().terms(),
+        ["Leg", "Kat", "Sta", "fen"]
+    );
+    assert_eq!(ListingNameQuery::new("a b c d e f g h".to_owned()).fixture().terms().len(), 8);
+    // 第九个片段失败关闭，不截断成前八个。
+    assert_eq!(
+        ListingNameQuery::new("a b c d e f g h i".to_owned()),
+        Err(ConsignmentError::InvalidQuery)
+    );
 }
 
 #[test]

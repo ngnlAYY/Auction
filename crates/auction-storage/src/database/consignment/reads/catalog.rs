@@ -1,9 +1,9 @@
 //! 公开列表与详情复用资格谓词，数据库仅返回公开字段。
 
 use auction_application::consignment::{
-    ConsignmentError, ConsignmentFuture, ListingReadPage, ListingRegistrationAvailability,
-    PublicListingDetail, PublicListingQuery, PublicListingRead, PublicListingState,
-    PublicListingSummary, RegistrationReplayCrypto,
+    ConsignmentError, ConsignmentFuture, ListingNameQuery, ListingReadPage,
+    ListingRegistrationAvailability, PublicListingDetail, PublicListingQuery, PublicListingRead,
+    PublicListingState, PublicListingSummary, RegistrationReplayCrypto,
 };
 use auction_domain::consignment::{ListingEquipmentIdentity, ListingPrice, ListingVersion};
 use auction_time::Timestamp;
@@ -16,6 +16,7 @@ use crate::database::consignment::eligibility::predicates::listing_sql;
 use crate::database::consignment::reads::availability;
 use crate::database::consignment::reads::projection::equipment;
 use crate::database::consignment::reads::{page_order, snapshot, storage_error, unavailable};
+use crate::database::like_patterns::contains_patterns;
 
 const PUBLIC_COLUMNS: &str =
     "SELECT l.id, l.world_id, l.external_equipment_id, l.state_version, l.state, l.price,
@@ -47,13 +48,19 @@ fn filters(sql: &mut QueryBuilder<Postgres>, query: &PublicListingQuery) {
         sql.push(" AND p.category = ANY(").push_bind(category.as_slice().to_vec()).push(")");
     }
     if let Some(name) = &query.name {
-        let name = name.as_str();
-        sql.push(" AND (strpos(lower(p.name), lower(")
-            .push_bind(name.to_owned())
-            .push(")) > 0 OR strpos(lower(p.alt_name), lower(")
-            .push_bind(name.to_owned())
-            .push(")) > 0)");
+        name_filter(sql, name);
     }
+}
+
+/// v1 与 v2 目录共用的名称条件：每个片段都须落在同一字段，即名称全部命中或别名全部命中，
+/// 不跨字段拼凑；片段按字面包含匹配。
+pub(super) fn name_filter(sql: &mut QueryBuilder<Postgres>, name: &ListingNameQuery) {
+    let patterns = contains_patterns(name.terms());
+    sql.push(" AND (p.name ILIKE ALL(")
+        .push_bind(patterns.clone())
+        .push(") OR p.alt_name ILIKE ALL(")
+        .push_bind(patterns)
+        .push("))");
 }
 
 pub(super) fn list_query(

@@ -455,7 +455,8 @@ async fn page_limits_and_literal_name_query_reach_the_correct_port() {
     }
 
     let category = "%E6%B0%B4".repeat(42) + "ab";
-    let q = "%E6%B0%B4".repeat(77) + "A%25_";
+    // 整串 80 个字符、两段各不超过 128 字节，按空白拆成名称片段。
+    let q = "%E6%B0%B4".repeat(40) + "%20" + &"%E6%B0%B4".repeat(36) + "A%25_";
     send(&app, get(&format!("{LISTINGS}?world=isekai&mode=consigned&category={category}&q={q}")))
         .await
         .assert(200, "ok");
@@ -464,7 +465,10 @@ async fn page_limits_and_literal_name_query_reach_the_correct_port() {
     assert_eq!(query.world, Some(ListingWorld::Isekai));
     assert_eq!(query.mode, Some(ListingMode::Consigned));
     assert_eq!(query.category.as_ref().expect("分类").as_slice(), ["水".repeat(42) + "ab"]);
-    assert_eq!(query.name.as_ref().expect("原样子串").as_str(), "水".repeat(77) + "A%_");
+    assert_eq!(
+        query.name.as_ref().expect("名称片段").terms(),
+        ["水".repeat(40), "水".repeat(36) + "A%_"]
+    );
 
     send(&app, get(&format!("{LISTINGS}?category=Cloth,Staff,Cloth"))).await.assert(200, "ok");
     let calls = backend.take_calls();
