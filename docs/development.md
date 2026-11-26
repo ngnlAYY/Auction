@@ -108,7 +108,7 @@ AUCTION_CONFIG_FILE=$dir/public.toml mise run run-public
 
 也可以用 `auction-server --config-dir <目录>` 一次启动三个角色（需要启用 Worker control 并允许当前 UID）。
 
-### 本地一口价挂单预览
+### 本地寄售市场预览
 
 以下步骤用于 Public、Admin、Worker 和 CLI 均已接入 `consignment-dev-preview` 的集成分支。
 

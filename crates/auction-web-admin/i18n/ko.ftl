@@ -2154,7 +2154,7 @@ admin-error-settlement-return-send-unresolved = 원래 발송의 결과가 아�
 admin-error-settlement-return-observation-required = 다시 회수하려면 원래 Take 세션의 최근 관찰이 동결 자산이 온전히 남아 수령 가능함을 보여야 합니다. 사건을 새로 고치고 메일 유지보수 확인을 기다리세요.
 
 # 一口价挂单 · 管理
-consignment-admin-title = 정가 판매 관리
+consignment-admin-title = 위탁 판매 마켓 관리
 consignment-seller-id = 판매자 ID
 consignment-stored-state = 저장된 상태
 consignment-effective-state = 현재 유효 상태
@@ -2395,7 +2395,7 @@ consignment-resolve-queued = 재발송이 예약되었습니다. 새 라운드 {
 consignment-resolve-rechecked = 재확인이 예약되었습니다. 작업 { $id }.
 
 # 정가 주문 및 증거.
-consignment-orders-title = 정가 주문
+consignment-orders-title = 위탁 판매 주문
 consignment-order-detail-title = 주문 상세
 consignment-order-state = 주문 상태
 consignment-buyer = 구매자

@@ -20,13 +20,13 @@ import {
 import { loadCatalog } from "./render-fixture.test";
 
 test.each([
-  ["关闭", () => response(status(false)), "The fixed-price listing service is disabled", 0, false],
+  ["关闭", () => response(status(false)), "The consignment market is disabled", 0, false],
   ["开启可登记", () => response(status(true)), "Fake Oak Staff", 1, true],
   ["开启暂不可登记", () => response(status(true, false)), "Fake Oak Staff", 1, false],
   [
     "查询失败",
     () => failure(503, "consignment_unavailable"),
-    "The fixed-price listing service is temporarily unavailable",
+    "The consignment market is temporarily unavailable",
     0,
     false,
   ],
@@ -411,7 +411,7 @@ test.each([
   [
     "503",
     () => failure(503, "consignment_unavailable"),
-    "The fixed-price listing service is temporarily unavailable",
+    "The consignment market is temporarily unavailable",
   ],
   [
     "transport",

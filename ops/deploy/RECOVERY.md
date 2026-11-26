@@ -349,7 +349,7 @@ ROLLBACK;
 
 跨过迁移 `000134`（breaking）回退，只能恢复升级前备份（见[程序回退](#程序回退)），并按[外部历史核对与启动](#6-外部历史核对与启动)核对外部世界。恢复前先在停机的一致快照上核对第 4 期可能留下的存量：旧程序表达不了这些事实，没有承接者的存量不得丢弃或改写。第 4 期 `[consignment] enabled` 默认 `false`，生产收件就绪的 `take_ready`、`return_ready` 固定为 false（见[Worker README](../../apps/auction-worker/README.md)），正常情况下不会产生已接受的整封、起写工作、季通知或 position；预期只有“预约”与“隔离中的原信”两类存量，其余各项应为零行。
 
-以下只含 SELECT，列名取自迁移 `000134`（[docs/contracts/database.md](../../docs/contracts/database.md#一口价挂单)为表族说明）。一律放在只读事务中，用 owner 之外的运行账号或迁移账号均可：
+以下只含 SELECT，列名取自迁移 `000134`（[docs/contracts/database.md](../../docs/contracts/database.md#寄售市场)为表族说明）。一律放在只读事务中，用 owner 之外的运行账号或迁移账号均可：
 
 ```sql
 BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;

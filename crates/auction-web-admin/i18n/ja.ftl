@@ -2154,7 +2154,7 @@ admin-error-settlement-return-send-unresolved = 元の送付の送信結果は�
 admin-error-settlement-return-observation-required = 再回収には、元の Take セッションでの最新の観察で凍結資産が完全に残り受け取り可能であることが必要です。案件を再読み込みし、メール保守の確認を待ってください。
 
 # 一口价挂单 · 管理
-consignment-admin-title = 固定価格の出品管理
+consignment-admin-title = 委託販売マーケット管理
 consignment-seller-id = 出品者 ID
 consignment-stored-state = 記録上の状態
 consignment-effective-state = 現在の有効状態
@@ -2395,7 +2395,7 @@ consignment-resolve-queued = 再送を予約しました。新ラウンド { $id
 consignment-resolve-rechecked = 再確認を予約しました。ジョブ { $id }。
 
 # 一口価格の注文と証拠。
-consignment-orders-title = 一口価格の注文
+consignment-orders-title = 委託販売の注文
 consignment-order-detail-title = 注文の詳細
 consignment-order-state = 注文の状態
 consignment-buyer = 購入者

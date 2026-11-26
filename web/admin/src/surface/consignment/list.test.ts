@@ -186,7 +186,7 @@ test("模式列逐行区分非寄售与寄售", async () => {
   });
 });
 
-test("列表与详情可直接匹配，认证后的详情高亮一口价入口", async () => {
+test("列表与详情可直接匹配，认证后的详情高亮寄售市场入口", async () => {
   const routes = compileRoutes(ADMIN_ROUTES);
   const index = resolveRoute(routes, "/consignment?state=closed");
   const detail = resolveRoute(routes, DETAIL_PAGE);
@@ -208,9 +208,9 @@ test("列表与详情可直接匹配，认证后的详情高亮一口价入口",
     tree.mount(() => NavigationLinks({ currentRoute: detail.match }));
     const link = requireElement(
       tree.find((node) => node.tag === "a" && node.getAttribute("href") === "/consignment"),
-      "一口价入口",
+      "寄售市场入口",
     );
-    expect(link.textContent).toBe("一口价挂单管理");
+    expect(link.textContent).toBe("寄售市场管理");
     expect(link.getAttribute("aria-current")).toBe("page");
   });
 });

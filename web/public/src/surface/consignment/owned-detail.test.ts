@@ -270,7 +270,7 @@ test("解析中每 30 秒重读，离开时取消请求与后续定时器", asyn
     delayed.resolve(response(listing("displayed")));
     await clock.advance(60_000);
     expect(reads).toBe(2);
-    expect(page.text()).toContain("service is disabled");
+    expect(page.text()).toContain("consignment market is disabled");
     expect(page.button("Submit registration")).toBeNull();
     expect(page.text()).not.toContain("Fake Oak Staff");
   } finally {

@@ -184,7 +184,7 @@ VALUES (76, 'breaking');
 | 000129 | 新建 buyer_blacklist recovery action 必须有理由，保留历史 NULL 理由；登记 breaking |
 | 000130 | `cod_returned` disposition 绑定同一 recovery 的付款 Send 投递与 fence，身份引用写入后不可改写；登记 breaking |
 | 000131 | 资金来源累计 issue/return 由来源行原子计数并受冻结额度约束，已使用来源金额不可修改；运行账号仅可列级 INSERT 来源，不可写累计计数器，权限重放保持该限制，入口每次执行都收回授权链各函数的执行权；复合外键绑定补偿冲正的 recovery、auction 与 world，历史不一致时失败关闭；登记 breaking |
-| 000132 | 一口价挂单基础：新增挂单、只追加命令/事件/快照/基线/碰撞、可退休登记信封、重放比较密钥及持久解析工作与许可；复合外键绑定当前快照，延迟约束保护首写基线和同版事件；新投影按列授权，解析单例初始化为关闭；兼容与恢复待真实 PG 验证，登记 breaking |
+| 000132 | 寄售市场基础：新增挂单、只追加命令/事件/快照/基线/碰撞、可退休登记信封、重放比较密钥及持久解析工作与许可；复合外键绑定当前快照，延迟约束保护首写基线和同版事件；新投影按列授权，解析单例初始化为关闭；兼容与恢复待真实 PG 验证，登记 breaking |
 | 000133 | 新增装备世界与规范编号表达式索引、lot 装备 ID 与 lot ID 索引，供寄售历史、碰撞与有效活动额度读取，登记 compatible |
 | 000134 | 寄售第 4 期收件与代管：新增季窗与季通知、认证会话与收件就绪、原信 K/观察与派生事实/首次决定/隔离与重检/终局与解除、预约与逐件接受、实物占用、代管 position/代/事件/控制/交接、交给恢复流程的接管与投递 work/attempt/起写/证明共 29 张表；挂单扩展全部状态与 held 原因，命令行增加 v2 形状与类型化目标，整封接受在提交前校验条数/预约/item/position/唯一 Take，lot 实物准入与寄售强占用共用互斥行，`deliveries.origin_kind` 增加 `consignment_disposition` 并校验新载荷，授权入口再包装 000132；登记 breaking |
 | 000135 | 寄售第 5 期合同与结算来源：新增 `consignment_contracts`、`consignment_sales`、`consignment_withdrawals`（只追加，运行账号仅 `SELECT`、`INSERT`）；`settlement_obligations` 的拍卖四列放宽为可空并新增 `contract_id`、`contract_kind`、`custody_equipment_id`，来源恰为拍卖或寄售之一、来源列由触发器冻结；Sale 金额守恒（`F=floor(P*fee_bps/10000)`、`S=P-F`）；合同图（合同、子项、义务、履约）由延迟约束触发器在提交前核对；`position` 在季末等号及之后可由 `in_custody`/`reconcile` 进入 `season_ended`，占用释放仅对该终态免邮件证明；`position.listing_id` 唯一；授权入口再包装 000134；登记 breaking |

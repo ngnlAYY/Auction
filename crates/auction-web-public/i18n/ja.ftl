@@ -655,7 +655,7 @@ stale-build-refresh = ページを再読み込み
 language-switch-failed = 選択した言語を読み込めませんでした。現在の言語を維持します。
 
 # 一口价挂单 · 导航与标题
-consignment-nav = 固定価格の出品
+consignment-nav = 委託販売マーケット
 consignment-catalog = 装備の出品一覧
 consignment-new = 装備を登録
 consignment-mine = 自分の出品
@@ -705,8 +705,8 @@ consignment-displayed = 掲載中
 consignment-awaiting-deposit = 装備の送付待ち
 consignment-expired = 期限切れ
 consignment-closed = 終了
-consignment-disabled = 固定価格の出品サービスは停止しています。
-consignment-unavailable = 固定価格の出品サービスを一時的に利用できません。
+consignment-disabled = 委託販売マーケットは停止しています。
+consignment-unavailable = 委託販売マーケットを一時的に利用できません。
 consignment-not-found = 出品が存在しないか、掲載が終了しています。
 
 # 一口价挂单 · 资格原因

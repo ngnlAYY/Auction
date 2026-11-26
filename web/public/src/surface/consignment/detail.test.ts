@@ -21,11 +21,11 @@ import {
 import { loadDetail } from "./render-fixture.test";
 
 test.each([
-  ["关闭", () => response(status(false)), "The fixed-price listing service is disabled"],
+  ["关闭", () => response(status(false)), "The consignment market is disabled"],
   [
     "查询失败",
     () => failure(503, "consignment_unavailable"),
-    "The fixed-price listing service is temporarily unavailable",
+    "The consignment market is temporarily unavailable",
   ],
 ] as const)("能力%s时详情零读取", async (_, statusReply, text) => {
   const { PublicDetail } = await loadDetail();
@@ -64,9 +64,9 @@ test.each(["listing_not_found", "consignment_disabled"] as const)(
     );
     try {
       await settle();
-      expect(page.text()).toContain("The fixed-price listing service is temporarily unavailable");
+      expect(page.text()).toContain("The consignment market is temporarily unavailable");
       expect(page.text()).not.toContain("no longer displayed");
-      expect(page.text()).not.toContain("service is disabled");
+      expect(page.text()).not.toContain("consignment market is disabled");
       expect(page.text()).not.toContain("fake server message");
       retry = true;
       controlEvent(

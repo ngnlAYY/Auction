@@ -393,7 +393,7 @@ Worker 实际值应核对其指标，不能把 Admin 显示的数据库意图当
 
 `PUT /api/v1/admin/mail-templates/{template_key}` 要求 Admin 会话与 CSRF，严格 JSON、96 KiB 上限、不接受查询参数。请求体 `{command_id, expected_revision, body}`：`body` 为字符串时保存该正文，为 `null` 时恢复内置默认正文；`expected_revision` 是读取到的 `revision`。命令以会话身份为 actor 写入模板修订账本并同事务追加审计（动作 `mail_template.set` / `mail_template.reset`，审计只记模板键与版本，不复制正文）：同 `command_id` 同参数重放返回原结果；参数不同或 `expected_revision` 过期为 409 `mail_template_conflict`；模板键不在闭集内为 404 `mail_template_not_found`；命令形状无效，或正文为空、首尾有空白、超过 64 KiB、含控制字符、使用未登记占位符、缺少必需占位符、不满足该模板的专属要求，为 422 `invalid_mail_template`；5 秒内未确认或账本报告结果未知为 503 `outcome_unknown`（只能用原命令 ID 与原参数重试）；存储不可用为 503 `storage_unavailable`。成功为 200，`data.template` 为修订后的模板状态；各角色约 5 秒内刷新生效，接口不证明 Public 或 Worker 已应用。修改只影响之后创建或渲染的通知，不改写已冻结或已发出的正文。
 
-## 一口价挂单
+## 寄售市场
 
 表内路径相对于 `/api/v1`。前三期提供登记、解析、展示、本人管理与运营下架，正式制品的服务开关保持关闭。状态接口中的 `accepts_mail` 和 `purchasable` 均为 `false`。购买、寄入激活、成交查询、重列、重新核验与恢复接口在本期均走未知 API 的 404。
 
@@ -611,4 +611,4 @@ Public/Admin/Worker 可在业务 listener、control socket 之外启用独立出
 | `/audit` | 审计日志。新生成的链接用含偏移的 RFC 3339 时刻保存 `from`、`to`，输入框按浏览器时区显示；旧链接中不带偏移的值沿用打开链接时的浏览器时区 |
 | `/status` | 服务说明 |
 
-带参数的路径段不得为空、`.`、`..`，不得含控制字符、`/`、`\` 或 `%`。Solid 专属的一口价挂单页面见[浏览器入口](#浏览器入口)。
+带参数的路径段不得为空、`.`、`..`，不得含控制字符、`/`、`\` 或 `%`。Solid 专属的寄售市场页面见[浏览器入口](#浏览器入口)。

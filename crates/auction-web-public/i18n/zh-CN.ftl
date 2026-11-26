@@ -655,7 +655,7 @@ stale-build-refresh = 刷新页面
 language-switch-failed = 所选语言加载失败，已保持当前语言。
 
 # 一口价挂单 · 导航与标题
-consignment-nav = 一口价挂单
+consignment-nav = 寄售市场
 consignment-catalog = 装备挂单
 consignment-new = 登记装备
 consignment-mine = 我的挂单
@@ -705,8 +705,8 @@ consignment-displayed = 已展示
 consignment-awaiting-deposit = 等待寄来装备
 consignment-expired = 已过期
 consignment-closed = 已关闭
-consignment-disabled = 一口价服务已关闭
-consignment-unavailable = 一口价服务暂不可用
+consignment-disabled = 寄售市场已关闭
+consignment-unavailable = 寄售市场暂不可用
 consignment-not-found = 挂单不存在或已停止展示
 
 # 一口价挂单 · 资格原因
