@@ -98,6 +98,7 @@ export function ConsignmentCatalog(): JSX.Element {
         <Filters
           query={query()}
           rejected={rejected()}
+          registrationReady={capability()?.kind === "ready"}
           onApply={(next) => location.push(next)}
           onReject={(field) => location.state.set(field)}
         />

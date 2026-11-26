@@ -202,3 +202,31 @@
   border-block-start: var(--border-width) solid var(--color-border);
   padding-block: var(--space-2);
 }
+
+/* 登记装备入口：外观同成交历史页的主按钮，停在世界与挂单模式工具栏右端；
+   换行时仍靠右。高度与同行筛选标签一致，触控断点经 --size-control-compact 恢复 44px。 */
+.public-auction-group-toolbar > .public-consignment-register {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: var(--size-control-compact);
+  margin-inline-start: auto;
+  padding: 0 var(--space-3);
+  border: var(--border-width) solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* 手机上工具栏是带标签列的网格：登记入口独占最后一行，整宽并达到触控尺寸，不挤占世界与模式两行。 */
+@media screen and (max-width: 48rem) {
+  .public-auction-live .public-auction-group-toolbar > .public-consignment-register {
+    grid-column: 1 / -1;
+    min-block-size: var(--size-target);
+    margin: 0 0 var(--space-2);
+  }
+}
