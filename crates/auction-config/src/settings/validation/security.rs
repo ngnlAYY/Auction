@@ -20,6 +20,11 @@ pub(crate) fn validate_http_security(config: &HttpSecurityConfig) -> Result<(), 
             "anonymous_read_rate_limit 必须位于 1 至 10000",
         ));
     }
+    if !(1..=1000).contains(&config.anonymous_listing_rate_limit) {
+        return Err(ConfigError::InvalidHttpSecurity(
+            "anonymous_listing_rate_limit 必须位于 1 至 1000",
+        ));
+    }
     if config.anonymous_read_concurrency.is_some_and(|value| !(1..=256).contains(&value)) {
         return Err(ConfigError::InvalidHttpSecurity(
             "anonymous_read_concurrency 必须位于 1 至 256",
@@ -179,6 +184,18 @@ mod tests {
         }
         config.trusted_proxy_cidrs = vec!["127.0.0.1/32".to_owned(), "173.245.48.0/20".to_owned()];
         assert!(validate_http_security(&config).is_ok());
+    }
+
+    #[test]
+    fn anonymous_listing_limit_defaults_to_three_and_is_bounded() {
+        let mut config =
+            HttpSecurityConfig { allowed_origins_enabled: false, ..HttpSecurityConfig::default() };
+        assert_eq!(config.anonymous_listing_rate_limit, 3);
+        assert!(validate_http_security(&config).is_ok());
+        for invalid in [0, 1_001] {
+            config.anonymous_listing_rate_limit = invalid;
+            assert!(validate_http_security(&config).is_err());
+        }
     }
 
     #[test]

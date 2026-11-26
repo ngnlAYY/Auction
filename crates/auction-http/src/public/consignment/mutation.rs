@@ -2,8 +2,10 @@
 
 use std::net::SocketAddr;
 
-use auction_application::consignment::{ConsignmentError, RegisterListingInput};
-use auction_contracts::{RegisterListing, RepriceListing, WithdrawListing};
+use auction_application::consignment::{
+    AnonymousRegisterListingInput, ConsignmentError, RegisterListingInput,
+};
+use auction_contracts::{RegisterDirectListing, RegisterListing, RepriceListing, WithdrawListing};
 use auction_domain::CommandId;
 use axum::extract::rejection::PathRejection;
 use axum::extract::{ConnectInfo, Path, Request, State};
@@ -38,6 +40,46 @@ pub(super) async fn register<S: ConsignmentState>(
                 equipment_url: &input.equipment_url,
                 price: input.price.get(),
                 expected_fee_bps: input.expected_fee_bps.get(),
+            },
+            request_id(&parts.headers),
+        )
+        .await?;
+    command(mapping::registered(command_id, result))
+}
+
+/// 免登录登记非寄售挂单：来源与 mutation 限流守卫先于解码，新命令才消耗每来源登记额度；
+/// 卖家身份只取正文的自填游戏角色名。
+pub(super) async fn register_direct<S: ConsignmentState>(
+    State(state): State<S>,
+    ConnectInfo(address): ConnectInfo<SocketAddr>,
+    request: Request,
+) -> RouteResult {
+    let (parts, body) = request.into_parts();
+    input::anonymous_mutation_guard(state.public_state(), &parts.headers, address, &parts.uri)?;
+    let input: RegisterDirectListing = input::decode_write(&parts.headers, body).await?;
+    let service = state.consignment().register.as_ref().ok_or(ConsignmentError::Unavailable)?;
+    let command_id = CommandId::from_uuid(input.command_id);
+    // 不变量 1：每来源额度只限制新命令的创建，重放从不创建新事实，因此已入账的命令 ID 不再扣额度，
+    // 交由用例仲裁（同请求回原回执，异请求 409 command_id_conflict）。这里只用“是否存在”分流，
+    // 查到的内容不进入响应；读端口未装配时按新命令扣额度。账本读取失败时失败关闭：传播不可用错误，
+    // 不扣额度、不进入用例（此时登记本来也会失败）。并发的同 ID 新请求可能各扣一次，只会多算、不会少算。
+    let replay = match state.consignment().public_read.as_ref() {
+        Some(reader) => reader.anonymous_command(command_id).await?.is_some(),
+        None => false,
+    };
+    if !replay {
+        input::anonymous_listing_quota(state.public_state(), address)?;
+    }
+
+    // 不变量 1、6、7：模式与零费率由用例固定；同一命令 ID 的原样重试按自填名仲裁回原回执，
+    // 不读会话 Cookie，原装备链接不进入记录。
+    let result = service
+        .register_anonymous(
+            AnonymousRegisterListingInput {
+                command_id,
+                seller_game_name: &input.seller_game_name,
+                equipment_url: &input.equipment_url,
+                price: input.price.get(),
             },
             request_id(&parts.headers),
         )

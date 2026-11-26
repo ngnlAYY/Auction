@@ -14,9 +14,8 @@ use auction_application::auction::{
     PublicLotReader, PublicPriceHistoryReader, WorldReader,
 };
 use auction_application::consignment::{
-    DepositCommandService, DepositRead, ListingCommandStore, ListingRegistrationPolicy,
-    ListingWorlds, ManageListingService, OwnedListingRead, PublicListingRead,
-    RegisterListingService, RegistrationReplayCrypto,
+    DepositCommandService, DepositRead, ListingCommandStore, ManageListingService,
+    OwnedListingRead, PublicListingRead, RegisterListingService, RegistrationReplayCrypto,
 };
 use auction_application::core::ApplicationFuture;
 use auction_application::core::{ApplicationError, RepositoryError};
@@ -267,19 +266,7 @@ fn configure_consignment<
     };
     let sealer = credentials.as_ref().map(|credentials| Arc::clone(&credentials.sealer));
     let replay_crypto = credentials.map(|credentials| credentials.replay_crypto);
-    let policy = ListingRegistrationPolicy {
-        enabled: config.enabled(),
-        // 决定 4 对两世界开放，寄售节没有独立世界配置。实际准入由数据库的世界可用性再收紧。
-        worlds: ListingWorlds { main: true, isekai: true },
-        consigned_fee_bps: fee_bps,
-        max_open_per_user: config.max_open_per_user().try_into().context("寄售活动挂单额度无效")?,
-        registrations_per_hour: config
-            .registrations_per_hour()
-            .try_into()
-            .context("寄售每小时登记额度无效")?,
-        // 匿名入口与其配置尚未接入；零额度让匿名登记失败关闭。
-        anonymous_resolving_limit: 0,
-    };
+    let policy = config::registration_policy(config)?;
     let registration_sealer_available = sealer.is_some();
     // 不变量 1、6：停用仍交给原命令账本仲裁，首次登记与改价受有效开关约束。
     Ok(ConsignmentCapabilities {

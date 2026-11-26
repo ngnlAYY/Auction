@@ -162,6 +162,7 @@ fn assert_summary_keys(value: &Value) {
             "level",
             "price",
             "seller_name",
+            "seller_verified",
             "updated_at",
             "expires_at",
             "purchasable",

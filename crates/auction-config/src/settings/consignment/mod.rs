@@ -72,6 +72,7 @@ pub struct ConsignmentConfig {
     isekai_preclose_days: u8,
     max_open_per_user: i64,
     registrations_per_hour: i64,
+    anonymous_resolving_limit: i64,
     lookup_timeout_seconds: u64,
     lookup_max_response_bytes: usize,
     lookup_min_interval_ms: u64,
@@ -124,6 +125,11 @@ impl ConsignmentConfig {
         self.registrations_per_hour
     }
 
+    /// 全站处于解析中的免登录挂单上限。
+    pub const fn anonymous_resolving_limit(&self) -> i64 {
+        self.anonymous_resolving_limit
+    }
+
     /// 一次解析尝试的端到端秒数预算。
     pub const fn lookup_timeout_seconds(&self) -> u64 {
         self.lookup_timeout_seconds
@@ -147,6 +153,8 @@ impl ConsignmentConfig {
     /// 寄售配置段规范字节的 SHA-256，供装配根与开关一起冻结进自动重列决定（J12）。
     ///
     /// 摘要取校验后的有效值：省略字段与显式写出默认值得到同一摘要，任一字段的值变化都会改变摘要。
+    /// 例外是 `anonymous_resolving_limit`：它只约束 Public 的免登录准入、与重列决定无关，
+    /// 不进入摘要，以免新增字段改变已冻结决定的既有摘要。
     pub const fn section_digest(&self) -> [u8; 32] {
         self.section_digest
     }
@@ -163,6 +171,7 @@ pub(super) struct ConsignmentFileConfig {
     isekai_preclose_days: i64,
     max_open_per_user: i64,
     registrations_per_hour: i64,
+    anonymous_resolving_limit: i64,
     lookup_timeout_seconds: i64,
     lookup_max_response_bytes: i64,
     lookup_min_interval_ms: i64,
@@ -183,6 +192,7 @@ impl Default for ConsignmentFileConfig {
             isekai_preclose_days: 3,
             max_open_per_user: 20,
             registrations_per_hour: 10,
+            anonymous_resolving_limit: 50,
             lookup_timeout_seconds: 10,
             lookup_max_response_bytes: 65_536,
             lookup_min_interval_ms: 1_000,
@@ -253,6 +263,11 @@ impl ConsignmentFileConfig {
                 "registrations_per_hour",
                 self.registrations_per_hour,
                 1..=100,
+            )?,
+            anonymous_resolving_limit: in_range(
+                "anonymous_resolving_limit",
+                self.anonymous_resolving_limit,
+                1..=1_000,
             )?,
             lookup_timeout_seconds: in_range(
                 "lookup_timeout_seconds",

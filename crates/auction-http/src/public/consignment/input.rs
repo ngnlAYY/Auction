@@ -28,7 +28,9 @@ use uuid::Uuid;
 use crate::middleware::strict_json::application_json;
 use crate::public::consignment::response::RouteError;
 use crate::query::{parse_positive_i64, parse_public_page_size, parse_public_uuid, parse_query};
-use crate::session::{authenticated_public_mutation_identity, session_guard};
+use crate::session::{
+    authenticated_public_mutation_identity, rate_limited_response, session_guard,
+};
 use crate::state::PublicApiState;
 
 const MAX_WRITE_BYTES: usize = 4 << 10;
@@ -158,6 +160,32 @@ pub(super) async fn mutation_identity(
     let identity = private_identity(state, headers).await?;
     no_query(uri)?;
     Ok(identity)
+}
+
+pub(super) fn anonymous_mutation_guard(
+    state: &PublicApiState,
+    headers: &HeaderMap,
+    address: SocketAddr,
+    uri: &Uri,
+) -> Result<(), RouteError> {
+    // 不变量 1、6、7：既有 mutation 限流与 Origin 守卫先于命令与正文解码，不读会话 Cookie。
+    // 每来源登记额度要等到确认是新命令后才由 [`anonymous_listing_quota`] 消耗。
+    if let Some(response) = session_guard(state, headers, address, true, false) {
+        return Err(Box::new(response).into());
+    }
+    no_query(uri)?;
+    Ok(())
+}
+
+/// 为一条新的免登录登记命令消耗每来源每小时额度；地址已由边界按可信代理规则解析。
+pub(super) fn anonymous_listing_quota(
+    state: &PublicApiState,
+    address: SocketAddr,
+) -> Result<(), RouteError> {
+    if let Some(retry_after) = state.security().allow_anonymous_listing(address.ip()) {
+        return Err(Box::new(rate_limited_response(retry_after)).into());
+    }
+    Ok(())
 }
 
 pub(super) async fn decode_write<T: DeserializeOwned>(

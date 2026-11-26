@@ -256,6 +256,7 @@ fn summary_dto(entry: PublicCatalogEntryV2) -> Result<ListingSummaryV2, Consignm
         level: mapping::level(entry.level),
         price: mapping::price(entry.price.value())?,
         seller_name: entry.seller_name,
+        seller_verified: entry.seller_verified,
         updated_at: entry.updated_at,
         expires_at: entry.expires_at,
         generation,

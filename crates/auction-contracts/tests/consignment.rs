@@ -8,6 +8,7 @@ use auction_contracts::AdminListingDetail;
 use auction_contracts::ApiResponse;
 use auction_contracts::CommandReceipt;
 use auction_contracts::ConsignmentStatus;
+use auction_contracts::DirectCommandResult;
 use auction_contracts::EquipmentLevel;
 use auction_contracts::EquipmentStat;
 use auction_contracts::EquipmentView;
@@ -273,6 +274,7 @@ fn public_serialization_matches_the_field_whitelist() {
             "level",
             "price",
             "seller_name",
+            "seller_verified",
             "updated_at",
             "expires_at",
             "purchasable",
@@ -684,6 +686,42 @@ fn stored_result_keeps_the_original_status_and_safe_code() {
         with_field(&result, "code", json!("command_id_conflict")),
         "命令 ID 冲突伪装成新账本结果",
     );
+}
+
+#[test]
+fn direct_command_result_binds_progress_to_the_registered_receipt() {
+    let accepted: Value = decode(public_fixture!("command-result"));
+    let listing = json!({
+        "listing_id": "00000000-0000-4000-8000-000000000001",
+        "version": 1,
+        "effective_state": "resolving",
+        "effective_reason": null,
+        "expires_at": "2026-11-21T18:00:00Z",
+    });
+    let wire = json!({ "result": accepted["data"].clone(), "listing": listing });
+    let decoded: DirectCommandResult = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(serde_json::to_value(decoded).unwrap(), wire);
+    assert_rejects::<DirectCommandResult>(
+        with_field(
+            &wire,
+            "listing",
+            with_field(&listing, "listing_id", json!("00000000-0000-4000-8000-000000000002")),
+        ),
+        "挂单不是回执定位的目标",
+    );
+    assert_rejects::<DirectCommandResult>(
+        with_field(
+            &wire,
+            "listing",
+            with_field(&listing, "effective_state", json!("awaiting_deposit")),
+        ),
+        "免登录挂单出现寄售状态",
+    );
+    assert_rejects::<DirectCommandResult>(with_field(&wire, "listing", Value::Null), "受理缺挂单");
+    let rejected: Value = decode(public_fixture!("command-rejected"));
+    let rejected = json!({ "result": rejected["data"].clone(), "listing": Value::Null });
+    let _: DirectCommandResult = serde_json::from_value(rejected.clone()).unwrap();
+    assert_rejects::<DirectCommandResult>(with_field(&rejected, "listing", listing), "拒绝带挂单");
 }
 
 #[test]

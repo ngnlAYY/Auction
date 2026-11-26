@@ -280,6 +280,7 @@ fn public_dtos_expose_only_whitelisted_fields() {
             "price",
             "purchasable",
             "seller_name",
+            "seller_verified",
             "state",
             "updated_at",
             "version",

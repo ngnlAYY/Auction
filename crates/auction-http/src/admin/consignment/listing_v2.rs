@@ -14,6 +14,7 @@ use auction_contracts::{
     AdminListingV2, AdminPositionV2, ListingAuctionConflict, ListingGeneration, ListingVersion,
     PositionStateV2,
 };
+use auction_domain::UserId;
 use auction_domain::consignment::ListingState;
 use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
@@ -127,9 +128,9 @@ fn detail_dto(
 
 fn record_dto(record: &AdminListingRecordV2) -> Result<AdminListingV2, ConsignmentError> {
     let listing = &record.listing;
-    // 匿名非寄售挂单的可空卖家随 Admin 契约变更开放；此前失败关闭。
-    let seller_user_id = record.seller_user_id.ok_or(ConsignmentError::Unavailable)?;
-    if listing.listing_id.is_nil() || seller_user_id.is_nil() {
+    // 匿名非寄售挂单没有站内账户；有账户时仍拒绝 nil 标识。
+    let seller_user_id = record.seller_user_id.map(UserId::as_uuid);
+    if listing.listing_id.is_nil() || seller_user_id.is_some_and(|id| id.is_nil()) {
         return Err(ConsignmentError::Unavailable);
     }
     // Admin 视图不带卖家动作；止售只在在库下架态展示，hold_id 只在这里出现。
@@ -153,7 +154,7 @@ fn record_dto(record: &AdminListingRecordV2) -> Result<AdminListingV2, Consignme
         .transpose()?;
     Ok(AdminListingV2 {
         listing: owned_v2(listing, &[])?,
-        seller_user_id: seller_user_id.as_uuid(),
+        seller_user_id,
         seller_name: record.seller_name.clone(),
         admin_delist_reason: record
             .admin_delist_reason

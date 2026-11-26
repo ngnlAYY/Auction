@@ -81,7 +81,7 @@ pub(crate) trait ConsignmentState: Clone + Send + Sync + 'static {
     fn consignment(&self) -> &ConsignmentCapabilities;
 }
 
-/// 将九条 Public 寄售 API 放入给定路由器，并沿用严格方法和响应边界。
+/// 将十一条 Public 寄售 API 放入给定路由器，并沿用严格方法和响应边界。
 pub(crate) fn mount<S: ConsignmentState>(router: Router<S>) -> Router<S> {
     let routes = Router::new()
         .route("/api/v1/consignment/status", method_strict::get(read::status::<S>))
@@ -94,6 +94,14 @@ pub(crate) fn mount<S: ConsignmentState>(router: Router<S>) -> Router<S> {
         .route(
             "/api/v1/consignment/listings/{listing_id}",
             method_strict::get(read::public_detail::<S>),
+        )
+        .route(
+            "/api/v1/consignment/direct-listings",
+            method_strict::post(mutation::register_direct::<S>),
+        )
+        .route(
+            "/api/v1/consignment/direct-commands/{command_id}",
+            method_strict::get(read::direct_command::<S>),
         )
         .route("/api/v1/me/consignment/listings", method_strict::get(read::list_owned::<S>))
         .route(

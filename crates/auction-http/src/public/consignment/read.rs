@@ -180,6 +180,27 @@ pub(super) async fn owned_command<S: ConsignmentState>(
     loaded(mapping::stored_command(entry)?)
 }
 
+/// 凭原命令 ID 读取免登录登记的首次决定与挂单进度；不读会话，不回显自填名。
+pub(super) async fn direct_command<S: ConsignmentState>(
+    State(state): State<S>,
+    path: Result<Path<String>, PathRejection>,
+    uri: Uri,
+) -> RouteResult {
+    input::no_query(&uri)?;
+    let command_id = CommandId::from_uuid(input::command_id(path)?);
+    let reader = state.consignment().public_read.as_ref().ok_or(ConsignmentError::Unavailable)?;
+    // 不变量 1：命令 ID 是客户端生成的 UUIDv4，只能查到匿名登记账本中的原决定。
+    let receipt = reader
+        .anonymous_command(command_id)
+        .await
+        .map_err(read_failure)?
+        .ok_or(ConsignmentError::CommandNotFound)?;
+    if receipt.command.command_id != command_id {
+        return Err(ConsignmentError::Unavailable.into());
+    }
+    loaded(mapping::direct_command(receipt)?)
+}
+
 // 读端口失败只表示没有可信快照。资源不可见由端口的 Ok(None) 单独表达。
 fn read_failure(_failure: ConsignmentError) -> ConsignmentError {
     ConsignmentError::Unavailable

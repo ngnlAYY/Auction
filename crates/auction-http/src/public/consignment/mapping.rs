@@ -1,9 +1,9 @@
 //! 将寄售应用端口的安全事实逐字段映射为 Public DTO。
 
 use auction_application::consignment::{
-    ConsignmentError, ListingClosed, ListingEquipmentDetails, ListingEquipmentLevel,
-    ListingPageWindow, ListingPriceDisposition, ListingPriceReceipt, ListingReadPage,
-    ListingRegistered, MAX_LISTING_LOOKUP_ATTEMPTS, OwnedListingCommandReceipt,
+    AnonymousRegistrationReceipt, ConsignmentError, ListingClosed, ListingEquipmentDetails,
+    ListingEquipmentLevel, ListingPageWindow, ListingPriceDisposition, ListingPriceReceipt,
+    ListingReadPage, ListingRegistered, MAX_LISTING_LOOKUP_ATTEMPTS, OwnedListingCommandReceipt,
     OwnedListingDecision, OwnedListingRecord, PrivateListingViewKind, PublicListingDetail,
     PublicListingState, PublicListingSummary, SellerListingAction, StoredListingDecision,
 };
@@ -129,6 +129,7 @@ pub(super) fn public_summary(
         level: level(entry.level),
         price: price(entry.price.value())?,
         seller_name: entry.seller_name,
+        seller_verified: entry.seller_verified,
         updated_at: entry.updated_at,
         expires_at: entry.expires_at,
         purchasable: false,
@@ -305,6 +306,27 @@ pub(super) fn stored_command(
         }
     };
     Ok(dto::StoredCommandResult { http_status: i64::from(status), code: wire_code(code)?, receipt })
+}
+
+/// 免登录登记回执：首次决定原样映射，受理时附挂单当前有效态，不回显自填名。
+pub(super) fn direct_command(
+    receipt: AnonymousRegistrationReceipt,
+) -> Result<dto::DirectCommandResult, ConsignmentError> {
+    let listing = receipt
+        .listing
+        .map(|listing| {
+            let (state, reason) = listing.view.effective_state();
+            Ok::<_, ConsignmentError>(dto::DirectListingProgress {
+                listing_id: listing.listing_id,
+                version: version(listing.version.value())?,
+                effective_state: wire_code(state.as_str())?,
+                effective_reason: reason.map(|reason| wire_code(reason.as_str())).transpose()?,
+                expires_at: listing.expires_at,
+            })
+        })
+        .transpose()?;
+    // 不变量 6：回执与挂单的矛盾组合由 DTO 在序列化时拒绝，读路径按依赖不可用返回。
+    Ok(dto::DirectCommandResult { result: stored_command(receipt.command)?, listing })
 }
 
 fn stored_receipt(receipt: dto::CommandReceipt) -> dto::StoredCommandReceipt {
