@@ -3,7 +3,8 @@
 //! 收件人领取后，HV 在正文末尾追加回执行：每个附件一行 `Removed attachment: <名称>`（Credits 附件写作
 //! `Removed attachment: 49,000 Credits`），带 COD 的另有 `CoD Paid: N Credits`；已签收的原生格式里 CoD 行在前、与附件行之间隔一个空行
 //! （`CoD Paid: N Credits\n\nRemoved attachment: <名称>`），所以回执块允许回执行之间夹空行（块内空行忽略）。本模块把规范化后的正文拆成
-//! “原正文摘要 + 回执项”，与 Take 证明共用 `fields.rs` 的回执行解析，不复制第二份。
+//! “原正文摘要 + 回执项”，附件行与 Take 证明共用 `fields.rs` 的解析，不复制第二份；`CoD Paid` 行须整行等于
+//! `CoD Paid: <规范金额> Credits`（Take 证明的宽松匹配作用于整段回执文本，不适用于逐行判定）。
 //!
 //! 不变量 6：回执块必须位于正文末尾（只含回执行与空行）、与原正文至少隔一个空行；格式不符记为 [`MoogleMailSentReceipt::Malformed`]，
 //! 只影响寄售领取判定，绝不让原有 Sent 解析失败。正文中间出现回执样式的行不算回执（原正文摘要比对自然失败）。
@@ -12,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use crate::clients::mooglemail::parser::{
     MoogleMailSentReceipt, REMOVED_ATTACHMENT_MARKER, RETURNED_SUFFIX_PREFIX, canonical_mail_body,
-    removed_marker_line, take_cod_receipt_amount,
+    parse_canonical_credits, removed_marker_line,
 };
 
 const COD_PAID_MARKER: &str = "CoD Paid:";
@@ -68,7 +69,12 @@ fn parse_block(original: &str, block: &[&str]) -> MoogleMailSentReceipt {
             }
             removed.push(marker);
         } else {
-            let Some(amount) = take_cod_receipt_amount(line) else {
+            // 整行必须是规范格式，金额后多出任何文字都算格式不符（不变量 6）。
+            let Some(amount) = line
+                .strip_prefix("CoD Paid: ")
+                .and_then(|rest| rest.strip_suffix(" Credits"))
+                .and_then(parse_canonical_credits)
+            else {
                 return MoogleMailSentReceipt::Malformed;
             };
             if cod_paid.replace(amount).is_some() {
@@ -147,13 +153,14 @@ mod tests {
         assert!(returned);
     }
 
-    /// 格式不符记为 malformed：CoD Paid 两行、金额格式不符、名称为空、marker 重复。
+    /// 格式不符记为 malformed：CoD Paid 两行、金额格式不符、金额后有多余文字、名称为空、marker 重复。
     #[test]
     fn broken_receipt_lines_are_malformed() {
         for block in [
             "CoD Paid: 5 Credits\nCoD Paid: 5 Credits",
             "CoD Paid: five Credits",
             "CoD Paid:5 Credits",
+            "CoD Paid: 100 Credits extra",
             "Removed attachment:   ",
             "Removed attachment: A\nRemoved attachment: A",
         ] {
