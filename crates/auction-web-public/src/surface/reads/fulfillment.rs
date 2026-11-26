@@ -166,7 +166,8 @@ pub(crate) fn fulfillment() -> Element {
                     }
                 }
                 // 目录确认为空时没有可选场次，不渲染空的禁用下拉框；选项按需加载，故不以选项数量判断。
-                if !directory.empty() {
+                // 链接场次非法时仍渲染（带非法标记），与 Solid 版一致。
+                if !directory.empty() || directory.invalid_auction() {
                     label { r#for: "public-fulfillment-round",
                         span { {t!("fulfillment-round")} }
                         select {
