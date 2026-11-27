@@ -211,6 +211,8 @@ mise run web-size                                # 同上
 
 `ci/release/release.sh` 与 `ci/release/web-bundle.sh` 共用：选择发布工具（用 `mise which` 解析后放到 `PATH` 前部，并设置 `NO_DOWNLOADS=1` 与专用的 `DX_HOME`，见[ci/tools/README.md#发布构建如何取用工具](tools/README.md#发布构建如何取用工具)）、计算源码身份指纹（已跟踪与未忽略的新文件、删除与 mode 变化）、计算前后端共享构建号、读取 BUILD-INFO、校验 Web payload，以及只读的 payload 体积测量与预算判定。未通过环境变量指定时，显式清空 Cargo 配置中的两类 rustc 包装器；环境变量指定的 `sccache` 替换为 mise 安装的版本，其他显式包装器保留并计入构建环境指纹。
 
+`configure_build_tools` 在把工具目录放到 `PATH` 前部之后，还要求实际 `rustc` 的版本等于 `rust-toolchain.toml` 的 `channel`：`PATH`、`RUSTUP_TOOLCHAIN` 或旧 shim 都可能让编译器偏离声明，此时失败关闭。`rustc --version --verbose` 的摘要写进构建环境指纹，编译器不同就不能把旧制品当作同一次构建复用。
+
 `AUCTION_WEB_STACK` 缺省为 `dioxus`，两端都使用 Dioxus。选择 `solid` 时两端都使用 Solid，非法取值在加载身份脚本时失败。发布工具闭集取两端实际技术栈的并集。原生 Rust 编译的 sccache 总在工具闭集内。任一 surface 为 Solid 时加入 mise 提供的 bun（版本与二进制摘要），任一 surface 为 Dioxus 时保留原有的工具顺序。`web_surface_root` 对 Dioxus 返回 `target/dx/build/auction-web-<surface>/web`，对 Solid 返回 `target/web/<surface>`，内嵌目录都是其下的 `public/`。`print_web_stack_selection` 输出 `public` 与 `admin` 的实际技术栈，供构建入口在开始时记录。
 
 `web_inputs_fingerprint` 按 surface 选择输入。Dioxus 覆盖本 surface 的 crate、浏览器 crate 的传递路径依赖、工作区构建配置与锁文件、Web 构建脚本和工具配方。Solid 取 `web/**`（在 `web/` 范围内排除任意层级的 `node_modules` 与 `.tmp` 目录）、共享的 `crates/auction-web-shared/{style,assets}`、对应 surface 的 `assets/` 与 `i18n/`、根 `Cargo.toml`、`mise.lock` 和相关发布脚本。`path_fingerprint` 默认不排除任何路径；Solid 的 Web 与原生输入共用同一处 `--exclude-dir` 规则。Solid 的原生构建输入与环境指纹也纳入实际技术栈。缺省与显式 `dioxus` 的身份输出相同。发布脚本自身属于 Web 与原生指纹输入，修改其内容会更新构建号并使之前的页面及原生复用回执失效。`web_build_identity` 对两栈都取合并后输入身份的前 32 位十六进制。Dioxus 的两种指纹函数共用浏览器 crate 路径依赖清单，由 [`web-build-inputs` 门禁](checks/README.md#web-输入依赖闭包) 校验。Solid 的 TypeScript 源码由 `web/**` 输入范围覆盖，依赖方向由 `web` 的包边界检查约束。

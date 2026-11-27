@@ -250,8 +250,9 @@ check_public_redaction() {
 }
 
 check_systemd_templates() {
-	local failures
+	local failures status
 
+	status=0
 	failures=$(
 		for file in ops/deploy/systemd/auction-public-api.service.example \
 			ops/deploy/systemd/auction-admin-api.service.example; do
@@ -293,8 +294,8 @@ check_systemd_templates() {
         }
       ' "$file"
 		done
-	)
-	if [[ -n "$failures" ]]; then
+	) || status=1
+	if [[ -n "$failures" || $status -ne 0 ]]; then
 		printf '%s\n' "systemd 角色模板的依赖与顺序约束无效：" >&2
 		printf '%s' "$failures" >&2
 		return 1
@@ -303,6 +304,7 @@ check_systemd_templates() {
 	# 每个 service 模板都必须声明资源上限并关闭核心转储。
 	# 上限值属于主机容量判断，这里只要求存在、非空且 LimitCORE 恰为 0，
 	# 避免新增 unit 或复制模板时悄悄丢掉这些指令。
+	status=0
 	failures=$(
 		for file in ops/deploy/systemd/*.service.example; do
 			awk -v file="$file" '
@@ -333,9 +335,70 @@ check_systemd_templates() {
         }
       ' "$file"
 		done
-	)
-	if [[ -n "$failures" ]]; then
+	) || status=1
+	if [[ -n "$failures" || $status -ne 0 ]]; then
 		printf '%s\n' "systemd 服务模板缺少资源上限：" >&2
+		printf '%s' "$failures" >&2
+		return 1
+	fi
+
+	# 沙箱基线：与方法无关的加固项必须逐字保留；这些值就是安全边界，不接受等价变体。
+	status=0
+	failures=$(
+		for file in ops/deploy/systemd/*.service.example; do
+			awk -v file="$file" '
+        BEGIN {
+          section = ""
+          bad = 0
+          required["NoNewPrivileges"] = "true"
+          required["PrivateTmp"] = "true"
+          required["ProtectSystem"] = "strict"
+          required["ProtectHome"] = "true"
+          required["RestrictSUIDSGID"] = "true"
+          required["LockPersonality"] = "true"
+          required["SystemCallArchitectures"] = "native"
+        }
+        /^[[:space:]]*\[/ { section = $0; next }
+        section ~ /^\[Service\]/ {
+          key = $0
+          sub(/[[:space:]]*=.*/, "", key)
+          gsub(/[[:space:]]/, "", key)
+          value = $0
+          sub(/^[^=]*=[[:space:]]*/, "", value)
+          sub(/[[:space:]]+$/, "", value)
+          if (key in required) {
+            seen[key] = 1
+            if (value != required[key]) {
+              printf "%s:%d: %s= 必须为 %s\n", file, FNR, key, required[key]
+              bad = 1
+            }
+          }
+          if (key == "RestrictAddressFamilies") {
+            seen[key] = 1
+            if (value == "") {
+              printf "%s:%d: RestrictAddressFamilies= 不能为空\n", file, FNR
+              bad = 1
+            }
+          }
+        }
+        END {
+          for (key in required) {
+            if (!(key in seen)) {
+              printf "%s: [Service] 缺少 %s=%s\n", file, key, required[key]
+              bad = 1
+            }
+          }
+          if (!("RestrictAddressFamilies" in seen)) {
+            printf "%s: [Service] 缺少 RestrictAddressFamilies=\n", file
+            bad = 1
+          }
+          exit bad
+        }
+      ' "$file"
+		done
+	) || status=1
+	if [[ -n "$failures" || $status -ne 0 ]]; then
+		printf '%s\n' "systemd 服务模板缺少沙箱基线：" >&2
 		printf '%s' "$failures" >&2
 		return 1
 	fi

@@ -62,9 +62,10 @@ bash ci/checks/check.sh migration-compatibility
 
 ```bash
 bash ci/checks/check.sh published-migrations
+bash ci/checks/published-migrations-test.sh
 ```
 
-[ci/checks/published-migrations.sh](published-migrations.sh) 把每个 `v<数字>` 发布 tag 视为已发布版本，读取该 tag 的 `migrations/postgres/*.up.sql`，要求当前工作树中同一路径仍然是普通文件、且字节内容与 tag 中的 Git blob 完全一致。修改、重命名或删除任一已发布迁移都会失败；追加新编号文件不受影响。检查只比较 Git 对象与工作树，不执行 SQL、不联网，也不修改 tag。
+[ci/checks/published-migrations.sh](published-migrations.sh) 把每个 `v<数字>` 发布 tag 视为已发布版本，读取该 tag 的 `migrations/postgres/*.up.sql`，要求当前工作树中同一路径仍然是普通文件、且字节内容与 tag 中的 Git blob 完全一致。修改、重命名或删除任一已发布迁移都会失败。新迁移只能追加在已发布最大编号之后：编号不大于该值的文件必须是某个 tag 中已存在的同一路径，否则失败——SQLx 会按编号顺序把这种文件插到历史中间执行，已升级的库不会重放它。检查只比较 Git 对象与工作树，不执行 SQL、不联网，也不修改 tag；[ci/checks/published-migrations-test.sh](published-migrations-test.sh) 在临时 Git 仓库里用真实 tag 覆盖上述通过与拒绝用例。
 
 为实现失败关闭，检查拒绝浅克隆：`git rev-parse --is-shallow-repository` 必须为 `false`，CI 的 `docs` 作业因此使用 `fetch-depth: 0`。本地缺少 tag 时先执行 `git fetch --tags`；没有发布 tag 时输出“仅有未发布的迁移”并通过。发布工作流的 `guard` 作业在构建前独立运行这一检查。
 
