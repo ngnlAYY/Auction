@@ -220,8 +220,9 @@ export function LiveCatalogActions(props: {
     if (!props.canBid) {
       return t("bid-unavailable");
     }
+    // 已有生效代理时不显示常驻说明，也不落到下面其他原因。
     if (activeProxy() !== null) {
-      return t("proxy-active-exists");
+      return "";
     }
     if (limitReached()) {
       return t("bid-limit-note");
@@ -234,12 +235,11 @@ export function LiveCatalogActions(props: {
     }
     return "";
   };
-  // 领先由装备高亮表达，行自身已带“正在领先”的描述，不再重复说明；超过金额上限等
-  // 其余原因必须可见。不显示说明时按钮不引用它。
+  // 领先由装备高亮表达，行自身已带“正在领先”的描述；已有生效代理时也不说明。
+  // 超过金额上限等其余原因必须可见。不显示说明时按钮不引用它。
   const showActionReason = () =>
     hasPending() ||
-    activeProxy() !== null ||
-    !(props.canBid && effectiveLeading() && !limitReached());
+    !(props.canBid && (activeProxy() !== null || (effectiveLeading() && !limitReached())));
   const actionReasonId = () =>
     showActionReason() ? `public-auction-action-reason-${props.lotId}` : "";
   const input = createValueMemo(

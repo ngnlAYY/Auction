@@ -143,6 +143,8 @@ function bidForm(input: () => BidFormInput): JSX.Element {
     }
     return input().blockedReason;
   };
+  // 说明文字为空（如已有代理授权）时不渲染说明节点，按钮也不引用它。
+  const showBlockedReason = () => blocked() && blockedReason() !== "";
   const focusAmount = (element: HTMLInputElement) => {
     onSettled(() => {
       element.focus();
@@ -246,7 +248,7 @@ function bidForm(input: () => BidFormInput): JSX.Element {
           />
         )}
       </Show>
-      <Show when={blocked()}>
+      <Show when={showBlockedReason()}>
         <p id={BID_BLOCKED_REASON_ID} class="action-feedback action-feedback--notice" role="note">
           {blockedReason()}
         </p>
@@ -275,7 +277,7 @@ function bidForm(input: () => BidFormInput): JSX.Element {
           // 而不是弹窗右上角的关闭按钮。编辑态的首选焦点仍是金额框。
           autofocus={confirming()}
           disabled={submitDisabled()}
-          aria-describedby={bidSubmitDescriptionIds(confirming(), blocked())}
+          aria-describedby={bidSubmitDescriptionIds(confirming(), showBlockedReason())}
         >
           {confirming() ? t("bid-confirm-submit") : t("bid-submit")}
         </button>

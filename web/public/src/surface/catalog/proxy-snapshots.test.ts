@@ -153,9 +153,8 @@ test("同一拍品授权重读两次失败仍限制普通出价，确认无授�
     close();
     await settle();
     expect(blocked()).toBe(true);
-    expect(renderedText(page.need((element) => element.attributes.id === reasonId))).toBe(
-      t("proxy-active-exists"),
-    );
+    // 已有生效代理时行内不渲染说明节点。
+    expect(page.find((element) => element.attributes.id === reasonId)).toBeNull();
 
     page.server.readProxy = () => null;
     page.server.activeProxy = false;
@@ -202,10 +201,10 @@ test("等待反击的代理在同场恢复后仍拦普通出价，换号后销�
     dispatch(page.need(retry), "Click");
     await waitFor(() => page.find(bid) !== null);
     expect(blocked()).toBe(true);
-    expect(page.need(bid).getAttribute("aria-describedby")).toContain(reasonId);
-    expect(renderedText(page.need((element) => element.attributes.id === reasonId))).toBe(
-      t("proxy-active-exists"),
-    );
+    // 按钮不引用不存在的说明，页面上也没有这句话。
+    expect(page.need(bid).getAttribute("aria-describedby") ?? "").not.toContain(reasonId);
+    expect(page.find((element) => element.attributes.id === reasonId)).toBeNull();
+    expect(page.find((element) => renderedText(element) === t("proxy-active-exists"))).toBeNull();
     expect(countProxy()).toBe(1);
 
     page.go("/rules");
@@ -218,13 +217,7 @@ test("等待反击的代理在同场恢复后仍拦普通出价，换号后销�
       requestPublicSessionCheck("refresh");
       await waitFor(() => page.find((element) => renderedText(element) === user.username) !== null);
       expect(blocked()).toBe(false);
-      expect(
-        page.find(
-          (element) =>
-            element.attributes.id === reasonId &&
-            renderedText(element) === t("proxy-active-exists"),
-        ),
-      ).toBeNull();
+      expect(page.find((element) => element.attributes.id === reasonId)).toBeNull();
     }
     expect(countProxy()).toBe(1);
   } finally {

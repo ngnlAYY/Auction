@@ -267,7 +267,7 @@ const LOT: CatalogRow = {
   remaining: "",
 };
 
-function mountActions() {
+function mountActions(row: { readonly canBid?: boolean; readonly nextBid?: number } = {}) {
   const requests = interceptProxyReads();
   return createRoot((dispose) => {
     const userId = createCell(FIRST_USER);
@@ -325,9 +325,9 @@ function mountActions() {
                           lotId: LOT_ID,
                           lotCode: LOT.code,
                           lotName: LOT.name,
-                          canBid: true,
+                          canBid: row.canBid ?? true,
                           currentPrice: LOT.currentPrice,
-                          nextBid: LOT.nextBid,
+                          nextBid: row.nextBid ?? LOT.nextBid,
                           lotStatus: LOT.status,
                           allowSlow: true,
                           proxyDefaultMode: "slow",
@@ -387,7 +387,7 @@ test("关闭详情与翻回本页时保留等待反击授权、禁用与说明�
     expect(actions.requests.map((request) => request.userId)).toEqual([FIRST_USER]);
     actions.requests[0]?.reply(WAITING_PROXY_WIRE);
     await settleProxyRead();
-    const blocked = [true, t("proxy-active-exists")];
+    const blocked = [true, ""];
     expect(actions.action()).toEqual(blocked);
 
     actions.close();
@@ -412,6 +412,20 @@ test("关闭详情与翻回本页时保留等待反击授权、禁用与说明�
   }
 });
 
+test("没有生效授权时，其他原因的说明仍然显示", async () => {
+  const limited = mountActions({ nextBid: 1_000_000_001 });
+  try {
+    flush();
+    limited.open();
+    await settleProxyRead();
+    limited.requests[0]?.reply(null);
+    await settleProxyRead();
+    expect(limited.action()).toEqual([true, t("bid-limit-note")]);
+  } finally {
+    limited.dispose();
+  }
+});
+
 test("换号销毁旧快照，场次之间隔离同一账号读取到的授权", async () => {
   const actions = mountActions();
   try {
@@ -420,7 +434,7 @@ test("换号销毁旧快照，场次之间隔离同一账号读取到的授权",
     await settleProxyRead();
     actions.requests[0]?.reply(WAITING_PROXY_WIRE);
     await settleProxyRead();
-    expect(actions.action()).toEqual([true, t("proxy-active-exists")]);
+    expect(actions.action()).toEqual([true, ""]);
     actions.close();
     actions.changeUser(SECOND_USER);
     flush();
@@ -432,7 +446,7 @@ test("换号销毁旧快照，场次之间隔离同一账号读取到的授权",
     expect(actions.requests.map((request) => request.userId)).toEqual([FIRST_USER, SECOND_USER]);
     actions.requests[1]?.reply(WAITING_PROXY_WIRE);
     await settleProxyRead();
-    expect(actions.action()).toEqual([true, t("proxy-active-exists")]);
+    expect(actions.action()).toEqual([true, ""]);
     actions.close();
     actions.auction.set(OTHER_AUCTION_ID);
     flush();
@@ -440,7 +454,7 @@ test("换号销毁旧快照，场次之间隔离同一账号读取到的授权",
     expect(actions.requests).toHaveLength(2);
     actions.auction.set(AUCTION_ID);
     flush();
-    expect(actions.action()).toEqual([true, t("proxy-active-exists")]);
+    expect(actions.action()).toEqual([true, ""]);
     expect(actions.requests).toHaveLength(2);
   } finally {
     actions.dispose();
