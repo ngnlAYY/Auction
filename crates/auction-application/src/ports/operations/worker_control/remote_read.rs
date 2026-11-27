@@ -192,8 +192,22 @@ pub struct WorkerSentLookupCandidate {
 }
 
 impl WorkerSentLookupCandidate {
+    /// 校验远端 Sent 详情投影的全部身份、正文与资产字段。
+    ///
+    /// 恢复核对用这些值判断“未证明发送”是否仍可能已在远端出现；字段口径必须与本地
+    /// `DeliverySendExpectation`/`ManualSentEvidence` 相同，否则损坏或越界的详情会被下游
+    /// 当作“不是本投递”，从而放行失败或重试，可能重复外部写入（不变量 4、6）。
     pub fn validate(&self) -> bool {
         matches!(self.world.as_str(), "main" | "isekai")
+            && auction_domain::valid_text(&self.external_mail_id, 64)
+            && crate::ports::admin::valid_mail_player_name(&self.recipient)
+            && auction_domain::valid_text(&self.subject, 512)
+            && self.sent_at.is_none_or(|value| value.timestamp_nanos_opt().is_some())
+            && (0..=crate::ports::delivery::MAX_DELIVERY_COD).contains(&self.remaining_credits)
+            && (0..=crate::ports::delivery::MAX_DELIVERY_COD).contains(&self.cod_pending)
+            && self.remaining_equipment_ids.len() <= MAX_SENT_DETAIL_ATTACHMENTS
+            && self.remaining_equipment_ids.iter().all(|id| valid_observed_equipment_id(id))
+            && self.observed_at.timestamp_nanos_opt().is_some()
     }
 }
 
@@ -226,14 +240,31 @@ pub struct WorkerSentLookupResponse {
     pub candidates: Vec<WorkerSentLookupCandidate>,
 }
 impl WorkerSentLookupResponse {
+    /// 只接受属于请求世界、字段完整且条目有界的 Sent 核查结果。
+    ///
+    /// 控制面响应是不可信输入：未通过完整校验的详情不能进入恢复核对，否则越界值会放大内存，
+    /// 或让已发送的邮件被当作不存在并放行失败/重试（不变量 4、6）。
     pub fn validate_for_world(&self, world: &str) -> bool {
         matches!(world, "main" | "isekai")
             && self.observed_at.timestamp_nanos_opt().is_some()
+            && self.candidates.len() <= MAX_RECOVERY_SCAN_ENTRIES
             && self
                 .candidates
                 .iter()
                 .all(|candidate| candidate.validate() && candidate.world == world)
     }
+}
+
+/// 单封 Sent 详情允许的剩余附件数上限；与发送冻结装备列表上限一致，避免控制面响应放大内存。
+const MAX_SENT_DETAIL_ATTACHMENTS: usize = 1_000;
+
+/// 远端 Sent 详情中的附件编号：允许页面保留前导零，但必须是至少一位非零的十进制文本。
+/// 冻结的发送预期另用更严格的规范正十进制比较，因此带零前缀的观察只会判为不匹配，不会被当成另一封邮件。
+fn valid_observed_equipment_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+        && value.bytes().any(|byte| byte != b'0')
 }
 
 /// 恢复后核对：单轮扫描的页数上限与配置校验上限一致。

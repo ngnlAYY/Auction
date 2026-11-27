@@ -70,7 +70,8 @@ where
                 .iter()
                 .enumerate()
                 .any(|(index, world_id)| world_ids[..index].contains(world_id))
-            || config.start_price <= 0
+            // 默认起拍价必须落在合法出价区间；超出上限会在录入后形成无法被任何出价命中的拍品。
+            || !(1..=auction_domain::MAX_BID_AMOUNT).contains(&config.start_price)
             || config.equipment_filter.validate().is_err()
         {
             return Err(MailProcessingError::InvalidConfiguration);

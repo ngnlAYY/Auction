@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use auction_domain::MAX_BID_AMOUNT;
+
 use crate::ports::core::decimal_identity;
 use crate::ports::mail::{EquipmentRejectionReason, MailEquipmentAttachment};
 
@@ -56,7 +58,8 @@ pub(super) fn resolve_start_price_plan(
     // 正文已受 64 KiB 边界限制，诊断记录完整分词数量，而不是首次超限时的数量下界。
     let token_count = tokens.len();
 
-    if default_price <= 0 {
+    // 无效默认价按拒收说明处理；上限与合法出价一致，避免持久化无法被任何出价命中的拍品。
+    if !(1..=MAX_BID_AMOUNT).contains(&default_price) {
         return Err(pricing_failure(
             EquipmentRejectionReason::StartPriceInvalid,
             "invalid_default_price",
@@ -428,7 +431,7 @@ fn parse_start_price_amount(value: &str) -> Option<i64> {
         }
         amount = amount.checked_add(scaled_fraction / scale)?;
     }
-    i64::try_from(amount).ok().filter(|amount| *amount > 0)
+    i64::try_from(amount).ok().filter(|amount| (1..=MAX_BID_AMOUNT).contains(amount))
 }
 
 fn equipment_reference_sentence_punctuation(character: char) -> bool {
