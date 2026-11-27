@@ -337,6 +337,8 @@ function countdownDisplay(end: bigint | null, now: number): CountdownDisplay {
       empty: false,
     };
   }
+  // 整秒向上取整：最后不足一秒仍显示 00:00:01，到真实截止才显示已结束。Rust 版按
+  // `Duration::num_seconds()` 朝零截断，与这里的显示相差一秒；差已登记在 web/README.md 的差异表。
   const remainingSeconds = Number((remainingNanos + 999_999_999n) / 1_000_000_000n);
   const days = Math.trunc(remainingSeconds / 86_400);
   const hours = Math.trunc((remainingSeconds % 86_400) / 3_600);

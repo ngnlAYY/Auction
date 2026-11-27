@@ -259,6 +259,7 @@ Admin 的 Solid 与 Rust 测试共用[写回执裁定样本](../crates/auction-c
   | `web/admin/src/surface/consignment/{detail,position-loss}.tsx`、`web/admin/src/api/consignment/loss.ts` | 只有 Solid 版的 Admin 挂单详情显示代管 position 摘要与损失案件链接，并在 position 仍占用实物（`in_custody`、`committed`、`in_transit`、`reconcile`）时提供“录入灭失证据 → 确认灭失”：先调 `POST /api/v2/admin/consignment/positions/{position_id}/loss-proofs`，再以回执的 `proof_id` 与详情读到的 position 版本调 `/confirm-loss`，成功后进入损失案件页。两个写动作各带命令 ID，结果未知只能原样重送；`stale_version` 只提示刷新详情。Rust 版没有灭失办理入口 |
   | `web/admin/src/surface/consignment/` | 下架没有命令回执查询入口。整页重载会清除内存中的未决记录，运营人员先重读详情，再按当前状态和版本确认是否再次下架，由服务端按版本仲裁 |
   | `web/admin/src/surface/consignment/`、`web/admin/src/api/consignment/` | Solid Admin 寄售详情的下架按钮走 v2 `POST /api/v2/admin/consignment/listings/{listing_id}/delist`：未代管件关闭，代管件设置运营止售并返回 `hold_set`。Rust 版仍走 v1，代管件返回 `409 listing_not_active`。解除止售页面等 v2 Admin 读模型时再做；v1 Admin 读模型不能呈现代管状态 |
+  | `web/public/src/surface/catalog/presentation.ts`（`countdownDisplay`） | 倒计时按整秒向上取整：剩余 61.5 秒显示 `00:01:02`，最后不足一秒仍显示 `00:00:01`，到真实截止才显示「已结束」。Rust 版用 `Duration::num_seconds()` 朝零截断，同一时刻显示 `00:01:01`，最后不足一秒即显示「已结束」。只影响显示，竞价资格与截止仍以服务端为准 |
 - 译文是各应用 `i18n/` 下的五个 `.ftl` 文件（en、zh-CN、zh-TW、ja、ko），键集合一致，键名用连字符。译文只使用 Fluent 的平铺子集：每条消息占一行，写成 `键 = 文本`，文本里的占位只有 `{ $变量 }` 与字符串字面量 `{"…"}` 两种；加载器遇到子集之外的写法会拒绝整份译文。该子集由 `i18n` 门禁的 [`i18n-flat-subset.pl`](../ci/checks/i18n-flat-subset.pl) 静态核对，扩展加载器语法时两边一起改。Public 默认 en，Admin 默认 zh-CN；偏好键 `hv.lang` 与 `hv.theme` 是固定契约。
 
 ## Public 竞价命令恢复

@@ -50,6 +50,8 @@ const CLAIM_RECORD = strictStruct({
   action: RightActionSchema,
 });
 type ClaimRecord = v.InferOutput<typeof CLAIM_RECORD>;
+// 本地存储失败与兄弟寄售页同码；本页没有专用译文键，按 `ERROR_KEYS` 的通用回退显示。
+const STORAGE_FAILURE: RightsError = { status: 0, code: "pending_storage_unavailable" };
 
 const KIND_KEYS = {
   continue_order: "consignment-right-kind-continue-order",
@@ -149,8 +151,12 @@ export function RightsPage(): JSX.Element {
   }
 
   function finishClaim(disposition: keyof typeof DISPOSITION_KEYS) {
-    // 不变量 1：清除失败时保留记录，避免刷新后把旧命令误作可继续的新命令。
-    if (!setSessionItem(CLAIM_KEY, "null")) return;
+    // 不变量 1：清除失败时保留记录，避免刷新后把旧命令误作可继续的新命令；仍须给出可见反馈，
+    // 否则已成功的续办停在未决面板上、按键继续被占用却没有任何说明。
+    if (!setSessionItem(CLAIM_KEY, "null")) {
+      error.set(STORAGE_FAILURE);
+      return;
+    }
     claim.set(null);
     error.set(null);
     notice.set(DISPOSITION_KEYS[disposition]);
@@ -262,8 +268,12 @@ export function RightsPage(): JSX.Element {
       expected_version: current.right_version,
       action,
     });
-    // 不变量 1：发送前写入严格白名单；无法记录时不发送不可恢复的写操作。
-    if (!record.ok || !setSessionItem(CLAIM_KEY, JSON.stringify(record.value))) return;
+    // 不变量 1：发送前写入严格白名单；无法记录时不发送不可恢复的写操作，并给出可见反馈。
+    if (!record.ok) return;
+    if (!setSessionItem(CLAIM_KEY, JSON.stringify(record.value))) {
+      error.set(STORAGE_FAILURE);
+      return;
+    }
     claim.set(record.value);
     sendClaim(record.value);
   };
