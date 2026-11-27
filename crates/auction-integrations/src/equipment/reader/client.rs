@@ -88,8 +88,13 @@ impl EquipmentSourceAdapter {
     }
 }
 
-/// 创建关闭代理和重定向的来源 HTTP client。
+/// 创建关闭代理、重定向和传输层重试的来源 HTTP client。来源请求只能按装配根给定的节奏发出：
+/// 协议级重放会在限速门与在途锁之外多出一次物理请求。
 pub fn build_equipment_http_client() -> Result<Client, reqwest::Error> {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()).build()
+    Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .retry(reqwest::retry::never())
+        .build()
 }
