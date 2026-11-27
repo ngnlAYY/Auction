@@ -8,6 +8,7 @@ import { createTaskResource, type ResourceState } from "@auction/web-shared/reac
 import { err, ok } from "@auction/web-shared/result";
 import { RouterContext } from "@auction/web-shared/router";
 import { openRouter } from "@auction/web-shared/router/test-window";
+import { t } from "@auction/web-shared/ui/i18n";
 import {
   type Context,
   children,
@@ -19,6 +20,7 @@ import {
   useContext,
 } from "solid-js";
 
+import type { OwnedProxy } from "../../api/account";
 import {
   PublicCommandOwnerContext,
   PublicContentLoadingContext,
@@ -71,13 +73,35 @@ function provide<T>(context: Context<T>, value: T) {
     });
 }
 
+const ACTIVE_PROXY: OwnedProxy = {
+  authorization_id: "authorization-1",
+  auction_id: TEST_AUCTION.id,
+  lot_id: LOT_ID,
+  lot_number: 1,
+  authorization_sequence: 1,
+  usage_number: 1,
+  mode: "slow",
+  maximum_amount: 150_000,
+  quota: { used: 1, limit: 3 },
+  transitions: [],
+  status: "active",
+  terminal_reason: null,
+  state_version: 2,
+  created_at: "2026-11-13T00:00:00Z",
+  updated_at: "2026-11-13T00:00:00Z",
+  equipment: { name: "Legendary Shield", category: "shield" },
+  bid: null,
+  invalid_reason: null,
+  capabilities: { can_lower: true, waiting: true, at_maximum: false },
+};
+
 interface BidRequest {
   readonly body: string;
   readonly signal: AbortSignal;
   readonly respond: (response: Response) => void;
 }
 
-function mountBidBoard() {
+function mountBidBoard(proxy: OwnedProxy | null = null) {
   const opened = openRouter("/?auction=truncated");
   Object.assign(opened.fake, { setInterval: () => 0, clearInterval() {} });
   const requests: BidRequest[] = [];
@@ -180,7 +204,7 @@ function mountBidBoard() {
               ordinaryBlocked: false,
               leading: false,
               blockedReason: "",
-              proxy: null,
+              proxy: proxy === null ? null : ok(proxy),
               proxyReadGeneration: null,
             });
           }
@@ -194,6 +218,13 @@ function mountBidBoard() {
       dispose,
       open: () => open(),
       form: () => findElement(tree(), (element) => element.tag === "form"),
+      directTab: () =>
+        findElement(
+          tree(),
+          (element) =>
+            element.tag === "button" &&
+            String(element.attributes.class).startsWith("public-bid-dialog__tab"),
+        ),
       retry: () =>
         findElement(
           tree(),
@@ -227,6 +258,7 @@ function mountBidBoard() {
       flush();
     },
     form: mounted.form,
+    directTab: mounted.directTab,
     retry: mounted.retry,
     close() {
       mounted.dispose();
@@ -237,6 +269,23 @@ function mountBidBoard() {
     },
   };
 }
+
+test("已有生效代理时直接出价标签带悬停说明，没有代理时不带 title", async () => {
+  for (const [proxy, expected] of [
+    [ACTIVE_PROXY, t("proxy-active-exists")],
+    [null, undefined],
+  ] as const) {
+    const mounted = mountBidBoard(proxy);
+    try {
+      await mounted.openFromCurrent();
+      const tab = mounted.directTab();
+      expect(tab?.attributes.disabled).toBe(proxy !== null);
+      expect(tab?.attributes.title).toBe(expected);
+    } finally {
+      mounted.close();
+    }
+  }
+});
 
 test("合法地址打开实际竞价弹窗，后退到非法场次后旧确认不能发请求", async () => {
   const mounted = mountBidBoard();

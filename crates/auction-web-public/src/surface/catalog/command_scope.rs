@@ -375,6 +375,8 @@ fn CatalogCommandDialog(
                                 r#type: "button",
                                 aria_pressed: (input.action == CatalogAction::Bid).to_string(),
                                 disabled: busy || has_active_proxy,
+                                // 仅在已有生效代理时用悬停说明禁用原因；不渲染常驻提示。
+                                title: has_active_proxy.then(|| t!("proxy-active-exists")),
                                 onclick: move |_| switch_tab.call(CatalogAction::Bid),
                                 {t!("bid-tab-direct")}
                             }
@@ -1015,6 +1017,30 @@ mod tests {
         let replay = requests().pop().unwrap();
         assert_eq!(replay.url, original.url);
         assert_eq!(replay.body, original.body);
+    }
+
+    #[test]
+    fn direct_tab_explains_its_lock_by_title_only_with_an_active_proxy() {
+        let mut dom = mounted();
+        let mut dialog = DIALOG.get().unwrap();
+        let explanation = "An active proxy authorization already exists for this lot.";
+        let has_title =
+            |mutations: &Mutations| {
+                mutations.edits.iter().any(|edit| matches!(edit,
+                Mutation::SetAttribute { name: "title", value: AttributeValue::Text(text), .. }
+                    if *text == explanation
+            ))
+            };
+        for (proxy, expected) in
+            [(Some(super::super::actions::tests::waiting_proxy()), true), (None, false)]
+        {
+            dom.in_runtime(|| dialog.set(None));
+            settle(&mut dom);
+            let mut open = input(LOT, CatalogAction::Bid);
+            open.proxy = Some(proxy);
+            dom.in_runtime(|| dialog.set(Some(open)));
+            assert_eq!(has_title(&settle(&mut dom)), expected);
+        }
     }
 
     #[test]
