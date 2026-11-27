@@ -103,7 +103,6 @@ export function recoveryDialogInput(row: CatalogRow): CommandDialogInput {
 }
 
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
-const ACTIVE_PROXY_HINT_ID = "public-bid-active-proxy";
 
 /** 当前快照无新确认时，由外壳最后确认的宿主继续持有草稿。 */
 export function catalogIdentityMatches(
@@ -411,7 +410,6 @@ function CatalogCommandDialog(props: {
                       type="button"
                       aria-pressed={input().action === "bid" ? "true" : "false"}
                       disabled={busy() || activeProxy()}
-                      aria-describedby={activeProxy() ? ACTIVE_PROXY_HINT_ID : undefined}
                       onClick={() => {
                         if (!activeProxy()) {
                           switchTab("bid");
@@ -434,15 +432,6 @@ function CatalogCommandDialog(props: {
                       {t("bid-tab-proxy")}
                     </button>
                   </div>
-                  <Show when={activeProxy()}>
-                    <p
-                      id={ACTIVE_PROXY_HINT_ID}
-                      class="action-feedback action-feedback--notice"
-                      role="note"
-                    >
-                      {t("proxy-active-exists")}
-                    </p>
-                  </Show>
                 </Show>
               </>
             }

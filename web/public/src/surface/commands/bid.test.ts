@@ -150,7 +150,7 @@ test("二次确认时晚到的活动授权禁用确认按钮，并关联两个�
       expect(confirming?.attributes.disabled).toBe(false);
       expect(confirming?.attributes["aria-describedby"]).toBe("public-bid-confirmation");
 
-      blockedReason.set("proxy-active-exists");
+      blockedReason.set("bid-limit-note");
       const locked = render();
       const button = locked.find(isSubmitButton);
       expect(command.confirmation.peek()).toBe(pending);
@@ -164,7 +164,39 @@ test("二次确认时晚到的活动授权禁用确认按钮，并关联两个�
         .split(" ")
         .map((id) => locked.find((node) => node.attributes.id === id));
       expect(targets.map((node) => node?.tag)).toEqual(["p", "p"]);
-      expect(targets[1]?.children).toEqual(["proxy-active-exists"]);
+      expect(targets[1]?.children).toEqual(["bid-limit-note"]);
+    } finally {
+      dispose();
+    }
+  });
+});
+
+test("已有生效代理时普通出价被禁用，但不渲染空的说明节点，确认按钮也不引用它", () => {
+  createRoot((dispose) => {
+    try {
+      const command = useConfirmCommand<PendingBidCommand, CommandError>();
+      const render = () =>
+        renderForm({
+          lotId: "lot-1",
+          nextBid: 126_000,
+          lotStatus: "live",
+          canBid: true,
+          canSubmit: true,
+          blocked: true,
+          blockedReason: "",
+          command,
+          onSubmit: () => {},
+          onClose: () => {},
+        });
+      const isSubmitButton = (node: CapturedElement) =>
+        node.tag === "button" && node.attributes.type === "submit";
+
+      const edit = render();
+      expect(edit.find(isSubmitButton)?.attributes.disabled).toBe(true);
+      expect(
+        edit.find((node) => node.attributes.id === "public-bid-blocked-reason"),
+      ).toBeUndefined();
+      expect(edit.find(isSubmitButton)?.attributes["aria-describedby"]).toBeUndefined();
     } finally {
       dispose();
     }

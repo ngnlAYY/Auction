@@ -21,7 +21,6 @@ pub struct BidFormInput {
     pub can_bid: bool,
     pub blocked: bool,
     pub blocked_reason: String,
-    pub active_proxy_reason_id: Option<&'static str>,
     pub command: BidConfirmCommand,
     pub on_submit: EventHandler<PendingBidCommand>,
     pub on_close: EventHandler<()>,
@@ -94,7 +93,6 @@ fn bid_form(input: BidFormInput) -> Element {
         can_bid,
         blocked,
         blocked_reason,
-        active_proxy_reason_id,
         command,
         on_submit,
         on_close,
@@ -118,12 +116,10 @@ fn bid_form(input: BidFormInput) -> Element {
     } else {
         blocked_reason
     };
-    let submit_described_by = match (confirming, active_proxy_reason_id) {
-        (true, Some(reason)) => format!("public-bid-confirmation {reason}"),
-        (true, None) => "public-bid-confirmation".to_owned(),
-        (false, Some(reason)) => reason.to_owned(),
-        (false, None) => String::new(),
-    };
+    // 没有说明文字（如已有代理授权）时不渲染说明节点。
+    let show_blocked_reason = blocked && !blocked_reason.is_empty();
+    let submit_described_by =
+        if confirming { "public-bid-confirmation".to_owned() } else { String::new() };
 
     let submit = use_callback(move |()| {
         if blocked
@@ -225,7 +221,7 @@ fn bid_form(input: BidFormInput) -> Element {
                     {t!("bid-shorthand-hint")}
                 }
             }
-            if blocked && active_proxy_reason_id.is_none() {
+            if show_blocked_reason {
                 p { class: "action-feedback action-feedback--notice", role: "note", "{blocked_reason}" }
             }
             if let Some(message) = validation() {
@@ -310,7 +306,6 @@ mod tests {
             can_bid: true,
             blocked: false,
             blocked_reason: String::new(),
-            active_proxy_reason_id: None,
             command: BidConfirmCommand(use_confirm_command()),
             on_submit: use_callback(|_| {}),
             on_close: use_callback(|()| {}),

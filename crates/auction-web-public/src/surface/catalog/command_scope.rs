@@ -312,11 +312,6 @@ fn CatalogCommandDialog(
     };
     let can_bid = input.can_bid && target_ready && session.identity_confirmed();
     let has_active_proxy = active_own_proxy(input.proxy.as_ref()).is_some();
-    let active_proxy_reason_id = (has_active_proxy
-        && !recovering
-        && !proxy_saved
-        && (!confirming || input.action == CatalogAction::Bid))
-        .then_some("public-bid-active-proxy");
     let lot_name = input.lot_name.clone();
     let lot_code = input.lot_code.clone();
     let current_price = format_credit_amount(input.current_price);
@@ -380,7 +375,6 @@ fn CatalogCommandDialog(
                                 r#type: "button",
                                 aria_pressed: (input.action == CatalogAction::Bid).to_string(),
                                 disabled: busy || has_active_proxy,
-                                aria_describedby: active_proxy_reason_id,
                                 onclick: move |_| switch_tab.call(CatalogAction::Bid),
                                 {t!("bid-tab-direct")}
                             }
@@ -397,14 +391,6 @@ fn CatalogCommandDialog(
                                 {t!("bid-tab-proxy")}
                             }
                         }
-                    }
-                }
-                if let Some(reason_id) = active_proxy_reason_id {
-                    p {
-                        id: reason_id,
-                        class: "action-feedback action-feedback--notice",
-                        role: "note",
-                        {t!("proxy-active-exists")}
                     }
                 }
                 div { role: "status", aria_atomic: "true",
@@ -431,7 +417,6 @@ fn CatalogCommandDialog(
                         can_bid,
                         blocked: input.ordinary_blocked,
                         blocked_reason: input.blocked_reason,
-                        active_proxy_reason_id,
                         command: bid_command,
                         on_submit: submit_bid,
                         on_close: close,

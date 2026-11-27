@@ -221,7 +221,8 @@ pub(crate) fn LiveCatalogActions(
     } else if !can_bid {
         t!("bid-unavailable")
     } else if has_active_proxy {
-        t!("proxy-active-exists")
+        // 已有生效代理时不显示常驻说明，也不落到下面其他原因。
+        String::new()
     } else if limit_reached {
         t!("bid-limit-note")
     } else if effective_leading {
@@ -229,10 +230,10 @@ pub(crate) fn LiveCatalogActions(
     } else {
         String::new()
     };
-    // 领先由装备高亮表达，行自身已带“正在领先”的描述，不再重复说明；超过金额上限等
-    // 其余原因必须可见。不显示说明时按钮不引用它。
+    // 领先由装备高亮表达，行自身已带“正在领先”的描述；已有生效代理时也不说明。
+    // 超过金额上限等其余原因必须可见。不显示说明时按钮不引用它。
     let show_action_reason =
-        has_pending || has_active_proxy || !(can_bid && effective_leading && !limit_reached);
+        has_pending || !(can_bid && (has_active_proxy || (effective_leading && !limit_reached)));
     let action_reason_id = if show_action_reason {
         format!("public-auction-action-reason-{lot_id}")
     } else {
@@ -690,35 +691,25 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn closing_details_keeps_the_row_disabled_and_preserves_its_reason() {
+    fn closing_details_keeps_the_row_disabled_without_a_reason() {
         let mut dom = mounted();
         let opened = show_detail(&mut dom, true);
         assert_eq!(requests(), 1);
         assert!(bid_button(&opened, true).is_some());
-        assert!(shows_proxy_reason(&opened));
-        let reason_id = format!("public-auction-action-reason-{LOT}");
-        let reason = opened
-            .edits
-            .iter()
-            .find_map(|edit| match edit {
-                Mutation::SetAttribute {
-                    name: "id",
-                    value: AttributeValue::Text(value),
-                    id,
-                    ..
-                } if value == &reason_id => Some(*id),
-                _ => None,
+        assert!(!shows_proxy_reason(&opened));
+        // 已有生效代理时行内不渲染说明节点，按钮也不引用它。
+        let has_reason_id = |mutations: &Mutations| {
+            mutations.edits.iter().any(|edit| {
+                matches!(edit,
+                    Mutation::SetAttribute { value: AttributeValue::Text(value), .. }
+                    if value.starts_with("public-auction-action-reason-")
+                )
             })
-            .expect("禁用理由已渲染");
+        };
+        assert!(!has_reason_id(&opened));
 
         let closed = show_detail(&mut dom, false);
         assert!(bid_button(&closed, false).is_none(), "关闭抽屉后普通出价仍禁用");
-        assert!(
-            !closed.edits.iter().any(|edit| matches!(edit,
-                Mutation::Remove { id } | Mutation::ReplaceWith { id, .. } if *id == reason
-            )),
-            "关闭抽屉后保留行内理由"
-        );
 
         let mut row = PROXY_READS.with_borrow(|reads| reads.as_ref().unwrap().row.unwrap());
         dom.in_runtime(|| row.set(false));
@@ -727,7 +718,7 @@ pub(super) mod tests {
         let mut remounted = Mutations::default();
         settle(&mut dom, &mut remounted);
         assert!(bid_button(&remounted, true).is_some());
-        assert!(shows_proxy_reason(&remounted));
+        assert!(!shows_proxy_reason(&remounted));
         assert_eq!(requests(), 1, "关抽屉和重挂载行都不发授权 GET");
 
         PROXY_READS.with_borrow_mut(|reads| reads.as_mut().unwrap().authorization = None);
@@ -741,20 +732,18 @@ pub(super) mod tests {
         let mut dom = mounted();
         let opened = show_detail(&mut dom, true);
         assert!(bid_button(&opened, true).is_some());
-        assert!(shows_proxy_reason(&opened));
+        assert!(!shows_proxy_reason(&opened));
         show_detail(&mut dom, false);
         let mut owner = PROXY_READS.with_borrow(|reads| reads.as_ref().unwrap().owner.unwrap());
         dom.in_runtime(|| owner.set(Some(BOB.to_owned())));
         let mut switched = Mutations::default();
         settle(&mut dom, &mut switched);
         assert!(bid_button(&switched, false).is_some());
-        assert!(!shows_proxy_reason(&switched));
         assert_eq!(requests(), 1, "换号不预取，也不沿用上一用户授权");
 
         PROXY_READS.with_borrow_mut(|reads| reads.as_mut().unwrap().authorization = None);
         let reopened = show_detail(&mut dom, true);
         assert!(bid_button(&reopened, true).is_none());
-        assert!(!shows_proxy_reason(&reopened));
         PROXY_READS.with_borrow(|reads| {
             let requests = &reads.as_ref().unwrap().requests;
             assert_eq!(
@@ -770,7 +759,7 @@ pub(super) mod tests {
     #[test]
     fn an_auction_read_failure_and_recovery_keep_the_confirmed_proxy_snapshot() {
         let mut dom = mounted();
-        assert!(shows_proxy_reason(&show_detail(&mut dom, true)));
+        assert!(!shows_proxy_reason(&show_detail(&mut dom, true)));
         show_detail(&mut dom, false);
         let mut visible = PROXY_READS.with_borrow(|reads| reads.as_ref().unwrap().visible.unwrap());
         dom.in_runtime(|| visible.set(false));
@@ -779,7 +768,7 @@ pub(super) mod tests {
         let mut recovered = Mutations::default();
         settle(&mut dom, &mut recovered);
         assert!(bid_button(&recovered, true).is_some());
-        assert!(shows_proxy_reason(&recovered));
+        assert!(!shows_proxy_reason(&recovered));
         assert_eq!(requests(), 1);
     }
 
@@ -863,7 +852,7 @@ pub(super) mod tests {
     #[test]
     fn an_authorization_error_only_releases_the_bid_block_after_a_confirmed_absence() {
         let mut dom = mounted();
-        assert!(shows_proxy_reason(&show_detail(&mut dom, true)));
+        assert!(!shows_proxy_reason(&show_detail(&mut dom, true)));
         show_detail(&mut dom, false);
         PROXY_READS.with_borrow_mut(|reads| reads.as_mut().unwrap().read_fails = true);
         let failed = show_detail(&mut dom, true);
@@ -877,7 +866,7 @@ pub(super) mod tests {
         let mut recovered = Mutations::default();
         settle(&mut dom, &mut recovered);
         assert!(bid_button(&recovered, true).is_some());
-        assert!(shows_proxy_reason(&recovered));
+        assert!(!shows_proxy_reason(&recovered));
 
         PROXY_READS.with_borrow_mut(|reads| {
             let reads = reads.as_mut().unwrap();
