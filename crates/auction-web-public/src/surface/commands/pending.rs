@@ -110,7 +110,7 @@ pub(super) fn confirm_panel(id: &str, type_label: &str, amount: String, note: St
     }
 }
 
-/// 只为代理输入框生成可解析的默认值：向上取到 1K 网格，不修改服务端下限或用户输入。
+/// 只为代理输入框生成默认值：以 K 为单位的纯数字（无后缀按 K 解析），向上取到 1K 网格，不修改服务端下限或用户输入。
 pub(super) fn initial_proxy_amount(minimum: i64) -> String {
     if !(1..=MAX_PUBLIC_BID_AMOUNT).contains(&minimum) {
         return String::new();
@@ -120,7 +120,7 @@ pub(super) fn initial_proxy_amount(minimum: i64) -> String {
     else {
         return String::new();
     };
-    format_credit_amount(amount)
+    (amount / 1_000).to_string()
 }
 
 pub(super) fn amount_hint(value: &str, id: &'static str, invalid_key: &'static str) -> Element {
@@ -209,4 +209,26 @@ pub(super) fn proxy_error_message(error: &CommandError, minimum: i64) -> String 
         _ => t!("proxy-command-error"),
     })
     .unwrap_or_else(|| t!("proxy-command-error"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::initial_proxy_amount;
+    use crate::surface::catalog::parse_credit_amount;
+
+    #[test]
+    fn proxy_default_is_plain_k_units_and_parses_back() {
+        assert_eq!(initial_proxy_amount(61_500), "62");
+        assert_eq!(initial_proxy_amount(1_005_000), "1005");
+        assert_eq!(initial_proxy_amount(0), "");
+        assert_eq!(parse_credit_amount(&initial_proxy_amount(61_500)), Some(62_000));
+        assert_eq!(parse_credit_amount("62"), Some(62_000));
+        assert_eq!(parse_credit_amount("1.5M"), Some(1_500_000));
+    }
+
+    #[test]
+    fn proxy_input_still_rejects_invalid_notation() {
+        assert_eq!(parse_credit_amount("62.5"), None);
+        assert_eq!(parse_credit_amount("1.0005M"), None);
+    }
 }
