@@ -22,7 +22,9 @@ use crate::database::consignment::commands::DepositWriter;
 use crate::database::consignment::commands::errors::WriteError;
 use crate::database::consignment::commands::ledger::{DepositArbitration, DepositTarget};
 use crate::database::consignment::commands::session::{LockKeys, with_deposit_transaction};
-use crate::database::consignment::listings::projection::{LockedListing, lock_listings};
+use crate::database::consignment::listings::projection::{
+    LockedListing, anonymous_seller_lock_key, lock_listings,
+};
 
 impl SeasonStore for DepositRepository {
     fn queue_season_notice(
@@ -298,10 +300,10 @@ async fn close_lock_keys(
     store: &crate::database::DatabaseStore,
     target: SeasonCloseTarget,
 ) -> Result<(Vec<Uuid>, Vec<auction_domain::consignment::ListingEquipmentIdentity>), WriteError> {
-    let rows: Vec<(Uuid, String, String)> = match target {
+    let rows: Vec<(Option<Uuid>, Option<String>, String, String)> = match target {
         SeasonCloseTarget::World(world) => {
             sqlx::query_as(
-                "SELECT seller_user_id, world_id, external_equipment_id
+                "SELECT seller_user_id, seller_game_name, world_id, external_equipment_id
                  FROM public.consignment_listings
                  WHERE world_id = $1 AND (state IN (
                      'resolving', 'displayed', 'awaiting_deposit', 'deposit_accepted',
@@ -317,7 +319,7 @@ async fn close_lock_keys(
         }
         SeasonCloseTarget::Listing(listing_id) => {
             sqlx::query_as(
-                "SELECT seller_user_id, world_id, external_equipment_id
+                "SELECT seller_user_id, seller_game_name, world_id, external_equipment_id
                  FROM public.consignment_listings WHERE id = $1",
             )
             .bind(listing_id)
@@ -326,7 +328,7 @@ async fn close_lock_keys(
         }
         SeasonCloseTarget::Position(position_id) => {
             sqlx::query_as(
-                "SELECT listing.seller_user_id, listing.world_id,
+                "SELECT listing.seller_user_id, listing.seller_game_name, listing.world_id,
                         listing.external_equipment_id
                  FROM public.consignment_custody_positions position
                  JOIN public.consignment_listings listing ON listing.id = position.listing_id
@@ -339,11 +341,24 @@ async fn close_lock_keys(
     };
     let mut sellers = Vec::new();
     let mut equipment = Vec::new();
-    for (seller, world, eid) in rows {
-        sellers.push(seller);
+    for (seller_user_id, seller_game_name, world, eid) in rows {
+        sellers.push(seller_lock_key(seller_user_id, seller_game_name)?);
         equipment.push(auction_domain::consignment::ListingEquipmentIdentity::new(&world, &eid)?);
     }
     Ok((sellers, equipment))
+}
+
+/// 卖家会话锁键：账户挂单用账户 ID，匿名非寄售挂单（000138）用与预读相同的派生锁键。
+/// 卖家二选一的约束保证恰有一个；读到其他组合是投影损坏，失败关闭。
+fn seller_lock_key(
+    seller_user_id: Option<Uuid>,
+    seller_game_name: Option<String>,
+) -> Result<Uuid, WriteError> {
+    match (seller_user_id, seller_game_name) {
+        (Some(seller_user_id), None) => Ok(seller_user_id),
+        (None, Some(name)) => Ok(anonymous_seller_lock_key(&name)),
+        _ => Err(WriteError::invariant("consignment_season_close_seller")),
+    }
 }
 
 async fn window_for(
