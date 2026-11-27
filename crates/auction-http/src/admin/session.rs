@@ -6,7 +6,7 @@ use auction_application::public::AdminSessionIdentity;
 use auction_contracts::{AdminSessionResponse, ApiResponse};
 use auction_time::Timestamp;
 use axum::Json;
-use axum::extract::{ConnectInfo, State};
+use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 
@@ -129,12 +129,19 @@ fn session_projection(uri: &Uri) -> Result<bool, Box<Response>> {
 pub(crate) async fn renew_admin_session(
     State(state): State<AdminApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
+    request: Request,
 ) -> Response {
-    let (raw_csrf, identity) = match authenticated_admin_mutation(&state, &headers, address).await {
-        Ok(result) => result,
-        Err(response) => return *response,
-    };
+    let (parts, body) = request.into_parts();
+    let (raw_csrf, identity) =
+        match authenticated_admin_mutation(&state, &parts.headers, address).await {
+            Ok(result) => result,
+            Err(response) => return *response,
+        };
+    // 契约要求空请求体：零字节预算读取，任何非空正文都在续期前失败关闭，不缓冲未知大小正文。
+    if axum::body::to_bytes(body, 0).await.is_err() {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_body", "会话续期只接受空请求体")
+            .into_response();
+    }
     session_response("会话已续期", no_store_headers(), raw_csrf, identity, Some(Timestamp::now()))
 }
 

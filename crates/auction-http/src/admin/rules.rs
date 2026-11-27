@@ -17,7 +17,7 @@ use auction_contracts::{
 };
 use auction_domain::CommandId;
 use axum::{
-    body::Bytes,
+    body::Body,
     extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
@@ -30,6 +30,7 @@ use crate::errors::{
 };
 use crate::mapping::timestamp;
 use crate::middleware::boundary::request_id;
+use crate::middleware::strict_json;
 use crate::query::parse_query;
 use crate::session::{
     admin_session_guard, authenticated_admin_mutation, authenticated_admin_session, internal_error,
@@ -38,6 +39,9 @@ use crate::session::{
 use crate::state::AdminApiState;
 
 const DEFAULT_LOCALE: &str = "en";
+
+/// 规则与关于共用的请求体上限；只在鉴权后由解码头强制执行。
+const DOCUMENT_BODY_LIMIT: usize = 1 << 20;
 
 /// 读取 Admin 规则文档；所选语言尚未建立时返回 404。
 pub(crate) async fn get(
@@ -55,7 +59,7 @@ pub(crate) async fn validate(
     address: ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     uri: Uri,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     validate_candidate(state, address, headers, uri, body).await
 }
@@ -66,7 +70,7 @@ pub(crate) async fn publish(
     address: ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     uri: Uri,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     publish_document(SiteDocumentKind::Rules, state, address, headers, uri, body).await
 }
@@ -87,7 +91,7 @@ pub(crate) async fn validate_about(
     address: ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     uri: Uri,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     validate_candidate(state, address, headers, uri, body).await
 }
@@ -98,7 +102,7 @@ pub(crate) async fn publish_about(
     address: ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     uri: Uri,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     publish_document(SiteDocumentKind::About, state, address, headers, uri, body).await
 }
@@ -167,7 +171,7 @@ async fn validate_candidate(
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     uri: Uri,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     if let Err(response) = authenticated_admin_mutation(&state, &headers, address).await {
         return *response;
@@ -175,13 +179,11 @@ async fn validate_candidate(
     if let Some(response) = mutation_boundary(&uri) {
         return response;
     }
-    let input: AdminRulesCandidateRequest = match serde_json::from_slice(&body) {
-        Ok(input) => input,
-        Err(_) => {
-            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
-                .into_response();
-        }
-    };
+    let input: AdminRulesCandidateRequest =
+        match strict_json::decode_after_guard(&headers, body, DOCUMENT_BODY_LIMIT).await {
+            Ok(input) => input,
+            Err(response) => return *response,
+        };
     let candidate =
         AdminRulesCandidate { locale: input.locale, title: input.title, markdown: input.markdown }
             .normalize();
@@ -209,7 +211,7 @@ async fn publish_document(
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     uri: Uri,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     let (_, identity) = match authenticated_admin_mutation(&state, &headers, address).await {
         Ok(result) => result,
@@ -218,13 +220,11 @@ async fn publish_document(
     if let Some(response) = mutation_boundary(&uri) {
         return response;
     }
-    let input: AdminRulesPublishRequest = match serde_json::from_slice(&body) {
-        Ok(input) => input,
-        Err(_) => {
-            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
-                .into_response();
-        }
-    };
+    let input: AdminRulesPublishRequest =
+        match strict_json::decode_after_guard(&headers, body, DOCUMENT_BODY_LIMIT).await {
+            Ok(input) => input,
+            Err(response) => return *response,
+        };
     if input.command_id.is_nil() {
         return api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
             .into_response();

@@ -12,7 +12,7 @@ use auction_application::admin::{
     AdminRuntimeWorldsConfig, WorkerRestartState,
 };
 use auction_application::core::ApplicationFuture;
-use axum::body::{Bytes, to_bytes};
+use axum::body::{Body, to_bytes};
 use axum::extract::ConnectInfo;
 use axum::http::{StatusCode, Uri};
 use axum::response::Response;
@@ -22,6 +22,16 @@ use super::{
     RuntimeProjection, get, map_error, map_snapshot, runtime_projection, update, validate,
 };
 use crate::admin::auctions::command_test_support::{VALID_UUID, headers, state_with_runtime};
+
+/// 直接调用 handler 的单测绕过了路由层；生产路由原先由 `strict_json` 提供的 JSON 媒体类型在这里补齐。
+fn json_headers() -> axum::http::HeaderMap {
+    let mut map = headers();
+    map.insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/json"),
+    );
+    map
+}
 
 /// 已发布页面（基线 b2300b46）`valid_alerts` 严格校验的告警区块闭集：缺省投影必须恰好是它。
 const BASELINE_ALERT_KEYS: [&str; 21] = [
@@ -389,9 +399,9 @@ async fn legacy_threshold_request_has_the_same_preview_and_save_result() {
     let candidate =
         json!({"operations": {"alerts": {"managed": true}}, "allow_manual_early_open": true});
     let save = update(
-        state_with_runtime(Some(port.clone())), address, headers(),
+        state_with_runtime(Some(port.clone())), address, json_headers(),
         "/api/v1/admin/config".parse().unwrap(),
-        Bytes::from(json!({"expected_fingerprint": fingerprint, "command_id": VALID_UUID, "document": candidate}).to_string()),
+        Body::from(json!({"expected_fingerprint": fingerprint, "command_id": VALID_UUID, "document": candidate}).to_string()),
     ).await;
     let (status, save) = json_response(save).await;
     assert_eq!(status, StatusCode::OK);
@@ -400,9 +410,9 @@ async fn legacy_threshold_request_has_the_same_preview_and_save_result() {
         let preview = validate(
             state_with_runtime(Some(port.clone())),
             address,
-            headers(),
+            json_headers(),
             format!("/api/v1/admin/config:validate{query}").parse().unwrap(),
-            Bytes::from(json!({"document": candidate}).to_string()),
+            Body::from(json!({"document": candidate}).to_string()),
         )
         .await;
         let (status, preview) = json_response(preview).await;
@@ -436,17 +446,17 @@ async fn invalid_runtime_response_exposes_only_fixed_worker_file_hints() {
         let preview = validate(
             state.clone(),
             address,
-            headers(),
+            json_headers(),
             "/api/v1/admin/config:validate".parse().unwrap(),
-            Bytes::from(json!({"document": candidate}).to_string()),
+            Body::from(json!({"document": candidate}).to_string()),
         )
         .await;
         let save = update(
             state,
             address,
-            headers(),
+            json_headers(),
             "/api/v1/admin/config".parse().unwrap(),
-            Bytes::from(
+            Body::from(
                 json!({
                     "expected_fingerprint": fingerprint,
                     "command_id": VALID_UUID,
@@ -650,9 +660,9 @@ async fn worker_restart_state_is_an_opt_in_no_store_get_projection() {
     let response = validate(
         state,
         address,
-        headers(),
+        json_headers(),
         "/api/v1/admin/config:validate?include_worker_restart_state=true".parse().unwrap(),
-        Bytes::from_static(br#"{"document":{}}"#),
+        Body::from(r#"{"document":{}}"#),
     )
     .await;
     let (status, body) = json_response(response).await;
@@ -717,17 +727,17 @@ async fn runtime_config_validate_contract_fixtures() {
         let response = validate(
             state.clone(),
             address,
-            headers(),
+            json_headers(),
             format!("/api/v1/admin/config:validate{query}").parse().unwrap(),
-            Bytes::from_static(br#"{"document":{"allow_manual_early_open":true}}"#),
+            Body::from(r#"{"document":{"allow_manual_early_open":true}}"#),
         )
         .await;
         assert_http(name, StatusCode::OK, response).await;
     }
     let response = validate(
-        state, address, headers(),
+        state, address, json_headers(),
         "/api/v1/admin/config:validate?include_equipment_taxonomy=true&include=fulfillment_collection_overdue_age_seconds".parse().unwrap(),
-        Bytes::from_static(br#"{"document":{"operations":{"alerts":{"managed":true}}}}"#),
+        Body::from(r#"{"document":{"operations":{"alerts":{"managed":true}}}}"#),
     ).await;
     assert_http("admin/config-validate-invalid", StatusCode::BAD_REQUEST, response).await;
 }

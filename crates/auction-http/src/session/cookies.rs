@@ -109,8 +109,9 @@ pub(crate) fn admin_cookie(
 }
 
 pub(crate) fn append_clear_cookie(headers: &mut HeaderMap, secure: bool) {
-    let mut value = String::from(
-        "auction_public_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; HttpOnly; SameSite=Lax",
+    // 与签发使用同一常量：改名时退出登录仍能清除同名 Cookie，而不是留下旧会话令牌。
+    let mut value = format!(
+        "{PUBLIC_SESSION_COOKIE}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; HttpOnly; SameSite=Lax"
     );
     if secure {
         value.push_str("; Secure");

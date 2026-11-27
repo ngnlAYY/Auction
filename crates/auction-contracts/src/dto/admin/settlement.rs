@@ -120,7 +120,8 @@ pub struct AdminSettlementAdjustmentResponse {
 }
 
 /// Admin 结算报告中的单个 lot。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+/// 完整游戏装备 URL 含 10 位 key，与 Public 投影同一口径：只允许进入 wire，调试输出始终脱敏。
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminSettlementLotResponse {
     pub id: String,
     pub lot_number: i32,
@@ -143,6 +144,32 @@ pub struct AdminSettlementLotResponse {
     /// 赢家累计领先纳秒数；流拍为 0。
     pub leader_held_nanos: i64,
     pub adjustment: AdminSettlementAdjustmentResponse,
+}
+
+impl std::fmt::Debug for AdminSettlementLotResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AdminSettlementLotResponse")
+            .field("id", &self.id)
+            .field("lot_number", &self.lot_number)
+            .field("status", &self.status)
+            .field("equipment_name", &self.equipment_name)
+            .field("equipment_category", &self.equipment_category)
+            .field("game_equipment_url", &"[REDACTED]")
+            .field("seller", &self.seller)
+            .field("winner", &self.winner)
+            .field("final_price", &self.final_price)
+            .field("listed_price", &self.listed_price)
+            .field("buyer_amount", &self.buyer_amount)
+            .field("seller_amount", &self.seller_amount)
+            .field("tax_amount", &self.tax_amount)
+            .field("compensation_amount", &self.compensation_amount)
+            .field("hold_ppm", &self.hold_ppm)
+            .field("adjustment_ppm", &self.adjustment_ppm)
+            .field("leader_held_nanos", &self.leader_held_nanos)
+            .field("adjustment", &self.adjustment)
+            .finish()
+    }
 }
 
 /// Admin 结算报告响应；未结算拍卖的 `settlement` 为 null，且不伪造 lot 金额。
