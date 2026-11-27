@@ -117,8 +117,9 @@ pub(crate) async fn cancel_active_reservations(
     command_id: Uuid,
     now: Timestamp,
 ) -> Result<(), WriteError> {
-    let identity: (Uuid, String, String) = sqlx::query_as(
-        "SELECT seller_user_id, world_id, external_equipment_id
+    // 只取实物身份；卖家列自 000138 起可空（匿名非寄售挂单没有账户），此处从未使用它。
+    let identity: (String, String) = sqlx::query_as(
+        "SELECT world_id, external_equipment_id
          FROM public.consignment_listings WHERE id = $1",
     )
     .bind(listing_id)
@@ -134,7 +135,7 @@ pub(crate) async fn cancel_active_reservations(
     if reservation_ids.is_empty() {
         return Ok(());
     }
-    let identity = ListingEquipmentIdentity::new(&identity.1, &identity.2)?;
+    let identity = ListingEquipmentIdentity::new(&identity.0, &identity.1)?;
     for reservation_id in reservation_ids {
         sqlx::query(
             "UPDATE public.consignment_deposit_reservations

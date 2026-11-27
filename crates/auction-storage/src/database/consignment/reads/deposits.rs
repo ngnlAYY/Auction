@@ -139,9 +139,10 @@ pub(crate) async fn read_instructions(
         tx.commit().await.map_err(storage)?;
         return Ok(None);
     };
-    let listing_seller: uuid::Uuid = listing.try_get("seller_user_id").map_err(storage)?;
+    // 000138 匿名非寄售挂单没有账户卖家：本人寄件指引只属于账户挂单，其余按“非本人”返回空。
+    let listing_seller: Option<uuid::Uuid> = listing.try_get("seller_user_id").map_err(storage)?;
     let listing_state: String = listing.try_get("state").map_err(storage)?;
-    if listing_seller != seller.as_uuid() {
+    if listing_seller != Some(seller.as_uuid()) {
         tx.commit().await.map_err(storage)?;
         return Ok(None);
     }

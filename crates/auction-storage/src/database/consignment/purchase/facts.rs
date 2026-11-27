@@ -24,6 +24,7 @@ use crate::database::consignment::deposit::primitives::{
     service_control,
 };
 use crate::database::consignment::eligibility::accounts::lock_seller_eligibility;
+use crate::database::consignment::listings::projection::anonymous_seller_lock_key;
 use crate::database::consignment::refusal::buyer_sanction_pending;
 
 /// 锁内读出的挂单行。
@@ -65,8 +66,8 @@ pub(super) async fn lock_listing_row(
     listing_id: Uuid,
 ) -> Result<Option<ListingRow>, WriteError> {
     let Some(row) = sqlx::query(
-        "SELECT id, seller_user_id, world_id, mode, state, state_version, price, fee_bps,
-                pricing_version, service_epoch, blacklist_count_at_register
+        "SELECT id, seller_user_id, seller_game_name, world_id, mode, state, state_version,
+                price, fee_bps, pricing_version, service_epoch, blacklist_count_at_register
          FROM public.consignment_listings WHERE id = $1 FOR UPDATE",
     )
     .bind(listing_id)
@@ -74,6 +75,16 @@ pub(super) async fn lock_listing_row(
     .await?
     else {
         return Ok(None);
+    };
+    // 000138 匿名非寄售挂单没有账户卖家：改用与预读相同的派生锁键（见 `ListingLockIdentity::from_row`）
+    // 参与会话锁集合比较；这类挂单的 mode 不是 consigned，购买与改价随后仍按业务拒绝失败关闭。
+    let seller_user_id = match (
+        row.try_get::<Option<Uuid>, _>("seller_user_id")?,
+        row.try_get::<Option<String>, _>("seller_game_name")?,
+    ) {
+        (Some(seller_user_id), None) => seller_user_id,
+        (None, Some(name)) => anonymous_seller_lock_key(&name),
+        _ => return Err(WriteError::invariant("consignment_purchase_seller")),
     };
     let world: &str = row.try_get("world_id")?;
     let mode: &str = row.try_get("mode")?;
@@ -92,7 +103,7 @@ pub(super) async fn lock_listing_row(
                 .map_err(invalid_projection)?,
             pricing_version: u16::try_from(row.try_get::<i16, _>("pricing_version")?)?,
         },
-        seller_user_id: row.try_get("seller_user_id")?,
+        seller_user_id,
         service_epoch: row.try_get("service_epoch")?,
         blacklist_count_at_register: row.try_get("blacklist_count_at_register")?,
     }))
