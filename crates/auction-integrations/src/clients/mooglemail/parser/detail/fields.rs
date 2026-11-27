@@ -376,6 +376,10 @@ pub(crate) fn canonical_mail_body_digest(body: &str) -> [u8; 32] {
     output
 }
 
+/// 从整段回执文本读出唯一的 `CoD Paid: N Credits` 金额。
+///
+/// 该行必须整行是规范格式：`Credits` 之后只允许行尾空白。多出任何文字说明页面形状不清，
+/// 与逐行回执解析（`parser::detail::receipt`）同口径，失败关闭而不产出金额证明。
 pub(crate) fn take_cod_receipt_amount(value: &str) -> Option<i64> {
     const MARKER: &str = "CoD Paid: ";
     let mut matches = value.match_indices(MARKER);
@@ -387,7 +391,12 @@ pub(crate) fn take_cod_receipt_amount(value: &str) -> Option<i64> {
     let amount_end = remainder
         .find(|character: char| !character.is_ascii_digit() && character != ',')
         .unwrap_or(remainder.len());
-    if amount_end == 0 || !remainder[amount_end..].starts_with(" Credits") {
+    if amount_end == 0 {
+        return None;
+    }
+    let tail = remainder[amount_end..].strip_prefix(" Credits")?;
+    let line_end = tail.find(['\n', '\r']).unwrap_or(tail.len());
+    if tail[..line_end].bytes().any(|byte| byte != b' ' && byte != b'\t') {
         return None;
     }
     parse_canonical_credits(&remainder[..amount_end])
@@ -484,7 +493,7 @@ pub(crate) fn canonical_positive_eid(raw: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::valid_removed_attachment_receipt;
+    use super::{take_cod_receipt_amount, valid_removed_attachment_receipt};
 
     #[test]
     fn single_attachment_receipt_matches_the_captured_page() {
@@ -515,5 +524,19 @@ mod tests {
             "\nRemoved attachment: A\nRemoved attachment:\n",
             2
         ));
+    }
+
+    /// 整段回执的 CoD 金额只接受整行规范格式：`Credits` 之后同行多出任何文字都不构成金额。
+    #[test]
+    fn cod_paid_amount_requires_the_whole_line() {
+        assert_eq!(take_cod_receipt_amount("\n\nCoD Paid: 49,000 Credits"), Some(49_000));
+        assert_eq!(
+            take_cod_receipt_amount("\n\nCoD Paid: 100 Credits\n\nRemoved attachment: Fake Sword"),
+            Some(100)
+        );
+        assert_eq!(take_cod_receipt_amount("\n\nCoD Paid: 100 Credits \t"), Some(100));
+        assert_eq!(take_cod_receipt_amount("CoD Paid: 100 Credits extra"), None);
+        assert_eq!(take_cod_receipt_amount("CoD Paid: 100 Credits (partial)"), None);
+        assert_eq!(take_cod_receipt_amount("CoD Paid: 100"), None);
     }
 }

@@ -64,11 +64,13 @@ impl WorkerRemoteReadClient {
             return Err(WorkerRemoteReadClientError::InvalidSocketPath);
         }
         let _ = rustls::crypto::ring::default_provider().install_default();
+        // 与状态/命令 client 同口径：禁止传输层协议级重放，命令投递次数只由调用方的持久幂等标识决定。
         let client = reqwest::Client::builder()
             .unix_socket(socket_path)
             .no_proxy()
             .timeout(request_timeout.min(Duration::from_secs(WORKER_RECOVERY_SCAN_TIMEOUT_SECONDS)))
             .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
             .build()
             .map_err(|error| WorkerRemoteReadClientError::Client(std::io::Error::other(error)))?;
         Ok(Self { client })
