@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use auction_domain::{CommandId, valid_text};
+use auction_domain::{CommandId, MAX_BID_AMOUNT, valid_text};
 use auction_time::Timestamp;
 use serde::Serialize;
 use serde_json::Value;
@@ -45,7 +45,7 @@ pub(super) fn validate_command(command: &MailAuctionIntakeCommand) -> Result<(),
             || !item.attributes.is_object()
             || item.collected_at < command.received_at
             || item.collected_at > command.now
-            || item.start_price <= 0
+            || !(1..=MAX_BID_AMOUNT).contains(&item.start_price)
             || !equipment_ids.insert(item.external_equipment_id.as_str())
         {
             return Err(MailProcessingError::InvalidAuctionCommand.into());
