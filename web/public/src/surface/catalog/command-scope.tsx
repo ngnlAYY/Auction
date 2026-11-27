@@ -410,6 +410,8 @@ function CatalogCommandDialog(props: {
                       type="button"
                       aria-pressed={input().action === "bid" ? "true" : "false"}
                       disabled={busy() || activeProxy()}
+                      // 仅在已有生效代理时用悬停说明禁用原因；不渲染常驻提示。
+                      title={activeProxy() ? t("proxy-active-exists") : undefined}
                       onClick={() => {
                         if (!activeProxy()) {
                           switchTab("bid");
