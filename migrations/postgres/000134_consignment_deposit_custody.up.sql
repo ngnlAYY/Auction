@@ -2055,8 +2055,10 @@ ALTER TABLE public.deliveries
     );
 
 -- 季通知与换季提醒同归结算类节奏；判定顺序与 000098 完全一致，只把新来源并列到结算分支。
+-- 函数体只用内置类型与运算符；仍显式固定 search_path，会话搜索路径不能把同名运算符解析到别处
+-- （表达式索引 deliveries_admin_category_idx 依赖本函数，重建前必须保持同一解析结果）。
 CREATE OR REPLACE FUNCTION public.delivery_send_category(origin text, payload jsonb)
-RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE SET search_path = pg_catalog AS $$
     SELECT CASE
         WHEN payload ->> 'operation' IS DISTINCT FROM 'send' THEN NULL
         WHEN origin = 'lot_watch' THEN 'outbid'
