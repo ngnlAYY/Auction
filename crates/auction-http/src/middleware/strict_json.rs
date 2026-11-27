@@ -85,10 +85,6 @@ pub(crate) const fn patch(limit: usize) -> Policy {
     Policy::new(limit, PATCH)
 }
 
-pub(crate) const fn post_put(limit: usize) -> Policy {
-    Policy::new(limit, POST | PUT)
-}
-
 pub(crate) const fn post_patch(limit: usize) -> Policy {
     Policy::new(limit, POST | PATCH)
 }

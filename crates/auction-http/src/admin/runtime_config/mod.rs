@@ -17,7 +17,7 @@ use auction_contracts::{
 };
 use auction_domain::CommandId;
 use axum::{
-    body::Bytes,
+    body::Body,
     extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
@@ -27,6 +27,7 @@ use serde_json::Value;
 use crate::diagnostics;
 use crate::errors::{CAPABILITY_NOT_PROVIDED, api_error, feature_unavailable};
 use crate::middleware::boundary::request_id;
+use crate::middleware::strict_json;
 use crate::query::parse_query;
 use crate::session::{
     admin_session_guard, authenticated_admin_mutation, authenticated_admin_session, internal_error,
@@ -38,6 +39,9 @@ mod taxonomy;
 
 /// runtime 端口只在角色配置引用 `runtime_config_file` 时装配；提示指向缺少的文件配置。
 const RUNTIME_CONFIG_FILE_MISSING: &str = "未配置 runtime_config_file，runtime 配置不可用";
+
+/// runtime 配置请求体上限；只在鉴权后由解码头强制执行。
+const RUNTIME_CONFIG_BODY_LIMIT: usize = 4 << 20;
 
 /// 读取当前 runtime TOML 的安全文档和 fingerprint。
 pub(crate) async fn get(
@@ -94,7 +98,7 @@ pub(crate) async fn validate(
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     uri: Uri,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     if let Err(response) = authenticated_admin_mutation(&state, &headers, address).await {
         return *response;
@@ -103,13 +107,11 @@ pub(crate) async fn validate(
         Ok(value) => value,
         Err(response) => return *response,
     };
-    let input: AdminRuntimeConfigValidateRequest = match serde_json::from_slice(&body) {
-        Ok(input) => input,
-        Err(_) => {
-            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
-                .into_response();
-        }
-    };
+    let input: AdminRuntimeConfigValidateRequest =
+        match strict_json::decode_after_guard(&headers, body, RUNTIME_CONFIG_BODY_LIMIT).await {
+            Ok(input) => input,
+            Err(response) => return *response,
+        };
     let document = match parse_document(input.document) {
         Ok(document) => document,
         Err(response) => return *response,
@@ -139,7 +141,7 @@ pub(crate) async fn update(
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     uri: Uri,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     let (_, identity) = match authenticated_admin_mutation(&state, &headers, address).await {
         Ok(result) => result,
@@ -149,13 +151,11 @@ pub(crate) async fn update(
         Ok(value) => value,
         Err(response) => return *response,
     };
-    let input: AdminRuntimeConfigUpdateRequest = match serde_json::from_slice(&body) {
-        Ok(input) => input,
-        Err(_) => {
-            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
-                .into_response();
-        }
-    };
+    let input: AdminRuntimeConfigUpdateRequest =
+        match strict_json::decode_after_guard(&headers, body, RUNTIME_CONFIG_BODY_LIMIT).await {
+            Ok(input) => input,
+            Err(response) => return *response,
+        };
     if input.command_id.is_nil() {
         return api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
             .into_response();

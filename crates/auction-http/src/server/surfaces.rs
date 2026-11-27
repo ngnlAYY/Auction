@@ -377,16 +377,13 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                 ),
             ),
         )
+        // 规则与关于的 1 MiB 请求体上限由 handler 在鉴权后解码（先限流、Origin、CSRF 与会话，
+        // 再读正文），这里不再挂前置 DefaultBodyLimit/strict_json，避免未鉴权请求提前缓冲正文。
         .route(
             "/api/v1/admin/rules",
             axum::routing::get(admin_handlers::rules::get)
                 .post(admin_handlers::rules::validate)
                 .put(admin_handlers::rules::publish)
-                .layer(DefaultBodyLimit::max(1 << 20))
-                .layer(middleware::from_fn_with_state(
-                    strict_json::post_put(1 << 20),
-                    strict_json::enforce,
-                ))
                 .strict_methods("GET, POST, PUT"),
         )
         // “关于”与规则共用同一套文档发布机制，路径、请求体上限与方法闭集保持一致。
@@ -395,11 +392,6 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
             axum::routing::get(admin_handlers::rules::get_about)
                 .post(admin_handlers::rules::validate_about)
                 .put(admin_handlers::rules::publish_about)
-                .layer(DefaultBodyLimit::max(1 << 20))
-                .layer(middleware::from_fn_with_state(
-                    strict_json::post_put(1 << 20),
-                    strict_json::enforce,
-                ))
                 .strict_methods("GET, POST, PUT"),
         )
         .route(
@@ -429,26 +421,14 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                     strict_json::enforce,
                 )),
         )
+        // runtime 配置的 4 MiB 请求体上限同样由 handler 在鉴权后解码，未鉴权请求不会提前缓冲正文。
         .route(
             "/api/v1/admin/config",
             axum::routing::get(admin_handlers::runtime_config::get)
                 .put(admin_handlers::runtime_config::update)
-                .layer(DefaultBodyLimit::max(4 << 20))
-                .layer(middleware::from_fn_with_state(
-                    strict_json::put(4 << 20),
-                    strict_json::enforce,
-                ))
                 .strict_methods("GET, PUT"),
         )
-        .route(
-            "/api/v1/admin/config:validate",
-            post(admin_handlers::runtime_config::validate)
-                .layer(DefaultBodyLimit::max(4 << 20))
-                .layer(middleware::from_fn_with_state(
-                    strict_json::post(4 << 20),
-                    strict_json::enforce,
-                )),
-        )
+        .route("/api/v1/admin/config:validate", post(admin_handlers::runtime_config::validate))
         .route(
             "/api/v1/admin/users",
             axum::routing::get(admin_handlers::users::list)
