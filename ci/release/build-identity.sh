@@ -170,6 +170,31 @@ if web_stack_uses_solid; then
 	build_tool_providers[bun]='bun'
 fi
 
+# rust-toolchain.toml 的 channel：声明与实际编译器必须一致，发布入口据此失败关闭。
+rust_toolchain_channel() {
+	sed -n 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml | sed -n '1p'
+}
+
+# 实际编译器必须等于固定工具链：rust-toolchain.toml 只是声明，PATH 上的 rustc 也可能来自
+# RUSTUP_TOOLCHAIN、系统安装或旧的 shim；同一份源码与构建输入会因此产出不同字节的制品。
+assert_rust_toolchain() {
+	local channel actual
+	channel=$(rust_toolchain_channel) || return 1
+	if [[ -z "$channel" ]]; then
+		printf '无法读取 rust-toolchain.toml 的 channel\n' >&2
+		return 1
+	fi
+	if ! actual=$(rustc --version 2>/dev/null); then
+		printf '发布构建需要 rustc %s：请先运行 mise install\n' "$channel" >&2
+		return 1
+	fi
+	if [[ "$actual" != "rustc $channel "* && "$actual" != "rustc $channel" ]]; then
+		printf '发布构建必须使用 rust-toolchain.toml 固定的 Rust %s：当前 %s\n' \
+			"$channel" "$actual" >&2
+		return 1
+	fi
+}
+
 # 解析单个发布工具的绝对路径。mise 缺失、仓库配置未受信任或工具尚未安装时失败关闭。
 # `mise which` 在固定版本未安装时会回退到 Cargo 的 bin 目录等位置的同名程序，所以还要求
 # 结果位于该工具自己的安装目录之下，不接受别处的任意版本。
@@ -249,6 +274,8 @@ configure_build_tools() {
 		tools_path+="${path%/*}:"
 	done
 	export PATH="$tools_path$PATH" NO_DOWNLOADS=1
+	# 上面的 PATH 只固定 dx 等配套二进制；cargo/rustc 仍取自调用者的 PATH，这里核对实际编译器。
+	assert_rust_toolchain || return 1
 	# dx 会优先使用自己数据目录里缓存过的 wasm-opt 与 esbuild，也会读取那里的用户级设置；把数据目录
 	# 指到 target 下的专用目录，让它只能取上面的固定版本。仍有 Dioxus surface 时都要这样做。
 	if web_stack_uses_dioxus; then
@@ -1040,12 +1067,18 @@ cargo_config_fingerprint() {
 # 原生制品与 Web payload 共用构建环境指纹；profile、工具包装器及目标参数变化都必须失效缓存。
 # 名称和值用 NUL 分隔后只输出摘要，避免分隔符歧义，也不把环境原文写进制品元数据。
 build_env_fingerprint() {
-	local name tools_identity stack_marker='' env_names
+	local name tools_identity rustc_identity rustc_report stack_marker='' env_names
 	# 同版本工具重装后字节也会改变；工具字节身份参与输入身份，避免复用旧工具生成的制品。
 	tools_identity=$(build_tools_identity) || return 1
 	if web_stack_uses_solid; then
 		stack_marker=$(web_stack_marker) || return 1
 	fi
+	# 编译器版本是构建环境的一部分：声明文件一致但实际 rustc 不同，不能把旧制品当作同一次构建。
+	rustc_report=$(rustc --version --verbose 2>/dev/null) || {
+		printf '无法读取 rustc 版本；发布构建需要固定的 Rust 工具链\n' >&2
+		return 1
+	}
+	rustc_identity=$(printf '%s\n' "$rustc_report" | sha256_stdin 'Rust 编译器身份') || return 1
 	env_names=$(compgen -e | LC_ALL=C sort) || {
 		printf '无法枚举构建环境变量\n' >&2
 		return 1
@@ -1055,6 +1088,7 @@ build_env_fingerprint() {
 			printf 'auction-web-stacks/1\0%s\0' "$stack_marker"
 		fi
 		printf 'auction-build-tools\0%s\0' "$tools_identity"
+		printf 'auction-rustc/1\0%s\0' "$rustc_identity"
 		cargo_config_fingerprint || return 1
 		# Cargo 的配置环境别名同样能替换编译器/包装器或覆盖 profile 的增量策略。
 		while IFS= read -r name; do

@@ -6,7 +6,7 @@ systemd 资源上限与沙箱、SSH、防火墙、PostgreSQL 监听、无人值�
 
 ### systemd 资源上限与沙箱
 
-所有 `*.service.example` 都声明资源上限与 `LimitCORE=0`；三个角色、合并部署与四个 oneshot 另加沙箱选项。上限是失控保护，不是容量规划：模板按约 1.9 GB 内存的单机取值（部署前用 `free -m` 核实主机容量），正常占用远低于上限。
+所有 `*.service.example` 都声明资源上限与 `LimitCORE=0`；三个角色、合并部署与四个 oneshot 另加沙箱选项。上限是失控保护，不是容量规划：模板按约 1.9 GB 内存的单机取值（部署前用 `free -m` 核实主机容量），正常占用远低于上限。`ci/checks/check.sh systemd-templates` 强制资源上限与 `NoNewPrivileges=true`、`PrivateTmp=true`、`ProtectSystem=strict`、`ProtectHome=true`、`RestrictSUIDSGID=true`、`LockPersonality=true`、`SystemCallArchitectures=native` 及非空的 `RestrictAddressFamilies=`，复制模板时删掉任一项都会失败。
 
 | unit | MemoryMax | TasksMax | 沙箱 |
 | --- | ---: | ---: | --- |

@@ -638,7 +638,7 @@ first_version_line() {
 
 write_dependencies() {
 	local destination=$1 commit=$2 epoch=$3 state=$4 fingerprint=$5 version=$6
-	local public_web_sha admin_web_sha dependency_list bun_lock_sha bun_version
+	local public_web_sha admin_web_sha dependency_list bun_lock_sha bun_version cargo_lock_sha
 	public_web_sha=$(read_build_info "$embedded_artifact_root/WEB-PUBLIC-MANIFEST.v1" payload_sha256)
 	admin_web_sha=$(read_build_info "$embedded_artifact_root/WEB-ADMIN-MANIFEST.v1" payload_sha256)
 	if web_stack_uses_solid; then
@@ -650,6 +650,8 @@ write_dependencies() {
 			return 1
 		fi
 	fi
+	# 摘要失败不能变成空字段：printf 本身的成功会掩盖命令替换的失败。
+	cargo_lock_sha=$(sha256_file Cargo.lock) || return 1
 	dependency_list=$(mktemp)
 	cargo tree --locked --workspace --all-features --prefix none --format '{p}' |
 		sed "s# (${repository_root}[^)]*)# (workspace)#" |
@@ -666,7 +668,7 @@ write_dependencies() {
 		printf -- "- Source worktree：\`%s\`\n" "$state"
 		printf -- "- Source fingerprint：\`%s\`\n" "$fingerprint"
 		printf -- "- SOURCE_DATE_EPOCH：\`%s\`\n" "$epoch"
-		printf -- "- Cargo.lock SHA-256：\`%s\`\n" "$(sha256_file Cargo.lock)"
+		printf -- "- Cargo.lock SHA-256：\`%s\`\n" "$cargo_lock_sha"
 		if web_stack_uses_solid; then
 			printf -- "- web/bun.lock SHA-256：\`%s\`\n" "$bun_lock_sha"
 		fi
