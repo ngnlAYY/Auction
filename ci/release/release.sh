@@ -354,15 +354,8 @@ build_variant() (
 	# 原生程序与两个浏览器 payload 共享同一构建号；web-bundle 独立运行时也会重算同一份来源指纹。
 	AUCTION_BUILD_ID=$(web_build_identity) || return 1
 	export AUCTION_BUILD_ID
-	if [[ "$variant" == embedded ]]; then
-		bash ci/release/web-bundle.sh public
-		verify_build_info "$next" "$variant"
-		bash ci/release/web-bundle.sh admin
-		web_payload_sha public >/dev/null
-		web_payload_sha admin >/dev/null
-		verify_surface_size_budget public
-		verify_surface_size_budget admin
-	fi
+	# Web payload 与 surface 锁都在构建锁内处理：web-bundle 自己会取相同的 surface 锁，
+	# 不能在父进程持锁时调用，否则自锁。
 	verify_build_info "$next" "$variant"
 
 	# Cargo 与构建产物目录按 variant 共享；锁覆盖缓存清理、编译和制品复制。
@@ -374,6 +367,31 @@ build_variant() (
 	if artifacts_reusable "$variant" "$artifact_directory" "$features" "${selected_binaries[@]}"; then
 		printf '%s 构建输入未变，复用：%s\n' "$variant" "$artifact_directory"
 		return 0
+	fi
+	if [[ "$variant" == embedded ]]; then
+		bash ci/release/web-bundle.sh public
+		bash ci/release/web-bundle.sh admin
+	fi
+	# 构建锁只按 variant 互斥，不阻止并发的 web-bundle 换入稳定目录。嵌入与合并变体在编译期
+	# 从稳定目录读取资源，因此这里按 web-bundle.sh 的同一锁文件持有两面 surface 锁，再复核
+	# payload、复用与体积预算，直到编译和制品拷贝结束。此时子进程已退出，且先取构建锁再取
+	# surface 锁，不会自锁或形成等待环。
+	local public_surface_lock_fd admin_surface_lock_fd
+	if [[ "$variant" == embedded || "$variant" == single ]]; then
+		mkdir -p -- "$repository_root/target/web/.locks"
+		exec {public_surface_lock_fd}>"$repository_root/target/web/.locks/public.lock"
+		flock -x "$public_surface_lock_fd"
+		exec {admin_surface_lock_fd}>"$repository_root/target/web/.locks/admin.lock"
+		flock -x "$admin_surface_lock_fd"
+		# 重新生成相同 payload 时仍复用原生制品；payload 变化则继续编译。
+		if artifacts_reusable "$variant" "$artifact_directory" "$features" "${selected_binaries[@]}"; then
+			printf '%s 构建输入未变，复用：%s\n' "$variant" "$artifact_directory"
+			return 0
+		fi
+		web_payload_sha public >/dev/null
+		web_payload_sha admin >/dev/null
+		verify_surface_size_budget public
+		verify_surface_size_budget admin
 	fi
 	# 强制重新展开两个 RustEmbed 类型，避免 Cargo 复用前一份 Web payload 的过程宏结果。
 	if [[ -f "$build_root/CACHEDIR.TAG" ]]; then
@@ -979,11 +997,28 @@ package_release() (
 	local selected_root="$embedded_artifact_root" selected_binaries=("${binaries[@]}")
 	local package_output_root="$package_output_root" variant_suffix=
 	if [[ "$single_binary" == true ]]; then
-		verify_single_artifacts
 		selected_root="$single_artifact_root"
 		selected_binaries=(auction-server auction-cli)
 		package_output_root="$repository_root/target/dist/package-single"
 		variant_suffix=-single
+	fi
+	local package_lock_fd package_lock_name=release
+	if [[ "$single_binary" == true ]]; then package_lock_name=single; fi
+	mkdir -p "$repository_root/target/dist/.locks"
+	exec {package_lock_fd}>"$repository_root/target/dist/.locks/$package_lock_name.lock"
+	flock -x "$package_lock_fd"
+	# 制品目录由 build_variant 用各自的目录锁整体替换；装包全程持有同一组锁，
+	# 确保校验与复制看到的是同一代制品，而不是验证后又被换掉的另一代。
+	mkdir -p "$artifact_root/.locks"
+	local api_lock_fd embedded_lock_fd single_lock_fd
+	exec {api_lock_fd}>"$artifact_root/.locks/api.lock"
+	exec {embedded_lock_fd}>"$artifact_root/.locks/embedded.lock"
+	exec {single_lock_fd}>"$artifact_root/.locks/single.lock"
+	flock -x "$api_lock_fd"
+	flock -x "$embedded_lock_fd"
+	flock -x "$single_lock_fd"
+	if [[ "$single_binary" == true ]]; then
+		verify_single_artifacts
 	else
 		verify_artifacts
 	fi

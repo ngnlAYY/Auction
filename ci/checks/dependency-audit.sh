@@ -10,8 +10,15 @@ if (($# != 1)); then
 	exit 2
 fi
 
-lockfile=$1
-exceptions="$(dirname "$0")/dependency-audit.ignore"
+# 调用方可能从任意目录传入相对路径；先固定为绝对路径，再切到仓库根，锁文件和例外清单
+# 都不再依赖调用方的 cwd。
+lockfile=$(realpath -- "$1") || {
+	printf '无法解析 Cargo.lock 路径：%s\n' "$1" >&2
+	exit 2
+}
+script_directory=$(dirname -- "$(realpath -- "${BASH_SOURCE[0]}")")
+cd -- "$script_directory/../.." || exit 2
+exceptions="$script_directory/dependency-audit.ignore"
 
 arguments=(--file "$lockfile" --deny warnings)
 while IFS= read -r line || [[ -n "$line" ]]; do

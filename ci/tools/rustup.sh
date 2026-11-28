@@ -12,7 +12,8 @@ if [[ $(uname -s) != Linux || $(uname -m) != x86_64 ]]; then
 fi
 
 if command -v rustup >/dev/null 2>&1; then
-  installed_version=$(rustup --version 2>/dev/null | awk 'NR == 1 {print $2}')
+  # 已存在的 rustup 可能本身无法运行（损坏、动态链接失败）；此时按“需要自举”处理，不能直接退出。
+  installed_version=$(rustup --version 2>/dev/null | awk 'NR == 1 {print $2}') || installed_version=''
   if [[ $installed_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] &&
     [[ $(printf '%s\n' "$minimum_version" "$installed_version" | sort -V | head -n 1) == "$minimum_version" ]]; then
     printf 'rustup %s 已满足证书修复基线。\n' "$installed_version"
@@ -57,3 +58,18 @@ chmod 0755 "$bootstrap_dir/rustup-init"
 installed_rustup="${CARGO_HOME:-$HOME/.cargo}/bin/rustup"
 printf '%s  %s\n' "$archive_sha256" "$installed_rustup" | sha256sum --check --status
 "$installed_rustup" --version
+
+# 后续 mise/cargo 走 PATH 上的 rustup：若被更早的旧版本遮住，本次自举并没有生效。
+resolved_rustup=$(command -v rustup || true)
+if [[ -z $resolved_rustup ]]; then
+  printf '警告：PATH 上没有 rustup；把 %s 加入 PATH 后 mise 才会使用修复版本。\n' "$installed_rustup" >&2
+else
+  resolved_version=$("$resolved_rustup" --version 2>/dev/null | awk 'NR == 1 {print $2}') ||
+    resolved_version=''
+  if [[ ! $resolved_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+    [[ $(printf '%s\n' "$minimum_version" "$resolved_version" | sort -V | head -n 1) != "$minimum_version" ]]; then
+    printf 'PATH 上的 rustup（%s，版本 %s）不是修复版本；请把它指向 %s 或调整 PATH 顺序。\n' \
+      "$resolved_rustup" "${resolved_version:-未知}" "$installed_rustup" >&2
+    exit 1
+  fi
+fi

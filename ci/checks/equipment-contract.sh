@@ -79,14 +79,24 @@ my @reverse = $reverse =~ /Self::(\w+)/g;
 equal_set('原因枚举', \@variants, \@declared);
 equal_set('原因反向映射', \@variants, \@reverse);
 
-# 取最后一次追加的同名约束定义，防止只核对某份过时迁移。
-my ($constraint, $migration);
+# 按迁移文件名顺序跟踪同名约束的 ADD/DROP：最后一次操作必须是 ADD，否则闭集已不在库上生效。
+my ($constraint, $migration, $dropped_at);
 for my $path (sort glob 'migrations/postgres/*.up.sql') {
     my $source = read_source($path);
-    while ($source =~ /ADD\s+CONSTRAINT\s+inbound_mail_equipment_diagnostic_check\s+CHECK\s*\((.*?)\);/sg) {
-        ($constraint, $migration) = ($1, $path);
+    while ($source =~ /
+        ADD\s+CONSTRAINT\s+inbound_mail_equipment_diagnostic_check\s+CHECK\s*\((.*?)\);
+        | DROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?inbound_mail_equipment_diagnostic_check\b
+    /sgx) {
+        if (defined $1) {
+            ($constraint, $migration) = ($1, $path);
+            undef $dropped_at;
+        } else {
+            undef $constraint;
+            $dropped_at = $path;
+        }
     }
 }
+die "装备诊断数据库约束已由 $dropped_at 删除\n" if defined $dropped_at;
 die "未找到装备诊断数据库约束\n" unless defined $constraint;
 my ($sql_codes) = $constraint =~ /
     equipment_diagnostic\s*->>\s*'category'\s*=\s*'protocol_drift'\s*

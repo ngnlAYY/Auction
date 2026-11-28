@@ -58,18 +58,30 @@ fi
 umask 077
 runtime_parent="$repository_root/target/blaze"
 runtime_directory="$runtime_parent/runtime"
-for directory in "$repository_root/target" "$runtime_parent" "$runtime_directory"; do
+# 构建目录与缓存同样导出给 Blaze，必须是普通目录，不能是指向隔离树之外的符号链接。
+for directory in "$repository_root/target" "$runtime_parent" "$runtime_directory" \
+	"$runtime_parent/build" "$runtime_parent/cache"; do
 	if [[ -L "$directory" ]]; then
 		printf 'Blaze 运行目录路径不得是符号链接：%s\n' "$directory" >&2
 		exit 1
 	fi
 done
-mkdir -p -- "$runtime_directory"
-[[ -d "$runtime_directory" ]] || { printf 'Blaze 运行路径不是目录：%s\n' "$runtime_directory" >&2; exit 1; }
-runtime_owner=$(stat -c '%u' -- "$runtime_directory")
-[[ "$runtime_owner" == "$EUID" ]] || { printf 'Blaze 运行目录不属于当前用户：%s\n' "$runtime_directory" >&2; exit 1; }
-chmod 700 -- "$runtime_directory"
+mkdir -p -- "$runtime_directory" "$runtime_parent/build" "$runtime_parent/cache"
+for directory in "$runtime_directory" "$runtime_parent/build" "$runtime_parent/cache"; do
+	[[ -d "$directory" ]] || { printf 'Blaze 运行路径不是目录：%s\n' "$directory" >&2; exit 1; }
+	runtime_owner=$(stat -c '%u' -- "$directory")
+	[[ "$runtime_owner" == "$EUID" ]] ||
+		{ printf 'Blaze 运行目录不属于当前用户：%s\n' "$directory" >&2; exit 1; }
+	chmod 700 -- "$directory"
+done
 unset BLAZE_HOME RA_JIT_HOME BLAZE_REMOTE RA_JIT_REMOTE
+# 目标、档位与 flags 只由本入口决定；继承的同名环境变量会绕过上面的命令行拒绝。
+while IFS= read -r variable; do
+	case "$variable" in
+	CARGO_BUILD_TARGET* | CARGO_PROFILE_* | CARGO_ENCODED_RUSTFLAGS | CARGO_BUILD_RUSTFLAGS | \
+		CARGO_BUILD_RUSTDOCFLAGS | RUSTFLAGS | RUSTDOCFLAGS) unset "$variable" ;;
+	esac
+done < <(compgen -e)
 export XDG_RUNTIME_DIR="$runtime_directory"
 export CARGO_TARGET_DIR="$repository_root/target/blaze/build"
 export BLAZE_CACHE="$repository_root/target/blaze/cache"

@@ -19,6 +19,22 @@ fail() {
 	exit 1
 }
 
+# 命令替换失败会得到空串，直接写进 [[ ]] 会让断言在测量失败时也通过；先确认命令成功再比较。
+assert_output_same() {
+	local label=$1 expected=$2
+	shift 2
+	local actual
+	actual=$("$@") || fail "$label：测量命令失败"
+	[[ "$actual" == "$expected" ]] || fail "$label"
+}
+assert_output_differs() {
+	local label=$1 expected=$2
+	shift 2
+	local actual
+	actual=$("$@") || fail "$label：测量命令失败"
+	[[ "$actual" != "$expected" ]] || fail "$label"
+}
+
 fixture=$(mktemp -d)
 trap 'rm -rf -- "$fixture"' EXIT
 printf '[workspace]\nmembers = ["crates/*"]\nresolver = "3"\n' >"$fixture/Cargo.toml"
@@ -47,19 +63,20 @@ fi
 	"$diagnostic" == *'多出工作区依赖：crates/auction-jobs'* ]] || fail "$diagnostic"
 
 cd "$fixture"
+fixture_path_fingerprint() { (cd "$fixture" && path_fingerprint "$@"); }
 public_fingerprint=$(web_inputs_fingerprint public)
 admin_fingerprint=$(web_inputs_fingerprint admin)
 shared_build_id=$(web_build_identity)
 
 printf '// 后端源码变化\n' >>crates/auction-jobs/src/lib.rs
-[[ $(web_inputs_fingerprint public) == "$public_fingerprint" &&
-	$(web_inputs_fingerprint admin) == "$admin_fingerprint" &&
-	$(web_build_identity) == "$shared_build_id" ]] || fail '无关 crate 进入了 Web 输入'
+assert_output_same '无关 crate 进入了 Web 输入' "$public_fingerprint" web_inputs_fingerprint public
+assert_output_same '无关 crate 进入了 Web 输入' "$admin_fingerprint" web_inputs_fingerprint admin
+assert_output_same '无关 crate 进入了 Web 输入' "$shared_build_id" web_build_identity
 
 printf '// 时间库源码变化\n' >>crates/auction-time/src/lib.rs
-[[ $(web_inputs_fingerprint public) != "$public_fingerprint" &&
-	$(web_inputs_fingerprint admin) != "$admin_fingerprint" &&
-	$(web_build_identity) != "$shared_build_id" ]] || fail '时间库变化应使两端指纹和共享构建号失效'
+assert_output_differs '时间库变化应使两端指纹和共享构建号失效' "$public_fingerprint" web_inputs_fingerprint public
+assert_output_differs '时间库变化应使两端指纹和共享构建号失效' "$admin_fingerprint" web_inputs_fingerprint admin
+assert_output_differs '时间库变化应使两端指纹和共享构建号失效' "$shared_build_id" web_build_identity
 
 # 固定工具环境和 payload 完整性，让两种判定都以构建号和输入变化为准。
 verify_web_payload() { [[ $1 == "$surface" && $2 == "$stable_root" ]]; }
@@ -80,8 +97,10 @@ for surface in public admin; do
 	other=$(web_other_surface "$surface")
 	printf '// 对端源码变化\n' >>"crates/auction-web-$other/src/lib.rs"
 	current_build_id=$(web_build_identity)
-	[[ $(web_inputs_fingerprint "$surface") == "$source_identity" &&
-		"$current_build_id" != "$AUCTION_BUILD_ID" ]] || fail "$surface 单端指纹应保持原值，共享构建号应变化"
+	assert_output_same "$surface 单端指纹应保持原值，共享构建号应变化" \
+		"$source_identity" web_inputs_fingerprint "$surface"
+	[[ "$current_build_id" != "$AUCTION_BUILD_ID" ]] ||
+		fail "$surface 单端指纹应保持原值，共享构建号应变化"
 	if web_build_inputs_unchanged; then fail "$surface 构建号变化时复核应失败"; fi
 	AUCTION_BUILD_ID=$current_build_id
 	if web_payload_reusable; then fail "$surface 带旧构建号的回执应拒绝复用"; fi
@@ -120,42 +139,48 @@ printf 'identity\n' >"$fixture/ci/release/build-identity.sh"
 
 # path_fingerprint 的缺省口径不能变化；排除项必须同时从 scope 标记和目录遍历中消失。
 printf 'one\n' >>"$fixture/web/node_modules/pkg/index.js"
-default_node=$(cd "$fixture" && path_fingerprint web)
+default_node=$(fixture_path_fingerprint web)
 printf 'two\n' >>"$fixture/web/node_modules/pkg/index.js"
-[[ $(cd "$fixture" && path_fingerprint web) != "$default_node" ]] ||
-	fail '缺省 path_fingerprint 应包含 node_modules'
-excluded_node=$(cd "$fixture" && path_fingerprint --exclude web/node_modules web)
+assert_output_differs '缺省 path_fingerprint 应包含 node_modules' "$default_node" \
+	fixture_path_fingerprint web
+excluded_node=$(fixture_path_fingerprint --exclude web/node_modules web)
 printf 'three\n' >>"$fixture/web/node_modules/pkg/index.js"
-[[ $(cd "$fixture" && path_fingerprint --exclude web/node_modules web) == "$excluded_node" ]] ||
-	fail '--exclude 应跳过 node_modules 子树'
-default_tmp=$(cd "$fixture" && path_fingerprint --exclude web/node_modules web)
+assert_output_same '--exclude 应跳过 node_modules 子树' "$excluded_node" \
+	fixture_path_fingerprint --exclude web/node_modules web
+default_tmp=$(fixture_path_fingerprint --exclude web/node_modules web)
 printf 'scratch\n' >>"$fixture/web/.tmp/scratch.js"
-[[ $(cd "$fixture" && path_fingerprint --exclude web/node_modules web) != "$default_tmp" ]] ||
-	fail '缺省 path_fingerprint 应包含临时目录'
-excluded_tmp=$(cd "$fixture" && path_fingerprint --exclude web/node_modules --exclude web/.tmp web)
+assert_output_differs '缺省 path_fingerprint 应包含临时目录' "$default_tmp" \
+	fixture_path_fingerprint --exclude web/node_modules web
+excluded_tmp=$(fixture_path_fingerprint --exclude web/node_modules --exclude web/.tmp web)
 printf 'scratch again\n' >>"$fixture/web/.tmp/scratch.js"
-[[ $(cd "$fixture" && path_fingerprint --exclude web/node_modules --exclude web/.tmp web) == "$excluded_tmp" ]] ||
-	fail '--exclude 应跳过临时目录'
+assert_output_same '--exclude 应跳过临时目录' "$excluded_tmp" \
+	fixture_path_fingerprint --exclude web/node_modules --exclude web/.tmp web
 
 # 目录名级排除必须覆盖任意层级；默认调用仍要把这些文件算进去。
-default_nested=$(cd "$fixture" && path_fingerprint web)
+default_nested=$(fixture_path_fingerprint web)
 printf 'nested module changed\n' >>"$fixture/web/public/node_modules/.vite/cache/index.js"
-[[ $(cd "$fixture" && path_fingerprint web) != "$default_nested" ]] ||
-	fail '缺省 path_fingerprint 应包含嵌套 node_modules'
-excluded_nested=$(cd "$fixture" && path_fingerprint "${web_input_excludes[@]}" web)
+assert_output_differs '缺省 path_fingerprint 应包含嵌套 node_modules' "$default_nested" \
+	fixture_path_fingerprint web
+excluded_nested=$(fixture_path_fingerprint "${web_input_excludes[@]}" web)
 printf 'nested module changed again\n' >>"$fixture/web/public/node_modules/.vite/cache/index.js"
 printf 'nested scratch changed\n' >>"$fixture/web/tooling/.tmp/scratch.js"
 printf 'surface scratch changed\n' >>"$fixture/web/public/.tmp/scratch.js"
 printf 'deep nested module changed\n' >>"$fixture/web/public/deep/node_modules/pkg/index.js"
 printf 'deep nested scratch changed\n' >>"$fixture/web/public/deep/.tmp/scratch.js"
-[[ $(cd "$fixture" && path_fingerprint "${web_input_excludes[@]}" web) == "$excluded_nested" ]] ||
-	fail '--exclude-dir 应跳过任意层级的 node_modules 与 .tmp'
+assert_output_same '--exclude-dir 应跳过任意层级的 node_modules 与 .tmp' "$excluded_nested" \
+	fixture_path_fingerprint "${web_input_excludes[@]}" web
 
 solid_inputs_fingerprint() (
 	export AUCTION_WEB_STACK=solid
 	cd "$fixture"
 	source "$repository_root/ci/release/build-identity.sh"
 	web_inputs_fingerprint public
+)
+solid_admin_inputs_fingerprint() (
+	export AUCTION_WEB_STACK=solid
+	cd "$fixture"
+	source "$repository_root/ci/release/build-identity.sh"
+	web_inputs_fingerprint admin
 )
 solid_build_inputs_fingerprint() (
 	export AUCTION_WEB_STACK=solid
@@ -180,55 +205,74 @@ env_fingerprint_for_stack() (
 )
 
 solid_inputs=$(solid_inputs_fingerprint)
+solid_admin_inputs=$(solid_admin_inputs_fingerprint)
 solid_build_inputs=$(solid_build_inputs_fingerprint)
 solid_build_id_value=$(solid_build_id)
 
 printf 'web source\n' >>"$fixture/web/src/app.ts"
-[[ "$(solid_inputs_fingerprint)" != "$solid_inputs" &&
-	"$(solid_build_inputs_fingerprint)" != "$solid_build_inputs" &&
-	"$(solid_build_id)" != "$solid_build_id_value" ]] ||
-	fail 'web/** 变化应进入 Solid 指纹'
+assert_output_differs 'web/** 变化应进入 Solid 指纹' "$solid_inputs" solid_inputs_fingerprint
+assert_output_differs 'web/** 变化应进入 Solid 指纹' "$solid_build_inputs" solid_build_inputs_fingerprint
+assert_output_differs 'web/** 变化应进入 Solid 指纹' "$solid_build_id_value" solid_build_id
 solid_inputs=$(solid_inputs_fingerprint)
 solid_build_inputs=$(solid_build_inputs_fingerprint)
 solid_build_id_value=$(solid_build_id)
 
 printf 'shared style\n' >>"$fixture/crates/auction-web-shared/style/base.css"
-[[ "$(solid_inputs_fingerprint)" != "$solid_inputs" &&
-	"$(solid_build_inputs_fingerprint)" != "$solid_build_inputs" &&
-	"$(solid_build_id)" != "$solid_build_id_value" ]] || fail '共享样式变化应进入 Solid 指纹'
+assert_output_differs '共享样式变化应进入 Solid 指纹' "$solid_inputs" solid_inputs_fingerprint
+assert_output_differs '共享样式变化应进入 Solid 指纹' "$solid_build_inputs" solid_build_inputs_fingerprint
+assert_output_differs '共享样式变化应进入 Solid 指纹' "$solid_build_id_value" solid_build_id
 solid_inputs=$(solid_inputs_fingerprint)
 solid_build_inputs=$(solid_build_inputs_fingerprint)
 solid_build_id_value=$(solid_build_id)
 
 printf 'shared asset\n' >>"$fixture/crates/auction-web-shared/assets/shared.txt"
-[[ "$(solid_inputs_fingerprint)" != "$solid_inputs" &&
-	"$(solid_build_inputs_fingerprint)" != "$solid_build_inputs" &&
-	"$(solid_build_id)" != "$solid_build_id_value" ]] || fail '共享资源变化应进入 Solid 指纹'
+assert_output_differs '共享资源变化应进入 Solid 指纹' "$solid_inputs" solid_inputs_fingerprint
+assert_output_differs '共享资源变化应进入 Solid 指纹' "$solid_build_inputs" solid_build_inputs_fingerprint
+assert_output_differs '共享资源变化应进入 Solid 指纹' "$solid_build_id_value" solid_build_id
 solid_inputs=$(solid_inputs_fingerprint)
 solid_build_inputs=$(solid_build_inputs_fingerprint)
 solid_build_id_value=$(solid_build_id)
 
 printf 'public asset\n' >>"$fixture/crates/auction-web-public/assets/asset.txt"
-[[ "$(solid_inputs_fingerprint)" != "$solid_inputs" &&
-	"$(solid_build_inputs_fingerprint)" != "$solid_build_inputs" &&
-	"$(solid_build_id)" != "$solid_build_id_value" ]] || fail 'public 资源变化应进入 Solid 指纹'
+assert_output_differs 'public 资源变化应进入 Solid 指纹' "$solid_inputs" solid_inputs_fingerprint
+assert_output_differs 'public 资源变化应进入 Solid 指纹' "$solid_build_inputs" solid_build_inputs_fingerprint
+assert_output_differs 'public 资源变化应进入 Solid 指纹' "$solid_build_id_value" solid_build_id
 solid_inputs=$(solid_inputs_fingerprint)
 solid_build_inputs=$(solid_build_inputs_fingerprint)
 solid_build_id_value=$(solid_build_id)
 
 printf 'public i18n\n' >>"$fixture/crates/auction-web-public/i18n/en.ftl"
-[[ "$(solid_inputs_fingerprint)" != "$solid_inputs" &&
-	"$(solid_build_inputs_fingerprint)" != "$solid_build_inputs" &&
-	"$(solid_build_id)" != "$solid_build_id_value" ]] || fail 'public 译文变化应进入 Solid 指纹'
+assert_output_differs 'public 译文变化应进入 Solid 指纹' "$solid_inputs" solid_inputs_fingerprint
+assert_output_differs 'public 译文变化应进入 Solid 指纹' "$solid_build_inputs" solid_build_inputs_fingerprint
+assert_output_differs 'public 译文变化应进入 Solid 指纹' "$solid_build_id_value" solid_build_id
 solid_inputs=$(solid_inputs_fingerprint)
 solid_build_inputs=$(solid_build_inputs_fingerprint)
 solid_build_id_value=$(solid_build_id)
 
+# Admin 的 assets/i18n 只进入 admin 指纹；public 指纹不得被带偏。
+solid_admin_inputs=$(solid_admin_inputs_fingerprint)
+printf 'admin asset\n' >>"$fixture/crates/auction-web-admin/assets/asset.txt"
+assert_output_differs 'admin 资源变化应进入 Solid admin 指纹' \
+	"$solid_admin_inputs" solid_admin_inputs_fingerprint
+assert_output_same 'admin 资源变化不应进入 Solid public 指纹' "$solid_inputs" solid_inputs_fingerprint
+assert_output_differs 'admin 资源变化应改变共享构建号' "$solid_build_id_value" solid_build_id
+solid_inputs=$(solid_inputs_fingerprint)
+solid_admin_inputs=$(solid_admin_inputs_fingerprint)
+solid_build_id_value=$(solid_build_id)
+
+printf 'admin i18n\n' >>"$fixture/crates/auction-web-admin/i18n/en.ftl"
+assert_output_differs 'admin 译文变化应进入 Solid admin 指纹' \
+	"$solid_admin_inputs" solid_admin_inputs_fingerprint
+assert_output_same 'admin 译文变化不应进入 Solid public 指纹' "$solid_inputs" solid_inputs_fingerprint
+assert_output_differs 'admin 译文变化应改变共享构建号' "$solid_build_id_value" solid_build_id
+solid_inputs=$(solid_inputs_fingerprint)
+solid_admin_inputs=$(solid_admin_inputs_fingerprint)
+solid_build_id_value=$(solid_build_id)
+
 printf 'unrelated\n' >>"$fixture/crates/auction-jobs/src/lib.rs"
-[[ "$(solid_inputs_fingerprint)" == "$solid_inputs" ]] || fail '无关 crate 不应进入 Solid public 指纹'
-[[ "$(solid_build_id)" == "$solid_build_id_value" ]] || fail '无关 crate 不应改变 Solid 构建号'
-[[ "$(solid_build_inputs_fingerprint)" != "$solid_build_inputs" ]] ||
-	fail '无关 crate 仍应进入原生构建输入'
+assert_output_same '无关 crate 不应进入 Solid public 指纹' "$solid_inputs" solid_inputs_fingerprint
+assert_output_same '无关 crate 不应改变 Solid 构建号' "$solid_build_id_value" solid_build_id
+assert_output_differs '无关 crate 仍应进入原生构建输入' "$solid_build_inputs" solid_build_inputs_fingerprint
 solid_inputs=$(solid_inputs_fingerprint)
 solid_build_inputs=$(solid_build_inputs_fingerprint)
 solid_build_id_value=$(solid_build_id)
@@ -240,39 +284,39 @@ printf 'nested temp\n' >>"$fixture/web/tooling/.tmp/scratch.js"
 printf 'nested surface temp\n' >>"$fixture/web/public/.tmp/scratch.js"
 printf 'deep nested module\n' >>"$fixture/web/public/deep/node_modules/pkg/index.js"
 printf 'deep nested temp\n' >>"$fixture/web/public/deep/.tmp/scratch.js"
-[[ "$(solid_inputs_fingerprint)" == "$solid_inputs" ]] || fail 'Solid 指纹应排除 node_modules 与临时目录'
-[[ "$(solid_build_inputs_fingerprint)" == "$solid_build_inputs" ]] ||
-	fail 'Solid 原生输入指纹应排除 node_modules 与临时目录'
-[[ "$(solid_build_id)" == "$solid_build_id_value" ]] || fail 'Solid 构建号应排除 node_modules 与临时目录'
+assert_output_same 'Solid 指纹应排除 node_modules 与临时目录' "$solid_inputs" solid_inputs_fingerprint
+assert_output_same 'Solid 原生输入指纹应排除 node_modules 与临时目录' \
+	"$solid_build_inputs" solid_build_inputs_fingerprint
+assert_output_same 'Solid 构建号应排除 node_modules 与临时目录' "$solid_build_id_value" solid_build_id
 
 printf 'lock\n' >>"$fixture/mise.lock"
-[[ "$(solid_inputs_fingerprint)" != "$solid_inputs" &&
-	"$(solid_build_inputs_fingerprint)" != "$solid_build_inputs" &&
-	"$(solid_build_id)" != "$solid_build_id_value" ]] || fail 'mise.lock 变化应进入 Solid 指纹'
+assert_output_differs 'mise.lock 变化应进入 Solid 指纹' "$solid_inputs" solid_inputs_fingerprint
+assert_output_differs 'mise.lock 变化应进入 Solid 指纹' "$solid_build_inputs" solid_build_inputs_fingerprint
+assert_output_differs 'mise.lock 变化应进入 Solid 指纹' "$solid_build_id_value" solid_build_id
 solid_inputs=$(solid_inputs_fingerprint)
 solid_build_inputs=$(solid_build_inputs_fingerprint)
 solid_build_id_value=$(solid_build_id)
 
 printf 'cargo\n' >>"$fixture/Cargo.toml"
-[[ "$(solid_inputs_fingerprint)" != "$solid_inputs" &&
-	"$(solid_build_inputs_fingerprint)" != "$solid_build_inputs" &&
-	"$(solid_build_id)" != "$solid_build_id_value" ]] || fail 'Cargo.toml 变化应进入 Solid 指纹'
+assert_output_differs 'Cargo.toml 变化应进入 Solid 指纹' "$solid_inputs" solid_inputs_fingerprint
+assert_output_differs 'Cargo.toml 变化应进入 Solid 指纹' "$solid_build_inputs" solid_build_inputs_fingerprint
+assert_output_differs 'Cargo.toml 变化应进入 Solid 指纹' "$solid_build_id_value" solid_build_id
 solid_inputs=$(solid_inputs_fingerprint)
 solid_build_inputs=$(solid_build_inputs_fingerprint)
 solid_build_id_value=$(solid_build_id)
 
 printf 'bundle\n' >>"$fixture/ci/release/web-bundle.sh"
-[[ "$(solid_inputs_fingerprint)" != "$solid_inputs" &&
-	"$(solid_build_inputs_fingerprint)" != "$solid_build_inputs" &&
-	"$(solid_build_id)" != "$solid_build_id_value" ]] || fail '发布脚本变化应进入 Solid 指纹'
+assert_output_differs '发布脚本变化应进入 Solid 指纹' "$solid_inputs" solid_inputs_fingerprint
+assert_output_differs '发布脚本变化应进入 Solid 指纹' "$solid_build_inputs" solid_build_inputs_fingerprint
+assert_output_differs '发布脚本变化应进入 Solid 指纹' "$solid_build_id_value" solid_build_id
 solid_inputs=$(solid_inputs_fingerprint)
 solid_build_inputs=$(solid_build_inputs_fingerprint)
 solid_build_id_value=$(solid_build_id)
 
 printf 'identity\n' >>"$fixture/ci/release/build-identity.sh"
-[[ "$(solid_inputs_fingerprint)" != "$solid_inputs" &&
-	"$(solid_build_inputs_fingerprint)" != "$solid_build_inputs" &&
-	"$(solid_build_id)" != "$solid_build_id_value" ]] || fail '身份脚本变化应进入 Solid 指纹'
+assert_output_differs '身份脚本变化应进入 Solid 指纹' "$solid_inputs" solid_inputs_fingerprint
+assert_output_differs '身份脚本变化应进入 Solid 指纹' "$solid_build_inputs" solid_build_inputs_fingerprint
+assert_output_differs '身份脚本变化应进入 Solid 指纹' "$solid_build_id_value" solid_build_id
 
 default_env=$(build_env_fingerprint)
 explicit_dioxus_env=$(env_fingerprint_for_stack dioxus)

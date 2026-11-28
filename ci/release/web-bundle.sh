@@ -2,12 +2,38 @@
 # 构建单个 Web surface 的固定 payload。复用时核对输入、共享构建号与产物完整性。
 # 用法：ci/release/web-bundle.sh public|admin
 
+# 读取准备凭据的 lock/bun/安装树三行；文件缺失、字段多余或格式无效时失败关闭。
+solid_prepared_fields() {
+	local prepared="$repository_root/web/node_modules/.auction-prepared"
+	[[ -f "$prepared" && ! -L "$prepared" ]] || return 1
+	awk -F= '
+		NF != 2 || ($1 != "lock_sha256" && $1 != "bun_version" && $1 != "tree_sha256") || seen[$1]++ { exit 1 }
+		{ value[$1] = $2 }
+		END {
+			if (NR != 3 || !seen["lock_sha256"] || !seen["bun_version"] || !seen["tree_sha256"]) exit 1
+			print value["lock_sha256"]
+			print value["bun_version"]
+			print value["tree_sha256"]
+		}' "$prepared"
+}
+
+# Solid 复用回执绑定准备凭据里的安装树摘要：只比较 lock 与 bun 版本时，重新准备出不同依赖树
+# 仍会复用旧 payload。凭据缺失或摘要无效时返回失败，由调用方给出可行动诊断。
+solid_prepared_tree_sha256() {
+	local fields tree
+	fields=$(solid_prepared_fields) || return 1
+	tree=${fields##*$'\n'}
+	[[ "$tree" =~ ^[0-9a-f]{64}$ ]] || return 1
+	printf '%s\n' "$tree"
+}
+
 # 写入与复用比较共用字段清单。回执须绑定实际编译进 payload 的构建号。
 web_build_fields() {
 	local stack_value=${stack:-dioxus}
 	printf '%s\n' 'schema=auction-web-build/1' "surface=$surface"
 	if [[ "$stack_value" == solid ]]; then
-		printf '%s\n' 'profile=solid-release' 'stack=solid' "bun_version=$bun_version"
+		printf '%s\n' 'profile=solid-release' 'stack=solid' "bun_version=$bun_version" \
+			"dependencies_tree_sha256=$solid_dependencies_tree"
 	else
 		printf '%s\n' 'profile=wasm-release' "dx_version=$dx_version" "rustc_version=$rustc_version"
 	fi
@@ -26,13 +52,17 @@ web_payload_reusable() {
 }
 
 web_build_inputs_unchanged() {
-	local current_source_identity current_build_environment current_build_id
+	local current_source_identity current_build_environment current_build_id current_dependencies_tree=''
 	current_source_identity=$(web_inputs_fingerprint "$surface") || return 1
 	current_build_environment=$(build_env_fingerprint) || return 1
 	current_build_id=$(web_build_identity) || return 1
+	if [[ "${stack:-dioxus}" == solid ]]; then
+		current_dependencies_tree=$(solid_prepared_tree_sha256) || return 1
+	fi
 	[[ "$current_source_identity" == "$source_identity" &&
 		"$current_build_environment" == "$build_environment" &&
-		"$current_build_id" == "$AUCTION_BUILD_ID" ]]
+		"$current_build_id" == "$AUCTION_BUILD_ID" &&
+		"$current_dependencies_tree" == "${solid_dependencies_tree:-}" ]]
 }
 
 # 两端都支持 Dioxus 与 Solid；未知 surface 或技术栈必须在任何清理或构建之前失败。
@@ -73,15 +103,7 @@ solid_web_dependencies_ready() {
 		printf 'web/ 依赖缺少准备凭据：先运行 mise run web-prepare\n' >&2
 		return 1
 	fi
-	if ! prepared_values=$(awk -F= '
-		NF != 2 || ($1 != "lock_sha256" && $1 != "bun_version" && $1 != "tree_sha256") || seen[$1]++ { exit 1 }
-		{ value[$1] = $2 }
-		END {
-			if (NR != 3 || !seen["lock_sha256"] || !seen["bun_version"] || !seen["tree_sha256"]) exit 1
-			print value["lock_sha256"]
-			print value["bun_version"]
-			print value["tree_sha256"]
-		}' "$prepared"); then
+	if ! prepared_values=$(solid_prepared_fields); then
 		printf 'web/ 依赖准备凭据格式无效：先运行 mise run web-prepare\n' >&2
 		return 1
 	fi
@@ -103,10 +125,6 @@ solid_web_dependencies_ready() {
 	fi
 	if [[ "$lock_sha256" != "$prepared_lock" ]]; then
 		printf 'web/ 依赖准备凭据与 web/bun.lock 不一致：先运行 mise run web-prepare\n' >&2
-		return 1
-	fi
-	if ! prepared_tree=$(awk -F= '$1 == "tree_sha256" { print $2; count++ } END { if (count != 1) exit 1 }' "$prepared"); then
-		printf 'web/ 依赖准备凭据缺少安装树摘要：先运行 mise run web-prepare\n' >&2
 		return 1
 	fi
 	if [[ ! "$prepared_tree" =~ ^[0-9a-f]{64}$ ]]; then
@@ -263,10 +281,6 @@ stack=$(web_surface_stack "$surface") || exit 2
 
 configure_build_tools
 
-# 浏览器与原生程序使用同一构建号，即使单端输入未变，复用也必须维持这一不变量。
-AUCTION_BUILD_ID=$(web_build_identity) || exit 1
-export AUCTION_BUILD_ID
-
 stable_root=$(web_surface_root "$surface" "$repository_root") || exit 2
 payload_root="$stable_root/public"
 payload_manifest="$stable_root/PAYLOAD-SHA256"
@@ -274,6 +288,17 @@ marker="$payload_root/auction-web-manifest.v1"
 # 复用标记放在 payload 之外：它不属于内嵌资源，也不计入 payload 哈希。
 web_build_info="$stable_root/WEB-BUILD-INFO"
 
+lock_directory="$repository_root/target/web/.locks"
+mkdir -p -- "$lock_directory"
+exec {surface_lock_fd}>"$lock_directory/$surface.lock"
+flock -x "$surface_lock_fd"
+
+recover_generated_directory "$stable_root"
+
+# 复用判定必须基于锁内重新读取的输入：等锁期间源码或工具变化时，不能拿锁前快照复用旧 payload。
+# 浏览器与原生程序使用同一构建号，即使单端输入未变，复用也必须维持这一不变量。
+AUCTION_BUILD_ID=$(web_build_identity) || exit 1
+export AUCTION_BUILD_ID
 source_epoch=$(git show -s --format=%ct HEAD)
 if [[ ! "$source_epoch" =~ ^[1-9][0-9]*$ ]]; then
 	printf '无法取得有效的 SOURCE_DATE_EPOCH：%s\n' "$source_epoch" >&2
@@ -306,12 +331,13 @@ source_identity=$(web_inputs_fingerprint "$surface")
 # WASM 自定义 profile 与 rustflags 同样影响页面产物，不能只使外层原生二进制缓存失效。
 build_environment=$(build_env_fingerprint)
 
-lock_directory="$repository_root/target/web/.locks"
-mkdir -p -- "$lock_directory"
-exec {surface_lock_fd}>"$lock_directory/$surface.lock"
-flock -x "$surface_lock_fd"
-
-recover_generated_directory "$stable_root"
+# Solid 的 Lock 与 bun 版本可能不变而依赖树重新准备；复用前先取准备凭据里的树摘要。
+if [[ "$stack" == solid ]]; then
+	solid_dependencies_tree=$(solid_prepared_tree_sha256) || {
+		printf 'web/ 依赖准备凭据缺少安装树摘要：先运行 mise run web-prepare\n' >&2
+		exit 1
+	}
+fi
 
 if web_payload_reusable; then
 	printf '%s Web payload 输入未变，复用：sha256=%s files=%s\n' \

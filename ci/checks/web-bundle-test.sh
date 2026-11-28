@@ -127,10 +127,32 @@ explicit_fields=$(web_build_fields)
 	fail 'Dioxus 回执应保持原字段'
 stack=solid
 bun_version='bun fixture'
+solid_dependencies_tree=$(printf '%064d' 2)
 solid_fields=$(web_build_fields)
 [[ "$solid_fields" == *$'profile=solid-release'* && "$solid_fields" == *$'stack=solid'* &&
-	"$solid_fields" == *'bun_version=bun fixture'* && "$solid_fields" != *'dx_version='* ]] ||
-	fail 'Solid 回执应记录实际技术栈与 bun 版本'
+	"$solid_fields" == *'bun_version=bun fixture'* &&
+	"$solid_fields" == *"dependencies_tree_sha256=$solid_dependencies_tree"* &&
+	"$solid_fields" != *'dx_version='* ]] ||
+	fail 'Solid 回执应记录实际技术栈、bun 版本与安装树摘要'
+unset solid_dependencies_tree
+
+# 准备凭据里的安装树摘要必须被读取；缺失或非法时失败关闭，避免回执记为无约束。
+prepared_receipt_root=$fixture/prepared-receipt
+mkdir -p "$prepared_receipt_root/web/node_modules"
+printf 'lock_sha256=%064d\nbun_version=bun fixture\ntree_sha256=%064d\n' 1 3 \
+	>"$prepared_receipt_root/web/node_modules/.auction-prepared"
+[[ $(repository_root=$prepared_receipt_root solid_prepared_tree_sha256) == "$(printf '%064d' 3)" ]] ||
+	fail '准备凭据的安装树摘要未被读取'
+printf 'lock_sha256=%064d\ntree_sha256=%064d\n' 1 3 \
+	>"$prepared_receipt_root/web/node_modules/.auction-prepared"
+if (repository_root=$prepared_receipt_root solid_prepared_tree_sha256) >/dev/null; then
+	fail '缺少 bun_version 的准备凭据不应给出安装树摘要'
+fi
+printf 'lock_sha256=%064d\nbun_version=bun fixture\ntree_sha256=%s\n' 1 short \
+	>"$prepared_receipt_root/web/node_modules/.auction-prepared"
+if (repository_root=$prepared_receipt_root solid_prepared_tree_sha256) >/dev/null; then
+	fail '非法安装树摘要不应被接受'
+fi
 
 # 构建阶段要求锁文件、bun 版本与已安装依赖树均与准备凭据一致。
 make_prepared_web() {

@@ -29,10 +29,12 @@ my $non_code = qr{
 # 紧跟内联 `mod 名 {`）。
 my @service_apps = qw(server worker admin-api public-api);
 my $service_app = qr{^apps/auction-(server|worker|admin-api|public-api)/src/};
+# 截止位置在掩码文本上匹配：注释或字面量里的同形文本已换成空白，不会提前截止；cfg 与 mod
+# 之间可隔属性、注释行或空行。
 my $inline_test = qr{
     ^\#\[cfg\(test\)\][ \t]*\n
-    (?:[ \t]*(?:\#\[[^\n]*\]|//[^\n]*)[ \t]*\n)*
-    [ \t]*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{
+    (?:[ \t]*\n|[ \t]*\#[^\n]*\][ \t]*\n)*
+    [ \t]*(?:pub(?:\([^)]*\))?\s+)?mod\s+(?:r\#)?\w+\s*\{
 }xm;
 # 注释与字符字面量换成空白；字符串换成带序号的占位符，正文另存，只在消息位置取出判定。
 my $comment_or_literal = qr{
@@ -97,7 +99,13 @@ sub is_english {
 
 sub english_messages {
     my ($code) = @_;
-    $code = substr($code, 0, $-[0]) if $code =~ $inline_test;
+    if ($code =~ /^\#\[cfg\(test\)\]/m) {
+        (my $masked = $code) =~ s{$non_code}{ (my $blank = $&) =~ tr/\n/ /c; $blank }ge;
+        if ($masked =~ $inline_test) {
+            my $cut = $-[0];
+            $code = substr($code, 0, $cut);
+        }
+    }
     my @literals;
     $code =~ s{$comment_or_literal}{
         defined $+{skip} ? ' '

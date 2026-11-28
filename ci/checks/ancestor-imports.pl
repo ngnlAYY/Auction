@@ -48,7 +48,7 @@ sub line_of {
 
 sub is_test_file {
     my ($file) = @_;
-    return $file =~ m{(?:^|/)tests/} || $file =~ /tests\.rs$/;
+    return $file =~ m{(?:^|/)tests/} || $file =~ m{(?:^|/)tests\.rs$|_tests\.rs$};
 }
 
 sub new_module {
@@ -168,7 +168,10 @@ sub parse_body {
             }
             return undef if $depth > 0;
             my $attribute = substr($$text, $offset, pos($$text) - $offset);
-            $module->{pending_test} = 1 if $attribute =~ /^\#\[\s*cfg\s*\(\s*test\s*\)\s*\]$/;
+            # 只把 `cfg(test)` 与 `cfg(all(test, …))` 视为仅测试构型；`cfg(any(test, …))`
+            # 还覆盖非测试构型，`cfg(not(test))` 是生产构型，二者都按生产代码检查。
+            $module->{pending_test} = 1
+                if $attribute =~ /^\#\[\s*cfg\s*\(\s*(?:test\s*\)|all\s*\(\s*test\s*[,)])/;
             $offset = pos($$text);
             next;
         }

@@ -455,7 +455,7 @@ for my $sample (
 ) {
     my ($name, $body) = @$sample;
     my $module = "#[cfg(test)]\nmod tests {\n    fn fixture() { $body }\n}\n";
-    my $masked = $module =~ s/[^\n]/ /gr;
+    my $masked = $module =~ s/[^\r\n\x{2028}\x{2029}]/ /gr;
     is(strip_rust_inline_tests($before . $module . $after), $before . $masked . $after, $name);
 }
 
@@ -466,12 +466,12 @@ for my $sample (
     ['原始标识符模块名', "#[cfg(test)]\nmod r#mod {}\n"],
 ) {
     my ($name, $module) = @$sample;
-    my $masked = $module =~ s/[^\n]/ /gr;
+    my $masked = $module =~ s/[^\r\n\x{2028}\x{2029}]/ /gr;
     is(strip_rust_inline_tests($before . $module . $after), $before . $masked . $after, $name);
 }
 
 my $complete = "#[cfg(test)]\nmod complete {}\n";
-my $masked = $complete =~ s/[^\n]/ /gr;
+my $masked = $complete =~ s/[^\r\n\x{2028}\x{2029}]/ /gr;
 my $module_start = "#[cfg(test)]\nmod broken { ";
 for my $sample (
     ['未闭合的原始字符串', $module_start . 'r#" }'],
@@ -516,6 +516,19 @@ while IFS=$'\t' read -r sample valid line; do
 		fi
 	fi
 done <"$sample_dir/index"
+
+# 清单被截断或某行写坏时会少跑用例；执行条数必须与 JSON 清单一致才算通过。
+expected_samples=$(perl -MJSON::PP -e '
+	use strict;
+	use warnings;
+	local $/;
+	my $samples = decode_json(<STDIN>);
+	print scalar @$samples;
+' <"$samples")
+[[ $expected_samples =~ ^[1-9][0-9]*$ ]] || fail '平铺边界样本清单为空或无法读取'
+consumed_samples=$(wc -l <"$sample_dir/index")
+[[ $consumed_samples -eq $expected_samples ]] ||
+	fail "平铺边界样本执行 $consumed_samples 条，清单有 $expected_samples 条"
 
 ((test_failed == 0)) || exit 1
 printf '%s\n' 'i18n 门禁回归通过'

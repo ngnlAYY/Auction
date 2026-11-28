@@ -140,11 +140,13 @@ sub validate {
     my ($doc) = @_;
 
     my $version = $doc->{version};
-    add_error('version 必须为整数 1') unless defined $version && $version =~ /\A1\z/;
+    add_error('version 必须为整数 1')
+        unless defined $version && !ref $version && $version =~ /\A1\z/;
 
     my $lead = $doc->{lead_days};
+    # JSON 布尔值会字符串化为 1/0，必须按标量类型排除。
     add_error('lead_days 必须是 1–90 的整数')
-        unless defined $lead && $lead =~ /\A\d+\z/ && $lead >= 1 && $lead <= 90;
+        unless defined $lead && !ref $lead && $lead =~ /\A\d+\z/ && $lead >= 1 && $lead <= 90;
 
     my %blocks;
     my $ranges = $doc->{blocked_ranges};
@@ -159,7 +161,7 @@ sub validate {
             }
             my $name = $range->{name};
             add_error("blocked_ranges[$index].name 必须是非空字符串")
-                unless defined $name && $name =~ /\S/;
+                unless defined $name && !ref $name && $name =~ /\S/;
             my $start = parse_iso($range->{starts_on});
             my $end = parse_iso($range->{ends_on});
             if (!defined $start || !defined $end) {
@@ -263,9 +265,9 @@ sub validate {
                 next;
             }
             add_error("deferred[$index].item 必须是非空字符串")
-                unless defined $entry->{item} && $entry->{item} =~ /\S/;
+                unless defined $entry->{item} && !ref $entry->{item} && $entry->{item} =~ /\S/;
             add_error("deferred[$index].reason 必须是非空字符串")
-                unless defined $entry->{reason} && $entry->{reason} =~ /\S/;
+                unless defined $entry->{reason} && !ref $entry->{reason} && $entry->{reason} =~ /\S/;
         }
     } elsif (defined $doc->{deferred}) {
         add_error('deferred 必须是数组');

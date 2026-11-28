@@ -22,8 +22,8 @@ use open qw(:std :encoding(UTF-8));
 
 my %std = map { $_ => 1 } qw(std core alloc);
 my %local_root = map { $_ => 1 } qw(crate super self);
-my $use_start = qr/^(\s*)use\s+(?:::)?([A-Za-z_][A-Za-z0-9_]*)/;
-my $mod_decl = qr/^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([a-z_][a-z0-9_]*)\s*;/;
+my $use_start = qr/^(\s*)use\s+(?:::)?((?:r\#)?[A-Za-z_][A-Za-z0-9_]*)/;
+my $mod_decl = qr/^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+((?:r\#)?[a-z_][a-z0-9_]*)\s*;/;
 # 注释、字符串与字符字面量换成等长空白（保留换行），导入区只按代码结构切分条目。
 # 前置的首字符断言只是加速：每种非代码片段都以这些字符开头。
 my $non_code = qr{
@@ -53,9 +53,11 @@ sub group_of {
 sub check_block {
     my ($lines, $masked_lines, $comment_lines, $start, $local) = @_;
     my ($i, $indent, @groups, @gaps) = ($start);
-    my ($pending_attrs, $blank_before) = (0, 0);
+    my ($pending_attrs, $blank_before, $commented) = (0, 0, 0);
     while ($i < @$lines) {
         my $line = $masked_lines->[$i];
+        # 注释行在掩码文本里是空白；README 口径是含注释的块不检查，从原文掩码里找回注释。
+        $commented ||= $comment_lines->[$i] =~ m{//|/\*};
         if ($line =~ /^\s*$/) {
             return ($i, undef) if $pending_attrs;
             $blank_before++;
@@ -73,7 +75,7 @@ sub check_block {
         my ($end, $depth, $comment) = ($i, 0, 0);
         while ($end < @$lines) {
             my $text = $masked_lines->[$end];
-            $comment ||= $comment_lines->[$end] =~ m{//};
+            $comment ||= $comment_lines->[$end] =~ m{//|/\*};
             $depth += () = $text =~ /\{/g;
             $depth -= () = $text =~ /\}/g;
             last if $depth <= 0 && $text =~ /;\s*$/;
@@ -87,6 +89,7 @@ sub check_block {
         $i = $end + 1;
     }
     $i -= $pending_attrs;
+    return ($i, undef) if $commented;
     for my $k (1 .. $#groups) {
         my ($previous, $current, $gap) = ($groups[$k - 1], $groups[$k], $gaps[$k]);
         return ($i, '分组顺序应为 std → 外部 crate → 本 crate') if $current < $previous;
@@ -153,7 +156,7 @@ sub check_region {
         $masked =~ /\Gpub\s*\([^()]*\)\s+/gc unless $public;
         if ($masked =~ /\Guse\s+([^;]*);/gc) {
             my ($tree, $end) = ($1, pos($masked));
-            while ($tree =~ /\bas\s+([A-Za-z_][A-Za-z0-9_]*)/g) {
+            while ($tree =~ /\bas\s+((?:r\#)?[A-Za-z_][A-Za-z0-9_]*)/g) {
                 $region_local->{$1} = 1;
             }
             if (!$public) {
@@ -175,12 +178,12 @@ sub check_region {
             $offset = $end;
             next;
         }
-        if ($masked =~ /\Gmod\s+(\w+)\s*;/gc) {
+        if ($masked =~ /\Gmod\s+((?:r\#)?\w+)\s*;/gc) {
             $region_local->{$1} = 1;
             $offset = pos($masked);
             next;
         }
-        if ($masked =~ /\G(?:pub(?:\([^()]*\))?\s+)?mod\s+(\w+)\s*\{/gc) {
+        if ($masked =~ /\G(?:pub(?:\([^()]*\))?\s+)?mod\s+((?:r\#)?\w+)\s*\{/gc) {
             $region_local->{$1} = 1;
             $offset = check_region(pos($masked), 1);
             return undef unless defined $offset;

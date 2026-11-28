@@ -118,17 +118,24 @@ fi
 ) || fail '外层 SHA256SUMS 校验失败'
 
 temporary_root=$(mktemp -d)
-trap 'rm -rf -- "$temporary_root"' EXIT
+receipt_tmp=''
+cleanup_temporary() {
+	[[ -z $receipt_tmp ]] || rm -f -- "$receipt_tmp"
+	rm -rf -- "$temporary_root"
+}
+trap cleanup_temporary EXIT
 
 # 先核对归档成员，避免解包路径穿越、符号链接、特殊文件、重复路径和文件/目录冲突。
+# 非终端输出时 GNU tar 默认用 `escape` 引用，成员名里的换行/制表/回车显示为反斜杠转义，
+# 下面按行读取并用反斜杠检查失败关闭；`--null` 只影响 `-T` 输入，不会让 `--list` 输出 NUL。
 member_list="$temporary_root/members.tsv"
-tar --list --gzip --null --file "$archive" >"$member_list" || fail '无法读取归档成员'
+tar --list --gzip --file "$archive" >"$member_list" || fail '无法读取归档成员'
 [[ -s $member_list ]] || fail '归档为空'
 verbose_list="$temporary_root/members.verbose"
-tar --list --verbose --null --gzip --file "$archive" >"$verbose_list" ||
+tar --list --verbose --gzip --file "$archive" >"$verbose_list" ||
 	fail '无法读取归档成员类型'
-mapfile -d '' -t member_lines <"$member_list"
-mapfile -d '' -t verbose_lines <"$verbose_list"
+mapfile -t member_lines <"$member_list"
+mapfile -t verbose_lines <"$verbose_list"
 [[ ${#member_lines[@]} -eq ${#verbose_lines[@]} ]] ||
 	fail '归档成员路径与类型清单不一致'
 sorted_member_list="$temporary_root/members.sorted.tsv"
@@ -138,6 +145,9 @@ for index in "${!member_lines[@]}"; do
 	member_type=${verbose_lines[$index]:0:1}
 	[[ $member_type == '-' || $member_type == 'd' ]] ||
 		fail '归档包含符号链接或其他特殊文件'
+	case $member in
+	*$'\n'* | *$'\r'* | *$'\t'*) fail '归档成员名含换行、回车或制表符' ;;
+	esac
 	member_path=${member%/}
 	[[ $member_path == "$base" || $member_path == "$base"/* ]] ||
 		fail "归档成员不在 $base/ 下：$member"
@@ -193,6 +203,47 @@ manifest="$package_root/RELEASE-MANIFEST.v1"
 			seen["source_commit"] != 1 || seen["source_fingerprint"] != 1) bad = 1
 		exit bad
 	}' "$manifest" || fail 'RELEASE-MANIFEST.v1 含重复、未知或缺失的头部字段'
+
+# sha256sum --check 只核验被列出的行；files= 白名单必须与包内普通文件完全一致，
+# 且 SHA256SUMS 必须精确覆盖除清单与摘要自身外的全部文件。
+manifest_files="$temporary_root/manifest.files"
+awk '
+{
+	if ($0 == "files=") { in_files = 1; next }
+	if (!in_files) next
+	if (NF != 2 || $1 !~ /^[0-7]{3,4}$/ || $2 ~ /^\// || $2 ~ /\\/ ||
+		$2 ~ /(^|\/)\.\.?($|\/)/) { bad = 1; next }
+	print $2
+}
+END { if (!in_files || bad) exit 1 }
+' "$manifest" >"$manifest_files" || fail 'RELEASE-MANIFEST.v1 的 files= 行格式无效'
+[[ -s $manifest_files ]] || fail 'RELEASE-MANIFEST.v1 的文件白名单为空'
+duplicates=$(LC_ALL=C sort "$manifest_files" | uniq -d) ||
+	fail '无法检查 RELEASE-MANIFEST.v1 的文件白名单'
+[[ -z $duplicates ]] || fail 'RELEASE-MANIFEST.v1 的文件白名单含重复路径'
+LC_ALL=C sort "$manifest_files" >"$temporary_root/manifest.sorted"
+actual_files="$temporary_root/package.files"
+(
+	cd "$package_root"
+	find . -type f -printf '%P\n'
+) | LC_ALL=C sort >"$actual_files" || fail '无法列出包内普通文件'
+cmp -s "$temporary_root/manifest.sorted" "$actual_files" ||
+	fail 'RELEASE-MANIFEST.v1 的文件白名单与包内文件不一致'
+checksum_files="$temporary_root/checksums.files"
+awk '
+{
+	path = substr($0, 67)
+	if (length($0) < 67 || substr($0, 65, 2) != "  " || path == "" ||
+		substr($0, 1, 64) ~ /[^0-9a-f]/) { bad = 1; next }
+	print path
+}
+END { exit bad }
+' "$package_root/SHA256SUMS" >"$checksum_files" || fail '包内 SHA256SUMS 行格式无效'
+LC_ALL=C sort "$checksum_files" >"$temporary_root/checksums.sorted"
+awk '$0 != "RELEASE-MANIFEST.v1" && $0 != "SHA256SUMS"' \
+	"$temporary_root/manifest.sorted" >"$temporary_root/checksums.expected"
+cmp -s "$temporary_root/checksums.expected" "$temporary_root/checksums.sorted" ||
+	fail '包内 SHA256SUMS 未精确覆盖清单中除清单与摘要外的全部文件'
 read_build_info() {
 	awk -F= -v wanted="$1" '$1 == wanted { print substr($0, length($1) + 2); exit }' "$2"
 }
@@ -271,6 +322,10 @@ else
 	[[ -n $tag ]] || fail "构建提交 $commit 不能从任何发布 tag 到达"
 fi
 
+# 发布 tag 与归档版本由发布工作流绑定；不一致时页面技术栈阈值与回执来源会指向错误的发行。
+[[ $tag == "v$package_version" ]] ||
+	fail "发布 tag $tag 与归档版本 $package_version 不一致"
+
 # 来源证明：绑定发布仓库、发布工作流、tag 与构建提交。默认失败关闭，--offline 才跳过。
 provenance=skipped
 if [[ $offline != true ]]; then
@@ -309,20 +364,27 @@ fi
 
 archive_sha256=$(sha256sum "$archive" | awk '{print $1}')
 if [[ -n $receipt ]]; then
-	# 回执只在全部核对通过后写出；noclobber 让并发创建同一路径的一方失败。
-	(
-		set -o noclobber
-		umask 077
-		printf '%s\n' \
-			'schema=auction-package-verification/1' \
-			"archive_sha256=$archive_sha256" \
-			"package=$base" \
-			"source_commit=$commit" \
-			"tag=$tag" \
-			"provenance=$provenance" \
-			"web_stack_id=$web_stack_id" \
-			"verified_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >"$receipt"
-	) || fail "无法写出验证回执：$receipt"
+	# 回执只在全部核对通过后写出：先写同目录临时文件（0600），再用硬链接原子发布；
+	# 目标已存在时拒绝覆盖，进程中断只会留下临时文件而不会留下看似成功的半截回执。
+	receipt_tmp=$(mktemp -- "$(dirname "$receipt")/.receipt.XXXXXX") ||
+		fail "无法创建验证回执临时文件：$receipt"
+	chmod 0600 -- "$receipt_tmp" || fail "无法设置验证回执权限：$receipt"
+	printf '%s\n' \
+		'schema=auction-package-verification/1' \
+		"archive_sha256=$archive_sha256" \
+		"package=$base" \
+		"source_commit=$commit" \
+		"tag=$tag" \
+		"provenance=$provenance" \
+		"web_stack_id=$web_stack_id" \
+		"verified_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >"$receipt_tmp" ||
+		fail "无法写出验证回执：$receipt"
+	if ! ln -- "$receipt_tmp" "$receipt" 2>/dev/null; then
+		[[ -e $receipt || -L $receipt ]] && fail "验证回执已存在，拒绝覆盖：$receipt"
+		fail "无法写出验证回执：$receipt"
+	fi
+	rm -f -- "$receipt_tmp"
+	receipt_tmp=''
 fi
 
 printf '部署制品校验通过\n'

@@ -131,7 +131,8 @@ sub document {
     # 代码示例中的 HTML id 不能成为真实锚点。
     $text =~ s/(?<!`)(`+)(?!`)(.*?)\1(?!`)/blank($&)/gse;
     $text =~ s{<code\b[^>]*>.*?</code>}{blank($&)}gise;
-    while ($text =~ /<(?:a|h[1-6])\b[^>]*\b(?:id|name)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))[^>]*>/gis) {
+    # 属性名必须以空白开头：`data-id`、`?id=` 这类值不是锚点。
+    while ($text =~ /<(?:a|h[1-6])\b[^>]*\s(?:id|name)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))[^>]*>/gis) {
         my $anchor = defined $1 ? $1 : defined $2 ? $2 : $3;
         $anchors{entities($anchor)} = 1;
     }
@@ -212,7 +213,7 @@ sub check_table_continuation {
         for (my $row = $index; $row < @lines; $row++) {
             my $line = $lines[$row];
             last if $line !~ /\S/;
-            last if $line =~ /^ {0,3}(?:>|<|\#{1,6}(?:[ \t]|$)|[-+*][ \t]|[0-9]{1,9}[.)][ \t])/;
+            last if $line =~ /^ {0,3}(?:>|<|\#{1,6}(?:[ \t]|$)|[-+*][ \t]|[0-9]{1,9}[.)][ \t]|(?:[-*_][ \t]*){3,}\r?$)/;
             next if $is_table_row->($line);
             printf STDERR "%s:%d: 表格行之后紧跟非表格文本，会被渲染进表格；表格后须空一行\n",
                 $file, $row + 1;
