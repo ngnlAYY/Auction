@@ -102,7 +102,7 @@ pub(super) async fn quarantine_one(
              (scan_id, delivery_id, fencing_version, world_id, external_mail_id, sent_at,
               recipient, subject, collected, observed_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         ON CONFLICT (delivery_id, fencing_version) DO NOTHING
+         ON CONFLICT DO NOTHING
          RETURNING id",
     )
     .bind(scan_id)

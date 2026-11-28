@@ -16,7 +16,7 @@ use auction_time::Timestamp;
 use uuid::Uuid;
 
 use super::commands::{
-    AcquireReceipt, AcquireReturn, ConsumeReceipt, ConsumeReturn, StartReturnTake,
+    AcquireReceipt, AcquireReturn, ConsumeReceipt, ConsumeReturn, ReturnOperation, StartReturnTake,
 };
 use super::store::ReturnIntakeStore;
 use crate::ports::consignment::deposit::{StartReceipt, WriteStartOutcome};
@@ -49,9 +49,16 @@ pub(super) struct Counters {
     pub cash_returns: usize,
 }
 
+/// 一条账本行：命令身份（操作码与摘要）与回执同一条记录，与生产 `consignment_commands` 同形。
+struct LedgerRow {
+    operation: ReturnOperation,
+    hash: RequestHash,
+    reply: Reply,
+}
+
 #[derive(Default)]
 struct State {
-    ledger: HashMap<CommandId, (RequestHash, Reply)>,
+    ledger: HashMap<CommandId, LedgerRow>,
     intakes: HashMap<Uuid, IntakeRow>,
     by_leg: HashMap<(Uuid, Uuid, u32, &'static str), OriginalMailKey>,
     k_final: HashMap<OriginalMailKey, KFinalDisposition>,
@@ -121,14 +128,16 @@ fn leg_key(facts: &ReturnIntakeFacts) -> (Uuid, Uuid, u32, &'static str) {
     (facts.contract_id, facts.obligation_id, facts.original_round, facts.leg.as_str())
 }
 
+/// 同命令 ID 同操作同摘要返回原回执；换操作或换摘要都是身份冲突，不能当作缓存缺失继续执行。
 fn replay(
     state: &State,
+    operation: ReturnOperation,
     command_id: CommandId,
     hash: RequestHash,
 ) -> Result<Option<Reply>, ConsignmentError> {
     match state.ledger.get(&command_id) {
         None => Ok(None),
-        Some((stored, reply)) if *stored == hash => Ok(Some(reply.clone())),
+        Some(row) if row.operation == operation && row.hash == hash => Ok(Some(row.reply.clone())),
         Some(_) => Err(ConsignmentError::CommandIdConflict),
     }
 }
@@ -137,11 +146,18 @@ impl ReturnIntakeStore for FakeReturns {
     fn acquire_return(&self, command: AcquireReturn) -> ConsignmentFuture<'_, AcquireReceipt> {
         Box::pin(async move {
             let mut state = self.lock()?;
-            if let Some(Reply::Acquire(mut receipt)) =
-                replay(&state, command.command_id, command.request_hash)?
-            {
-                receipt.replayed = true;
-                return Ok(receipt);
+            match replay(
+                &state,
+                ReturnOperation::AcquireReturn,
+                command.command_id,
+                command.request_hash,
+            )? {
+                Some(Reply::Acquire(mut receipt)) => {
+                    receipt.replayed = true;
+                    return Ok(receipt);
+                }
+                Some(_) => return Err(ConsignmentError::CommandIdConflict),
+                None => {}
             }
             let facts = command.facts;
             let intake_id = return_intake_id(&facts.k);
@@ -217,9 +233,14 @@ impl ReturnIntakeStore for FakeReturns {
                     return Err(DepositBusinessRejection::DispositionConflict.into());
                 }
             };
-            state
-                .ledger
-                .insert(command.command_id, (command.request_hash, Reply::Acquire(receipt)));
+            state.ledger.insert(
+                command.command_id,
+                LedgerRow {
+                    operation: ReturnOperation::AcquireReturn,
+                    hash: command.request_hash,
+                    reply: Reply::Acquire(receipt),
+                },
+            );
             Ok(receipt)
         })
     }
@@ -230,12 +251,18 @@ impl ReturnIntakeStore for FakeReturns {
     ) -> ConsignmentFuture<'_, WriteStartOutcome> {
         Box::pin(async move {
             let mut state = self.lock()?;
-            match replay(&state, command.command_id, command.request_hash)? {
+            match replay(
+                &state,
+                ReturnOperation::StartReturnTake,
+                command.command_id,
+                command.request_hash,
+            )? {
                 Some(Reply::Started(receipt)) => {
                     return Ok(WriteStartOutcome::AlreadyCommitted(receipt));
                 }
                 Some(Reply::Rejected(error)) => return Err(error),
-                _ => {}
+                Some(_) => return Err(ConsignmentError::CommandIdConflict),
+                None => {}
             }
             let row = state.intakes.get(&command.intake_id).ok_or(ConsignmentError::Unavailable)?;
             if row.work_id != command.work_id {
@@ -283,7 +310,11 @@ impl ReturnIntakeStore for FakeReturns {
                     );
                     state.ledger.insert(
                         command.command_id,
-                        (command.request_hash, Reply::Started(receipt.clone())),
+                        LedgerRow {
+                            operation: ReturnOperation::StartReturnTake,
+                            hash: command.request_hash,
+                            reply: Reply::Started(receipt.clone()),
+                        },
                     );
                     return Ok(WriteStartOutcome::FirstCommitted(receipt));
                 }
@@ -297,7 +328,11 @@ impl ReturnIntakeStore for FakeReturns {
                     );
                     state.ledger.insert(
                         command.command_id,
-                        (command.request_hash, Reply::Started(receipt.clone())),
+                        LedgerRow {
+                            operation: ReturnOperation::StartReturnTake,
+                            hash: command.request_hash,
+                            reply: Reply::Started(receipt.clone()),
+                        },
                     );
                     return Ok(WriteStartOutcome::AlreadyCommitted(receipt));
                 }
@@ -316,7 +351,14 @@ impl ReturnIntakeStore for FakeReturns {
                 }
             };
             // 确定拒绝只占该次尝试的命令 ID。
-            state.ledger.insert(command.command_id, (command.request_hash, Reply::Rejected(error)));
+            state.ledger.insert(
+                command.command_id,
+                LedgerRow {
+                    operation: ReturnOperation::StartReturnTake,
+                    hash: command.request_hash,
+                    reply: Reply::Rejected(error),
+                },
+            );
             Err(error)
         })
     }
@@ -324,13 +366,19 @@ impl ReturnIntakeStore for FakeReturns {
     fn consume_return(&self, command: ConsumeReturn) -> ConsignmentFuture<'_, ConsumeReceipt> {
         Box::pin(async move {
             let mut state = self.lock()?;
-            match replay(&state, command.command_id, command.request_hash)? {
+            match replay(
+                &state,
+                ReturnOperation::ConsumeReturn,
+                command.command_id,
+                command.request_hash,
+            )? {
                 Some(Reply::Consumed(mut receipt)) => {
                     receipt.replayed = true;
                     return Ok(receipt);
                 }
                 Some(Reply::Rejected(error)) => return Err(error),
-                _ => {}
+                Some(_) => return Err(ConsignmentError::CommandIdConflict),
+                None => {}
             }
             let row = state.intakes.get(&command.intake_id).ok_or(ConsignmentError::Unavailable)?;
             let intake = row.facts.clone();
@@ -387,7 +435,11 @@ impl ReturnIntakeStore for FakeReturns {
                     }
                     state.ledger.insert(
                         command.command_id,
-                        (command.request_hash, Reply::Consumed(receipt)),
+                        LedgerRow {
+                            operation: ReturnOperation::ConsumeReturn,
+                            hash: command.request_hash,
+                            reply: Reply::Consumed(receipt),
+                        },
                     );
                     return Ok(receipt);
                 }
@@ -397,10 +449,19 @@ impl ReturnIntakeStore for FakeReturns {
                         .get(&command.intake_id)
                         .map(|(_, original)| *original)
                         .ok_or(ConsignmentError::Unavailable)?;
-                    let receipt = ConsumeReceipt { replayed: true, ..original };
+                    // 账本按本次命令 ID 记录重放；回执的命令 ID 必须是调用方提交的那个（与生产一致）。
+                    let receipt = ConsumeReceipt {
+                        command_id: command.command_id,
+                        replayed: true,
+                        ..original
+                    };
                     state.ledger.insert(
                         command.command_id,
-                        (command.request_hash, Reply::Consumed(receipt)),
+                        LedgerRow {
+                            operation: ReturnOperation::ConsumeReturn,
+                            hash: command.request_hash,
+                            reply: Reply::Consumed(receipt),
+                        },
                     );
                     return Ok(receipt);
                 }

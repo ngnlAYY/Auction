@@ -90,12 +90,11 @@ pub enum SettlementTransactionError {
 }
 
 /// 结算 runner 使用的失败类型边界，与竞价 runner 的错误集合保持分离。
+/// 序列化冲突分类必须由实现显式给出；默认“非冲突”会把可重试的 40001 静默变成永久失败。
 pub trait SettlementTransactionFailure:
     From<SettlementTransactionError> + From<TransactionPolicyError> + Send
 {
-    fn is_serialization_conflict(&self) -> bool {
-        false
-    }
+    fn is_serialization_conflict(&self) -> bool;
 }
 
 /// 结算事务对象。实现必须锁定拍卖、lot 和结算池，并在同一事务写入所有结算事实。

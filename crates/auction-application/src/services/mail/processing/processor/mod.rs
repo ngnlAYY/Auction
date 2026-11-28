@@ -73,6 +73,9 @@ where
             // 默认起拍价必须落在合法出价区间；超出上限会在录入后形成无法被任何出价命中的拍品。
             || !(1..=auction_domain::MAX_BID_AMOUNT).contains(&config.start_price)
             || config.equipment_filter.validate().is_err()
+            // 回信预算与启动配置、runtime 校验同一区间；来源实现必须返回完整快照，
+            // 这里在装配时拒绝越界初值，避免零窗口或超上限的说明信预算进入处理循环。
+            || !config.reply_policy.current().is_valid()
         {
             return Err(MailProcessingError::InvalidConfiguration);
         }

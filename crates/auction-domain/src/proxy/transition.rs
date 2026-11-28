@@ -9,8 +9,9 @@ impl ProxyTransition {
         if self.authorization_id.is_nil() || self.command_id.is_nil() || self.state_version == 0 {
             return Err(DomainError::InvalidBidState("代理转换缺少有效身份或版本"));
         }
-        if !self.new_maximum.is_credit_grid_aligned()
-            || self.old_maximum.is_some_and(|amount| !amount.is_credit_grid_aligned())
+        // 新追加事实的代理上限受竞价上限约束；只校验网格会放过规划器不可能产生的越界金额。
+        if !self.new_maximum.is_valid_bid_input()
+            || self.old_maximum.is_some_and(|amount| !amount.is_valid_bid_input())
         {
             return Err(DomainError::InvalidProxyMaximum);
         }

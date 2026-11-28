@@ -39,6 +39,9 @@ fn subject_projection_accepts_truncation_only() {
     assert!(subject_is_list_projection(&expected, &expected));
     assert!(subject_is_list_projection("[Auction] settlement pay", &expected));
     assert!(subject_is_list_projection("[Auction] settlement pay\u{2026}", &expected));
+    // 截断同时留下替换符与省略号时仍可证明前缀；不可证明的尾串必须拒绝。
+    assert!(subject_is_list_projection("[Auction] settlement pay\u{FFFD}\u{2026}", &expected));
+    assert!(!subject_is_list_projection("\u{2026}", &expected));
     assert!(!subject_is_list_projection("[Auction] other", &expected));
     assert!(!subject_is_list_projection("", &expected));
 }

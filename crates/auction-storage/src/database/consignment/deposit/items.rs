@@ -57,7 +57,9 @@ pub(crate) async fn accept_items_in_tx(
     let mut listing_ids = BTreeSet::new();
     let mut reservation_ids = BTreeSet::new();
     for item in items {
+        // 与 `c4_item_ordinal_ck` 同一上界：超界必须先按证据不足拒绝，不能落库时才报约束错误。
         if item.ordinal == 0
+            || item.ordinal > 20
             || !ordinals.insert(item.ordinal)
             || !eids.insert(item.equipment.external_equipment_id().to_owned())
             || !listing_ids.insert(item.listing_id)

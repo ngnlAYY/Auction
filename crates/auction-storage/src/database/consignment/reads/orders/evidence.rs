@@ -124,8 +124,12 @@ async fn return_takes(
 ) -> Result<Vec<(Timestamp, OrderEvidence)>, sqlx::Error> {
     let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT i.id AS intake_id, i.take_work_id, i.created_at, r.round_id, start.fence AS start_fence,
-                EXISTS (SELECT 1 FROM public.mail_disposition_proofs p
-                        WHERE p.work_id = i.take_work_id AND p.kind = 'exact_take') AS taken,
+               EXISTS (SELECT 1 FROM public.mail_disposition_proofs p
+                       WHERE p.work_id = i.take_work_id AND p.kind = 'exact_take'
+                         AND p.conclusion = 'take_proven') AS taken,
+               EXISTS (SELECT 1 FROM public.mail_disposition_proofs p
+                       WHERE p.work_id = i.take_work_id AND p.kind = 'exact_take'
+                         AND p.conclusion = 'evidence_quarantined') AS quarantined,
                 EXISTS (SELECT 1 FROM public.consignment_return_consumptions c
                         WHERE c.intake_id = i.id) AS consumed
          FROM public.consignment_return_intakes i
@@ -146,12 +150,15 @@ fn return_take(row: &PgRow) -> Result<(Timestamp, OrderEvidence), sqlx::Error> {
     let state = match (
         row.try_get::<bool, _>("consumed")?,
         row.try_get::<bool, _>("taken")?,
+        row.try_get::<bool, _>("quarantined")?,
         fence.is_some(),
     ) {
-        (true, _, _) => "consumed",
-        (false, true, _) => "taken",
-        (false, false, true) => "write_started",
-        (false, false, false) => "pending",
+        (true, _, _, _) => "consumed",
+        (false, true, _, _) => "taken",
+        // 只有 quarantine 证据时是“证据不足，持续核对”，不能报成已证 Take。
+        (false, false, true, _) => "reconcile",
+        (false, false, false, true) => "write_started",
+        (false, false, false, false) => "pending",
     };
     Ok((
         row.try_get("created_at")?,

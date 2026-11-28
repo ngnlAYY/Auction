@@ -13,7 +13,7 @@ use crate::ports::admin::{
 use crate::ports::auction::{WorldReader, WorldSnapshot};
 use crate::ports::core::ApplicationFuture;
 use crate::ports::core::{
-    CompetitionTransaction, StoredCommand, TransactionPolicy, TransactionRunner,
+    CommandInsert, CompetitionTransaction, StoredCommand, TransactionPolicy, TransactionRunner,
 };
 
 /// 将业务世界状态、幂等账本和追加式审计收口到同一事务的应用服务。
@@ -99,7 +99,7 @@ where
                         return Err(AdminWorldError::StoredResultCorrupt.into());
                     }
 
-                    transaction
+                    let inserted = transaction
                         .insert_command(StoredCommand {
                             command_id: command.command_id,
                             command_kind: ADMIN_WORLD_SET_ENABLED_COMMAND_KIND.to_owned(),
@@ -109,6 +109,12 @@ where
                             result_payload: serde_json::to_vec(&result)?,
                         })
                         .await?;
+                    // 并发同 ID 已提交时必须按账本重放，不能再追加一条审计或返回本事务投影。
+                    // 已变更路径先被 world 行 CAS 拒绝，Duplicate 只在无变化命令上可达，
+                    // 因此走到这里时本事务还没有写入任何世界事实。
+                    if let CommandInsert::Duplicate(stored) = inserted {
+                        return replay(stored, &command, aggregate_id, request_hash);
+                    }
                     transaction
                         .append_admin_world_record(command, previous, result.clone(), changed)
                         .await?;

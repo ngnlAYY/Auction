@@ -103,6 +103,7 @@ pub(crate) fn parse_retention_policy(
     if policy.format != "auction-retention-policy.v2"
         || policy.policy_id != "auction-retention-policy"
         || policy.version != 2
+        || policy.database_schema_version != crate::database::postgres_expected_migration_version()
         || policy.authority != "user-decisions-7-23-25-26-29-31"
         || policy.inventory_authorizes_mutation
         || !policy.deletion_requires_dry_run_and_operator_approval

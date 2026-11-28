@@ -52,6 +52,8 @@ impl ConsignmentGraphStore for MemoryGraphStore {
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+
     use auction_domain::consignment::{
         ConsignmentContract, ConsignmentContractCore, WithdrawalTerms,
         build_consignment_obligations,
@@ -67,13 +69,13 @@ mod tests {
     use crate::ports::consignment::errors::ConsignmentError;
 
     /// 只轮询立即就绪的假端口，不引入额外异步运行时依赖。
-    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    fn block_on<F: Future>(future: F) -> F::Output {
         let mut context = std::task::Context::from_waker(std::task::Waker::noop());
         let mut future = Box::pin(future);
-        loop {
-            if let std::task::Poll::Ready(value) = future.as_mut().poll(&mut context) {
-                return value;
-            }
+        // 假端口只返回立即就绪的 future；出现挂起说明测试前提被破坏，直接失败而不是忙等挂死。
+        match future.as_mut().poll(&mut context) {
+            std::task::Poll::Ready(value) => value,
+            std::task::Poll::Pending => panic!("假端口的 future 不应挂起"),
         }
     }
 

@@ -8,9 +8,8 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
     if command.command_id.is_nil()
         || command.request_hash.as_bytes() == [0; 32]
         || !auction_domain::valid_text(&command.origin_id, 512)
-        || command.recipient.is_empty()
-        || command.recipient != command.recipient.trim()
-        || command.recipient.chars().any(char::is_control)
+        // 收件人与 Admin 邮件模型同一字节上限（512），避免超长收件人流入预算与发送路径。
+        || !auction_domain::valid_text(&command.recipient, 512)
     {
         return Err(RepositoryError::Failed("MoogleMail delivery 命令无效".to_owned()).into());
     }

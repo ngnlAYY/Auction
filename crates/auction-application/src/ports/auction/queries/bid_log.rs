@@ -7,6 +7,8 @@ use crate::ports::core::ApplicationFuture;
 
 /// 公开竞价日志兼容页允许的最大 offset。
 pub const MAX_PUBLIC_BID_LOG_OFFSET: i64 = 10_000;
+/// Public 竞价日志单页的最大条数，与公开分页契约一致。
+pub const MAX_PUBLIC_BID_LOG_LIMIT: i64 = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicBidLogListRequest {
@@ -37,6 +39,7 @@ impl PublicBidLogListRequest {
                     || !lot_code.bytes().all(|byte| byte.is_ascii_alphanumeric())
             })
             || self.limit < 1
+            || self.limit > MAX_PUBLIC_BID_LOG_LIMIT
             || self.offset < 0
             || self.offset > MAX_PUBLIC_BID_LOG_OFFSET
             || self.cursor.is_some() && self.offset != 0

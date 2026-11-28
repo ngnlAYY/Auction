@@ -141,7 +141,8 @@ pub fn record_comparison<T: PartialEq + ?Sized>(
     record_sample(recorder, owner, branch, outcome);
 }
 
-/// 记录一次已判定的可比较样本；`branch` 必须在该 owner 的闭集中。
+/// 记录一次已判定的可比较样本；`branch` 必须在该 owner 的闭集中，`outcome` 只能是
+/// `Match`/`Mismatch`。不可比较样本必须经 [`record_uncomparable`] 携带闭集原因，否则丢弃。
 pub fn record_sample(
     recorder: &dyn ShadowRecorder,
     owner: ShadowOwner,
@@ -203,15 +204,26 @@ fn record(recorder: &dyn ShadowRecorder, sample: ShadowSample) {
             outcome = sample.outcome.label(),
             "影子判定与旧路径不一致"
         ),
-        // 不可比较代表该分支没有证据，必须可见；样本量大时由调用点自行去重。
-        ShadowOutcome::Uncomparable => tracing::warn!(
-            target: "auction::shadow",
-            owner = sample.owner.label(),
-            branch = sample.branch,
-            outcome = sample.outcome.label(),
-            reason = sample.reason.unwrap_or("unclassified"),
-            "影子样本不可比较，不计入差异归零证据"
-        ),
+        // 不可比较代表该分支没有证据，必须可见；缺失闭集原因会绕过原因登记校验，
+        // 这类样本不进入日志与指标，调用点必须改用 `record_uncomparable`。
+        ShadowOutcome::Uncomparable => {
+            let Some(reason) = sample.reason else {
+                tracing::error!(
+                    target: "auction::shadow",
+                    reason = "undeclared",
+                    "影子不可比较样本缺少闭集原因，样本已丢弃"
+                );
+                return;
+            };
+            tracing::warn!(
+                target: "auction::shadow",
+                owner = sample.owner.label(),
+                branch = sample.branch,
+                outcome = sample.outcome.label(),
+                reason = reason,
+                "影子样本不可比较，不计入差异归零证据"
+            );
+        }
     }
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| recorder.record(sample)));
 }
@@ -318,5 +330,19 @@ mod tests {
             ShadowOutcome::Mismatch,
         );
         assert!(recorder.samples().is_empty(), "未登记的分支不能进入指标或样本流");
+    }
+
+    #[test]
+    fn uncomparable_without_reason_is_dropped() {
+        let recorder = CapturingRecorder::default();
+        record_sample(
+            &recorder,
+            ShadowOwner::AuditReadiness,
+            "transient",
+            ShadowOutcome::Uncomparable,
+        );
+        assert!(recorder.samples().is_empty(), "缺少闭集原因的不可比较样本必须丢弃");
+        record_uncomparable(&recorder, ShadowOwner::AuditReadiness, "transient", "timeout");
+        assert_eq!(recorder.samples().len(), 1);
     }
 }

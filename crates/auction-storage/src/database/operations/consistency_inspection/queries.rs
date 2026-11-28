@@ -153,9 +153,8 @@ WITH RECURSIVE chain AS (
     FROM public.settlement_obligations obligation
     LEFT JOIN public.settlement_obligation_fulfillments parent ON parent.obligation_id = obligation.prerequisite_obligation_id
     WHERE obligation.prerequisite_obligation_id IS NOT NULL
-      AND ((obligation.business_state = 'ready' AND parent.execution_state IS DISTINCT FROM 'satisfied'
-            AND (obligation.obligation_kind <> 'buyer_refund'
-                 OR obligation.prerequisite_obligation_id IS NOT NULL))
+      AND ((obligation.business_state = 'ready'
+            AND parent.execution_state IS DISTINCT FROM 'satisfied')
            OR (obligation.business_state = 'blocked' AND parent.execution_state = 'satisfied'))
     UNION ALL
     SELECT payment.id::text, 'payment_recovery_chain_missing'

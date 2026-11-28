@@ -147,7 +147,10 @@ impl AdminAuditPage {
                 .is_ok_and(|entry_count| entry_count <= request.page_size)
             && self.total.is_none_or(|total| total >= 0)
             && self.next_cursor.is_none_or(AdminAuditCursor::validate)
+            // 游标分页不返回总数：数字页请求才允许带 `total`。
             && (request.page.is_some() || self.total.is_none())
+            // `has_more` 为真时调用方只能靠 `next_cursor` 续读；没有游标就是不可恢复的分页。
+            && (!self.has_more || self.next_cursor.is_some())
             && self.entries.iter().all(AdminAuditRecord::validate)
     }
 }

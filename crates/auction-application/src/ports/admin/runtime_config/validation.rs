@@ -346,7 +346,16 @@ pub fn valid_allowlist_path_prefix(value: &str) -> bool {
         && value.split('/').all(|segment| segment != "." && segment != "..")
 }
 
+/// 与 HTTP `OriginPolicy::new` 的装配条件一致：`Url` 规范化序列化后必须还是同一个 origin。
+/// 默认端口（`http:80` / `https:443`）会被规范化省略；在这里放行会让通过校验的 runtime
+/// 文件随后在装配阶段被拒绝。
 fn valid_origin(value: &str) -> bool {
+    valid_origin_syntax(value)
+        && Url::parse(value)
+            .is_ok_and(|url| url.as_str().trim_end_matches('/') == value.trim_end_matches('/'))
+}
+
+fn valid_origin_syntax(value: &str) -> bool {
     let Some((scheme, authority_and_path)) = value.split_once("://") else {
         return false;
     };

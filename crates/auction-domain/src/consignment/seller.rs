@@ -17,11 +17,14 @@ impl ListingSellerName {
     /// 校验单行、不带首尾空白（有则拒绝，不做修剪）、无控制字符与行分隔符，并拒绝装备链接与 key 片段。
     pub fn new(value: &str) -> Result<Self, ListingError> {
         // 不变量 6、7：与数据库 consignment_safe_observation_text 同口径，凭据形状不能借名字进入公开 DTO。
-        let lowered = value.to_ascii_lowercase();
         if !valid_text(value, MAX_SELLER_GAME_NAME_BYTES)
             || value.contains(['\u{2028}', '\u{2029}'])
-            || ["/equip/", "/equip?", "key="].iter().any(|fragment| lowered.contains(fragment))
         {
+            return Err(ListingError::InvalidSellerName);
+        }
+        // 只对有界文本做大小写折叠，避免超长外部输入在拒绝前产生整份副本。
+        let lowered = value.to_ascii_lowercase();
+        if ["/equip/", "/equip?", "key="].iter().any(|fragment| lowered.contains(fragment)) {
             return Err(ListingError::InvalidSellerName);
         }
         Ok(Self(value.to_owned()))

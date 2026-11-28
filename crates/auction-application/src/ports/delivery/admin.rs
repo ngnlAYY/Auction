@@ -24,12 +24,14 @@ pub const DELIVERY_ADMIN_CATEGORIES: [&str; 7] =
 /// 世界闭集；投递载荷只允许这两个已发布世界。
 pub const DELIVERY_ADMIN_WORLDS: [&str; 2] = ["main", "isekai"];
 /// 退役原因闭集：在 sending 围栏前确定未写入外部系统。
-pub const DELIVERY_ADMIN_RETIREMENT_REASONS: [&str; 5] = [
+pub const DELIVERY_ADMIN_RETIREMENT_REASONS: [&str; 6] = [
     "lot_watch_invalidated",
     "recipient_renamed",
     "auction_opened",
     "season_boundary_passed",
     "season_reminder_resolved",
+    // 寄售付款提醒在发送前被派前复验作废（P7A3）；存储投影必须同样带出该原因。
+    "payment_reminder_voided",
 ];
 /// 抑制原因闭集：在发送前被隔离、批次终止或载荷拒绝，从未开始外部写入。
 pub const DELIVERY_ADMIN_SUPPRESSION_REASONS: [&str; 6] = [

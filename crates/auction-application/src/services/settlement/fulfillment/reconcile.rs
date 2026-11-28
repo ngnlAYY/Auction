@@ -70,7 +70,18 @@ impl SettlementFulfillmentService {
                 None,
                 true,
             )?;
-            if store.replay_internal(command).await? {
+            let replayed = match store.replay_internal(command).await {
+                Ok(replayed) => replayed,
+                // 稳定命令无法按冻结事实精确重建时与 prepare/refund 一致隔离人工：
+                // 冲突不等于“未执行”，不能反复重试同一无法重放的对账。
+                Err(ApplicationError::FulfillmentDependencyMismatch) => {
+                    return self
+                        .manual_reconcile_now(claim, delivery_id, "delivery_conflict")
+                        .await;
+                }
+                Err(error) => return Err(error),
+            };
+            if replayed {
                 return Ok(SettlementFulfillmentReconcileResult {
                     obligation_id: claim.obligation_id,
                     delivery_id,

@@ -137,7 +137,19 @@ impl AuctionScheduleSource {
         if previous.scheduled_end_at != updated.scheduled_end_at {
             source.end_local = timezone.to_datetime(updated.scheduled_end_at.to_jiff());
         }
-        source.resolve()?;
+        let resolved = source.resolve()?;
+        // 折叠小时里同一本地钟点对应两个 UTC 瞬间；反解再解析固定取较早实例，
+        // 会让改期偏离命令给出的 UTC。只要求实际改动的时刻保持原值。
+        let keeps_requested_instant = [
+            (previous.preview_due_at, updated.preview_due_at, resolved.preview_due_at),
+            (previous.open_due_at, updated.open_due_at, resolved.open_due_at),
+            (previous.scheduled_end_at, updated.scheduled_end_at, resolved.scheduled_end_at),
+        ]
+        .into_iter()
+        .all(|(previous, updated, resolved)| previous == updated || resolved == updated);
+        if !keeps_requested_instant {
+            return Err(DomainError::InvalidSchedule("改期时刻无法由本地钟点唯一表示"));
+        }
         // 改期不得保留旧赛季身份却把付款窗口推过换季；使用命令的实际 UTC 截止。
         validate_pre_season_payment_deadline(
             &timezone,

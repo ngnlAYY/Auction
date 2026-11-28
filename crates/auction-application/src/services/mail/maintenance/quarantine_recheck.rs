@@ -293,9 +293,11 @@ impl QuarantineRecheckService {
             }
             Err(error) => return Err(error),
         };
+        // 回执必须描述本次提交的观察：摘要不同说明存储返回了别的观察，不能据此自动交接。
         if receipt.quarantine_id != claim.quarantine_id
             || receipt.observation_id.is_nil()
             || receipt.digest == [0; 32]
+            || receipt.digest != observation_digest
             || receipt.quarantine_version < claim.quarantine_version
         {
             self.work.reconcile(&claim, DispositionReconcileReason::EvidenceConflict).await?;

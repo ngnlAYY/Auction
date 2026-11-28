@@ -57,6 +57,8 @@ fn valid_user_selector(value: &str) -> bool {
         .into_iter()
         .all(|width| groups.next().is_some_and(|group| group.len() == width));
     let tail = groups.next().unwrap_or_default();
+    // 残缺的 UUID 拼写不能回落到用户名查询：四组 8/4/4/4 的截断 ID 与完整 UUID 只差最后一组，
+    // 放行会让管理员把粘贴失败的值当成真实用户名。Admin 界面对这种形状给出明确拒绝。
     let uuid_shaped = has_uuid_prefix
         && groups.next().is_none()
         && (tail.len() == 12

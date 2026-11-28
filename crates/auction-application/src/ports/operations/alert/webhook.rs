@@ -8,7 +8,10 @@ use super::signals::{OperationsAlertError, OperationsAlertKind};
 use crate::ports::core::ApplicationFuture;
 
 /// Webhook 可重试失败的最大尝试次数；耗尽后进入 failed/retry_exhausted。
-pub const MAX_OPERATIONS_ALERT_WEBHOOK_ATTEMPTS: u32 = 5;
+///
+/// 存储适配器只领取 `attempt_count` 小于本上限的 pending 投递，达到上限即收口为
+/// `retry_exhausted`；两边必须保持同一上限，Worker 才能把最后一次可重试失败直接标为耗尽。
+pub const MAX_OPERATIONS_ALERT_WEBHOOK_ATTEMPTS: u32 = 3;
 
 /// 默认 webhook JSON 模板；占位符只允许出现在冻结投递中。
 pub const DEFAULT_OPERATIONS_ALERT_WEBHOOK_TEMPLATE: &str = r#"{"format":"auction-operations-alert.v1","kind":"{kind}","scope":"{scope}","source":"{source}","count":{count},"age_seconds":{age_seconds}}"#;

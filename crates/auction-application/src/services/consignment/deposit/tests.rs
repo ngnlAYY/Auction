@@ -606,14 +606,29 @@ fn controls_reads_proofs_and_seasons_use_the_same_ledger() {
         Some(auction_domain::consignment::HeldOffMarketReason::Review)
     );
 
-    let (_reservation, token) = fake.seed_reservation(
+    // 非 AwaitingDeposit 挂单即使残留活动预约也不能给出寄件指引：生产与替身都返回
+    // `Some(OwnedDepositInstructions::None)`（本人可见但当前无指引）。
+    let (_reservation, _token) = fake.seed_reservation(
         held_listing,
         seller(),
         "43",
         Timestamp::UNIX_EPOCH + auction_time::Duration::hours(1),
     );
+    assert_eq!(
+        run(fake.instructions(seller(), held_listing)).expect("读取指引"),
+        Some(OwnedDepositInstructions::None)
+    );
+
+    let deposit_listing = Uuid::from_u128(3);
+    seed_awaiting(&fake, deposit_listing);
+    let (_reservation, token) = fake.seed_reservation(
+        deposit_listing,
+        seller(),
+        "44",
+        Timestamp::UNIX_EPOCH + auction_time::Duration::hours(1),
+    );
     let instructions =
-        run(fake.instructions(seller(), held_listing)).expect("读取指引").expect("本人");
+        run(fake.instructions(seller(), deposit_listing)).expect("读取指引").expect("本人");
     let OwnedDepositInstructions::Active(active) = instructions else {
         panic!("应有有效指引");
     };

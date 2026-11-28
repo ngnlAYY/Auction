@@ -28,7 +28,10 @@ pub(super) fn check_quote(
     price: ListingPrice,
     quote: ListingQuote,
 ) -> Result<(), FundingRuleError> {
-    if quote.fee < 0 || quote.seller_amount <= 0 || quote.fee + quote.seller_amount != price.value()
+    // 报价来自冻结/反序列化输入，先排除符号再按 checked 加法核对，避免溢出回绕或调试期 panic。
+    if quote.fee < 0
+        || quote.seller_amount <= 0
+        || quote.fee.checked_add(quote.seller_amount) != Some(price.value())
     {
         return Err(FundingRuleError::QuoteMismatch);
     }

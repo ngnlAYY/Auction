@@ -1,27 +1,22 @@
-//! 内存假实现的外写、代管控制、季节任务与读取端口。
+//! 内存假实现的外写、代管控制与季节任务。
 
 use std::future;
 
 use auction_domain::CommandId;
-use auction_domain::SettlementWorld;
 use auction_domain::consignment::deposit::EnvelopeObservation;
 use auction_domain::consignment::{
-    FeeBps, ListingMode, ListingPrice, ListingState, SeasonState, decide_withdrawal_intent,
-    operations_hold_reason, release_operations_hold_reason,
+    ListingState, decide_withdrawal_intent, operations_hold_reason, release_operations_hold_reason,
 };
 use uuid::Uuid;
 
 use super::{FakeDepositStore, LedgerReceipt, WriteRecord};
 use crate::ports::consignment::deposit::{
-    ActiveDepositInstructions, AdminDepositAction, AdminDepositDetail, AdminDepositQuery,
-    AdminFinalDecision, AdminObservationItem, AdminQuarantineObservation, ApplyMailProofCommand,
-    CustodyControlStore, DepositOperation, DepositRead, DepositStatus, DepositWorldStatus,
-    DepositWorlds, DispositionStore, OperationsHoldDisposition, OperationsHoldReceipt,
-    OwnedDepositInstructions, ProofReceipt, QuarantineState, ReleaseOperationsHoldCommand,
-    SeasonCloseCommand, SeasonCloseReceipt, SeasonCloseTarget, SeasonNoticeCommand,
-    SeasonNoticeReceipt, SeasonStore, SetOperationsHoldCommand, StartDispositionWriteCommand,
-    StartReceipt, WithdrawDepositCommand, WithdrawDepositReceipt, WithdrawDisposition,
-    WriteStartOutcome,
+    AdminObservationItem, ApplyMailProofCommand, CustodyControlStore, DepositOperation,
+    DispositionStore, OperationsHoldDisposition, OperationsHoldReceipt, ProofReceipt,
+    ReleaseOperationsHoldCommand, SeasonCloseCommand, SeasonCloseReceipt, SeasonCloseTarget,
+    SeasonNoticeCommand, SeasonNoticeReceipt, SeasonStore, SetOperationsHoldCommand,
+    StartDispositionWriteCommand, StartReceipt, WithdrawDepositCommand, WithdrawDepositReceipt,
+    WithdrawDisposition, WriteStartOutcome,
 };
 use crate::ports::consignment::{ConsignmentError, ConsignmentFuture, DepositBusinessRejection};
 use crate::ports::core::RequestHash;
@@ -45,6 +40,13 @@ impl DispositionStore for FakeDepositStore {
                 return Err(ConsignmentError::Unavailable);
             }
             if let Some(write) = state.writes.get(&command.work_id) {
+                // 同一 work 必属同一最终决定与投递；不一致是确定冲突，不能回放别的工作的回执
+                // （与 `start_port` 的工作行复核一致）。
+                if write.final_decision_id != command.final_decision_id
+                    || write.delivery_id != command.delivery_id
+                {
+                    return Err(DepositBusinessRejection::ActionNotAllowed.into());
+                }
                 let receipt = write.receipt.clone();
                 state.ledger.insert(
                     command.command_id,
@@ -68,6 +70,7 @@ impl DispositionStore for FakeDepositStore {
                 command.work_id,
                 WriteRecord {
                     receipt: receipt.clone(),
+                    final_decision_id: command.final_decision_id,
                     delivery_id: command.delivery_id,
                     fence: command.fence,
                 },
@@ -430,11 +433,17 @@ impl SeasonStore for FakeDepositStore {
                 if state.clock < command.season.end_utc {
                     return Err(DepositBusinessRejection::ActionNotAllowed.into());
                 }
+                // 假实现不建模代管 position：无法把 position 解析成所属挂单，按生产
+                // “position 不属于本季窗”失败关闭，不能悄悄关成零件。
+                if matches!(command.target, SeasonCloseTarget::Position(_)) {
+                    return Err(DepositBusinessRejection::SourceMismatch.into());
+                }
                 let mut closed = Vec::new();
                 for (listing_id, listing) in state.listings.iter_mut() {
                     let close = match command.target {
                         SeasonCloseTarget::World(_) => true,
                         SeasonCloseTarget::Listing(target) => *listing_id == target,
+                        // 已在上方失败关闭。
                         SeasonCloseTarget::Position(_) => false,
                     };
                     if close && listing.state.is_active() {
@@ -455,134 +464,6 @@ impl SeasonStore for FakeDepositStore {
             },
         );
         Box::pin(future::ready(result))
-    }
-}
-
-impl DepositRead for FakeDepositStore {
-    fn status(&self) -> ConsignmentFuture<'_, DepositStatus> {
-        let state = self.state.lock().expect("假实现状态锁");
-        let isekai_state = Self::season_for(&state);
-        let window = state.current_season.as_ref().or(state.frozen_season.as_ref());
-        let status = DepositStatus {
-            enabled: true,
-            registration_ready: true,
-            registration_modes: vec![ListingMode::Consigned],
-            registration_worlds: vec![SettlementWorld::Main, SettlementWorld::Isekai],
-            fee_bps: FeeBps::DEFAULT_CONSIGNED,
-            min_price: ListingPrice::new(1).expect("下限"),
-            max_price: ListingPrice::new(ListingPrice::MAX).expect("上限"),
-            accepts_mail: state.allowlisted,
-            purchasable: false,
-            worlds: DepositWorlds {
-                main: DepositWorldStatus {
-                    mail_ready: state.allowlisted,
-                    purchase_ready: false,
-                    season_state: SeasonState::NotSeasonal,
-                    cutoff_at: None,
-                    season_end_at: None,
-                },
-                isekai: DepositWorldStatus {
-                    mail_ready: state.allowlisted,
-                    purchase_ready: false,
-                    season_state: isekai_state,
-                    cutoff_at: window.map(|window| window.admission_cutoff_utc),
-                    season_end_at: window.map(|window| window.end_utc),
-                },
-            },
-        };
-        Box::pin(future::ready(Ok(status)))
-    }
-
-    fn instructions(
-        &self,
-        seller: auction_domain::UserId,
-        listing_id: Uuid,
-    ) -> ConsignmentFuture<'_, Option<OwnedDepositInstructions>> {
-        let state = self.state.lock().expect("假实现状态锁");
-        let Some(listing) = state.listings.get(&listing_id) else {
-            return Box::pin(future::ready(Ok(None)));
-        };
-        if listing.seller_user_id != seller {
-            return Box::pin(future::ready(Ok(None)));
-        }
-        let Some(reservation) = Self::active_reservation(&state, listing_id) else {
-            return Box::pin(future::ready(Ok(Some(OwnedDepositInstructions::None))));
-        };
-        let instructions = OwnedDepositInstructions::Active(ActiveDepositInstructions {
-            world: state.authenticated_world,
-            bot: "test-bot".to_owned(),
-            subject: "consign".to_owned(),
-            body: reservation.token.clone(),
-            reservation_id: reservation.reservation_id,
-            expires_at: reservation.expires_at,
-        });
-        Box::pin(future::ready(Ok(Some(instructions))))
-    }
-
-    fn quarantine(
-        &self,
-        query: AdminDepositQuery,
-    ) -> ConsignmentFuture<'_, Option<AdminDepositDetail>> {
-        let state = self.state.lock().expect("假实现状态锁");
-        let Some(quarantine) = state.quarantines.get(&query.quarantine_id) else {
-            return Box::pin(future::ready(Ok(None)));
-        };
-        let observations: Vec<AdminQuarantineObservation> = quarantine
-            .observations
-            .iter()
-            .map(|observation| AdminQuarantineObservation {
-                observation_id: observation.observation_id,
-                observed_at: observation.observed_at,
-                parser_version: observation.parser_version.clone(),
-                digest: observation.digest,
-                credits: observation.credits,
-                cod: observation.cod,
-                returnable: Some(observation.returnable),
-                takeable: observation.takeable,
-                items: observation.items.clone(),
-            })
-            .collect();
-        let final_decision =
-            quarantine.release_receipt.as_ref().map(|receipt| AdminFinalDecision {
-                release_id: receipt.release_id,
-                decision_id: receipt.decision_id,
-                kind: receipt.decision_kind,
-                owner: None,
-                released_at: state.clock,
-                listing_changes: receipt.listing_changes.clone(),
-                obligation_id: receipt.obligation_id,
-                return_mail_id: receipt.return_mail_id,
-                return_evidence_id: receipt.return_evidence_id,
-                recovery_id: receipt.recovery_id,
-                recovery_handoff_id: receipt.recovery_handoff_id,
-                return_intake_id: receipt.return_intake_id,
-                original_round: receipt.original_round,
-                take_work_id: receipt.take_work_id,
-                take_delivery_id: receipt.take_delivery_id,
-            });
-        let observation_total = u64::try_from(observations.len()).unwrap_or(u64::MAX);
-        let detail = AdminDepositDetail {
-            quarantine_id: quarantine.quarantine_id,
-            version: quarantine.version,
-            state: if quarantine.active {
-                QuarantineState::Active
-            } else {
-                QuarantineState::Released
-            },
-            world: quarantine.mail_key.world(),
-            external_mid: quarantine.mail_key.external_mid().to_owned(),
-            first_decision_id: quarantine.quarantine_id,
-            reason: quarantine.reason,
-            observation_total,
-            observations,
-            allowed_actions: if quarantine.active {
-                vec![AdminDepositAction::Recheck, AdminDepositAction::ReleaseQuarantine]
-            } else {
-                Vec::new()
-            },
-            final_decision,
-        };
-        Box::pin(future::ready(Ok(Some(detail))))
     }
 }
 

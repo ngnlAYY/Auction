@@ -29,6 +29,7 @@ struct Sealed {
 
 struct Certified {
     payment_obligation_id: Uuid,
+    original_delivery_id: Uuid,
     price: ListingPrice,
     quote: ListingQuote,
     receipt: CertifyReceipt,
@@ -165,32 +166,37 @@ impl ConsignmentFundingStore for FakeFunding {
             if let Some(done) = lookup(&state.certifies, &command.mutation)? {
                 return Ok(CertifyReceipt { replayed: true, ..done });
             }
-            // 同一经济实收换命令 ID 复见：相容者读原结果，异合同或异额冲突，零新增发行。
-            if let Some(old) = state.certified.get(&command.receipt) {
+            // 已封存的 opening 份额必须由本实收业务键显式声明；省略会把已含金额当未含而重复发行。
+            let sealed = state.sealed.iter().find(|sealed| sealed.receipt == command.receipt);
+            let included = match (command.attribution_id, sealed) {
+                (None, None) => 0,
+                (None, Some(_)) => return Err(FundingError::Conflict),
+                (Some(id), Some(sealed)) if sealed.attribution_id == id => {
+                    opening_included_total(&sealed.slices).map_err(rule)?
+                }
+                _ => return Err(FundingError::Invalid),
+            };
+            // 同一经济实收换命令 ID 复见：相容者读原结果，异合同、异额或异 delivery 冲突，零新增
+            // 发行。查找闭集与存储一致：收据键、付款义务或原 delivery 任一命中都只能有一份结果。
+            let existing = state.certified.iter().find(|(key, old)| {
+                **key == command.receipt
+                    || old.payment_obligation_id == command.payment_obligation_id
+                    || old.original_delivery_id == command.original_delivery_id
+            });
+            if let Some((_, old)) = existing {
                 let same = old.payment_obligation_id == command.payment_obligation_id
+                    && old.original_delivery_id == command.original_delivery_id
                     && old.price == command.price
                     && old.quote == command.quote
                     && old.receipt.contract_id == command.contract_id
-                    && old.receipt.split.gross() == command.gross;
+                    && old.receipt.split.gross() == command.gross
+                    && old.receipt.split.opening_included() == included;
                 return if same {
                     Ok(CertifyReceipt { replayed: true, ..old.receipt.clone() })
                 } else {
                     Err(FundingError::Conflict)
                 };
             }
-            let included = match command.attribution_id {
-                None => 0,
-                Some(id) => {
-                    let sealed = state
-                        .sealed
-                        .iter()
-                        .find(|sealed| {
-                            sealed.attribution_id == id && sealed.receipt == command.receipt
-                        })
-                        .ok_or(FundingError::Invalid)?;
-                    opening_included_total(&sealed.slices).map_err(rule)?
-                }
-            };
             let split = CodReceiptSplit::new(command.gross, included).map_err(rule)?;
             let plan =
                 plan_cod_funding(command.world, command.mode, command.price, command.quote, split)
@@ -220,6 +226,7 @@ impl ConsignmentFundingStore for FakeFunding {
                 command.receipt,
                 Certified {
                     payment_obligation_id: command.payment_obligation_id,
+                    original_delivery_id: command.original_delivery_id,
                     price: command.price,
                     quote: command.quote,
                     receipt: receipt.clone(),

@@ -271,9 +271,20 @@ pub fn validate_disposition_reason_code(
         {
             Err(DeliveryDispositionError::InvalidReason)
         }
-        (_, Some(code)) if !valid_text(code, 64) => Err(DeliveryDispositionError::InvalidReason),
+        (_, Some(code)) if !valid_reason_code(code) => Err(DeliveryDispositionError::InvalidReason),
         _ => Ok(()),
     }
+}
+
+/// 非预检退役原因码与 `delivery_dispositions.reason_code` 的数据库 CHECK 同口径：
+/// 1 至 64 个 ASCII 小写字母、数字或 `_.:-`，避免领域放行后由持久层拒绝。
+fn valid_reason_code(value: &str) -> bool {
+    (1..=64).contains(&value.len())
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || matches!(byte, b'_' | b'.' | b':' | b'-')
+        })
 }
 
 /// 操作者标识：非空、最多 128 字节、无首尾空白与控制字符。
@@ -300,7 +311,7 @@ pub fn validate_disposition_reason(
 pub struct DeliveryAcknowledgementFacts<'a> {
     /// 投递当前状态；只有 `failed` 可确认。
     pub status: &'a str,
-    /// 投递来源种类；结算与恢复来源不允许。
+    /// 投递来源种类；结算、恢复与结算退件 Take 来源不允许。
     pub origin_kind: &'a str,
     /// 冻结载荷中的 Credits 附件金额；`None` 表示无法精确读取（保守拒绝）。
     pub credits: Option<i64>,
@@ -320,7 +331,10 @@ pub fn validate_acknowledgement(
     facts: DeliveryAcknowledgementFacts<'_>,
 ) -> Result<(), DeliveryDispositionError> {
     if facts.status != "failed"
-        || matches!(facts.origin_kind, "settlement" | "settlement_recovery_action")
+        || matches!(
+            facts.origin_kind,
+            "settlement" | "settlement_recovery_action" | "settlement_return_action"
+        )
         || facts.has_fulfillment_obligation
         || facts.equipment_count != 0
         || facts.credits != Some(0)

@@ -239,12 +239,7 @@ pub(crate) async fn load_observation(
         credits: sqlx::Row::try_get(&row, "credits")?,
         cod: sqlx::Row::try_get(&row, "cod")?,
         raw_count: sqlx::Row::try_get(&row, "raw_count")?,
-        asset_count: derived.asset_count.or_else(|| {
-            sqlx::Row::try_get::<Option<i32>, _>(&row, "raw_count")
-                .ok()
-                .flatten()
-                .and_then(|value| u32::try_from(value).ok())
-        }),
+        asset_count: derived.asset_count,
         items,
         season_window_id: sqlx::Row::try_get(&row, "season_window_id")?,
         evidence_ref: sqlx::Row::try_get(&row, "evidence_ref")?,

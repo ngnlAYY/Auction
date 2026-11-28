@@ -49,7 +49,7 @@ VALUES (76, 'breaking');
 
 ## 索引
 
-当前 head 为 `000138`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。
+当前 head 为 `000152`，与 [ops/deploy/retention-policy.v2.json](../../ops/deploy/retention-policy.v2.json) 的 `database_schema_version` 一致；新增迁移必须同时推进这两处。
 
 | 版本 | 主题 |
 | --- | --- |
@@ -191,3 +191,17 @@ VALUES (76, 'breaking');
 | 000136 | 寄售第 6 期购买、资金、退件与拒收：放开 `available→sale_pending`、`sale_pending→closed(sold)` 与 position 的 `committed/in_transit/handed_over/reconcile` 及 `awaiting_take` 季末迁移，买家确领改认新表 `consignment_handoff_proofs`；命令账本增加购买、派发、退件、资金与处罚操作及回执；资金分配唯一键改为含 `consignment_contract_id` 的四列并新增过渡/手续费/核销用途与 `claimed` 分录，累计 issue 上限触发器加跨 source 守卫；新增 COD 收据与 opening 份额、手续费与本金事实、现金退件阻断与原资金消费、派发轮次/尝试/证据、退件接管/消费、拒收周期/事实/裁决/处罚/构成项/账号工作等 23 张表；`consignment_sales` 追加资金边界列；授权入口再包装 000135；登记 breaking |
 | 000137 | 寄售第 7 期：独立表段新增损失证据/事实/案件/结果/回执、受限权利及其状态/挑战/尝试/会话/令牌、权利通知 outbox 与结果、付款提醒、重列决定、找回预算命中共 16 张表（全部只追加，outbox 仅租约三列可更新），共享替换段再新增处罚效果与账号工作结果 2 张表；定义 `c7_sha1` 与 `c7_right_id`（权利 ID 的确定性 UUIDv5），并为既有合同回填失败关闭的权利；共享替换段放宽命令账本 actor / 目标 / 操作 / 回执闭集、挂单迁移与事件、处分代 g+1、position `lost`、占用释放与交接边，并放宽通知投递载荷；统一处置种类闭集新增 `season_closed`（季末关闭从未起写的寄售取得投递，插入守卫限定绑定，写入时固定解除告警）；授权入口再包装 000136；末尾追加 ㉑ 寄售 record_carrier 校验接受 `equipment_ids`、㉒ 放开撤回件 position `in_custody ↔ in_transit`（限当前代 Withdrawal）、㉓ 未付取消封闭后拒写 funded；登记 breaking。表与派生规则见 [docs/contracts/database.md](../../docs/contracts/database.md#寄售损失受限权利与通知迁移-000137) |
 | 000138 | 匿名非寄售登记：`consignment_listings.seller_user_id` 改为可空并新增不可变的 `seller_game_name`（二选一、自填名只允许非寄售），新增同名同装备未终结唯一索引与计数索引；命令账本 v1 增加 `anonymous` actor（只允许登记），登记事件门与 v2 撤回门增加匿名分支；登记 breaking。见 [docs/contracts/database.md](../../docs/contracts/database.md#匿名非寄售登记迁移-000138) |
+| 000139 | 为 `bids` 与 `audit_records` 补语句级 `BEFORE TRUNCATE` 触发器，复用既有拒绝函数；行级只追加触发器不拦截整表清空；登记 breaking |
+| 000140 | `lots` 写入时校验 `auctions.world_id` 与 `equipment.world_id` 一致；延迟约束触发器校验 `slow_authorization_id` 属于本 lot 且 `mode = 'slow'`；既有行不回填；登记 breaking |
+| 000141 | PM 提醒发送围栏单向：发送只能从 `claimed` 开始，`succeeded`/`suppressed` 为不可回退终态；只替换守卫函数，不改写行、索引与既有约束；登记 breaking |
+| 000142 | `record_carrier` 的 1-credit 发行必须复用冻结来源的 `proof_digest`，与其它 record-only 分支一致；独立 `BEFORE INSERT` 触发器补齐，不改写既有函数与历史分录；登记 breaking |
+| 000143 | `forum_identity_history` 改为只追加（行级拒绝 `UPDATE`/`DELETE`、语句级拒绝 `TRUNCATE`），授权入口重放只授 `SELECT`/`INSERT`；入口另以失败关闭检查 `auction_runtime` 对 `public` 的直接 `CREATE` 与 public 序列的 `UPDATE`；登记 breaking |
+| 000144 | 结算履约的准备/激活身份成对：命令 ID 与摘要必须同时存在，激活身份必须晚于准备身份；`NOT VALID` 只约束新写入，历史行不动；登记 breaking |
+| 000145 | 恢复 Send/退件唯一归属延伸到闭账后的追加事实：`settlement_recovery_return_consumptions` 与 `delivery_send_attempts` 的插入由延迟约束触发器重跑 000123 归属函数；不改写历史；登记 breaking |
+| 000146 | 场次结算池余额改为完整等式（启用时 `opening + tax - compensation`，禁用时 `opening`）；`NOT VALID` 只约束新写入；登记 breaking |
+| 000147 | 结算义务前置义务必须同 `auction_id`/`lot_id`/`equipment_id`/`contract_id`，且前置链不得成环或超过 64 层；延迟约束触发器只约束新写入；登记 breaking |
+| 000148 | `settlement_return_takes` 写入时核对案件世界/义务/原派发与 Take 投递来源/载荷/外部 MID；登记 breaking |
+| 000149 | `refunding` 恢复必须有 `equipment_recovered` 结论；修复 000005 的 CHECK NULL 漏洞，`NOT VALID` 只约束新写入；登记 breaking |
+| 000150 | 把 000024 中 `failed` 且无 thread/title/body 的论坛主题从 `legacy_global` 重分类为 `category_v1`；登记 breaking |
+| 000151 | `snapshot_invalid`/`filter_rejected` 诊断必须带字符串 `detail_code`，补齐 000056 的 JSON null 分支；`NOT VALID` 只约束新写入；登记 breaking |
+| 000152 | 账户挂单的 `withdraw` 命令事件要求 `actor_ref` 等于卖家账户 ID；匿名挂单同名门不变；登记 breaking |

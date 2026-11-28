@@ -3,7 +3,7 @@
 //! 边界只来自已冻结的 `auctions.intake_opens_at`；提醒正文与身份都绑定该边界，
 //! 换季配置之后变化不会改写已创建通知。发送围栏前若边界已过或义务已完成即退役。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use auction_domain::{CommandId, valid_text};
 use auction_time::{SecondsFormat, Timestamp};
@@ -61,6 +61,7 @@ pub fn group_season_reminders(
         if fact.season_boundary.timestamp_nanos_opt().is_none()
             || !valid_text(&fact.recipient, 256)
             || !valid_text(&fact.obligation_kind, 64)
+            || fact.lot_id.is_nil()
             || fact.lot_number == 0
             || fact.category_number == 0
             || !valid_text(&fact.category, 128)
@@ -93,10 +94,13 @@ pub fn group_season_reminders(
                 .then_with(|| left.obligation_kind.cmp(&right.obligation_kind))
                 .then_with(|| left.lot_id.cmp(&right.lot_id))
         });
-        // 同一 lot ID × 义务种类只能出现一次。
-        if reminder.items.windows(2).any(|pair| {
-            pair[0].lot_id == pair[1].lot_id && pair[0].obligation_kind == pair[1].obligation_kind
-        }) {
+        // 同一 lot ID × 义务种类只能出现一次；按身份判定，不依赖与无关排序键的相邻关系。
+        let mut identities = BTreeSet::new();
+        if reminder
+            .items
+            .iter()
+            .any(|item| !identities.insert((item.lot_id, item.obligation_kind.as_str())))
+        {
             return Err(PlayerNotificationError::InvalidSeasonReminder);
         }
     }
@@ -111,7 +115,7 @@ pub fn season_reminder_body(reminder: &SeasonReminder) -> Option<String> {
             item.lot_id.is_nil()
                 || item.lot_number == 0
                 || item.category_number == 0
-                || !valid_text(&item.obligation_kind, 128)
+                || !valid_text(&item.obligation_kind, 64)
                 || !valid_text(&item.category, 128)
                 || !valid_text(&item.equipment_name, 512)
                 || item.amount < 0
@@ -315,6 +319,28 @@ mod tests {
         let duplicate = fact_with_lot("alice", 1, "winner_equipment_handoff", Uuid::from_u128(7));
         assert_eq!(
             group_season_reminders(vec![duplicate.clone(), duplicate]),
+            Err(PlayerNotificationError::InvalidSeasonReminder)
+        );
+    }
+
+    /// 同一 lot × 义务种类的重复事实即使 lot 编号不同也必须拒绝，不能只看排序后的相邻项。
+    #[test]
+    fn duplicate_identity_is_rejected_across_lot_numbers() {
+        let duplicate = fact_with_lot("alice", 1, "seller_payout", Uuid::from_u128(9));
+        let mut later = duplicate.clone();
+        later.lot_number = 5;
+        let between = fact_with_lot("alice", 3, "winner_equipment_handoff", Uuid::from_u128(10));
+        assert_eq!(
+            group_season_reminders(vec![duplicate, between, later]),
+            Err(PlayerNotificationError::InvalidSeasonReminder)
+        );
+    }
+
+    /// 缺少 lot 身份的事实不能进入分组，否则整封提醒会被正文校验静默丢弃。
+    #[test]
+    fn nil_lot_identity_is_rejected_in_grouping() {
+        assert_eq!(
+            group_season_reminders(vec![fact_with_lot("alice", 1, "seller_payout", Uuid::nil())]),
             Err(PlayerNotificationError::InvalidSeasonReminder)
         );
     }

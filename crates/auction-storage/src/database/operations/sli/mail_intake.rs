@@ -31,6 +31,7 @@ macro_rules! flow_sql {
     FROM candidates candidate
     LEFT JOIN public.inbound_mail inbound
       ON inbound.world_id=candidate.payload_world
+     AND inbound.mailbox_key='mooglemail:'||candidate.payload_world
      AND inbound.external_mail_id=candidate.payload->>'external_mail_id'"
             ),
             unknown: concat!(
@@ -41,6 +42,7 @@ macro_rules! flow_sql {
     FROM candidates candidate
     JOIN public.inbound_mail inbound
       ON inbound.world_id=candidate.payload_world
+     AND inbound.mailbox_key='mooglemail:'||candidate.payload_world
      AND inbound.external_mail_id=candidate.payload->>'external_mail_id'
     WHERE ",
                 $unproven,
@@ -64,6 +66,7 @@ macro_rules! flow_sql {
     FROM candidates candidate
     JOIN public.inbound_mail inbound
       ON inbound.world_id=candidate.payload_world
+     AND inbound.mailbox_key='mooglemail:'||candidate.payload_world
      AND inbound.external_mail_id=candidate.payload->>'external_mail_id'
     WHERE ",
                 $proven,

@@ -193,7 +193,7 @@ pub(crate) async fn claim_postgres(
                    ON item.batch_id = batch.id
                  INNER JOIN public.operations_alert_signals AS signal
                    ON signal.fingerprint = item.fingerprint
-                 WHERE batch.status IN ('enqueued', 'succeeded')
+                 WHERE batch.status IN ('pending', 'claimed', 'enqueued', 'succeeded')
                    AND batch.created_at > $1 - interval '24 hours'
                    AND signal.kind = ANY($2::text[])
              )",

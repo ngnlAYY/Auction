@@ -89,6 +89,23 @@ async fn record_in_tx(
         return Err(sqlx::Error::RowNotFound);
     }
 
+    // 会话行只写一次；每次心跳都必须重新证明凭据仍是当前 active 版本（与插入触发器同一条件）。
+    let credential_current: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+             SELECT 1 FROM public.credential_keys
+             WHERE id = $1 AND credential_kind = 'mail_cookie' AND scope = $2
+               AND status = 'active' AND state_version = $3
+         )",
+    )
+    .bind(session.credential_id)
+    .bind(world)
+    .bind(credential_version)
+    .fetch_one(&mut *connection)
+    .await?;
+    if !credential_current {
+        return Err(sqlx::Error::RowNotFound);
+    }
+
     let policy = &record.policy;
     let row = sqlx::query(
         "WITH wall_clock AS (SELECT clock_timestamp() AS now)

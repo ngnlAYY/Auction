@@ -14,7 +14,9 @@ pub(super) async fn active_intent(
          FROM public.consignment_custody_controls control
          JOIN public.consignment_custody_positions position ON position.id = control.position_id
          WHERE position.listing_id = $1 AND control.kind = 'withdrawal_intent'
-         ORDER BY control.version ASC LIMIT 1",
+         -- `version` 是逐 position 计数：多 position 时同一版本无法选出主行，
+         -- 主行 ID 由 `insert_intent_controls` 写在按 UUID 排序的首个 position 上。
+         ORDER BY position.id ASC LIMIT 1",
     )
     .bind(listing_id)
     .fetch_optional(connection)

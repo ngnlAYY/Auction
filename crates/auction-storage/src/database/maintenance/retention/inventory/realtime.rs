@@ -68,7 +68,11 @@ pub(super) async fn read_realtime_inventory(
     .fetch_all(&mut **transaction)
     .await
     .map_err(|source| query_error("realtime_stream_inventory", source))?;
-    let streams = rows.into_iter().map(map_realtime_stream).collect::<Result<Vec<_>, _>>()?;
+    let streams = rows
+        .into_iter()
+        .take(MAX_REALTIME_STREAMS as usize)
+        .map(map_realtime_stream)
+        .collect::<Result<Vec<_>, _>>()?;
 
     let coverage_row = sqlx::query(
         "SELECT

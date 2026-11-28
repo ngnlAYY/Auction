@@ -327,8 +327,8 @@ impl From<DepositError> for ConsignmentError {
             | DepositError::ReservationNotActive
             | DepositError::ReservationMismatch
             | DepositError::ReservationCountMismatch => Rejection::EvidenceUnproven.into(),
-            // 季窗来自日历配置，不是客户端输入；配置或日历错误按能力不可用处理。
-            DepositError::InvalidSeasonWindow => Self::Unavailable,
+            // 季窗与日历都来自服务端配置，不是客户端输入；配置或日历错误按能力不可用处理。
+            DepositError::InvalidSeasonWindow | DepositError::InvalidCalendar => Self::Unavailable,
             DepositError::TokenPrefix
             | DepositError::TokenLength
             | DepositError::TokenAlphabet
@@ -340,7 +340,6 @@ impl From<DepositError> for ConsignmentError {
             | DepositError::BodyIsolatedCr
             | DepositError::BodyDuplicate
             | DepositError::BodyFreeText
-            | DepositError::InvalidCalendar
             | DepositError::InvalidRequest => Self::InvalidDepositRequest,
         }
     }
@@ -425,12 +424,16 @@ mod tests {
 
     use super::ConsignmentError;
 
+    /// 季窗与日历都是服务端配置输入：配置缺失不能记作客户端 400。
     #[test]
-    fn invalid_season_window_is_service_unavailable() {
-        assert_eq!(
-            ConsignmentError::from(DepositError::InvalidSeasonWindow).api_error(),
-            Some((503, "consignment_unavailable"))
-        );
+    fn season_window_and_calendar_are_service_unavailable() {
+        for error in [DepositError::InvalidSeasonWindow, DepositError::InvalidCalendar] {
+            assert_eq!(
+                ConsignmentError::from(error).api_error(),
+                Some((503, "consignment_unavailable")),
+                "{error:?}"
+            );
+        }
     }
 
     /// 代管态与 v1 mutation 的组合是确定拒绝，不能退化成可重试的 503；未知组合仍失败关闭。

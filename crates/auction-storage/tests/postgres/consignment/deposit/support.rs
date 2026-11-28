@@ -258,6 +258,7 @@ pub fn observation_and_asset() -> String {
                    \"canonical_alias_ambiguous\":false,\"unknown_attachment\":false,
                    \"system_rts\":false,\"legacy_auction_owner\":null,
                    \"received_minute_raw\":\"2026-01-01T03:00\",
+                   \"asset_count\":1,
                    \"items\":[{{\"ordinal\":1,\"world\":\"main\",\"tradeable\":true,
                                \"history_ok\":true}}]}}'::jsonb,
                  NULL);

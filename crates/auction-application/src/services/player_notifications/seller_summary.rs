@@ -18,11 +18,15 @@ use crate::ports::mail::{
 use crate::ports::player_notifications::{PlayerNotificationError, SellerSummaryLotFact};
 use crate::services::public::{format_credits, lot_code};
 
-/// 汇总正文上限；超出时不截断结算结果，直接不创建通知。
+/// 汇总正文字节上限；列表按剩余预算逐条追加，尾部计数与合计仍覆盖全部 lot。
 pub const MAX_SELLER_SUMMARY_BODY_BYTES: usize = 16 << 10;
 
 /// 正文最多列出的 lot 数；其余只给计数，避免单封邮件无限增长。
 pub const MAX_SELLER_SUMMARY_LOTS: usize = 64;
+
+/// 为“其余 lot”提示与尾部统计预留的字节；按此预算裁剪列表，精确合计不会被挤掉。
+/// 尾部上界约为“清单省略数（≤ 20 位）+ 两个计数 + i64 千分位金额 + 固定尾句”共 200 字节。
+const SELLER_SUMMARY_TAIL_RESERVE_BYTES: usize = 512;
 
 /// 汇总的固定主题；正文才是逐卖方冻结内容。
 pub const SELLER_SUMMARY_SUBJECT: &str = "Auction session results";
@@ -115,9 +119,10 @@ pub fn group_seller_summaries(
     Ok(summaries)
 }
 
-/// 由已合并事实生成冻结正文；超出正文预算返回 `None`，不截断结果。
+/// 由已合并事实生成冻结正文；列表按字节预算逐条追加，尾部计数与合计仍覆盖全部 lot。
 pub fn seller_summary_body(summary: &SellerSummary) -> Option<String> {
     let sold_total = summary.sold_total()?;
+    let listing_budget = MAX_SELLER_SUMMARY_BODY_BYTES - SELLER_SUMMARY_TAIL_RESERVE_BYTES;
     let mut body = String::with_capacity(160 + summary.lots.len() * 96);
     body.push_str("Your auction session has been settled.\n\n");
     body.push_str(&format!("Session: {} #{}\n\n", summary.world, summary.sequence));
@@ -127,16 +132,19 @@ pub fn seller_summary_body(summary: &SellerSummary) -> Option<String> {
         if listed >= MAX_SELLER_SUMMARY_LOTS {
             break;
         }
-        listed += 1;
-        let price = lot.sold_price.unwrap_or_default();
-        body.push_str(&format!(
+        let line = format!(
             "- {}: {} - {} Credits\n",
             lot_code(&lot.category, lot.category_number),
             lot.equipment_name,
-            format_credits(price)
-        ));
+            format_credits(lot.sold_price.unwrap_or_default())
+        );
+        if body.len() + line.len() > listing_budget {
+            break;
+        }
+        body.push_str(&line);
+        listed += 1;
     }
-    if listed == 0 {
+    if summary.sold_count() == 0 {
         body.push_str("- none\n");
     }
     body.push_str("\nUnsold:\n");
@@ -145,14 +153,15 @@ pub fn seller_summary_body(summary: &SellerSummary) -> Option<String> {
         if unsold_listed >= MAX_SELLER_SUMMARY_LOTS {
             break;
         }
+        let line =
+            format!("- {}: {}\n", lot_code(&lot.category, lot.category_number), lot.equipment_name);
+        if body.len() + line.len() > listing_budget {
+            break;
+        }
+        body.push_str(&line);
         unsold_listed += 1;
-        body.push_str(&format!(
-            "- {}: {}\n",
-            lot_code(&lot.category, lot.category_number),
-            lot.equipment_name
-        ));
     }
-    if unsold_listed == 0 {
+    if summary.unsold_count() == 0 {
         body.push_str("- none\n");
     }
     let hidden = summary.lots.len().saturating_sub(listed + unsold_listed);
@@ -325,5 +334,25 @@ mod tests {
             group_seller_summaries(vec![fact("alice", 1, Some(50_000)), fact("alice", 1, None)])
                 .expect_err("同一 lot 不能出现两次");
         assert_eq!(error, PlayerNotificationError::InvalidSellerSummary);
+    }
+
+    /// 名称很长的结算组也必须生成正文：列表按预算裁剪，尾部合计仍然精确。
+    #[test]
+    fn large_summaries_are_listed_within_the_body_budget() {
+        let long_name = "N".repeat(400);
+        let facts = (1..=64_u32)
+            .flat_map(|lot_number| {
+                let mut sold = fact("alice", lot_number, Some(1_000));
+                sold.equipment_name = long_name.clone();
+                let mut unsold = fact("alice", lot_number + 64, None);
+                unsold.equipment_name = long_name.clone();
+                [sold, unsold]
+            })
+            .collect::<Vec<_>>();
+        let summary = group_seller_summaries(facts).expect("合法事实必须聚合").remove(0);
+        let body = seller_summary_body(&summary).expect("大组也必须生成正文");
+        assert!(body.len() <= MAX_SELLER_SUMMARY_BODY_BYTES, "{}", body.len());
+        assert!(body.contains("Totals: 64 sold, 64 unsold, 64,000 Credits."), "{body}");
+        assert!(body.contains("more lots not listed here"), "{body}");
     }
 }

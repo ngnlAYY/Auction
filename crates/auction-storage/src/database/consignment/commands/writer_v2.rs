@@ -218,7 +218,12 @@ impl<'w, 'tx, 'conn> DepositWriter<'w, 'tx, 'conn> {
                 actor: audit_actor(&self.actor),
                 request_id: self.request_id,
                 action: operation_action(self.operation),
-                listing_id: None,
+                // 挂单目标的审计与 v1 同形状（entity_type=consignment_listing），
+                // Admin 读模型的 admin_delist_reason 连接依赖该实体与 listing id。
+                listing_id: match &self.target {
+                    DepositTarget::Listing(listing_id) => Some(*listing_id),
+                    _ => None,
+                },
                 accepted: result.status < 400,
                 now,
                 command_id,

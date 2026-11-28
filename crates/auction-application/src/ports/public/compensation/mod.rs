@@ -99,6 +99,9 @@ impl PublicCompensationRound {
             || self.tax_income < 0
             || self.discount_demand < 0
             || self.compensation_out < 0
+            // 补偿支出不得超过该场名义折扣需求；与结算计划和 Admin 报告同一不变式，公开页不能
+            // 展示超过名义需求的兑付率。
+            || self.compensation_out > self.discount_demand
             || self.closing_balance < 0
             || self.movement_count < 2
             || self.movement_count > i64::from(i32::MAX)

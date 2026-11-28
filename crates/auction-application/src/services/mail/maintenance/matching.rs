@@ -97,14 +97,20 @@ pub(super) fn notice_subject_matches(expected: &str, list_subject: &str) -> bool
     if expected.starts_with(list_subject) {
         return true;
     }
-    let without_replacement = list_subject.trim_end_matches('\u{FFFD}');
-    if !without_replacement.is_empty() && expected.starts_with(without_replacement) {
-        return true;
+    // 字节截断可能先留下 U+FFFD，再由页面补上省略号；与 mail_recipient_is_list_projection
+    // 一样循环剥离，否则带两种标记的有效截断会被拒。
+    let mut prefix = list_subject;
+    loop {
+        let shorter = prefix
+            .strip_suffix('\u{FFFD}')
+            .or_else(|| prefix.strip_suffix('\u{2026}'))
+            .or_else(|| prefix.strip_suffix("..."));
+        match shorter {
+            Some(shorter) => prefix = shorter,
+            None => break,
+        }
     }
-    without_replacement
-        .strip_suffix("\u{2026}")
-        .or_else(|| without_replacement.strip_suffix("..."))
-        .is_some_and(|prefix| !prefix.is_empty() && expected.starts_with(prefix))
+    !prefix.is_empty() && expected.starts_with(prefix)
 }
 
 pub(super) fn sent_matches(

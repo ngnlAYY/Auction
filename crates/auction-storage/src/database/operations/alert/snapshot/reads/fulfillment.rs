@@ -93,7 +93,11 @@ pub(in crate::database::operations::alert::snapshot) const FULFILLMENT_SNAPSHOT:
                     AND fulfillment.last_error_code IN (
                         'settlement_return_held', 'settlement_return_inbox'
                     )
-                    AND returned.status IN ('held', 'inbox_closed'))) AS failure_disposed,
+                    AND EXISTS (
+                        SELECT 1 FROM public.settlement_return_cases AS closed_case
+                        WHERE closed_case.delivery_id = fulfillment.delivery_id
+                          AND closed_case.status IN ('held', 'inbox_closed')
+                    ))) AS failure_disposed,
                -- 已由结算退件案件接管的人工对账：改按退件待办计数，不再计入履约人工对账。
                (returned.return_mail_id IS NOT NULL AND returned.closed_at IS NULL) AS return_open,
                -- 原投递本轮的系统退件已被恢复流程消费：邮件已退回 Bot，由恢复流程承担。

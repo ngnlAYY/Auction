@@ -147,9 +147,13 @@ impl AdminMailIntakeFilter {
         Ok(())
     }
 
-    /// 返回已校验数字页的零基偏移。
+    /// 返回数字页的零基偏移。未先调用 `validate` 的输入不会 panic：偏移饱和到
+    /// `[0, MAX_ADMIN_MAIL_OFFSET]`，再由页面校验继续拒绝。
     pub fn offset(&self) -> i64 {
-        (self.page - 1) * self.page_size
+        self.page
+            .checked_sub(1)
+            .and_then(|page| page.checked_mul(self.page_size))
+            .map_or(MAX_ADMIN_MAIL_OFFSET, |offset| offset.clamp(0, MAX_ADMIN_MAIL_OFFSET))
     }
 }
 

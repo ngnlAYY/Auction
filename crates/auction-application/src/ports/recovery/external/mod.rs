@@ -265,6 +265,8 @@ pub enum SentDetailMatch {
 }
 
 /// Sent 列表标题会被服务端按字节截断；只接受可证明的前缀。
+/// 截断点可能同时留下替换符与省略号且顺序不定，与收件人投影一样循环剥离，取最长可证明前缀。
+/// 该判定只用于筛选详情候选（详情仍要求完整身份），放宽只会多读详情，不能单独产生隔离。
 pub fn subject_is_list_projection(list_subject: &str, detail_subject: &str) -> bool {
     if list_subject.is_empty() || detail_subject.is_empty() {
         return false;
@@ -272,14 +274,18 @@ pub fn subject_is_list_projection(list_subject: &str, detail_subject: &str) -> b
     if detail_subject.starts_with(list_subject) {
         return true;
     }
-    let without_replacement = list_subject.trim_end_matches('\u{FFFD}');
-    if !without_replacement.is_empty() && detail_subject.starts_with(without_replacement) {
-        return true;
+    let mut prefix = list_subject;
+    loop {
+        let shorter = prefix
+            .strip_suffix('\u{FFFD}')
+            .or_else(|| prefix.strip_suffix('\u{2026}'))
+            .or_else(|| prefix.strip_suffix("..."));
+        match shorter {
+            Some(shorter) => prefix = shorter,
+            None => break,
+        }
     }
-    let without_ellipsis = without_replacement
-        .strip_suffix('\u{2026}')
-        .or_else(|| without_replacement.strip_suffix("..."));
-    without_ellipsis.is_some_and(|prefix| !prefix.is_empty() && detail_subject.starts_with(prefix))
+    !prefix.is_empty() && detail_subject.starts_with(prefix)
 }
 
 /// 列表行是否可能属于该投递；只用于筛选详情候选，不能单独产生隔离。

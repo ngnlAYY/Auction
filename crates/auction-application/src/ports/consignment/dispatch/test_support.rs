@@ -219,7 +219,20 @@ impl DispatchStore for FakeDispatch {
                 WriteStartDecision::First => {}
                 WriteStartDecision::Already => {
                     let existing = existing.ok_or(ConsignmentError::Unavailable)?;
-                    return Ok(WriteStartOutcome::AlreadyCommitted(existing));
+                    // 与 `mark_write_started_in_tx` 一致：回放沿用已存 attempt/fence，但回执属于本次
+                    // 命令；新命令也写下自己的成功回执，重放不再借用首个命令的身份。
+                    let receipt = StartReceipt::started(
+                        command.command_id,
+                        existing.decision_id,
+                        existing.work_id,
+                        existing.attempt_id,
+                        existing.fence,
+                    );
+                    state.ledger.insert(
+                        command.command_id,
+                        (command.request_hash, Reply::Started(receipt.clone())),
+                    );
+                    return Ok(WriteStartOutcome::AlreadyCommitted(receipt));
                 }
                 WriteStartDecision::Reject(rejection) => {
                     let error = match rejection {

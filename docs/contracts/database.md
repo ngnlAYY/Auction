@@ -478,11 +478,34 @@ Worker 心跳的 `details.worker_cold_config` 为 `{"version":1,"sha256":"<64 �
 - `000123` 把恢复后 quarantine 与 delivery 当前 fence/状态推进同事务绑定，按各退件截止区间逐一归属可能外达的 Send；退件 action 的状态推进保持版本单调且身份字段不变，并只修复唯一可证明的历史案件。
 - `000124` 为 `mailbox_sweep_cursors` 持久化 sweep 与 attempt 身份；迟到批次不能回退游标，只有当前轮已无待处理后缀时才能回绕。`000014`/`000032` 的 intake 目标仍以每世界唯一 intake auction、唯一 target 和事务级世界锁维护。
 
+### 审计补充数据库不变量（schema 139–140）
+
+- `000139` 为 `bids` 与 `audit_records` 补语句级 `BEFORE TRUNCATE` 触发器，复用既有拒绝函数；行级只追加触发器不拦截 `TRUNCATE`，运行账号另有权限层拒绝。
+- `000140` 在 `lots` 写入时要求 `auctions.world_id` 与 `equipment.world_id` 一致，并以延迟约束触发器要求 `slow_authorization_id` 属于本 lot 且 `mode = 'slow'`；只约束新写入，既有行不回填。
+
+### 审计补充数据库不变量（schema 141–144）
+
+- `000141` 让 PM 提醒的发送围栏单向：`status` 只能从 `claimed` 进入 `sending`，`succeeded` 与 `suppressed` 是不可回退终态；`sending_at` 与 sender 仍不可改，撤销发送后的取消另由 `000042` 的既有围栏处理。已完成的 PM 不能重新进入发送队列再外写一次。
+- `000142` 要求 `record_carrier` 的 1-credit 发行分录复用冻结来源的 `proof_digest`，与 `record_opening` 及三个 record-only 分支一致；以独立 `BEFORE INSERT` 触发器补齐，既有函数、来源与历史分录不改写。
+- `000143` 把 `forum_identity_history` 收口为只追加（行级拒绝 `UPDATE`/`DELETE`、语句级拒绝 `TRUNCATE`），运行账号只保留 `SELECT`、`INSERT`；授权入口每次重放都重申该写入面。同一次入口执行还以失败关闭检查运行账号对 `public` 的直接 `CREATE`（`000122` 只撤销 `PUBLIC` 的授权）与 public 序列的 `UPDATE`（`000122` 的继承检查只覆盖表）。
+- `000144` 要求结算履约的准备身份（`prepare_command_id`/`prepare_request_digest`）与激活身份（`activate_command_id`/`activate_request_digest`）分别成对出现，且激活身份晚于准备身份；两条约束以 `NOT VALID` 加入，历史行（含“有 delivery、无身份”的既有形状）原样保留，新写入立即受约束。
+
+### 审计补充数据库不变量（schema 145–152）
+
+- `000145` 把 000123 的恢复 Send/退件唯一归属延伸到闭账后的追加事实：新增延迟约束触发器在提交前重跑归属函数，`settlement_recovery_return_consumptions` 与 `delivery_send_attempts` 的写入不得再破坏已闭账恢复的唯一归属。
+- `000146` 把场次结算池余额从仅上界收紧为完整等式：`closing = opening + tax - compensation`（启用补偿池）或 `closing = opening`（禁用）；以 `NOT VALID` 加入，历史行保留，新写入立即受约束。
+- `000147` 要求结算义务的前置义务在同一 `auction_id`/`lot_id`/`equipment_id`/`contract_id` 身份内，并拒绝成环或超过 64 层的前置链；延迟约束触发器只约束新写入。
+- `000148` 在写入 `settlement_return_takes` 时核对案件的世界、义务与原派发，以及 Take 投递的来源、载荷世界/操作与外部 MID，不再只在 `manual_reconcile → satisfied` 时校验。
+- `000149` 要求 `stage = 'refunding'` 的恢复必须已有 `resolution = 'equipment_recovered'`；`NOT VALID` 只约束新写入，修复 000005 在 `resolution IS NULL` 时的 CHECK NULL 漏洞。
+- `000150` 把 000024 中 `failed` 且从未写入 thread/title/body 的论坛主题从 `legacy_global` 重分类为 `category_v1`；有内容的 failed 行保持原方案。
+- `000151` 要求 `snapshot_invalid` 与 `filter_rejected` 诊断必须带字符串 `detail_code`，补齐 000056 在 JSON null 上求值为 NULL 的分支；Admin 读侧同步拒绝这两类的空原因码。
+- `000152` 对账户挂单的 `withdraw` 命令事件要求 `actor_ref` 等于卖家账户 ID；匿名挂单的同名账户门保持不变。
+
 ## 共有约束
 
 - **幂等账本**：每个写命令 owner 都有命令表，以 `command_id` 为键保存 32 字节请求摘要与结果。同 ID 同摘要重放、异摘要冲突。
 - **乐观版本**：可变聚合（拍卖、lot、用户、义务、投递等）带 `state_version` 或 `fencing_version`，命令以期望版本做 CAS。
-- **只追加事实**：出价、代理转换、黑名单历史、审计、发送/收取尝试及 Sent 绑定、COD 退回计数、历史核对证明、场次与 lot 结算结果、补偿账本及冲正由触发器拒绝 UPDATE/DELETE，运行账号在权限层同样只有 `INSERT`（见[数据库账号与权限](#数据库账号与权限)）。资金账户仅冻结 `accounting_mode`/`policy_version`，其他运行状态可变；改名的原始名称证据保留，但撤销会更新 `user_renames.reverted_at`。
+- **只追加事实**：出价、代理转换、黑名单历史、论坛身份历史（迁移 `000143`）、审计、发送/收取尝试及 Sent 绑定、COD 退回计数、历史核对证明、场次与 lot 结算结果、补偿账本及冲正由触发器拒绝 UPDATE/DELETE，运行账号在权限层同样只有 `INSERT`（见[数据库账号与权限](#数据库账号与权限)）。资金账户仅冻结 `accounting_mode`/`policy_version`，其他运行状态可变；改名的原始名称证据保留，但撤销会更新 `user_renames.reverted_at`。
 - **租约与 fencing**：Worker 领取的工作项（拍卖调度、结算、履约、投递、恢复、邮件轮询、论坛同步、私信、告警）都有 `lease_token`/`lease_expires_at` 与单调递增的 fencing 版本；租约过期可被重新领取，处于“发送中”的外部写入在结果未知时转为人工对账，绝不自动重发。
 - **事务**：竞价、关键生命周期等命令使用 Serializable 隔离，序列化失败（40001）与死锁（40P01）由 owner 有界重试；同一幂等命令 ID 使用共用事务级 advisory lock 协调。运行期 claim、进度及部分账本写入也使用默认隔离事务，以行锁、租约/fencing、唯一约束等保障各自不变量，并非所有写入都是 Serializable。
 - **失败诊断**：SQL 通用失败在原错误变体中附加 SQLSTATE 类别/代码及可用的约束名、表名，不保留驱动原文或业务值；字段可能缺失，错误文本不得决定自动重试或重发。格式与安全边界见 [crates/auction-storage/README.md#sql-错误安全上下文](../../crates/auction-storage/README.md#sql-错误安全上下文)，不改变数据库 schema 或事务契约。
@@ -495,16 +518,16 @@ Worker 心跳的 `details.worker_cold_config` 为 `{"version":1,"sha256":"<64 �
 迁移 owner 与运行账号分离。owner 是应用数据库 owner，只供 `auction-cli` 的
 `db create`、`db migrate`、`db rebuild`、`backup restore` 与 `service start/restart` 使用，
 凭据固定在 owner-only 的独立敏感 TOML（`--owner-secrets`）。Public、Admin 与 Worker 共用一个
-运行账号 `auction_runtime`，角色本身在集群中预先创建，权限由迁移 `000081` 建立、`000122` 校验并由 `000131` 收紧资金来源写入面；`000131` 的入口每次执行都收回授权链各函数的执行权，`--no-privileges` 恢复后重放同样重新收口。
+运行账号 `auction_runtime`，角色本身在集群中预先创建，权限由迁移 `000081` 建立、`000122` 校验并由 `000131` 收紧资金来源写入面；`000143` 的入口在此基础上收口论坛身份历史与直接/继承的 DDL、序列写权限。`000131` 的入口每次执行都收回授权链各函数的执行权，`--no-privileges` 恢复后重放同样重新收口。
 
 | 对象面 | 运行账号权限 |
 | --- | --- |
 | `public` schema | 只有 `USAGE`；`CREATE` 被撤销，因此不能建表、索引、视图、触发器或函数 |
 | 普通可变表 | `SELECT`、`INSERT`、`UPDATE`、`DELETE`；任何表都没有 `TRUNCATE` |
 | `settlement_funding_sources` | 运行账号有 `SELECT`，且仅可插入 `id`、`uid`、`kind`、`source_key`、`amount`、`proof_digest`；不可指定或改写 `issued_amount`，计数器只由分录触发器更新。权限重放同样保留此列级限制 |
-| 只追加事实表（触发器拒绝 `UPDATE`/`DELETE`）：`auction_settlements`、`audit_records`、`bid_proxy_authorization_transitions`、`bids`、`compensation_ledger`、`compensation_pool_reversals`、`delivery_dispositions`、`delivery_external_quarantines`、`delivery_send_attempts`、`delivery_sent_bindings`、`delivery_sent_confirmations`、`delivery_take_attempts`、`lot_settlements`、`mail_template_events`、`runtime_switch_events`、`settlement_equipment_losses`、`settlement_legacy_bot_seller_claims`、`settlement_legacy_self_reconciliations`、`settlement_recovery_return_consumptions`、`settlement_return_evidence`、`settlement_return_commands`、`settlement_return_events`、`settlement_return_takes`、`settlement_return_verifications`、`settlement_fulfillment_dispatches`、`settlement_funding_delivery_bindings`、`settlement_funding_returns`、`user_blacklist_history` | 只有 `SELECT`、`INSERT` |
+| 只追加事实表（触发器拒绝 `UPDATE`/`DELETE`，语句级触发器拒绝 `TRUNCATE`）：`auction_settlements`、`audit_records`、`bid_proxy_authorization_transitions`、`bids`、`compensation_ledger`、`compensation_pool_reversals`、`delivery_dispositions`、`delivery_external_quarantines`、`delivery_send_attempts`、`delivery_sent_bindings`、`delivery_sent_confirmations`、`delivery_take_attempts`、`forum_identity_history`（迁移 `000143`）、`lot_settlements`、`mail_template_events`、`runtime_switch_events`、`settlement_equipment_losses`、`settlement_legacy_bot_seller_claims`、`settlement_legacy_self_reconciliations`、`settlement_recovery_return_consumptions`、`settlement_return_evidence`、`settlement_return_commands`、`settlement_return_events`、`settlement_return_takes`、`settlement_return_verifications`、`settlement_fulfillment_dispatches`、`settlement_funding_delivery_bindings`、`settlement_funding_returns`、`user_blacklist_history` | 只有 `SELECT`、`INSERT` |
 | 冻结证据与登记：`settlement_pools`、`schema_migration_compatibility`、`_sqlx_migrations` | 只有 `SELECT` |
-| 序列 | 只有 `USAGE`、`SELECT`；不授予 `UPDATE`，运行账号不能 `setval` |
+| 序列 | 只有 `USAGE`、`SELECT`；不授予 `UPDATE`，运行账号不能 `setval`；迁移 `000143` 的入口对仍存在的直接/继承 `UPDATE` 失败关闭 |
 
 迁移 `000081` 以固定角色名授权；`auction_runtime` 不存在、可登录属性不合格、是 superuser /
 `CREATEDB` / `CREATEROLE` / `BYPASSRLS` / `REPLICATION`、拥有 `public` schema 或其对象、或可继承

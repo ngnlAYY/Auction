@@ -132,6 +132,7 @@ impl DepositTarget {
                 | (Self::Listing(_), DepositOperation::AdminDelist)
                 | (Self::Listing(_), DepositOperation::ReleaseOperationsHold)
                 | (Self::Listing(_), DepositOperation::Relist)
+                | (Self::Listing(_), DepositOperation::FulfillWithdrawIntent)
                 | (Self::Position(_), DepositOperation::ConfirmPositionLoss)
                 | (Self::Position(_), DepositOperation::RecordLossCaseOutcome)
                 | (Self::Position(_), DepositOperation::RecordPositionLossProof)

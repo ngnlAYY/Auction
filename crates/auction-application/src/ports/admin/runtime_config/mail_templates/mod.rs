@@ -189,12 +189,17 @@ impl AdminRuntimeMailTemplatesConfig {
     /// 可选占位符由调用方传空串表示“该行不出现”，渲染本身不接受缺项。
     pub fn render(&self, key: &str, variables: &[(&str, &str)]) -> Option<String> {
         let template = self.body(key)?;
+        // 占位符闭集在这里也失败关闭：调用方多传的同名变量不能把闭集外的占位符展开成正文。
+        let allowed = placeholder_rule(key).1;
         let mut output = String::with_capacity(template.len());
         let mut cursor = 0;
         while let Some(relative_start) = template[cursor..].find('{') {
             let start = cursor + relative_start;
             let end = start + 1 + template[start + 1..].find('}')?;
             let placeholder = &template[start + 1..end];
+            if !allowed.contains(&placeholder) {
+                return None;
+            }
             let value = variables.iter().find(|(name, _)| *name == placeholder)?.1;
             // 按展开后的字节数限流；重复占位符不能先膨胀成巨型正文再交给发送校验。
             if output.len().checked_add(start - cursor)?.checked_add(value.len())?

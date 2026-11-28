@@ -121,7 +121,10 @@ fn deposit<T: DepositReceipt>(
     if stored.body.get("disposition").and_then(Value::as_str) == Some("rejected") {
         let code = stored.body.get("code").and_then(Value::as_str).unwrap_or_default();
         let rejection = decode_rejection(code).ok_or_else(corrupt)?;
-        if i16::try_from(rejection.status()).ok() != Some(stored.status) {
+        // 账本列与正文必须指同一个闭集码；数据库只分别约束状态码，不能代替这里的一致性核对。
+        if stored.code.as_str() != code
+            || i16::try_from(rejection.status()).ok() != Some(stored.status)
+        {
             return Err(corrupt());
         }
         return Ok(OwnedDepositDecision::Rejected(rejection));

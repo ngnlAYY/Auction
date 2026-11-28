@@ -175,8 +175,9 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
         && snapshot.origin_kind == "operations_alert"
         && snapshot.reason_code.as_deref() == Some("operations_alert_batch_terminal")
     {
+        // 抑制原因是该失败码的投影；真实行必然带 `suppression_reason == failure_code`。
         return snapshot.retirement_reason.is_none()
-            && snapshot.suppression_reason.is_none()
+            && snapshot.suppression_reason.as_deref() == snapshot.failure_code.as_deref()
             && snapshot.lease_expires_at.is_none()
             && snapshot.claimed_at.is_none()
             && snapshot.sending_at.is_none()
@@ -236,6 +237,7 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
     {
         return snapshot.origin_kind == "settlement"
             && snapshot.reason_code.is_none()
+            && snapshot.fencing_version > 0
             && snapshot.lease_expires_at.is_none()
             && snapshot.sending_at.is_none()
             && snapshot.external_reference.is_none()

@@ -8,6 +8,10 @@ use std::time::Duration;
 
 use crate::ports::delivery::DELIVERY_PREFLIGHT_TIMEOUT;
 
+/// 结算履约投递的 `deliveries.origin_kind`；它不在 `MailDeliveryOrigin` 闭集内（后者只描述
+/// 邮件摄取 payload 的来源），模板键也不属于 `MailNotificationTemplate`。
+const SETTLEMENT_DELIVERY_ORIGIN: &str = "settlement";
+
 /// 出站通知种类闭集；label 使用冻结的模板键或通知身份名。
 ///
 /// 每个变体都必须出现在 `docs/guide/mail-flows.md` 的“通知目录”表中，
@@ -107,6 +111,11 @@ impl NotificationKind {
         if operation != Some("send") {
             return None;
         }
+        // 结算履约的 origin 与模板都不在邮件摄取闭集内；只接受结算送达的六种通知，
+        // 其他模板借该 origin 出现时一律不归类（Worker 终态映射另有同一判定）。
+        if origin_kind == SETTLEMENT_DELIVERY_ORIGIN {
+            return Self::from_template(template?).filter(|kind| kind.is_settlement());
+        }
         let origin = crate::ports::mail::MailDeliveryOrigin::from_name(origin_kind)?;
         let expected_origin = template.and_then(|template| {
             crate::ports::mail::MailNotificationTemplate::from_name(template)
@@ -120,6 +129,19 @@ impl NotificationKind {
             return None;
         }
         Self::from_template(template?)
+    }
+
+    /// 是否为结算履约送达的通知；结算 payload 的模板键不在邮件摄取闭集内。
+    const fn is_settlement(self) -> bool {
+        matches!(
+            self,
+            Self::SettlementWinnerEquipmentCod
+                | Self::SettlementPaymentCarrier
+                | Self::SettlementPaymentReminder
+                | Self::SettlementEquipmentHandoff
+                | Self::SettlementSellerPayout
+                | Self::SettlementBuyerRefund
+        )
     }
 
     /// 由 MoogleMail 冻结模板键识别通知种类。
@@ -360,6 +382,19 @@ mod tests {
             None
         );
         assert_eq!(NotificationKind::from_delivery("settlement", Some("send"), None), None);
+        // 结算履约的六种通知由 "settlement" origin 送达；其他模板不能借该 origin 归类。
+        assert_eq!(
+            NotificationKind::from_delivery(
+                "settlement",
+                Some("send"),
+                Some("settlement_seller_payout"),
+            ),
+            Some(NotificationKind::SettlementSellerPayout)
+        );
+        assert_eq!(
+            NotificationKind::from_delivery("settlement", Some("send"), Some("register_key")),
+            None
+        );
         // 已退役的论坛回执不再是通知种类，残留模板名与其他未知模板一样不归类。
         assert_eq!(NotificationKind::from_template("forum_auction_notice"), None);
     }

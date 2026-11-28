@@ -145,6 +145,8 @@ impl AdminCredential {
             && valid_time(self.updated_at)
             && self.updated_at >= self.created_at
             && self.rotated_at.is_none_or(|value| value >= self.created_at)
+            // `rotated_at` 表示最近一次失效时间，写入时刻不晚于同一次变更的 `updated_at`。
+            && self.rotated_at.is_none_or(|value| value <= self.updated_at)
     }
 }
 

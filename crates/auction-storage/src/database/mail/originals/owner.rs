@@ -42,8 +42,8 @@ async fn resolve(
 ) -> Result<Option<LegacyAuctionOwner>, ConsignmentError> {
     let columns = MailKeyColumns::from_key(key);
     // 调用方传入的观察身份已经绑定本次重读的原信；只查这一行，避免并发追加后误用更新的观察。
-    let bound: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM public.mail_envelope_observations
+    let bound: Option<(Uuid, Option<String>)> = sqlx::query_as(
+        "SELECT id, sender FROM public.mail_envelope_observations
          WHERE id = $1 AND bot_uid = $2 AND world_id = $3 AND external_mid = $4",
     )
     .bind(observation_id)
@@ -53,7 +53,9 @@ async fn resolve(
     .fetch_optional(store.pool())
     .await
     .map_err(storage_unavailable)?;
-    if bound.is_none() {
+    // 来源证明与旧路由同口径：持久发件人必须恰为 MoogleMail（精确比较、不忽略大小写）。
+    let Some((_, Some(sender))) = bound else { return Ok(None) };
+    if sender != SYSTEM_RETURN_SENDER {
         return Ok(None);
     }
     let evidence = {
@@ -64,10 +66,8 @@ async fn resolve(
     };
     let Some(obligation_id) = evidence.obligation_id else { return Ok(None) };
     let Some(subject) = evidence.subject.as_deref() else { return Ok(None) };
-    // 来源证明与旧路由同口径：发件人必须恰为 MoogleMail，主题必须仍是规范结算主题。
-    if system_returned_settlement_obligation_id(SYSTEM_RETURN_SENDER, subject)
-        != Some(obligation_id)
-    {
+    // 主题必须仍是规范结算主题，且主题里的义务 ID 与该行一致。
+    if system_returned_settlement_obligation_id(&sender, subject) != Some(obligation_id) {
         return Ok(None);
     }
     let obligation: Option<(String, bool)> = sqlx::query_as(
@@ -83,12 +83,14 @@ async fn resolve(
     if obligation.as_ref().is_some_and(|(_, consignment)| *consignment) {
         return Ok(None);
     }
-    let Some(kind) = obligation.as_ref().and_then(|(kind, _)| parse_kind(kind)) else {
+    let Some((kind, _)) = obligation.as_ref() else {
         // E2：本地不存在的退款/卖款 UUID 仍按规范主题进入原案件；其余（尤其装备交付）
         // 无法区分退件案件与恢复流程，查不到时不猜，保持隔离。
         return Ok(subject_case_owner(subject, obligation_id));
     };
-    if !system_return_matches_obligation(SYSTEM_RETURN_SENDER, subject, kind, obligation_id) {
+    // 义务行存在但种类无法解析（只可能来自本版闭集之外的未来迁移）：不猜旧 owner。
+    let Some(kind) = parse_kind(kind) else { return Ok(None) };
+    if !system_return_matches_obligation(&sender, subject, kind, obligation_id) {
         return Ok(None);
     }
     match kind {

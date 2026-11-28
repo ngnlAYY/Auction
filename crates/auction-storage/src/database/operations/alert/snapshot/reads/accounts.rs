@@ -186,7 +186,8 @@ pub(super) async fn notification_snapshot(
                 )::bigint, 0) AS oldest_postage_age
              FROM public.deliveries d
              WHERE d.origin_kind NOT IN
-                 ('settlement', 'settlement_recovery_action', 'operations_alert')
+                 ('settlement', 'settlement_recovery_action',
+                  'settlement_return_action', 'operations_alert')
                AND /* undisposed */",
         );
         query = query.replace("/* undisposed */", UNDISPOSED).replace(

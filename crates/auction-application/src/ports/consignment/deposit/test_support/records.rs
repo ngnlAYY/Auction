@@ -121,6 +121,8 @@ pub(crate) struct FakeQuarantine {
     pub active: bool,
     pub observations: Vec<FakeObservation>,
     pub owner: Option<ReleaseKind>,
+    /// 解除时刻；只在解除提交时写入，重放不随测试时钟漂移。
+    pub released_at: Option<Timestamp>,
     pub release_receipt: Option<ReleaseReceipt>,
 }
 
@@ -128,6 +130,8 @@ pub(crate) struct FakeQuarantine {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WriteRecord {
     pub receipt: StartReceipt,
+    /// 该工作所属的最终决定；同一 work 换决定是确定冲突，不能回放别人的回执。
+    pub final_decision_id: Uuid,
     pub delivery_id: Uuid,
     pub fence: u64,
 }

@@ -85,6 +85,7 @@ pub(crate) fn decode_rejection(code: &str) -> Option<DepositBusinessRejection> {
         "custody_unproven" => DepositBusinessRejection::CustodyUnproven,
         "operations_hold" => DepositBusinessRejection::OperationsHold,
         "listing_limit_reached" => DepositBusinessRejection::ListingLimitReached,
+        "opposite_payment_open" => DepositBusinessRejection::OppositePaymentOpen,
         _ => return None,
     })
 }
