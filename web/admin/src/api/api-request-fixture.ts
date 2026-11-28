@@ -286,7 +286,12 @@ function pathParts(path: string): string[] {
       if (/~(?:[^01]|$)/u.test(part)) {
         throw new Error("字段路径转义无效");
       }
-      return part.replace(/~1/gu, "/").replace(/~0/gu, "~");
+      const key = part.replace(/~1/gu, "/").replace(/~0/gu, "~");
+      // 测试夹具只描述 JSON 数据；原型相关的键会让 setAt 改写 Object.prototype。
+      if (key === "__proto__" || key === "prototype" || key === "constructor") {
+        throw new Error("字段路径不得引用原型");
+      }
+      return key;
     });
 }
 

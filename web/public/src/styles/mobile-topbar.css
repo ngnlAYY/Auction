@@ -142,6 +142,12 @@
     white-space: nowrap;
   }
 
+  /* 倒计时标签（“剩余”“距开始”）在桌面单独占一格；两行栅格里没有它的位置，
+     不处理会自动占出整个第三行。只留倒计时本身，读屏信息由它的 aria-label 承担。 */
+  .public-console .console-ticker .console-ticker__label {
+    display: none;
+  }
+
   /* 倒计时排在世界名正下方；空间不够时截断，不另起一行。 */
   .public-console .console-ticker .console-ticker__context > .console-ticker__countdown {
     grid-row: 2;

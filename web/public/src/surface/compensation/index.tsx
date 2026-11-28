@@ -25,7 +25,7 @@ import { useContentLoading } from "../loading";
 import { normalizePublicPageSize, publicPageMatches, updatePublicPage } from "../pagination";
 import { usePublicPageBounds } from "../pagination/bounds";
 import { queryAuctionId } from "../query/board";
-import { readPublicQuery, updatePublicQueryPairs } from "../query/location";
+import { readPublicQueryForState, updatePublicQueryPairs } from "../query/location";
 import { usePageRouteGuard } from "../query/route-page";
 import {
   commitAuctionSelection,
@@ -234,7 +234,9 @@ export function poolPage(): JSX.Element {
               }}
               onSelectRound={(auctionId) => {
                 writeRoundSelection(
-                  queryAuctionId(readPublicQuery()) === auctionId ? null : auctionId,
+                  queryAuctionId(readPublicQueryForState(queryStateSignal)) === auctionId
+                    ? null
+                    : auctionId,
                 );
               }}
               onLotPageChange={(nextPage) => {

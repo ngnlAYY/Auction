@@ -175,6 +175,7 @@ export function decodeDelivery(value: AdminDeliveryResponse): Result<Delivery, n
     isZeroDeliveryTime(createdAt) ||
     isZeroDeliveryTime(updatedAt) ||
     updatedAt < createdAt ||
+    (claimedAt.value !== null && isZeroDeliveryTime(claimedAt.value)) ||
     (leaseExpiresAt.value !== null && isZeroDeliveryTime(leaseExpiresAt.value)) ||
     !validOptionalText(value.external_reference) ||
     !validOptionalText(value.failure_code) ||

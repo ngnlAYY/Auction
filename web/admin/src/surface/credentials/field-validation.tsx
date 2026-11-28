@@ -180,10 +180,20 @@ export interface CredentialFieldFeedback {
 /** 为一次凭据表单创建字段错误状态；离焦提示共用页面提供的播报器。 */
 export function useCredentialFields(announcer: FieldAnnouncer): CredentialFieldFeedback {
   const touched = new Set<CredentialField>();
+  const announced = new Map<CredentialField, CredentialFieldIssue | null>();
   const errors: Cell<CredentialFieldErrors> = createCell(credentialFieldErrorsDefault());
   return {
     error: (field) => credentialFieldErrorsGet(errors(), field),
-    show: (next) => errors.set(next),
+    show: (next) => {
+      errors.set(next);
+      // 提交失败已就地展示并聚焦播报；记录后离焦不重复播报同一条。
+      for (const field of CREDENTIAL_FIELD_ALL) {
+        const issue = credentialFieldErrorsGet(next, field);
+        if (issue !== null) {
+          announced.set(field, issue);
+        }
+      }
+    },
     edited: (field, value) => {
       touched.add(field);
       const previous = credentialFieldErrorsGet(errors.peek(), field);
@@ -201,20 +211,23 @@ export function useCredentialFields(announcer: FieldAnnouncer): CredentialFieldF
       }
       // 离焦时提示；仍有效的服务端错误保留至输入发生变化。
       const issue = credentialFieldIssue(field, value);
-      if (issue === null) {
-        return;
+      if (credentialFieldErrorsGet(errors.peek(), field) !== issue) {
+        errors.update((current) => credentialFieldErrorsSet(current, field, issue));
       }
-      if (credentialFieldErrorsGet(errors.peek(), field) === issue) {
-        return;
+      // 错误表只说明当前展示；播报记录单独跟踪，换成新消息时仍会播报。
+      if (announced.get(field) !== issue) {
+        announced.set(field, issue);
+        if (issue !== null) {
+          announcer.announceOnBlur(credentialFieldId(field), credentialFieldIssueMessage(issue));
+        }
       }
-      errors.update((current) => credentialFieldErrorsSet(current, field, issue));
-      announcer.announceOnBlur(credentialFieldId(field), credentialFieldIssueMessage(issue));
     },
     reset: (fields) => {
       errors.update((current) => {
         let next = current;
         for (const field of fields) {
           touched.delete(field);
+          announced.delete(field);
           next = credentialFieldErrorsSet(next, field, null);
         }
         return next;

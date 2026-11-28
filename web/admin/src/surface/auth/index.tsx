@@ -60,6 +60,7 @@ export function AdminShell() {
     return (
       readiness() !== undefined &&
       (current.error !== null ||
+        logoutRecovery() !== null ||
         (current.loggedOut && isLoginPath()) ||
         (current.session !== null && !isLoginPath() && !isDashboardPath()))
     );

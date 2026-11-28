@@ -76,7 +76,12 @@ function validMyBids(value: unknown): boolean {
     Array.isArray(proxies) &&
     proxies.every((proxy) => validOwnedProxy(proxy, null, false)) &&
     nonnegative(decoded.bid_total) &&
-    nonnegative(decoded.proxy_total)
+    nonnegative(decoded.proxy_total) &&
+    // 服务端保证每页条数不超过页长与总数；客户端同样失败关闭。
+    bids.length <= (int(decoded.page_size) ?? 0) &&
+    proxies.length <= (int(decoded.page_size) ?? 0) &&
+    bids.length <= (int(decoded.bid_total) ?? 0) &&
+    proxies.length <= (int(decoded.proxy_total) ?? 0)
   );
 }
 
@@ -180,8 +185,11 @@ function validOwnedProxy(value: unknown, lotId: string | null, trimmedEquipment:
     !validTransitions(decoded.transitions, decoded) ||
     !time(decoded.created_at) ||
     !time(decoded.updated_at) ||
+    // 服务端投影拒绝晚于创建时间的更新时间；浏览器信任边界保持同一顺序。
+    (timeValue(decoded.created_at) ?? 0) > (timeValue(decoded.updated_at) ?? 0) ||
     !validOwnedEquipment(decoded.equipment, trimmedEquipment) ||
     (bidPresent && !validOwnedBid(decoded.bid)) ||
+    (bidPresent && string(bid?.mechanism) !== "proxy") ||
     (bidPresent &&
       (string(bid?.auction_id) !== string(decoded.auction_id) ||
         string(bid?.lot_id) !== string(decoded.lot_id) ||

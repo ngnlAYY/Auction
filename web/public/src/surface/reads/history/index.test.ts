@@ -343,9 +343,14 @@ test("仅有空格买家的原始筛选也需要写址才能清除", async () =>
     }
     const draft = Reflect.get(filters, "draft");
     if (typeof draft !== "function") throw new Error("未装配筛选草稿");
+    // 503 的正文也不是错误信封，统一读取路径会另报一次 dto_decode；这里只核对成交读取。
+    const priceReads = () =>
+      fetcher.mock.calls
+        .map(([input]) => String(input))
+        .filter((path) => path.startsWith("/api/v1/price-history?"));
     await settleRead();
     expect(draft()).toMatchObject({ buyer: " " });
-    expect(fetcher.mock.calls.map(([input]) => String(input))).toEqual([
+    expect(priceReads()).toEqual([
       "/api/v1/price-history?buyer=+&sort=closed_desc&page=1&page_size=20",
     ]);
     mounted.rejectWrites("push");
@@ -353,7 +358,7 @@ test("仅有空格买家的原始筛选也需要写址才能清除", async () =>
     await settleRead();
     expect(draft()).toMatchObject({ buyer: " " });
     expect(mounted.location.search).toBe("?buyer=+&other=%2f");
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(priceReads()).toHaveLength(1);
 
     mounted.rejectWrites(false);
     clear();
@@ -361,7 +366,7 @@ test("仅有空格买家的原始筛选也需要写址才能清除", async () =>
     expect(draft()).toMatchObject({ buyer: "" });
     expect(mounted.location.search).toBe("?other=%2f");
     // 清空后没有任何条件，页面回到全部成交的第一页。
-    expect(fetcher.mock.calls.map(([input]) => String(input))).toEqual([
+    expect(priceReads()).toEqual([
       "/api/v1/price-history?buyer=+&sort=closed_desc&page=1&page_size=20",
       "/api/v1/price-history?sort=closed_desc&page=1&page_size=20",
     ]);

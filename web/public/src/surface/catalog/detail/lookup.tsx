@@ -25,7 +25,6 @@ import type { CatalogRow } from "../../../api/model";
 import { catalogRowFromDetail } from "../../../api/model";
 import {
   fetchLotDetail,
-  LOT_DETAIL_FETCH_ERROR,
   type LotDetailFetchError,
 } from "../../../api/queries/lots";
 import { PublicRefreshGenerationContext, useBidRefresh } from "../../board/refresh";
@@ -312,10 +311,13 @@ function LotDetailLookupSession(props: {
       if (row === null) {
         const page = await fetchLotDetail(target.lotId, context.signal);
         if (!context.alive()) return;
-        if (page.ok && page.value.auction_id === target.auctionId && page.value.lot !== null) {
-          row = catalogRowFromDetail(page.value.lot);
+        if (!page.ok) {
+          error = page.error;
+        } else if (page.value.lot === null || page.value.auction_id !== target.auctionId) {
+          // 权威详情明确回答目标不存在或归属另一场次：重试不可能成功，按缺失结案。
+          error = { kind: "not_found" };
         } else {
-          error = page.ok ? LOT_DETAIL_FETCH_ERROR : page.error;
+          row = catalogRowFromDetail(page.value.lot);
         }
       }
       // 只有当前条目与读取代号内的目标才能发布价格或失败状态。

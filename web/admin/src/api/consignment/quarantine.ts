@@ -26,9 +26,12 @@ const DETAIL_POLICY: JsonFieldPolicy = {
     ["data", "version"],
     ["data", "observation_total"],
     ["data", "observations", null, "attachment_count"],
+    ["data", "observations", null, "credits"],
+    ["data", "observations", null, "cod"],
     ["data", "observations", null, "items", null, "ordinal"],
     ["data", "observations", null, "items", null, "amount"],
     ["data", "release", "outcome", "original_round"],
+    ["data", "release", "outcome", "listing_changes", null, "listing_version"],
   ],
 };
 
@@ -43,10 +46,30 @@ const HOLD_POLICY: JsonFieldPolicy = {
 };
 
 type AdminSchemas = typeof import("@auction/contracts/dto/admin/consignment/quarantine");
-let adminSchemas: Promise<AdminSchemas> | undefined;
-function schemas() {
-  adminSchemas ??= import("@auction/contracts/dto/admin/consignment/quarantine");
+type DelistSchemas = typeof import("@auction/contracts/dto/admin/consignment");
+let adminSchemas: Promise<Result<AdminSchemas, string>> | undefined;
+let delistSchemas: Promise<Result<DelistSchemas, string>> | undefined;
+/** 只缓存已成功的模块加载；分块暂时失败后下一次调用仍可重试，且把拒绝转成稳定失败。 */
+function schemas(): Promise<Result<AdminSchemas, string>> {
+  adminSchemas ??= import("@auction/contracts/dto/admin/consignment/quarantine").then(
+    (module) => ok(module),
+    () => {
+      adminSchemas = undefined;
+      return err("network_error");
+    },
+  );
   return adminSchemas;
+}
+
+function delistSchemasModule(): Promise<Result<DelistSchemas, string>> {
+  delistSchemas ??= import("@auction/contracts/dto/admin/consignment").then(
+    (module) => ok(module),
+    () => {
+      delistSchemas = undefined;
+      return err("network_error");
+    },
+  );
+  return delistSchemas;
 }
 
 async function readResponse<T>(
@@ -82,7 +105,9 @@ export async function fetchAdminQuarantine(
   signal: AbortSignal,
 ): Promise<Result<InferOutput<AdminSchemas["QuarantineDetailSchema"]>, string>> {
   if (!is(ConsignmentUuidSchema, quarantineId)) return err("invalid_request");
-  const { QuarantineDetailSchema } = await schemas();
+  const schemasResult = await schemas();
+  if (!schemasResult.ok) return err(schemasResult.error);
+  const { QuarantineDetailSchema } = schemasResult.value;
   const result = await readResponse(
     host,
     `${DEPOSITS}/${quarantineId}`,
@@ -108,7 +133,12 @@ export async function prepareAdminQuarantineRecheck(
   quarantineId: string,
   expectedVersion: number,
 ): Promise<CommandOperation<InferOutput<AdminSchemas["QuarantineRecheckReceiptSchema"]>>> {
-  const { QuarantineRecheckRequestSchema, QuarantineRecheckReceiptSchema } = await schemas();
+  const schemasResult = await schemas();
+  if (!schemasResult.ok) {
+    const failure = writeNotSent(schemasResult.error);
+    return async () => err(failure);
+  }
+  const { QuarantineRecheckRequestSchema, QuarantineRecheckReceiptSchema } = schemasResult.value;
   const body = (commandId: string) => ({
     command_id: commandId,
     expected_version: expectedVersion,
@@ -166,7 +196,12 @@ export async function prepareAdminQuarantineRelease(
   observationId: string,
   proposedKind: InferOutput<AdminSchemas["QuarantineDecisionKindSchema"]>,
 ): Promise<CommandOperation<InferOutput<AdminSchemas["QuarantineReleaseReceiptSchema"]>>> {
-  const { QuarantineReleaseRequestSchema, QuarantineReleaseReceiptSchema } = await schemas();
+  const schemasResult = await schemas();
+  if (!schemasResult.ok) {
+    const failure = writeNotSent(schemasResult.error);
+    return async () => err(failure);
+  }
+  const { QuarantineReleaseRequestSchema, QuarantineReleaseReceiptSchema } = schemasResult.value;
   const body = (commandId: string) => ({
     command_id: commandId,
     expected_version: expectedVersion,
@@ -236,10 +271,17 @@ export async function prepareAdminHold(
   expectedVersion: number,
   reason: string,
 ): Promise<CommandOperation<AdminHoldOutcome>> {
-  const [{ ConsignmentDelistReceiptV2Schema }, { AdminDelistListingSchema }] = await Promise.all([
-    schemas(),
-    import("@auction/contracts/dto/admin/consignment"),
-  ]);
+  const [schemaResult, delistResult] = await Promise.all([schemas(), delistSchemasModule()]);
+  if (!schemaResult.ok) {
+    const failure = writeNotSent(schemaResult.error);
+    return async () => err(failure);
+  }
+  if (!delistResult.ok) {
+    const failure = writeNotSent(delistResult.error);
+    return async () => err(failure);
+  }
+  const { ConsignmentDelistReceiptV2Schema } = schemaResult.value;
+  const { AdminDelistListingSchema } = delistResult.value;
   const body = (commandId: string) => ({
     command_id: commandId,
     expected_version: expectedVersion,
@@ -302,7 +344,12 @@ export async function prepareAdminReleaseHold(
   expectedVersion: number,
   holdId: string,
 ): Promise<CommandOperation<InferOutput<AdminSchemas["ConsignmentHoldReceiptSchema"]>>> {
-  const { ReleaseConsignmentHoldRequestSchema, ConsignmentHoldReceiptSchema } = await schemas();
+  const schemasResult = await schemas();
+  if (!schemasResult.ok) {
+    const failure = writeNotSent(schemasResult.error);
+    return async () => err(failure);
+  }
+  const { ReleaseConsignmentHoldRequestSchema, ConsignmentHoldReceiptSchema } = schemasResult.value;
   const body = (commandId: string) => ({
     command_id: commandId,
     expected_version: expectedVersion,

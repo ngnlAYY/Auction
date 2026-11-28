@@ -312,9 +312,7 @@ export function RuntimeConfigDocument(): JSX.Element {
       currentCommand.document,
     );
     const requiresRestartForReceipt = requiresRestart();
-    updateConfirmOpen.set(false);
-    notice.set(null);
-    pending.submitWithReceipt<ConfigUpdateOutcome>(
+    const begun = pending.submitWithReceipt<ConfigUpdateOutcome>(
       "runtime-config",
       t("admin-runtime-update"),
       (commandId, signal) => updateRuntimeConfigCommand(host, commandId, prepared, signal),
@@ -333,6 +331,12 @@ export function RuntimeConfigDocument(): JSX.Element {
         setIfAlive(notice, { kind: "action-error", code }, () => pageAlive);
       },
     );
+    // 宿主未受理（会话不再允许写入或同一实体已有命令）时保留确认框与已冻结的候选。
+    if (!begun) {
+      return;
+    }
+    updateConfirmOpen.set(false);
+    notice.set(null);
   };
 
   return (

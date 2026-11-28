@@ -82,6 +82,7 @@ function validPreviewDetailEquipment(summary: JsonObject): boolean {
     optionalInt(equipment, "level") === optionalInt(summary, "equipment_level") &&
     optionalString(equipment, "primary_attribute_initials") ===
       optionalString(summary, "primary_attribute_initials") &&
+    (equipment.avg_roll ?? null) === (summary.avg_roll ?? null) &&
     string(equipment.game_equipment_url) === string(summary.game_equipment_url)
   );
 }
@@ -129,7 +130,8 @@ export function validEquipment(value: unknown, full: boolean): boolean {
     optionalStats(decoded, "stats") &&
     optionalFinite(decoded, "avg_roll") &&
     gameUrl(decoded.game_equipment_url) &&
-    (!full || (Object.hasOwn(decoded, "attributes") && validAttributes(decoded.attributes)))
+    (!Object.hasOwn(decoded, "attributes") || validAttributes(decoded.attributes)) &&
+    (!full || Object.hasOwn(decoded, "attributes"))
   );
 }
 

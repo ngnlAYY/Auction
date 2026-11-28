@@ -108,6 +108,13 @@ export const ListingActionSchema = v.picklist(["reprice", "withdraw"]);
 /** 本人挂单的允许动作。 */
 export type ListingAction = v.InferOutput<typeof ListingActionSchema>;
 
+/** 终态原因只能指向其固定的终态；与 `ListingReason::terminal_state` 同一张表。 */
+export function listingReasonTerminalState(reason: ListingReason): ListingState {
+  if (v.is(ClosedReasonSchema, reason)) return "closed";
+  if (v.is(ExpiredReasonSchema, reason)) return "expired";
+  return "rejected";
+}
+
 /** 解码时检查已发布状态与不可变模式是否相容。 */
 export function listingStateMatchesMode(state: ListingState, mode: ListingMode): boolean {
   if (state === "displayed") return mode === "direct";

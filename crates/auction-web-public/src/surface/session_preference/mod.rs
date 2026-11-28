@@ -62,6 +62,8 @@ pub(super) fn SessionPreference(user_id: String) -> Element {
     let busy = snapshot.busy;
     let pending = snapshot.pending.is_some();
     let ready = owner.session_ready() && snapshot.authoritative.is_some();
+    // 刷新只要求会话当前可读；ready 还要求已加载权威快照，会挡住加载失败后的手动恢复。
+    let refresh_enabled = owner.session_ready() && !busy;
     // 读取偏好由顶栏提示；保存是本表单的命令反馈，留在表单内。
     use_content_loading(busy && !pending);
     let controls_disabled = !ready || busy || pending;
@@ -184,7 +186,7 @@ pub(super) fn SessionPreference(user_id: String) -> Element {
                             }
                         } else {
                             button {
-                                r#type: "button", disabled: busy,
+                                r#type: "button", disabled: !refresh_enabled,
                                 aria_describedby: "session-duration-feedback",
                                 onclick: move |_| refresh.load(PreferenceRead::Refresh),
                                 {t!("session-duration-refresh")}

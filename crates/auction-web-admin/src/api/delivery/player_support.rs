@@ -17,14 +17,15 @@ pub(super) fn decode_player_support(
         || bundle.obligations.len() > MAX_PLAYER_SUPPORT_ROWS
         || bundle.deliveries.len() > MAX_PLAYER_SUPPORT_ROWS
         || bundle.notifications.len() > MAX_PLAYER_SUPPORT_ROWS
+        || bundle.references.len() > MAX_PLAYER_SUPPORT_ROWS
     {
         return Err(());
     }
     if let Some(user) = &bundle.user
         && (!valid_uuid(&user.id)
-            || user.username.is_empty()
+            || !valid_safe_text(&user.username, 256)
             || !matches!(user.status.as_str(), "active" | "blacklisted")
-            || user.game_player_id.as_deref().is_some_and(str::is_empty))
+            || user.game_player_id.as_deref().is_some_and(|id| !valid_safe_text(id, 256)))
     {
         return Err(());
     }
@@ -50,7 +51,7 @@ pub(super) fn decode_player_support(
             || !valid_uuid(&deal.auction_id)
             || deal.lot_number < 0
             || !valid_world(&deal.world_id)
-            || deal.equipment_name.is_empty()
+            || !valid_equipment_name(&deal.equipment_name)
             || !(0..=MAX_JSON_SAFE_INTEGER).contains(&deal.final_price)
         {
             return Err(());
@@ -64,6 +65,14 @@ pub(super) fn decode_player_support(
             || !valid_safe_text(&obligation.obligation_kind, 64)
             || !matches!(obligation.business_state.as_str(), "ready" | "blocked" | "contingent")
             || !(0..=MAX_JSON_SAFE_INTEGER).contains(&obligation.amount)
+            || obligation
+                .fulfillment_state
+                .as_deref()
+                .is_some_and(|state| !valid_safe_text(state, 64))
+            || obligation
+                .fulfillment_error_code
+                .as_deref()
+                .is_some_and(|code| !valid_safe_text(code, 96))
             || obligation.delivery_id.as_deref().is_some_and(|id| !valid_uuid(id))
         {
             return Err(());
@@ -79,6 +88,7 @@ pub(super) fn decode_player_support(
         if !valid_uuid(&notification.notification_id)
             || !matches!(notification.channel.as_str(), "mm" | "pm" | "pending")
             || !valid_safe_text(&notification.state, 64)
+            || notification.kind.as_deref().is_some_and(|kind| !valid_safe_text(kind, 64))
             || notification.lot_id.as_deref().is_some_and(|id| !valid_uuid(id))
             || notification.auction_id.as_deref().is_some_and(|id| !valid_uuid(id))
             || notification.delivery_id.as_deref().is_some_and(|id| !valid_uuid(id))
@@ -110,6 +120,11 @@ fn valid_reason_code(value: &str, maximum: usize) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+/// 装备名称按装备词典的原文边界：非空、至多 512 字节且不含控制字符。
+fn valid_equipment_name(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 512 && !value.chars().any(char::is_control)
 }
 
 pub(super) fn valid_world(world: &str) -> bool {

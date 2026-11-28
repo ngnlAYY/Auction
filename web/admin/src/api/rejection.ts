@@ -168,6 +168,8 @@ const REJECTION_RULES = new Map(
 // 寄售仅由 Solid 提供，裁定单独维护，不进入跨栈样本。
 const CONSIGNMENT_DELIST_REJECTIONS = new Map<string, { status: number; scope: Rejection }>([
   ["invalid_reason", { status: 400, scope: "this_attempt" }],
+  // 关闭门在任何存储写入前拒绝本次尝试。
+  ["consignment_disabled", { status: 404, scope: "this_attempt" }],
   ["listing_not_found", { status: 404, scope: "replay_checked" }],
   ["stale_version", { status: 409, scope: "replay_checked" }],
   ["listing_not_active", { status: 409, scope: "replay_checked" }],
@@ -176,6 +178,8 @@ const CONSIGNMENT_DELIST_REJECTIONS = new Map<string, { status: number; scope: R
   ["opposite_payment_open", { status: 409, scope: "replay_checked" }],
   ["evidence_unproven", { status: 409, scope: "replay_checked" }],
   ["evidence_conflict", { status: 409, scope: "replay_checked" }],
+  ["hold_mismatch", { status: 409, scope: "replay_checked" }],
+  ["source_mismatch", { status: 409, scope: "replay_checked" }],
   ["disposition_conflict", { status: 409, scope: "replay_checked" }],
   ["action_not_allowed", { status: 403, scope: "replay_checked" }],
 ]);

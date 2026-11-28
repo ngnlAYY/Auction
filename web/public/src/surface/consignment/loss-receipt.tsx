@@ -15,6 +15,7 @@ import { validConsignmentUuid } from "../../api/consignment-private";
 
 import { PrivateConsignmentPage, PrivateReadError } from "./private-page";
 import { ConsignmentEmpty } from "./read-view";
+import { useConsignmentRefresh } from "./refresh";
 
 function stateKey(state: LossCase["state"]): string {
   switch (state) {
@@ -56,6 +57,10 @@ function LossReceipt(props: {
   const read = createTaskResource(props.canUse, async (authorized, context) =>
     authorized ? fetchLossCase(props.userId, props.positionId, context.signal) : null,
   );
+  // 案件状态由后台审理推进且没有公开订阅；可见与恢复焦点时重读权威回执，避免长期显示过期阶段。
+  useConsignmentRefresh(props.canUse, () => {
+    if (props.canUse()) read.restart();
+  });
   const loaded = () => {
     const result = read();
     return result?.ok ? result.value : null;

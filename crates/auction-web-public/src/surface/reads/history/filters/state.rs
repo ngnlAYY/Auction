@@ -316,7 +316,20 @@ impl HistoryForm {
             if errors.in_settings() {
                 self.settings_open.set(true);
             }
-            focus_element_by_id_after_render(field.focus_id());
+            // 月份为空而年份已填时，焦点应落在月份选择器，而不是看起来有效的年份输入。
+            let focus_id = match field {
+                HistoryField::From | HistoryField::To => {
+                    let draft = self.draft.peek();
+                    let date = if field == HistoryField::From { &draft.from } else { &draft.to };
+                    if date.month.trim().is_empty() && !date.year.trim().is_empty() {
+                        field.month_focus_id()
+                    } else {
+                        field.focus_id()
+                    }
+                }
+                _ => field.focus_id(),
+            };
+            focus_element_by_id_after_render(focus_id);
             return;
         }
         if (current.errors.first().is_some() || current.query != candidate) && !write(&candidate) {

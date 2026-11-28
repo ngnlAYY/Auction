@@ -357,13 +357,31 @@ pub(super) fn event_details_text(details: &Value) -> String {
                 Value::Null => "-".to_owned(),
                 Value::Bool(flag) => flag.to_string(),
                 Value::Number(number) => number.to_string(),
-                Value::String(text) => text.clone(),
+                Value::String(text) => detail_text(text),
                 Value::Array(_) | Value::Object(_) => "…".to_owned(),
             };
-            format!("{key}={text}")
+            format!("{}={text}", detail_text(key))
         })
         .collect::<Vec<_>>()
         .join(" · ")
+}
+
+/// 单行细节文本：控制字符按转义显示，超长值截断，避免换行伪造字段或撑破布局。
+fn detail_text(value: &str) -> String {
+    const MAXIMUM_CHARS: usize = 256;
+    let mut text = String::with_capacity(value.len());
+    for (index, character) in value.chars().enumerate() {
+        if index == MAXIMUM_CHARS {
+            text.push('…');
+            break;
+        }
+        if character.is_control() {
+            text.extend(character.escape_debug());
+        } else {
+            text.push(character);
+        }
+    }
+    text
 }
 
 /// 投递来源为结算退件 Take 时，取出其案件 ID（`settlement_return:<案件 ID>`）；只接受规范 UUID。

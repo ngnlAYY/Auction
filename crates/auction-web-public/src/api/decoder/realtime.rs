@@ -166,6 +166,7 @@ fn valid_realtime_event(value: &Value, auction_id: &str) -> bool {
                 &[],
             ) && valid_uuid(string(payload.get("auction_id")).unwrap_or_default())
                 && positive(payload.get("state_version"))
+                && nonnegative(payload.get("policy_version"))
                 && nonnegative(payload.get("sold_count"))
                 && nonnegative(payload.get("unsold_count"))
                 && positive_count_sum(payload.get("sold_count"), payload.get("unsold_count"))

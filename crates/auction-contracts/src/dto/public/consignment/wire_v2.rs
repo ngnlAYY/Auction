@@ -5,6 +5,7 @@ use serde::Deserializer;
 use serde::Serializer;
 use serde::de::Error;
 use uuid::Uuid;
+use uuid::Variant;
 
 pub(in crate::dto) use super::wire::uuid;
 
@@ -52,10 +53,12 @@ pub(in crate::dto) fn command_uuid<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Uuid, D::Error> {
     let value = uuid(deserializer)?;
-    if value.get_version_num() == 4 {
+    // 与应用层 `validate_listing_client_command_id` 同口径：客户端不能占用
+    // 后台派生的 UUIDv5 命名空间，非 RFC 4122 变体也不是规范 UUIDv4。
+    if value.get_version_num() == 4 && value.get_variant() == Variant::RFC4122 {
         return Ok(value);
     }
-    Err(D::Error::custom("寄售命令 ID 必须为 UUIDv4"))
+    Err(D::Error::custom("寄售命令 ID 必须为规范 UUIDv4"))
 }
 
 /// 键必须出现；值可以为 null，非空值仍须是规范小写的非零 UUID。

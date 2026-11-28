@@ -7,6 +7,7 @@ import type {
 import { createCell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { createTaskResource } from "@auction/web-shared/reactive/resource";
+import { unreachable } from "@auction/web-shared/result";
 import { Link, type RoutePageProps } from "@auction/web-shared/router";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { Time } from "@auction/web-shared/ui/components/time";
@@ -249,7 +250,7 @@ function Evidence(props: {
                 fallback={<AsyncState kind="empty" title={t("admin-auctions-empty")} detail="" />}
               >
                 <ul class="admin-consignment-detail__evidence-list">
-                  <For each={ready().items} keyed={false}>
+                  <For each={ready().items} keyed={(entry) => evidenceItemKey(entry)}>
                     {(item) => <EvidenceItem item={item()} />}
                   </For>
                 </ul>
@@ -296,6 +297,32 @@ function EvidenceItem(props: { readonly item: OrderEvidenceItemV2 }): JSX.Elemen
       <EvidenceFields item={item()} />
     </li>
   );
+}
+
+/** 证据行的稳定键；同类重复条目没有独立 ID，按种类与判别字段区分。 */
+function evidenceItemKey(item: OrderEvidenceItemV2): string {
+  switch (item.kind) {
+    case "round":
+      return `round:${item.round_id}`;
+    case "attempt":
+      return `attempt:${item.attempt_id}`;
+    case "return_take":
+      return `return_take:${item.intake_id}:${item.work_id}`;
+    case "observation":
+      return `observation:${item.observation_id}`;
+    case "cash_use":
+      return `cash_use:${item.purpose}`;
+    case "blocker":
+      return `blocker:${item.blocker}`;
+    case "closure":
+      return `closure:${item.closure_kind}`;
+    case "resolution":
+      return `resolution:${item.resolution_id}`;
+    case "recheck":
+      return `recheck:${item.work_id}`;
+    default:
+      return unreachable(item);
+  }
 }
 
 function EvidenceFields(props: { readonly item: OrderEvidenceItemV2 }): JSX.Element {

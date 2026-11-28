@@ -79,6 +79,8 @@ const PENDING = v.union([
 ]);
 
 type Pending = v.InferOutput<typeof PENDING>;
+/** 结案回调随结果交付原记录，页面据此过滤不属于自己的挂单或操作。 */
+export type ConsignmentPendingRecord = Pending;
 type DepositPending = Extract<Pending, { operation: "issue_reservation" | "withdraw_deposit" }>;
 type InputOf<T> = T extends Pending ? Omit<T, keyof typeof IDENTITY> : never;
 /** 写入队列接收固定语义字段；登记链接经单独的一次性参数传入。 */
@@ -133,7 +135,7 @@ function originalOutcome(record: Pending, result: StoredCommandResult): Consignm
   return consignmentReceiptMatches(receipt, record.command_id, record) ? ok(receipt) : null;
 }
 
-/** v2 回执须回答原记录：同一操作、同一命令与挂单、版本恰好推进一；答非所问返回 null 保留记录。 */
+/** v2 回执须回答原记录：同一操作、同一命令与挂单、版本推进一；已有撤回意愿的重放复用当前版本。 */
 function depositOutcome(
   record: DepositPending,
   receipt: OwnedCommandReceiptV2,
@@ -145,10 +147,15 @@ function depositOutcome(
       : null;
   }
   if (receipt.operation !== "issue_reservation" && receipt.operation !== "withdraw") return null;
+  const versionMatches =
+    receipt.listing_version === record.expected_version + 1 ||
+    (operation === "withdraw" &&
+      receipt.disposition === "withdrawal_requested" &&
+      receipt.listing_version === record.expected_version);
   return receipt.operation === operation &&
     receipt.command_id === record.command_id &&
     receipt.listing_id === record.listing_id &&
-    receipt.listing_version === record.expected_version + 1
+    versionMatches
     ? ok(receipt)
     : null;
 }
@@ -228,7 +235,7 @@ function send(
 /** 页内命令宿主，离页或失去授权时取消任务。新页先查安全记录的原回执。 */
 export function useConsignmentPending(
   canUse: () => boolean,
-  onOutcome: (result: ConsignmentOutcome) => void,
+  onOutcome: (result: ConsignmentOutcome, record: ConsignmentPendingRecord) => void,
 ) {
   const identity = useContext(PublicCommandIdentityContext);
   const userId = identity?.userId ?? "";
@@ -251,11 +258,15 @@ export function useConsignmentPending(
     return true;
   }
 
-  function finish(result: ConsignmentOutcome, showOutcome = true) {
+  function finish(
+    record: ConsignmentPendingRecord,
+    result: ConsignmentOutcome,
+    showOutcome = true,
+  ) {
     if (!clearPending()) return;
     if (showOutcome) {
       error.set(null);
-      onOutcome(result);
+      onOutcome(result, record);
     }
   }
 
@@ -282,7 +293,7 @@ export function useConsignmentPending(
       if (!canApply(result)) return;
       if (result.ok) {
         if (result.value === null) error.set(INVALID_RECEIPT);
-        else finish(result.value);
+        else finish(record, result.value);
       } else if (commandReceiptMissing(result.error)) {
         // 不变量 1：404 只代表当次未见，仅授权原样重送；记录仍占用本账号的提交入口。
         missing.set(true);
@@ -317,9 +328,9 @@ export function useConsignmentPending(
       const canDisplay = canApply(result);
       if (rejected) {
         // 会话守卫可立即暂停界面；仍存活的原账号宿主可以结束已确认拒绝的命令。
-        finish(result, canDisplay);
+        finish(record, result, canDisplay);
       } else if (canDisplay) {
-        if (result.ok) finish(result);
+        if (result.ok) finish(record, result);
         else {
           // v2 结果未知时开放重送入口；重送前仍先查原回执，404 才真正重送（见 retry）。
           if (

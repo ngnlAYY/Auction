@@ -277,6 +277,7 @@ function CatalogCommandDialog(props: {
       openedAuction === null ||
       !targetAllowsBid() ||
       !current.canBid ||
+      !canSubmit() ||
       (payload.kind !== "bid" && !canSubmitProxy()) ||
       props.dialog.peek()?.lotId !== current.lotId
     )

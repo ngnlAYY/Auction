@@ -13,6 +13,7 @@ import {
 } from "../../../api/model";
 import { fetchCurrentAuction } from "../../../api/queries/current";
 import { fetchCurrentLots } from "../../../api/queries/lots";
+import { startPublicSessionIdentityObservation } from "../../../api/session/revision";
 import { fetchLotWatches } from "../../../api/watches";
 
 /** 当前场次及其完整公开标记结果；总数由真实匹配行数产生。 */
@@ -55,6 +56,7 @@ export async function load(
   world: string,
   signal: AbortSignal,
 ): Promise<Result<WatchedAuction | null, null>> {
+  const observation = startPublicSessionIdentityObservation();
   const auctionResult = await fetchCurrentAuction(world, signal);
   if (!auctionResult.ok) {
     return err(null);
@@ -63,7 +65,7 @@ export async function load(
   if (auction === null) {
     return ok(null);
   }
-  const watchesResult = await fetchLotWatches(userId, auction.id, signal);
+  const watchesResult = await fetchLotWatches(userId, auction.id, signal, observation);
   if (!watchesResult.ok) {
     return err(null);
   }
@@ -81,7 +83,7 @@ export async function load(
   }
   const [currentResult, currentWatchesResult] = await Promise.all([
     fetchCurrentAuction(world, signal),
-    fetchLotWatches(userId, auction.id, signal),
+    fetchLotWatches(userId, auction.id, signal, observation),
   ]);
   if (!currentResult.ok || !currentWatchesResult.ok) {
     return err(null);
@@ -94,6 +96,7 @@ export async function load(
   ) {
     return err(null);
   }
+  if (!observation.current()) return err(null);
   return ok({ auction, rows: rowsResult.value });
 }
 

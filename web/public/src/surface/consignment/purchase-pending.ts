@@ -177,8 +177,15 @@ export function usePurchasePending(
     submit(input: PurchaseIntent): boolean {
       if (pending.peek() !== null || !tasks.alive() || !untrack(canUse)) return false;
       const existing = load(key, userId);
-      if (!existing.ok || existing.value !== null) {
-        if (!existing.ok) error.set(existing.error);
+      if (!existing.ok) {
+        error.set(existing.error);
+        return false;
+      }
+      if (existing.value !== null) {
+        // 其他标签页可能在本宿主初始化后写入未决记录：接管它并先查原回执，
+        // 不能静默拒绝提交而让按钮看起来毫无反应。
+        pending.set(existing.value);
+        check(false);
         return false;
       }
       const record = decode(PENDING, {

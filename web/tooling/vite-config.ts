@@ -12,8 +12,8 @@ export type Surface = "public" | "admin";
 const WEB_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const REPOSITORY_ROOT = resolve(WEB_ROOT, "..");
 
-/** 构建号只允许 1–64 个 URL 安全字符，与服务端的校验口径一致。 */
-const BUILD_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+/** 构建号只允许 1–64 个 URL 安全字符且首字符为字母数字，与服务端的校验口径一致。 */
+const BUILD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 const HTML_COMMENT = /<!--[\s\S]*?(?:-->|$)/g;
 const SCRIPT_TAG = /<script\s[^>]*>/gi;

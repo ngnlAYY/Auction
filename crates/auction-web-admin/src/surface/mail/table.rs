@@ -73,7 +73,7 @@ pub(super) fn MailIntakeTable(
                 }
                 tbody {
                     for intake in intakes {
-                        MailIntakeRow { intake, on_select }
+                        MailIntakeRow { key: "{intake.id}", intake, on_select }
                     }
                 }
             }

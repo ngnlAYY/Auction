@@ -99,6 +99,7 @@ impl CredentialFieldErrors {
 pub(super) struct CredentialFieldFeedback {
     errors: Signal<CredentialFieldErrors>,
     edited: Signal<[bool; CredentialField::ALL.len()]>,
+    announced: Signal<[Option<CredentialFieldIssue>; CredentialField::ALL.len()]>,
     announcer: FieldAnnouncer,
 }
 
@@ -106,6 +107,7 @@ pub(super) fn use_credential_fields(announcer: FieldAnnouncer) -> CredentialFiel
     CredentialFieldFeedback {
         errors: use_signal(CredentialFieldErrors::default),
         edited: use_signal(|| [false; CredentialField::ALL.len()]),
+        announced: use_signal(|| [None; CredentialField::ALL.len()]),
         announcer,
     }
 }
@@ -117,6 +119,13 @@ impl CredentialFieldFeedback {
 
     pub(super) fn show(mut self, errors: CredentialFieldErrors) {
         self.errors.set(errors);
+        // 提交失败已就地展示并聚焦播报；记录后离焦不重复播报同一条。
+        let mut announced = self.announced.write();
+        for field in CredentialField::ALL {
+            if let Some(issue) = errors.get(field) {
+                announced[field as usize] = Some(issue);
+            }
+        }
     }
 
     pub(super) fn edited(mut self, field: CredentialField, value: &str) {
@@ -132,22 +141,31 @@ impl CredentialFieldFeedback {
     }
 
     pub(super) fn blurred(mut self, field: CredentialField, value: &str) {
-        // 首次交互到离焦才提示；仍有效的服务端错误保留至输入发生变化。
-        if self.edited.peek()[field as usize]
-            && let Some(issue) = field.issue(value)
-            && self.errors.peek().get(field) != Some(issue)
-        {
-            self.errors.write().set(field, Some(issue));
-            self.announcer.announce_on_blur(field.id(), credential_field_issue_message(issue));
+        // 首次交互到离焦才提示；同一条消息只播报一次，换成新消息时仍会播报。
+        if !self.edited.peek()[field as usize] {
+            return;
+        }
+        let issue = field.issue(value);
+        if self.errors.peek().get(field) != issue {
+            self.errors.write().set(field, issue);
+        }
+        let mut announced = self.announced.write();
+        if announced[field as usize] != issue {
+            announced[field as usize] = issue;
+            if let Some(issue) = issue {
+                self.announcer.announce_on_blur(field.id(), credential_field_issue_message(issue));
+            }
         }
     }
 
     pub(super) fn reset(mut self, fields: &[CredentialField]) {
         let mut errors = self.errors.write();
         let mut edited = self.edited.write();
+        let mut announced = self.announced.write();
         for &field in fields {
             errors.set(field, None);
             edited[field as usize] = false;
+            announced[field as usize] = None;
         }
     }
 }

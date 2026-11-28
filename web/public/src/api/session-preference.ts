@@ -78,7 +78,13 @@ export async function setSessionPreference(
     result: Result<PublicSessionPreferenceResponse, CommandError>,
     changed = false,
   ) => {
-    if (changed || (!result.ok && (result.error.status === 0 || result.error.status >= 500))) {
+    if (
+      changed ||
+      (!result.ok &&
+        (result.error.status === 0 ||
+          result.error.status >= 500 ||
+          (result.error.status === 409 && result.error.code === "invalid_response")))
+    ) {
       markPublicSessionChange();
       cookieMayHaveChanged = true;
     }

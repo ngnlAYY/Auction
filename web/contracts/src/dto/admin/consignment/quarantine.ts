@@ -121,7 +121,9 @@ export const QuarantineObservationSchema = v.pipe(
   v.check(
     ({ attachment_count, items }) =>
       attachment_count === items.length &&
-      new Set(items.map(({ ordinal }) => ordinal)).size === items.length,
+      new Set(items.map(({ ordinal }) => ordinal)).size === items.length &&
+      // 唯一、下限 1 且不超过总数，三项合起来才是连续的 1..N。
+      items.every(({ ordinal }) => ordinal <= attachment_count),
   ),
 );
 /** 观察安全投影。 */

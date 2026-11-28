@@ -51,7 +51,7 @@ export async function fetchCompensationLots(
   signal: AbortSignal,
 ): Promise<Result<PublicCompensationLotPageResponse, string>> {
   const normalizedPage = Math.max(1, page);
-  const url = `/api/v1/compensation-pool/${auctionId}/lots?page=${normalizedPage}&page_size=${pageSize}`;
+  const url = `/api/v1/compensation-pool/${encodeURIComponent(auctionId)}/lots?page=${normalizedPage}&page_size=${pageSize}`;
   const sent = await sendGet(url, signal);
   if (!sent.ok) {
     return err(transportErrorCode(sent.error));

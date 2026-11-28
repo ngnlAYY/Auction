@@ -2,6 +2,7 @@
 
 import type { AdminPlayerSupportBundleResponse } from "@auction/contracts/dto/admin/delivery";
 import { err, ok, type Result } from "@auction/web-shared/result";
+import { utf8ByteLength } from "@auction/web-shared/text";
 import { validUuid } from "@auction/web-shared/ui/validation";
 
 import { MAX_JSON_SAFE_INTEGER, validSafeText } from "../validation";
@@ -22,7 +23,8 @@ export function decodePlayerSupport(
     bundle.deals.length > MAX_PLAYER_SUPPORT_ROWS ||
     bundle.obligations.length > MAX_PLAYER_SUPPORT_ROWS ||
     bundle.deliveries.length > MAX_PLAYER_SUPPORT_ROWS ||
-    bundle.notifications.length > MAX_PLAYER_SUPPORT_ROWS
+    bundle.notifications.length > MAX_PLAYER_SUPPORT_ROWS ||
+    bundle.references.length > MAX_PLAYER_SUPPORT_ROWS
   ) {
     return err(null);
   }
@@ -30,9 +32,11 @@ export function decodePlayerSupport(
   if (
     user !== null &&
     (!validUuid(user.id) ||
-      user.username.length === 0 ||
+      !validSafeText(user.username, 256) ||
       (user.status !== "active" && user.status !== "blacklisted") ||
-      user.game_player_id === "")
+      (user.game_player_id !== null &&
+        user.game_player_id !== undefined &&
+        !validSafeText(user.game_player_id, 256)))
   ) {
     return err(null);
   }
@@ -62,7 +66,7 @@ export function decodePlayerSupport(
       !validUuid(deal.auction_id) ||
       deal.lot_number < 0 ||
       !validWorld(deal.world_id) ||
-      deal.equipment_name.length === 0 ||
+      !validEquipmentName(deal.equipment_name) ||
       deal.final_price < 0 ||
       deal.final_price > MAX_JSON_SAFE_INTEGER
     ) {
@@ -81,12 +85,25 @@ export function decodePlayerSupport(
         obligation.business_state !== "contingent") ||
       obligation.amount < 0 ||
       obligation.amount > MAX_JSON_SAFE_INTEGER ||
-      (obligation.delivery_id !== null && !validUuid(obligation.delivery_id))
+      (obligation.delivery_id !== null && !validUuid(obligation.delivery_id)) ||
+      (obligation.fulfillment_state !== null &&
+        obligation.fulfillment_state !== undefined &&
+        !validSafeText(obligation.fulfillment_state, 64)) ||
+      (obligation.fulfillment_error_code !== null &&
+        obligation.fulfillment_error_code !== undefined &&
+        !validSafeText(obligation.fulfillment_error_code, 96))
     ) {
       return err(null);
     }
   }
   for (const delivery of bundle.deliveries) {
+    if (
+      delivery.failure_code !== null &&
+      delivery.failure_code !== undefined &&
+      !validReasonCode(delivery.failure_code)
+    ) {
+      return err(null);
+    }
     if (!decodeDelivery(delivery).ok) {
       return err(null);
     }
@@ -98,10 +115,15 @@ export function decodePlayerSupport(
         notification.channel !== "pm" &&
         notification.channel !== "pending") ||
       !validSafeText(notification.state, 64) ||
+      (notification.kind !== null &&
+        notification.kind !== undefined &&
+        !validSafeText(notification.kind, 64)) ||
       (notification.lot_id !== null && !validUuid(notification.lot_id)) ||
       (notification.auction_id !== null && !validUuid(notification.auction_id)) ||
       (notification.delivery_id !== null && !validUuid(notification.delivery_id)) ||
-      (notification.state_reason !== null && !validSafeText(notification.state_reason, 96)) ||
+      (notification.state_reason !== null &&
+        notification.state_reason !== undefined &&
+        !validReasonCode(notification.state_reason)) ||
       parseDeliveryTime(notification.created_at) === null ||
       parseDeliveryTime(notification.updated_at) === null
     ) {
@@ -121,6 +143,16 @@ export function decodePlayerSupport(
     }
   }
   return ok(bundle);
+}
+
+/** 装备名称按装备词典的原文边界：非空、至多 512 字节且不含控制字符。 */
+function validEquipmentName(value: string): boolean {
+  return value.length > 0 && utf8ByteLength(value) <= 512 && !/\p{Cc}/u.test(value);
+}
+
+/** 稳定原因码：非空、至多 96 字节，且仅含小写字母、数字与下划线。 */
+function validReasonCode(value: string): boolean {
+  return value.length > 0 && utf8ByteLength(value) <= 96 && /^[a-z0-9_]+$/u.test(value);
 }
 
 export function validWorld(world: string): boolean {

@@ -25,15 +25,18 @@ export function formatLocalizedTimeForLanguage(value: string, language: string):
   if (value.length === 0) {
     return "—";
   }
-  const parsed = Date.parse(value);
-  if (Number.isFinite(parsed)) {
-    try {
-      return timeFormatter(language).format(new Date(parsed));
-    } catch {
-      // 浏览器格式化失败时继续走与源码相同的 UTC+8 兜底格式。
-    }
+  // 与兜底共用同一套 RFC3339 形状与 Timestamp 范围校验；Date.parse 还接受
+  // 日期简写、非法日历与越界年份，不能单独当作契约边界。
+  const instantMillis = parseTimestampInstant(value);
+  if (instantMillis === null) {
+    return "—";
   }
-  return shanghaiFallbackText(value) ?? "—";
+  try {
+    return timeFormatter(language).format(new Date(instantMillis));
+  } catch {
+    // 浏览器格式化失败时继续走与源码相同的 UTC+8 兜底格式。
+  }
+  return shanghaiFallbackText(instantMillis) ?? "—";
 }
 
 function timeFormatter(language: string): Intl.DateTimeFormat {
@@ -55,8 +58,8 @@ function timeFormatter(language: string): Intl.DateTimeFormat {
   return formatter;
 }
 
-/** 兜底格式 `DD Mon YYYY, HH:MM:SS`：平移八小时后直接取 UTC 字段。 */
-function shanghaiFallbackText(value: string): string | null {
+/** 校验 RFC3339 形状并返回 UTC 毫秒；日历非法或超出 Timestamp 范围时为 null。 */
+function parseTimestampInstant(value: string): number | null {
   const match = RELAXED_TIMESTAMP.exec(value);
   if (match === null) return null;
   const [, yearText, monthText, dayText, hourText, minuteText, secondText] = match;
@@ -88,8 +91,14 @@ function shanghaiFallbackText(value: string): string | null {
   if (!Number.isSafeInteger(instantMillis)) return null;
   if (instantMillis < AUCTION_TIMESTAMP_MIN_MILLIS) return null;
   if (instantMillis > AUCTION_TIMESTAMP_MAX_MILLIS) return null;
+  return instantMillis;
+}
+
+/** 兜底格式 `DD Mon YYYY, HH:MM:SS`：平移八小时后直接取 UTC 字段。 */
+function shanghaiFallbackText(instantMillis: number): string | null {
   const localMillis = instantMillis + SHANGHAI_OFFSET_MILLIS;
-  if (!Number.isSafeInteger(localMillis) || localMillis > AUCTION_TIMESTAMP_MAX_MILLIS) return null;
+  // 范围只约束 UTC 时刻；平移八小时后仍在 9999 年内，不按上界拒绝合法的 22:00–24:00Z。
+  if (!Number.isSafeInteger(localMillis)) return null;
   const local = new Date(localMillis);
   const localYear = local.getUTCFullYear();
   if (localYear < -9_999 || localYear > 9_999) return null;

@@ -220,7 +220,34 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
 
     // 手机软键盘与页面缩放只改变可见视口时，window 不一定派发 resize/scroll。
     // 沿用窗口变动时关闭浮层的策略，避免保留已经偏离触发文本的旧坐标。
-    const viewport = window.visualViewport ?? null;
+    const viewportCandidate = window.visualViewport ?? null;
+    let viewport: VisualViewport | null = viewportCandidate;
+    if (viewportCandidate !== null) {
+      let viewportResizeAdded = false;
+      let viewportScrollAdded = false;
+      try {
+        viewportCandidate.addEventListener("resize", resizeCallback);
+        viewportResizeAdded = true;
+      } catch {
+        viewportResizeAdded = false;
+      }
+      try {
+        viewportCandidate.addEventListener("scroll", scrollCallback);
+        viewportScrollAdded = true;
+      } catch {
+        viewportScrollAdded = false;
+      }
+      if (!viewportResizeAdded || !viewportScrollAdded) {
+        // 视口监听只是补充：撤销已登记的部分，窗口滚动/缩放与 Escape 的关闭路径照常生效。
+        if (viewportResizeAdded) {
+          viewportCandidate.removeEventListener("resize", resizeCallback);
+        }
+        if (viewportScrollAdded) {
+          viewportCandidate.removeEventListener("scroll", scrollCallback);
+        }
+        viewport = null;
+      }
+    }
     const handle: TooltipDismissHandle = {
       window,
       viewport,
@@ -232,26 +259,6 @@ export function TruncatedText(props: TruncatedTextProps): JSX.Element {
         removeTooltipDismissHandle(this);
       },
     };
-    if (viewport !== null) {
-      let viewportResizeAdded = false;
-      let viewportScrollAdded = false;
-      try {
-        viewport.addEventListener("resize", resizeCallback);
-        viewportResizeAdded = true;
-      } catch {
-        viewportResizeAdded = false;
-      }
-      try {
-        viewport.addEventListener("scroll", scrollCallback);
-        viewportScrollAdded = true;
-      } catch {
-        viewportScrollAdded = false;
-      }
-      if (!viewportResizeAdded || !viewportScrollAdded) {
-        removeTooltipDismissHandle(handle);
-        return;
-      }
-    }
     const popup = window.document.getElementById(popupId);
     handle.popupListeners =
       popup === null

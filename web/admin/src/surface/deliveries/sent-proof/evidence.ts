@@ -33,30 +33,3 @@ export function latestSendAttempt(detail: DeliveryDetail): DeliveryAttempt | nul
   }
   return latest;
 }
-
-/** 解析服务端小写 hex 摘要；长度或字符不合规时返回 `null`，不做大小写兼容。 */
-export function decodeHexDigest(value: string): readonly number[] | null {
-  if (value.length !== 64 || !/^[0-9a-f]{64}$/.test(value)) {
-    return null;
-  }
-  const digest: number[] = [];
-  for (let index = 0; index < value.length; index += 2) {
-    const high = hexNibble(value.charCodeAt(index));
-    const low = hexNibble(value.charCodeAt(index + 1));
-    if (high === null || low === null) {
-      return null;
-    }
-    digest.push((high << 4) | low);
-  }
-  return digest;
-}
-
-function hexNibble(value: number): number | null {
-  if (value >= 0x30 && value <= 0x39) {
-    return value - 0x30;
-  }
-  if (value >= 0x61 && value <= 0x66) {
-    return value - 0x61 + 10;
-  }
-  return null;
-}

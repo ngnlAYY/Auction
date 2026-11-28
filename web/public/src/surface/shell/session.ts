@@ -180,6 +180,7 @@ export function createPublicShellSession(refreshGeneration: Cell<number>) {
       return;
     }
     const { kind, result, revisions, previousUser } = observation;
+    // 只丢弃旧修订的成功结果；本轮失败（含 Cookie 同步失败）仍要显示，不能替换成第二次可能成功的读取。
     if (result.ok && revisions.primary !== publicSessionPrimaryRevision()) {
       restart("cookie_changed");
       return;

@@ -40,11 +40,12 @@ fn ManagedSection(
     on_dirty: EventHandler<()>,
     children: Element,
 ) -> Element {
-    let managed = form.read().boolean(path);
+    // 任一分组开关只随该路径变化重绘，不订阅整份草稿的每次输入。
+    let managed = use_memo(use_reactive((&path,), move |(path,)| form.read().boolean(path)));
     rsx! {
         RuntimeSection { title, open: false,
             SwitchField { form, disabled, path, label: t!("admin-runtime-op-managed"), on_dirty }
-            if managed {
+            if managed() {
                 p { class: "admin-runtime-section-note",
                     {t!("admin-runtime-op-managed-note", hot_reload_note: t!("admin-runtime-hot-fields-note"))}
                 }

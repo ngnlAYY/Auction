@@ -184,6 +184,7 @@ fn BidHistoryTable(page: crate::api::BidLogPage) -> Element {
                 tbody {
                     for bid in bid_history_rows(page.bids) {
                         tr {
+                            key: "{bid.id}",
                             class: if bid.valid { "public-auction-lot__leading" } else { "" },
                             "aria-description": if bid.valid { t!("bidlog-valid") } else { t!("bidlog-invalid") },
                             td { class: "public-auction-lot__participant-cell", "data-label": t!("bidlog-bidder"),

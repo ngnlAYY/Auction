@@ -167,6 +167,7 @@ function DeliveryDetailPage(props: DeliveryDetailPageProps): JSX.Element {
         return result;
       },
       () => {
+        setIfAlive(actionError, null, () => alive);
         setIfAlive(sentOpen, false, () => alive);
         setIfAlive(sentSubmitted, true, () => alive);
       },
@@ -217,6 +218,7 @@ function DeliveryDetailPage(props: DeliveryDetailPageProps): JSX.Element {
         return result.ok ? ok(null) : result;
       },
       () => {
+        setIfAlive(actionError, null, () => alive);
         setIfAlive(acknowledged, true, () => alive);
         setIfAlive(acknowledgeReason, "", () => alive);
         advanceCommandReload(refresh);

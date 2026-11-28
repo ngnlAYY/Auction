@@ -47,6 +47,7 @@ import {
 } from "./consignment-catalog";
 import { type ConsignmentReadError, readPublicConsignment } from "./consignment-status";
 import { observePublicSessionFailure } from "./session";
+import { publicSessionIdentityRevision } from "./session/revision";
 
 const CATALOG_V2 = "/api/v2/consignment/listings";
 const ORDERS = "/api/v2/me/consignment/orders";
@@ -183,6 +184,7 @@ async function requestOrders<T>(
   if (!decode(ConsignmentUuidSchema, userId).ok) {
     return err({ status: 400, code: "invalid_expected_user_id" });
   }
+  const identityAtStart = publicSessionIdentityRevision();
   let dispatched = false;
   let unauthorized = false;
   const deferUnauthorized =
@@ -239,7 +241,7 @@ async function requestOrders<T>(
     if (deferUnauthorized && unauthorized) {
       observePublicSessionFailure(401, "unauthenticated", userId);
     } else if (sessionChanged) {
-      observePublicSessionFailure(rejectedStatus, code, userId);
+      observePublicSessionFailure(rejectedStatus, code, userId, identityAtStart);
     }
   }
   return result;

@@ -112,12 +112,27 @@ fn exact_minutes(amount: &str, unit: DurationUnit) -> Option<u128> {
     if !digits || numerator == 0 {
         return None;
     }
-    numerator = numerator.checked_mul(unit.minutes())?;
     let scale = fraction_digits.checked_sub(exponent)?;
     if scale > 0 {
         let denominator = 10_u128.checked_pow(u32::try_from(scale).ok()?)?;
+        // 先约去与十进制分母的公因子，再乘以单位：大尾数（如 1e38 天）不会提前溢出。
+        let divisor = greatest_common_divisor(numerator, denominator);
+        let numerator = (numerator / divisor).checked_mul(unit.minutes())?;
+        let denominator = denominator / divisor;
         numerator.is_multiple_of(denominator).then_some(numerator / denominator)
     } else {
-        numerator.checked_mul(10_u128.checked_pow(scale.unsigned_abs())?)
+        numerator
+            .checked_mul(unit.minutes())?
+            .checked_mul(10_u128.checked_pow(scale.unsigned_abs())?)
     }
+}
+
+/// 欧几里得算法；只用于约去十进制分母，数值规模不超过 u128。
+fn greatest_common_divisor(mut left: u128, mut right: u128) -> u128 {
+    while right != 0 {
+        let remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    left
 }

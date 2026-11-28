@@ -21,8 +21,8 @@ unic-langid.workspace = true
 # query 模块的地址栏 query 解析/序列化。
 url.workspace = true
 uuid.workspace = true
-# 语言偏好持久化与 <html lang> 同步需要 Storage/Element；同时补齐 dioxus-web 0.7.10
-# 漏声明的 Location feature，详见根 Cargo.toml 说明。
+# 语言偏好持久化与 <html lang> 同步需要 Storage/Element；Location 由根工作区声明统一补齐，
+# 详见根 Cargo.toml 说明。
 web-sys = { workspace = true, features = ["console", "CssStyleDeclaration", "Document", "DomRect", "DomRectList", "Element", "Event", "EventTarget", "FocusEvent", "HtmlElement", "KeyboardEvent", "MouseEvent", "MutationObserver", "MutationObserverInit", "MutationRecord", "Node", "NodeList", "ResizeObserver", "ResizeObserverEntry", "Storage", "VisualViewport", "Window"] }
 wasm-bindgen.workspace = true
 
@@ -33,3 +33,5 @@ workspace = true
 # 只有浏览器内的收包接线测试使用，见 tests/transport_browser.rs。
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test.workspace = true
+# 测试直接构造 Response/Headers/ReadableStream，不能依赖 gloo-net 顺带启用这些 feature。
+web-sys = { workspace = true, features = ["Headers", "ReadableStream", "Response", "ResponseInit"] }

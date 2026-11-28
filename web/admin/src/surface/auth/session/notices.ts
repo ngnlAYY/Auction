@@ -45,7 +45,16 @@ export function noticeOrigin(draft: Draft): AdminSession | null {
 
 /** 在撤下宿主前保存已经归属的续期 401；等待退出回执或后续权威读取来结清。 */
 export function deferExpiration(draft: Draft, session: AdminSession): void {
-  draft.notices.expiration = { session, sawOtherGeneration: draft.sawOtherGeneration };
+  // 同一身份的异代证据是累积的；后到的 401 不能把已经看到的另一代降级掉。
+  const previous = draft.notices.expiration;
+  const preserved =
+    previous !== null && adminSessionSameIdentity(previous.session, session)
+      ? previous.sawOtherGeneration
+      : false;
+  draft.notices.expiration = {
+    session,
+    sawOtherGeneration: preserved || draft.sawOtherGeneration,
+  };
 }
 
 /** 固定对端通知到原有身份；同一身份的可信本地结论负责结清。 */

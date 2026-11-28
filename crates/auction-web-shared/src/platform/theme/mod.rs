@@ -35,6 +35,7 @@ impl Theme {
     }
 
     /// 浏览器界面色（`<meta name="theme-color">`），与 base.css 中对应主题的 `--color-bg` 一致。
+    #[cfg(target_arch = "wasm32")]
     const fn browser_color(self) -> &'static str {
         match self {
             Self::Dark => "#0e1116",
@@ -52,17 +53,22 @@ fn stored_theme() -> Option<Theme> {
     crate::storage::get_item(THEME_STORAGE_KEY).as_deref().and_then(Theme::parse)
 }
 
-/// 把主题同步到 `<html data-theme>` 与浏览器界面色。
+/// 把主题同步到 `<html data-theme>` 与浏览器界面色；非浏览器目标保持无操作。
 fn apply_theme(theme: Theme) {
-    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
-        return;
-    };
-    if let Some(root) = document.document_element() {
-        let _ = root.set_attribute("data-theme", theme.code());
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        if let Some(root) = document.document_element() {
+            let _ = root.set_attribute("data-theme", theme.code());
+        }
+        if let Ok(Some(meta)) = document.query_selector("meta[name=\"theme-color\"]") {
+            let _ = meta.set_attribute("content", theme.browser_color());
+        }
     }
-    if let Ok(Some(meta)) = document.query_selector("meta[name=\"theme-color\"]") {
-        let _ = meta.set_attribute("content", theme.browser_color());
-    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = theme;
 }
 
 /// 各 surface 根组件调用一次：恢复已保存主题并提供上下文，主题变化时同步 DOM。

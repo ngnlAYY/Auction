@@ -105,6 +105,7 @@ export function DeliveryFilters(props: DeliveryFiltersProps): JSX.Element {
   const draft = createCell<DeliveryFiltersDraft>(untrack(applied));
   const fromError = createCell<LocalTimeError | null>(null);
   const toError = createCell<LocalTimeError | null>(null);
+  const rangeError = createCell(false);
   const focusElementById = useFocusElementByIdAfterRender();
   // 已应用筛选随前进/后退或提交变化时整体重建草稿；否则旧草稿会在下一次“应用”时把过期
   // 条件写回地址栏。已应用筛选不变时保留操作员尚未提交的编辑。
@@ -114,6 +115,7 @@ export function DeliveryFilters(props: DeliveryFiltersProps): JSX.Element {
     }
     fromError.set(null);
     toError.set(null);
+    rangeError.set(false);
   });
   const submit = (event: SubmitEvent): void => {
     event.preventDefault();
@@ -122,8 +124,16 @@ export function DeliveryFilters(props: DeliveryFiltersProps): JSX.Element {
     const to = timeBound(current.createdTo);
     fromError.set(from.ok ? null : from.error);
     toError.set(to.ok ? null : to.error);
+    const fromNanos = from.ok && from.value !== "" ? parseStrictRfc3339(from.value) : null;
+    const toNanos = to.ok && to.value !== "" ? parseStrictRfc3339(to.value) : null;
+    const rangeInvalid = fromNanos !== null && toNanos !== null && fromNanos > toNanos;
+    rangeError.set(rangeInvalid);
     if (!from.ok || !to.ok) {
       focusElementById(from.ok ? CREATED_TO_FIELD : CREATED_FROM_FIELD);
+      return;
+    }
+    if (rangeInvalid) {
+      focusElementById(CREATED_TO_FIELD);
       return;
     }
     props.onFiltersChange({
@@ -230,6 +240,9 @@ export function DeliveryFilters(props: DeliveryFiltersProps): JSX.Element {
               if (fromError.peek() !== null && timeBound(value).ok) {
                 fromError.set(null);
               }
+              if (rangeError.peek()) {
+                rangeError.set(false);
+              }
               draft.update((current) => ({ ...current, createdFrom: value }));
             }}
           />
@@ -246,13 +259,22 @@ export function DeliveryFilters(props: DeliveryFiltersProps): JSX.Element {
           <input
             id={CREATED_TO_FIELD}
             type="datetime-local"
-            aria-invalid={toError() === null ? "false" : "true"}
-            aria-describedby={toError() === null ? undefined : "delivery-created-to-error"}
+            aria-invalid={toError() === null && !rangeError() ? "false" : "true"}
+            aria-describedby={
+              toError() !== null
+                ? "delivery-created-to-error"
+                : rangeError()
+                  ? "delivery-created-range-error"
+                  : undefined
+            }
             value={timestampToLocalInput(draft().createdTo)}
             onInput={(event) => {
               const value = event.currentTarget.value;
               if (toError.peek() !== null && timeBound(value).ok) {
                 toError.set(null);
+              }
+              if (rangeError.peek()) {
+                rangeError.set(false);
               }
               draft.update((current) => ({ ...current, createdTo: value }));
             }}
@@ -263,6 +285,11 @@ export function DeliveryFilters(props: DeliveryFiltersProps): JSX.Element {
                 {timeBoundError(issue())}
               </small>
             )}
+          </Show>
+          <Show when={rangeError()}>
+            <small id="delivery-created-range-error" class="admin-field-error">
+              {t("delivery-created-range")}
+            </small>
           </Show>
         </label>
         <button class="admin-btn-primary" type="submit">

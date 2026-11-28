@@ -34,13 +34,15 @@ export interface TaskScope {
  */
 export function createTaskScope(): TaskScope {
   let disposed = false;
-  const running = new Set<AbortController>();
+  const running = new Map<AbortController, () => void>();
   onCleanup(() => {
     disposed = true;
-    for (const controller of running) {
-      controller.abort();
-    }
+    const entries = [...running];
     running.clear();
+    for (const [controller, finish] of entries) {
+      controller.abort();
+      finish();
+    }
   });
   return {
     alive: () => !disposed,
@@ -62,7 +64,7 @@ export function createTaskScope(): TaskScope {
         controller.abort();
         return handle;
       }
-      running.add(controller);
+      running.set(controller, finish);
       const context: TaskContext = {
         alive: () => !controller.signal.aborted,
         signal: controller.signal,

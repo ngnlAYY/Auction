@@ -1,5 +1,10 @@
-// 运营挂单列表的 URL 筛选和页码，非法筛选交给 API 边界拒绝。
+// 运营挂单列表的 URL 筛选和页码；畸形值按未设置处理，不转发给 API。
 
+import { ListingStateV2Schema } from "@auction/contracts/dto/public/consignment/listing-v2";
+import {
+  ListingModeSchema,
+  ListingWorldSchema,
+} from "@auction/contracts/dto/public/consignment/states";
 import { type QueryPair, type QueryState, useQueryState } from "@auction/web-shared/net/query";
 
 import type { ListingFilters } from "../../api/consignment/list";
@@ -18,10 +23,10 @@ export function useListingQuery(): QueryState<ListingQuery> {
   return useQueryState(
     FILTER_KEYS,
     (pairs) => ({
-      world: pairValue(pairs, "world") ?? "",
-      mode: pairValue(pairs, "mode") ?? "",
-      state: pairValue(pairs, "state") ?? "",
-      sellerUserId: pairValue(pairs, "seller_user_id") ?? "",
+      world: parseChoice(pairs, "world", ListingWorldSchema.options),
+      mode: parseChoice(pairs, "mode", ListingModeSchema.options),
+      state: parseChoice(pairs, "state", ListingStateV2Schema.options),
+      sellerUserId: parseUuidText(pairs, "seller_user_id"),
       page: parsePage(pairs, "page"),
       duplicate: FILTER_KEYS.some((key) => pairs.filter(([name]) => name === key).length > 1),
     }),

@@ -115,7 +115,10 @@ function persistQuery(
   }
   const pathname = currentPublicPathname();
   const search = currentBrowserSearch();
-  const current = state === undefined ? readPublicQuery() : readPublicQueryForState(state);
+  const current =
+    state === undefined
+      ? readPublicQuery()
+      : readPublicQueryForState(state, initialSearchByState.get(state) ?? null);
   const next = { ...query, auction: query.auction ?? current.auction };
   // 重复应用当前筛选不创建可返回的条目，也不把省略的默认值写入地址。
   if (!replaceAll && mode === "push" && structuralEquals(next, current)) {
@@ -187,7 +190,9 @@ export function commitAuctionSelection(
   const auction = auctionParameter(id);
   if (
     auction.kind === "invalid" ||
-    (mode === "replace" && readPublicQueryForState(state).auction.kind === "invalid")
+    (mode === "replace" &&
+      readPublicQueryForState(state, initialSearchByState.get(state) ?? null).auction.kind ===
+        "invalid")
   ) {
     return false;
   }

@@ -10,6 +10,7 @@ export function validRules(value: unknown): boolean {
   const rules = object(value);
   if (rules === null) return false;
   return (
+    jsonKeysOnly(rules, ["locale", "title", "markdown", "revision", "published_at"], []) &&
     accountNonempty(rules.locale) &&
     accountNonempty(rules.title) &&
     string(rules.markdown) !== null &&

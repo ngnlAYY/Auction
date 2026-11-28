@@ -63,6 +63,9 @@ export function validLiveLot(
     nonempty(decoded.seller_name) &&
     (!leaderPresent || nonempty(decoded.leader_name)) &&
     hasLeader === leaderPresent &&
+    // 终态必须与领先者一致：sold 必有领先者，unsold 必无领先者。
+    (status !== "sold" || hasLeader === true) &&
+    (status !== "unsold" || hasLeader === false) &&
     statusMatches &&
     positive(decoded.state_version) &&
     validEquipment(decoded.equipment, full)

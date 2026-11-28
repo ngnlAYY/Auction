@@ -55,20 +55,20 @@ export interface SetupRequest {
   public_origin: string;
   admin_origin: string;
   /** 正式 Public 服务的回环 TCP 端口；省略时使用 8090。 */
-  public_listener_port: number;
+  public_listener_port?: number;
   /** 正式 Admin 服务的回环 TCP 端口；省略时使用 8091，不能与 Public 相同。 */
-  admin_listener_port: number;
+  admin_listener_port?: number;
   metrics_enabled: boolean;
   schedule_enabled: boolean;
-  /** 排期关闭时仍保存并校验候选；启用开关继续使用既有顶层字段。 */
-  schedule: SetupScheduleRequest;
+  /** 排期关闭时仍保存并校验候选；启用开关继续使用既有顶层字段。容器缺省时沿用默认排期。 */
+  schedule?: SetupScheduleRequest;
   start_price: number;
   log_filter: string;
   worker_concurrency: number;
   worker_poll_interval_seconds: number;
   realtime_poll_interval_millis: number;
   /** 合并入口明确确认在配置保存后初始化专用空库并启动；旧分体请求可省略。 */
-  confirm_initialize: boolean;
+  confirm_initialize?: boolean;
 }
 
 /** 初始化接口的成功阶段：`verified` 仅验证部署码，`validated` 检查输入和数据库连接，

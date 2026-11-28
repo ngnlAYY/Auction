@@ -258,10 +258,12 @@ pub(in crate::dto) fn optional_text<'de, const MAX: usize, D: Deserializer<'de>>
 }
 
 pub(in crate::dto) fn checked_text<const MAX: usize>(text: &str) -> Result<(), &'static str> {
+    // U+2028、U+2029 不是控制字符，但在显示与换行语义上等同换行，必须与
+    // `consignment_safe_observation_text` 及 ListingSellerName 保持同一单行口径。
     if !text.is_empty()
         && text.len() <= MAX
         && text == text.trim()
-        && !text.chars().any(char::is_control)
+        && !text.chars().any(|ch| ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}'))
     {
         return Ok(());
     }

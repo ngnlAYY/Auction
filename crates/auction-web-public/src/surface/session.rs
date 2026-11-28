@@ -246,6 +246,14 @@ pub(super) fn SessionMenu() -> Element {
         Some(Ok(None)) | Some(Ok(Some(_))) => SessionMenuState::Anonymous,
     };
 
+    // 权威身份离开登录态（过期、别处退出或换号）时收起旧面板；
+    // 否则再次登录会沿用悬空的开合状态，未点击就弹出账号面板。
+    let active_user = match &*session.read() {
+        Some(Ok(Some(identity))) if identity.authenticated => Some(identity.user_id.clone()),
+        _ => None,
+    };
+    use_effect(use_reactive((&active_user,), move |_| menu_open.set(false)));
+
     rsx! {
         div { class: "public-account-session-menu", aria_label: t!("session-menu-label"),
             {match session_state {

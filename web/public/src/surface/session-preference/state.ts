@@ -243,11 +243,8 @@ export function preferenceOwnerSubmit(owner: PreferenceOwner): void {
       const pendingUncertain =
         !(error.status === 409 && error.code === "session_preference_conflict") &&
         (state.pendingUncertain || commandErrorOutcomeUncertain(error));
-      const pending =
-        !pendingUncertain &&
-        (error.code === "session_lock_unavailable" || error.code === "session_lock_timeout")
-          ? null
-          : state.pending;
+      // 确定性结果（含明确冲突与等锁失败）释放冻结命令，用户可基于权威版本继续编辑。
+      const pending = pendingUncertain ? state.pending : null;
       return { ...state, busy: false, pendingUncertain, pending, error };
     });
   });

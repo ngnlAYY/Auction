@@ -310,9 +310,21 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
     const requested = requestedPageTarget();
     if (requested === null) return null;
     const loaded = pageRealtimeTarget();
-    return loaded !== null && structuralEquals(loaded[0], requested)
-      ? loaded[1]
-      : { kind: "checking" };
+    if (loaded === null || !structuralEquals(loaded[0], requested)) {
+      return { kind: "checking" };
+    }
+    const target = loaded[1];
+    // 同场次的新地址可能先于看板 effect 到达；旧世界的订阅目标不能复用。
+    // 竞价日志键已带世界范围，全部世界里的异世界场次不必等于所选世界。
+    if (
+      requested.kind === "auction" &&
+      target !== null &&
+      (target.kind === "auction" || target.kind === "inactive") &&
+      !(selectedWorld() === target.world && currentPublicQuery().world === target.world)
+    ) {
+      return { kind: "checking" };
+    }
+    return target;
   });
   const realtimeTargetCandidate = createValueMemo((): PublicRealtimeTarget => {
     const target = resolvedPageTarget();
@@ -453,7 +465,19 @@ function PublicShellContent(props: { readonly locationGeneration: Cell<number> }
       snapshot !== undefined && snapshot[0] === selectedWorld() && snapshot[1].ok
         ? snapshot[1].value
         : null;
-    return tickerAuction(requestedPageTarget(), displayedAuction(), current) ?? null;
+    const displayed = displayedAuction();
+    // 显式场次的世界仍可能在地址里纠偏；旧世界的摘要不能拿来标注页头。
+    return (
+      tickerAuction(
+        requestedPageTarget(),
+        displayed !== null &&
+          selectedWorld() === displayed.world &&
+          currentPublicQuery().world === displayed.world
+          ? displayed
+          : null,
+        current,
+      ) ?? null
+    );
   });
   const tickerLabels = createPublicTickerLabels(tickerAuctionDisplay, selectedWorld);
 

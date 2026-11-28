@@ -215,6 +215,7 @@ fn HistoryDateFilter(
             legend { {label} }
             div { class: "public-history-compound public-history-date",
                 select {
+                    id: field.month_focus_id(),
                     name: "{field_name}_month",
                     aria_describedby: error.as_ref().map(|_| error_id.clone()),
                     aria_label: month_label,

@@ -31,8 +31,9 @@ import {
   validTrimmedText,
 } from "../validation";
 
-/** 事件列表的固定字段按整数词法解析；未知扩展字段留给页面原样呈现。 */
+/** 事件列表按整数词法解析固定字段，并拒绝任意层重复键（Rust serde 会拒绝重复字段）；未知扩展字段原样留给页面。 */
 const EVENT_PAGE_FIELD_POLICY: JsonFieldPolicy = {
+  uniqueKeys: "all",
   integerPaths: [
     ["data", "pagination", "page"],
     ["data", "pagination", "page_size"],
@@ -43,6 +44,7 @@ const EVENT_PAGE_FIELD_POLICY: JsonFieldPolicy = {
 };
 
 const LAG_PAGE_FIELD_POLICY: JsonFieldPolicy = {
+  uniqueKeys: "all",
   integerPaths: [
     ["data", "pagination", "page"],
     ["data", "pagination", "page_size"],

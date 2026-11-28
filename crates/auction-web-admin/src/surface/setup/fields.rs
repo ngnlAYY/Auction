@@ -81,11 +81,11 @@ pub(super) fn SetupInput(
                             actor_edited.set(true);
                         }
                         draft.set(field, value);
+                        issues.write().retain(|issue| !field.related(issue.field));
                         if field == SetupField::AdminActor {
                             if validation::issue(&draft, field).is_some() { return; }
                             actor_blur_issue.set(None);
                         }
-                        issues.write().retain(|issue| !field.related(issue.field));
                     },
                     onblur: move |_| {
                         if !busy && field == SetupField::AdminActor && actor_edited() {

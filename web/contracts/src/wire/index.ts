@@ -130,8 +130,12 @@ export function stringMap<TSchema extends v.GenericSchema>(schema: TSchema) {
   );
 }
 
-/** 任意 JSON 值（serde_json::Value）；结构由消费它的模块另行校验。 */
-export const jsonValue = v.unknown();
+/** 任意 JSON 值（serde_json::Value）；结构由消费它的模块另行校验。
+ * 必填字段缺失时 valibot 会以 `undefined` 进入条目 schema，因此必须显式拒绝。 */
+export const jsonValue = v.pipe(
+  v.unknown(),
+  v.check((value) => value !== undefined),
+);
 
 /** 解码结果：成功时带值（值本身可以是 null），失败时只有标记。 */
 export type Decoded<T> = { readonly ok: true; readonly value: T } | { readonly ok: false };

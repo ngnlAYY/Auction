@@ -77,12 +77,20 @@ export function createTaskResource<D, T>(
         running?.cancel();
         state.set("pending");
         running = scope.spawn(async (context) => {
-          const result = await task(snapshot.value, context);
-          if (!context.alive()) {
-            return;
+          try {
+            const result = await task(snapshot.value, context);
+            if (!context.alive()) {
+              return;
+            }
+            value.set(result);
+            state.set("ready");
+          } catch (error) {
+            // 任务体抛出不进入 ready；仍在场时结束加载阶段，异常继续交给全局错误钩子。
+            if (context.alive()) {
+              state.set("stopped");
+            }
+            throw error;
           }
-          value.set(result);
-          state.set("ready");
         });
       });
     },

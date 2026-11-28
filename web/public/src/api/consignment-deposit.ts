@@ -18,6 +18,7 @@ import type { GenericSchema } from "valibot";
 import { sendRequest } from "./clock";
 import { COMMAND_NOT_SENT, type CommandError } from "./commands";
 import { observePublicSessionFailure } from "./session";
+import { publicSessionIdentityRevision } from "./session/revision";
 
 const INSTRUCTIONS = "/api/v2/me/consignment/listings";
 const WITHDRAW = "/api/v2/consignment/listings";
@@ -76,10 +77,19 @@ type ListingSchemas = typeof import("@auction/contracts/dto/public/consignment/l
 let depositSchemas: Promise<DepositSchemas> | undefined;
 let listingSchemas: Promise<ListingSchemas> | undefined;
 
-function schemas() {
+/** 分块加载失败不缓存：下一次进入寄售页可重新拉取同一批契约。 */
+async function schemas(): Promise<
+  Result<[DepositSchemas, ListingSchemas], ConsignmentDepositError>
+> {
   depositSchemas ??= import("@auction/contracts/dto/public/consignment/deposit");
   listingSchemas ??= import("@auction/contracts/dto/public/consignment/listing-v2");
-  return Promise.all([depositSchemas, listingSchemas]);
+  try {
+    return ok(await Promise.all([depositSchemas, listingSchemas]));
+  } catch {
+    depositSchemas = undefined;
+    listingSchemas = undefined;
+    return err({ status: 0, code: "consignment_unavailable" });
+  }
 }
 
 type Request =
@@ -110,6 +120,7 @@ async function requestDeposit<T>(
   integerPaths: NonNullable<JsonFieldPolicy["integerPaths"]>,
 ): Promise<Result<T, ConsignmentDepositError>> {
   if (!validDepositUuid(userId)) return err({ status: 400, code: "invalid_expected_user_id" });
+  const identityAtStart = publicSessionIdentityRevision();
   let dispatched = false;
   let unauthorized = false;
   const deferUnauthorized =
@@ -169,7 +180,7 @@ async function requestDeposit<T>(
     if (deferUnauthorized && unauthorized) {
       observePublicSessionFailure(401, "unauthenticated", userId);
     } else if (sessionChanged) {
-      observePublicSessionFailure(rejectedStatus, code, userId);
+      observePublicSessionFailure(rejectedStatus, code, userId, identityAtStart);
     }
   }
   return result;
@@ -209,7 +220,9 @@ export async function fetchDepositInstructions(
   signal: AbortSignal,
 ): Promise<Result<DepositInstructions, ConsignmentDepositError>> {
   if (!validDepositUuid(listingId)) return err({ status: 400, code: "invalid_request" });
-  const [{ DepositInstructionsSchema }] = await schemas();
+  const loaded = await schemas();
+  if (!loaded.ok) return loaded;
+  const [{ DepositInstructionsSchema }] = loaded.value;
   return requestDeposit(
     userId,
     `${INSTRUCTIONS}/${listingId}/deposit-instructions`,
@@ -230,7 +243,9 @@ export async function issueDepositReservation(
   onSessionGuardRejected?: () => void,
 ): Promise<Result<DepositReservationReceipt, ConsignmentDepositError>> {
   if (!validDepositUuid(listingId)) return err({ status: 400, code: "invalid_request" });
-  const [{ IssueDepositReservationSchema, DepositReservationReceiptSchema }] = await schemas();
+  const loaded = await schemas();
+  if (!loaded.ok) return loaded;
+  const [{ IssueDepositReservationSchema, DepositReservationReceiptSchema }] = loaded.value;
   const decoded = decode(IssueDepositReservationSchema, command);
   if (!decoded.ok) return err({ status: 400, code: "invalid_request" });
   const result = await requestDeposit(
@@ -243,7 +258,7 @@ export async function issueDepositReservation(
     [["data", "listing_version"]],
   );
   return result.ok &&
-    (result.value.command_id !== command.command_id ||
+    (result.value.command_id !== decoded.value.command_id ||
       result.value.listing_id !== listingId ||
       result.value.listing_version !== command.expected_version + 1)
     ? err({ status: 201, code: "invalid_response" })
@@ -259,7 +274,9 @@ export async function withdrawDepositListing(
   onSessionGuardRejected?: () => void,
 ): Promise<Result<WithdrawReceiptV2, ConsignmentDepositError>> {
   if (!validDepositUuid(listingId)) return err({ status: 400, code: "invalid_request" });
-  const [, { WithdrawListingV2Schema, WithdrawReceiptV2Schema }] = await schemas();
+  const loaded = await schemas();
+  if (!loaded.ok) return loaded;
+  const [, { WithdrawListingV2Schema, WithdrawReceiptV2Schema }] = loaded.value;
   const decoded = decode(WithdrawListingV2Schema, command);
   if (!decoded.ok) return err({ status: 400, code: "invalid_request" });
   const result = await requestDeposit(
@@ -272,9 +289,14 @@ export async function withdrawDepositListing(
     [["data", "listing_version"]],
   );
   return result.ok &&
-    (result.value.command_id !== command.command_id ||
+    (result.value.command_id !== decoded.value.command_id ||
       result.value.listing_id !== listingId ||
-      result.value.listing_version !== command.expected_version + 1)
+      // 已有撤回意愿时服务端复用当前版本并返回新命令的意愿回执，不再推进版本。
+      !(
+        result.value.listing_version === command.expected_version + 1 ||
+        (result.value.disposition === "withdrawal_requested" &&
+          result.value.listing_version === command.expected_version)
+      ))
     ? err({ status: 200, code: "invalid_response" })
     : result;
 }

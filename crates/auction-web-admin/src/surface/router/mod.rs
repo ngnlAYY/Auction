@@ -276,25 +276,24 @@ fn Status() -> Element {
 /// Admin 旧链接仍保留在路由表中以兼容书签；`replace` 确保返回键不会在别名与正式地址间
 /// 形成额外的导航环。片段由旧版路由行为保留，便于外部链接定位页面内锚点。
 fn redirect_admin_alias(path: &'static str) -> Element {
-    let target = format!("{path}{}", current_browser_suffix());
     use_effect(move || {
-        let _ = navigator().replace(target.clone());
+        let Some((pathname, search, hash)) = current_browser_location() else { return };
+        // 只收敛仍在别名地址上的渲染；effect 执行前的新导航优先。
+        if pathname == path {
+            let _ = navigator().replace(format!("{path}{search}{hash}"));
+        }
     });
     rsx! {}
 }
 
-fn current_browser_suffix() -> String {
+fn current_browser_location() -> Option<(String, String, String)> {
     cfg_select! {
         target_arch = "wasm32" => {
-            let Some(window) = web_sys::window() else {
-                return String::new();
-            };
+            let window = web_sys::window()?;
             let location = window.location();
-            let search = location.search().unwrap_or_default();
-            let hash = location.hash().unwrap_or_default();
-            format!("{search}{hash}")
+            Some((location.pathname().ok()?, location.search().ok()?, location.hash().ok()?))
         }
-        _ => String::new(),
+        _ => None,
     }
 }
 

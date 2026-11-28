@@ -185,14 +185,7 @@ export function DetailBidHistoryDialog(props: {
     const result = loaded();
     return result?.ok ? result.value : null;
   };
-  const emptyPage = () => {
-    const current = loadedPage();
-    return current !== null && current.bids.length === 0 ? current : null;
-  };
-  const tablePage = () => {
-    const current = loadedPage();
-    return current !== null && current.bids.length > 0 ? current : null;
-  };
+  // 空页也保留分页器：总数缩小时页码纠偏才有入口，不能把用户困在“暂无记录”。
   const failed = () => {
     const result = loaded();
     return result !== undefined && !result.ok;
@@ -215,18 +208,27 @@ export function DetailBidHistoryDialog(props: {
           <Match when={loaded() === undefined}>{null}</Match>
           <Match when={failed()}>
             <p class="public-catalog-detail__status" role="alert">
-              {t("data-error")}
+              <span>{t("data-error")}</span>
+              <button
+                class="public-catalog-detail__more"
+                type="button"
+                onClick={() => bidLog.restart()}
+              >
+                {t("data-retry")}
+              </button>
             </p>
           </Match>
-          <Match when={emptyPage()}>
-            <p class="public-catalog-detail__empty">{t("lot-no-bids")}</p>
-          </Match>
-          <Match when={tablePage()}>
+          <Match when={loadedPage()}>
             {(current) => (
               <>
-                <BidHistoryTable page={current()} />
+                <Show
+                  when={current().bids.length > 0}
+                  fallback={<p class="public-catalog-detail__empty">{t("lot-no-bids")}</p>}
+                >
+                  <BidHistoryTable page={current()} />
+                </Show>
                 <PublicPager
-                  page={current().page ?? 1}
+                  page={page()}
                   pageSize={HISTORY_PAGE_SIZE}
                   total={current().total}
                   hasMore={current().has_more ?? false}

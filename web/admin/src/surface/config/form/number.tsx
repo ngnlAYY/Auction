@@ -21,7 +21,10 @@ export const FieldAnnouncerContext = createContext<FieldAnnouncer>();
 
 interface NumberEdit {
   readonly issue: NumberIssue | null;
+  /** 错误已在界面上展示；输入只延续或清除它，新错误等离焦或提交。 */
   readonly reported: boolean;
+  /** 当前错误已播报或已排入离焦播报；种类变化后需要重新播报。 */
+  readonly announced: boolean;
 }
 
 /**
@@ -117,11 +120,11 @@ export function NumberInput(props: {
           if (
             pendingEdit !== null &&
             pendingEdit.issue !== null &&
-            !pendingEdit.reported &&
+            !pendingEdit.announced &&
             !issues.peek().some((issue) => issue.path === props.path)
           ) {
             const pendingIssue = pendingEdit.issue;
-            edit.set({ issue: pendingIssue, reported: true });
+            edit.set({ issue: pendingIssue, reported: true, announced: true });
             // 焦点播报的等待期内语言可能切换；保留字段错误，在真正播报前翻译。
             announcer.announceLocalizedOnBlur(id(), () =>
               numberIssueMessage(pendingIssue, props.minimum, props.maximum),

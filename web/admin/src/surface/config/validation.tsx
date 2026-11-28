@@ -43,6 +43,11 @@ type FieldIssueKind =
       readonly minimum: string;
       readonly maximum: string;
       readonly issue: NumberIssue;
+    }
+  | {
+      readonly kind: "time";
+      readonly labelAtValidation: string;
+      readonly issue: TimeIssue;
     };
 
 /** 校验摘要与控件共用的当前字段错误；由表单页面提供，控件只读取。 */
@@ -66,6 +71,27 @@ export function numberIssueMessage(issue: NumberIssue, minimum: string, maximum:
       return t("admin-runtime-field-integer");
     case "range":
       return t("admin-runtime-field-range", { minimum, maximum });
+    default:
+      return unreachable(issue);
+  }
+}
+
+/** 本地钟点输入的本地错误类别；与 Rust 的 `week_minute` 一样要求五位 `HH:MM`。 */
+export type TimeIssue = "required" | "format";
+
+export function timeIssue(input: string): TimeIssue | null {
+  if (input.length === 0) {
+    return "required";
+  }
+  return /^([01][0-9]|2[0-3]):[0-5][0-9]$/u.test(input) ? null : "format";
+}
+
+export function timeIssueMessage(issue: TimeIssue): string {
+  switch (issue) {
+    case "required":
+      return t("admin-runtime-field-time-required");
+    case "format":
+      return t("admin-runtime-field-time-format");
     default:
       return unreachable(issue);
   }
@@ -158,6 +184,19 @@ export function collectIssues(form: RuntimeConfigForm): readonly FieldIssue[] {
       });
     }
   });
+  visitTimeControls((path, label) => {
+    const input = runtimeConfigFormEditedInput(form, path);
+    if (input === null) {
+      return;
+    }
+    const issue = timeIssue(input);
+    if (issue !== null) {
+      issues.push({
+        path,
+        kind: { kind: "time", labelAtValidation: label(), issue },
+      });
+    }
+  });
   return issues;
 }
 
@@ -185,6 +224,29 @@ function visitNumberControls(
     const minimum = field.getAttribute("min") ?? "";
     const maximum = field.getAttribute("max") ?? "";
     visit(path, minimum, maximum, () => controlLabel(field, path));
+  }
+}
+
+/** 只检查已编辑的钟点控件；历史值即使不符合当前格式也不拦截提交。 */
+function visitTimeControls(visit: (path: string, label: () => string) => void): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+  let fields: NodeListOf<Element>;
+  try {
+    fields = document.querySelectorAll("[data-runtime-time]");
+  } catch {
+    return;
+  }
+  for (const field of fields) {
+    if (field.hasAttribute("disabled")) {
+      continue;
+    }
+    const path = field.getAttribute("data-runtime-time");
+    if (path === null) {
+      continue;
+    }
+    visit(path, () => controlLabel(field, path));
   }
 }
 
@@ -395,6 +457,10 @@ function fieldIssueText(issue: FieldIssue, controlLabelText: string | null): str
     case "number":
       label = controlLabelText ?? issue.kind.labelAtValidation;
       message = numberIssueMessage(issue.kind.issue, issue.kind.minimum, issue.kind.maximum);
+      break;
+    case "time":
+      label = controlLabelText ?? issue.kind.labelAtValidation;
+      message = timeIssueMessage(issue.kind.issue);
       break;
     default:
       return unreachable(issue.kind);

@@ -194,18 +194,24 @@ export function effect<T>(compute: () => T, apply: (value: T) => void): void {
 /** 合并 JSX 展开属性，后一份优先。 */
 export { merge as mergeProps } from "solid-js";
 
-/** 把展开的属性写入节点，保留响应式 getter 与写入次序。 */
+/** 把展开的属性写入节点，保留响应式 getter 与写入次序；后续展开缺少的键会被清除。 */
 export function spread(
   element: TestElement,
   sources: readonly Record<string, unknown>[],
   skipChildren = false,
 ): void {
+  let previous: readonly string[] = [];
   effect(
     () => Object.assign({}, ...sources),
     (props) => {
-      for (const [key, value] of Object.entries(props)) {
-        if (key !== "children" || !skipChildren) setProp(element, key, value);
+      const entries = Object.entries(props).filter(([key]) => key !== "children" || !skipChildren);
+      const keys = entries.map(([key]) => key);
+      // 条件展开少掉的键必须移除；否则旧处理器和属性会跨渲染残留。
+      for (const key of previous) {
+        if (!keys.includes(key)) setProp(element, key, undefined);
       }
+      for (const [key, value] of entries) setProp(element, key, value);
+      previous = keys;
     },
   );
 }

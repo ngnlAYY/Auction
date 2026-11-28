@@ -70,7 +70,11 @@ export function LotWatchButton(props: {
     watchToggleState(owner, context.authoritative(props.lotId), pending() !== null && !notSent());
   const watched = () => context.displayed(props.lotId);
   const busy = () => pending()?.busy === true;
-  const error = () => pending()?.error ?? (blockedBeforeSubmit() ? COMMAND_NOT_SENT : null);
+  const error = () =>
+    pending()?.error ??
+    (pending() === null && blockedBeforeSubmit() && currentSessionConfirmation(session) === null
+      ? COMMAND_NOT_SENT
+      : null);
   const uncertain = () => pending()?.uncertain === true;
   const conflict = () => error()?.status === 409 && error()?.code === "watch_conflict";
   const errorMessage = () =>

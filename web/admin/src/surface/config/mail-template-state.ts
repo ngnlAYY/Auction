@@ -135,6 +135,8 @@ export function useTemplateEditState(
         !pending.containsLocal(TEMPLATE_ENTITY_PREFIX) &&
         confirmation.peek() === null &&
         !conflicts.peek().has(key) &&
+        // 读取仍在进行时旧快照不能作为编辑基准，否则新列表到达即产生冲突草稿。
+        state.listReady() &&
         state.currentRevision(key) === revision
       );
     },

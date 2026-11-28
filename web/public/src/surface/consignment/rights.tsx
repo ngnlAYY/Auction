@@ -118,6 +118,7 @@ export function RightsPage(): JSX.Element {
   const inputs: HTMLInputElement[] = [];
   const wipe = () => {
     locator.set("");
+    identity.set("");
     code.set("");
     for (const input of inputs) input.value = "";
   };
@@ -142,9 +143,15 @@ export function RightsPage(): JSX.Element {
         attempt.set(null);
         notice.set(null);
         result.value();
+      } else if (result.error.status === 401) {
+        // 会话失效一律回到验权；不保留会重放旧会话的尝试。
+        backToVerify();
       } else {
         // 结果未知只保留原尝试；已确认被拒则结案。
         attempt.set(rightWriteRejected(next.kind, result.error) ? null : next);
+        if (next.kind === "verify" && result.error.code === "challenge_invalid") {
+          challengeId.set(null);
+        }
         error.set(result.error);
       }
     });
@@ -162,15 +169,28 @@ export function RightsPage(): JSX.Element {
     notice.set(DISPOSITION_KEYS[disposition]);
   }
 
+  /** 未决记录只属于当前验权得到的权利；换一份权利后不得在错误页面上结算或展示。 */
+  const claimForView = () => {
+    const record = claim();
+    const current = view();
+    return record !== null && current !== null && record.right_id === current.right_id
+      ? record
+      : null;
+  };
+
   function checkClaim() {
     const record = claim.peek();
-    if (record === null) return;
+    if (record === null || record.right_id !== view.peek()?.right_id) return;
     busy.set(true);
     tasks.spawn(async (context) => {
       const result = await fetchRightCommandReceipt(record.command_id, context.signal);
       if (!context.alive()) return;
       busy.set(false);
-      if (result.ok && result.value.command_id === record.command_id) {
+      if (
+        result.ok &&
+        result.value.command_id === record.command_id &&
+        result.value.right_id === record.right_id
+      ) {
         finishClaim(result.value.disposition);
       } else if (!result.ok && result.error.status === 401) backToVerify();
       // 404 只表示回执尚不存在，授权原样重送；其余错误只展示。
@@ -261,7 +281,13 @@ export function RightsPage(): JSX.Element {
     });
   };
   const submitClaim = (current: RightView, action: RightAction) => {
-    if (busy.peek() || claim.peek() !== null || !current.allowed_actions.includes(action)) return;
+    const existing = claim.peek();
+    if (
+      busy.peek() ||
+      (existing !== null && existing.right_id === current.right_id) ||
+      !current.allowed_actions.includes(action)
+    )
+      return;
     const record = decode(CLAIM_RECORD, {
       command_id: createUuidV4(),
       right_id: current.right_id,
@@ -407,7 +433,7 @@ export function RightsPage(): JSX.Element {
             <Show when={current().kind === "loss_case"}>
               <p>{t("consignment-right-read-only")}</p>
             </Show>
-            <Show when={claim()}>
+            <Show when={claimForView()}>
               <p role="status">{t("consignment-pending")}</p>
               <div class="public-consignment-account__actions">
                 <button type="button" disabled={busy()} onClick={checkClaim}>
@@ -417,9 +443,8 @@ export function RightsPage(): JSX.Element {
                   type="button"
                   disabled={busy()}
                   onClick={() => {
-                    const record = claim.peek();
-                    if (record !== null && record.right_id === current().right_id)
-                      sendClaim(record);
+                    const record = claimForView();
+                    if (record !== null) sendClaim(record);
                   }}
                 >
                   {t("session-duration-retry")}
@@ -431,7 +456,7 @@ export function RightsPage(): JSX.Element {
                 {(action) => (
                   <button
                     type="button"
-                    disabled={busy() || claim() !== null}
+                    disabled={busy() || claimForView() !== null}
                     onClick={() => submitClaim(current(), action)}
                   >
                     {t(ACTION_KEYS[action])}

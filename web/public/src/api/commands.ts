@@ -16,6 +16,7 @@ import {
   PUBLIC_EXPECTED_USER_ID_HEADER,
 } from "@auction/contracts/dto/public/commands";
 import {
+  type TransportError,
   type TransportRequestBuilder,
   type TransportResponse,
   transportErrorCode,
@@ -26,6 +27,7 @@ import { sendRequest } from "./clock";
 import { decodeErrorCode } from "./decoder";
 import { decodeBidCommand, decodeCreateProxyCommand, decodeLowerProxyCommand } from "./decoder/lot";
 import { observePublicSessionFailure } from "./session";
+import { publicSessionIdentityRevision } from "./session/revision";
 import { invalidateAfterCommand } from "./swr-cache";
 
 /** Public 命令失败的稳定错误投影；不把服务端说明正文带入浏览器展示。 */
@@ -127,6 +129,7 @@ async function sendCompetitionCommand<T>(
   readReceipt: (response: TransportResponse) => Result<T, string>,
   signal: AbortSignal,
 ): Promise<Result<T, CommandError>> {
+  const identityAtStart = publicSessionIdentityRevision();
   let dispatched = false;
   const build: TransportRequestBuilder = (requestSignal) => {
     if (requestSignal.aborted) {
@@ -147,10 +150,21 @@ async function sendCompetitionCommand<T>(
       },
     });
   };
-  const sent = await sendRequest(build, signal, (status) => {
-    // 401 一到就复核会话。正文断流或超时也要继续暂停未知命令的重试。
-    if (status === 401 && !signal.aborted) observePublicSessionFailure(status, "invalid_response");
-  });
+  let sent: Result<TransportResponse, TransportError>;
+  try {
+    sent = await sendRequest(build, signal, (status) => {
+      // 401 一到就复核会话。正文断流或超时也要继续暂停未知命令的重试。
+      if (status === 401 && !signal.aborted) {
+        observePublicSessionFailure(status, "invalid_response");
+      }
+    });
+  } catch {
+    // 传输层只在构造或观察回调抛错时拒绝 Promise；命令可能已发出，按结果未知失败关闭。
+    if (dispatched) {
+      invalidateAfterCommand();
+    }
+    return err(dispatched ? invalidResponse(0) : COMMAND_NOT_SENT);
+  }
   // 成功、拒绝和结果未知都要求竞价视图向服务端再确认，旧快照不能作为命令后的权威结果。
   if (!dispatched) {
     return err(COMMAND_NOT_SENT);
@@ -167,7 +181,7 @@ async function sendCompetitionCommand<T>(
   }
   const response = sent.value;
   if (!responseOk(response)) {
-    return err(readCommandError(response, userId));
+    return err(readCommandError(response, userId, identityAtStart));
   }
   const result = readReceipt(response);
   return result.ok ? result : err(invalidResponse(response.status));
@@ -177,7 +191,11 @@ function responseOk(response: { status: number }): boolean {
   return response.status >= 200 && response.status <= 299;
 }
 
-function readCommandError(response: TransportResponse, expectedUser: string): CommandError {
+function readCommandError(
+  response: TransportResponse,
+  expectedUser: string,
+  observedRevision: number,
+): CommandError {
   const status = response.status;
   const code = decodeErrorCode(response);
   const commandError: CommandError =
@@ -185,6 +203,7 @@ function readCommandError(response: TransportResponse, expectedUser: string): Co
       ? { code, status }
       : invalidResponse(status);
   // 否定预期用户必须取得完整错误正文。401 已在收到响应头时触发复核。
-  if (status === 409) observePublicSessionFailure(status, commandError.code, expectedUser);
+  if (status === 409)
+    observePublicSessionFailure(status, commandError.code, expectedUser, observedRevision);
   return commandError;
 }

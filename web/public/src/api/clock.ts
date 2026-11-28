@@ -188,8 +188,9 @@ export function sendGet(
   return sendGetObserved(
     url,
     (response) => {
-      observeStatus(response.status);
+      // 先采样服务端时钟：调用方的状态观察即使抛错也不能丢失本次校准。
       observeResponseDate(response);
+      observeStatus(response.status);
     },
     signal,
   );
@@ -224,8 +225,9 @@ export function sendGetConditional(
       };
     },
     (response) => {
-      observeResponse(response);
+      // 再验证请求同样先采样 Date，调用方观察与头部读取失败不影响校准。
       observeRevalidatedDate(response);
+      observeResponse(response);
     },
     signal,
   );

@@ -92,6 +92,8 @@ impl TooltipInteraction {
                 && !*self.popup_hovered.peek()
                 && !*self.popup_focused.peek()
                 && !*self.pinned.peek()
+                // 没有打开的浮层时 close 只会留下 dismissed，吞掉下一次聚焦的揭示。
+                && self.position.peek().is_some()
             {
                 self.close();
             }

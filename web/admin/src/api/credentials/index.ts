@@ -181,13 +181,13 @@ export async function fetchAdminCredentials(
   const query = new URLSearchParams();
   query.append("page", requestedPage.toString());
   query.append("page_size", pageSize.toString());
-  if (kind !== "") {
+  if (kindValue !== "") {
     query.append("kind", kindValue);
   }
-  if (world !== "") {
+  if (worldValue !== "") {
     query.append("world", worldValue);
   }
-  if (status !== "") {
+  if (statusValue !== "") {
     query.append("status", statusValue);
   }
   const response = await sendGet(host, `/api/v1/admin/credentials?${query.toString()}`, signal);

@@ -32,9 +32,9 @@
   padding: var(--space-2) var(--space-3);
 }
 
-.public-settings-page__list
-  > :is(.language-picker, .theme-picker)
-  + :is(.language-picker, .theme-picker) {
+/* 主题行始终排在语言行之后；语言切换失败会在两者之间插入一行错误提示，
+   分隔线不能靠相邻兄弟选择器，否则错误出现时主题行丢线上边框。 */
+.public-settings-page__list > .theme-picker {
   border-block-start: var(--border-width) solid var(--color-border);
 }
 
@@ -55,7 +55,8 @@
 .public-settings-page__list :is(.language-picker__select, .theme-picker__select) {
   inline-size: 11rem;
   max-inline-size: 60%;
-  min-block-size: 2.25rem;
+  /* 桌面 36px 的紧凑控件；触控断点由共用样式把紧凑高度提到 44px，取两者较大值。 */
+  min-block-size: max(2.25rem, var(--size-control-compact));
   border-radius: var(--radius-sm);
 }
 

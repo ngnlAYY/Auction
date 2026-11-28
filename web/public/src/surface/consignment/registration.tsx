@@ -6,7 +6,7 @@ import { Link, useRouter } from "@auction/web-shared/router";
 import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { onCleanup, Show } from "solid-js";
+import { createEffect, onCleanup, Show } from "solid-js";
 
 import type { ConsignmentPrivateError } from "../../api/consignment-private";
 import { type ConsignmentCapability, useConsignmentCapability } from "./capability";
@@ -58,7 +58,8 @@ function Registration(props: { readonly canUse: () => boolean }): JSX.Element {
   };
   onCleanup(clearUrl);
 
-  const pending = useConsignmentPending(props.canUse, (result) => {
+  const pending = useConsignmentPending(props.canUse, (result, record) => {
+    if (record.operation !== "register") return;
     if (result.ok) {
       if (result.value.listing_id !== null)
         router.push(ownedConsignmentHref(result.value.listing_id));
@@ -69,6 +70,10 @@ function Registration(props: { readonly canUse: () => boolean }): JSX.Element {
       feeRejected.set(capability());
       capability.refresh();
     }
+  });
+  // 费率拒绝触发能力重读；刷新落定后提示已不再是当前输入的错误，随表单重新出现一并清除。
+  createEffect(checkingFee, (checking) => {
+    if (!checking && error.peek()?.code === "fee_changed") error.set(null);
   });
   useConsignmentRefresh(() => false, capability.refresh);
 

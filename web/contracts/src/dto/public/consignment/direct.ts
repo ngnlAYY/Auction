@@ -10,7 +10,12 @@ import {
   ListingPriceSchema,
   ListingVersionSchema,
 } from "./scalar";
-import { ListingReasonSchema, ListingStateSchema, listingStateMatchesMode } from "./states";
+import {
+  ListingReasonSchema,
+  ListingStateSchema,
+  listingReasonTerminalState,
+  listingStateMatchesMode,
+} from "./states";
 
 /** 不变量 1、6、7：稳定命令 ID 与整数标价；模式固定非寄售，装备链接仅用于这次请求。 */
 export interface RegisterDirectListing {

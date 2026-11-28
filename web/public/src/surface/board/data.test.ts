@@ -35,6 +35,39 @@ const CURRENT = {
   proxy_default_mode: "fast",
 };
 
+/** 生成与该区间应有行数一致的摘要投影；解码器会核对页长与 total。 */
+function liveLots(url: URL, total: number) {
+  const page = Number(url.searchParams.get("page"));
+  const pageSize = Number(url.searchParams.get("page_size"));
+  const offset = (page - 1) * pageSize;
+  const count = Math.max(0, Math.min(pageSize, total - offset));
+  return Array.from({ length: count }, (_, index) => {
+    const number = offset + index + 1;
+    return {
+      id: `11111111-0000-4000-8000-${String(number).padStart(12, "0")}`,
+      auction_id: AUCTION_ID,
+      lot_number: number,
+      status: "live",
+      start_price: 1_000,
+      current_price: 1_000,
+      next_bid: 1_000,
+      has_leader: false,
+      seller_name: "seller",
+      state_version: 1,
+      effective_end_at: END_AT,
+      equipment: {
+        name: "Legendary Cotton Robe of Heimdall",
+        category: "Cloth",
+        equipment_group: "rare",
+        level: 450,
+        primary_attribute_initials: "IW",
+        avg_roll: 70.0,
+        game_equipment_url: "https://hentaiverse.org/equip/123456/0123456789",
+      },
+    };
+  });
+}
+
 function liveDirectory(url: URL, total = 0): Response {
   return success({
     auction_id: AUCTION_ID,
@@ -44,7 +77,7 @@ function liveDirectory(url: URL, total = 0): Response {
     bidding_open: true,
     opens_at: CURRENT.opens_at,
     preview_revision: 0,
-    lots: [],
+    lots: liveLots(url, total),
     total,
     page: Number(url.searchParams.get("page")),
     page_size: Number(url.searchParams.get("page_size")),

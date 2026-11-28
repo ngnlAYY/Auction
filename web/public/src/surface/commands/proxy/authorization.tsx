@@ -6,7 +6,7 @@ import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { formatCreditAmount } from "@auction/web-shared/ui/format";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { onSettled, Show, useContext } from "solid-js";
+import { createEffect, onSettled, Show, useContext } from "solid-js";
 
 import type { OwnedProxy } from "../../../api/account";
 import { parseCreditAmount } from "../../catalog/presentation";
@@ -38,11 +38,23 @@ export function ProxyAuthorizationForm(props: {
   const lowerBound = createValueMemo(() =>
     props.proxy.capabilities.waiting ? props.nextBid : props.currentPrice,
   );
-  const maximumAmount = createCell(initialProxyAmount(lowerBound()));
+  const initialMaximum = initialProxyAmount(lowerBound());
+  let lastDefault = initialMaximum;
+  const maximumAmount = createCell(initialMaximum);
+  // 下限随实时价格更新：草稿仍是上一份默认值时重同步，玩家已改写的输入保持原样。
+  createEffect(lowerBound, (bound) => {
+    const next = initialProxyAmount(bound);
+    if (maximumAmount.peek() === lastDefault) maximumAmount.set(next);
+    lastDefault = next;
+  });
   const validation = createCell<string | null>(null);
   const biddingOpen = () => props.lotStatus === "live";
   const limitReached = () => lowerBound() > MAX_PUBLIC_BID_AMOUNT;
-  const canLower = () => props.proxy.capabilities.can_lower && biddingOpen() && !limitReached();
+  const canLower = () =>
+    props.proxy.capabilities.can_lower &&
+    props.proxy.maximum_amount > lowerBound() &&
+    biddingOpen() &&
+    !limitReached();
   const submitDisabled = () => !canLower() || !props.canSubmit;
   const blockedReason = () => {
     if (!biddingOpen()) {

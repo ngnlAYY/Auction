@@ -77,23 +77,6 @@ export interface DeliveriesQuery {
   direction: SortDirection;
 }
 
-/** 与 Rust `Default` 相同的查询值；地址栏解析从不使用这里的第一页缺省。 */
-export function deliveriesQueryDefault(): DeliveriesQuery {
-  return {
-    status: "",
-    recipient: "",
-    reference: "",
-    template: "",
-    category: "",
-    world: "",
-    createdFrom: "",
-    createdTo: "",
-    page: 0n,
-    sort: "",
-    direction: "asc",
-  };
-}
-
 /** 映射为 API 查询结构；`status` 由页面单独传入。 */
 export function deliveriesQueryFilters(query: DeliveriesQuery): DeliverySearchFilters {
   return {

@@ -83,7 +83,8 @@ export async function fetchRuntimeSwitches(
   if (
     !closedSubset(databaseNames) ||
     !closedSubset(appliedNames) ||
-    !appliedNames.every((name) => databaseNames.includes(name))
+    !appliedNames.every((name) => databaseNames.includes(name)) ||
+    !databaseNames.includes("external_access_paused")
   ) {
     return err("invalid_response");
   }

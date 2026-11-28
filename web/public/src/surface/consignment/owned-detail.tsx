@@ -78,7 +78,8 @@ function Detail(props: {
   // 已在库件的撤回由服务端直接建撤回代（202 withdrawal_accepted），挂单重读后只显示撤回处理中，
   // 这里另行说明装备将寄回；任何后续结果都会撤下该提示。
   const accepted = createCell(false);
-  const pending = useConsignmentPending(props.canUse, (result) => {
+  const pending = useConsignmentPending(props.canUse, (result, record) => {
+    if (record.operation !== "register" && record.listing_id !== props.listingId) return;
     accepted.set(result.ok && result.value.disposition === "withdrawal_accepted");
     if (
       result.ok &&
@@ -138,10 +139,12 @@ function Detail(props: {
                 listing={listing()}
                 disabled={!props.canUse() || pending.blocked() || read.state() !== "ready"}
                 submit={(input) => {
-                  if (pending.submit(input)) {
+                  const submitted = pending.submit(input);
+                  if (submitted) {
                     feedback.set(null);
                     accepted.set(false);
                   }
+                  return submitted;
                 }}
                 refresh={() => {
                   feedback.set({ code: "stale_version", status: 409 });
@@ -276,7 +279,7 @@ interface ActionDraft {
 function SellerActions(props: {
   readonly listing: OwnedListingV2;
   readonly disabled: boolean;
-  readonly submit: (input: ConsignmentIntent) => void;
+  readonly submit: (input: ConsignmentIntent) => boolean;
   readonly refresh: () => void;
 }): JSX.Element {
   const draft = createCell<ActionDraft | null>(null);
@@ -299,13 +302,12 @@ function SellerActions(props: {
     if (current.action === "withdraw") {
       // 新撤回一律走 v2 路由：未代管件回 closed，代管件登记意愿回 withdrawal_requested，
       // 已在库件直接建撤回代回 202 withdrawal_accepted。
-      props.submit({ ...target, operation: "withdraw_deposit" });
-    } else {
-      const amount = listingPrice(price.peek());
-      if (amount === null) return;
-      props.submit({ ...target, operation: "reprice", price: amount });
+      if (props.submit({ ...target, operation: "withdraw_deposit" })) draft.set(null);
+      return;
     }
-    draft.set(null);
+    const amount = listingPrice(price.peek());
+    if (amount === null) return;
+    if (props.submit({ ...target, operation: "reprice", price: amount })) draft.set(null);
   };
 
   return (

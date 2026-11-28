@@ -402,10 +402,12 @@ pub(crate) fn run_page_events(module: &str, test: &str, run: impl FnOnce()) {
         .env(CHILD, "1")
         .output()
         .unwrap();
+    // libtest 对零命中的 `--exact` 也返回成功；必须核对确实运行了一个测试，
+    // 否则测试名漂移会让宿主回归静默不执行。
+    let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(
-        result.status.success(),
-        "{}\n{}",
-        String::from_utf8_lossy(&result.stdout),
+        result.status.success() && stdout.contains("test result: ok. 1 passed"),
+        "{stdout}\n{}",
         String::from_utf8_lossy(&result.stderr)
     );
 }

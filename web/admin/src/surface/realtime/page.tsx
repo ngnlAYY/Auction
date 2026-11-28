@@ -261,6 +261,17 @@ function pageWithCopy(): JSX.Element {
       replayProcessed.set(true);
     }
   });
+
+  // 失败分页变化后旧确认框不再对应当前页面；与 Rust 页一样清除选择。
+  createEffect(
+    () => queryState().failurePage,
+    (page, previous) => {
+      // 只在实际换页时清除；地址栏以等价状态重写不能让弹窗消失。
+      if (previous !== undefined && previous !== page) {
+        selectedFailure.set(null);
+      }
+    },
+  );
   const replayAvailable = (): boolean => !replayProcessed() && replayEligible() === true;
 
   const refreshAll = (): void => {

@@ -431,6 +431,14 @@ function retryPendingCommand(host: PendingCommandHost, commandId: string): Comma
     guard?.release();
     return "invalid";
   }
+  // 门禁回调也可能同步注销来源或撤回写许可；取得 guard 后按同一组条件复核。
+  if (
+    (source !== null && !sourceRegistered(host, source)) ||
+    !adminSessionWritesAllowed(host.sessionHost)
+  ) {
+    guard?.release();
+    return "blocked";
+  }
   const afterGate = host.entries.peek();
   const afterIndex = afterGate.findIndex((candidate) => candidate.identity.commandId === commandId);
   const afterEntry = afterIndex < 0 ? undefined : afterGate[afterIndex];

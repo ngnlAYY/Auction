@@ -4,8 +4,9 @@
 // 说明符的合法形态是闭集：以 ./ 或 ../ 开头的相对路径、写死的两个 @auction 别名、
 // web/package.json 登记的第三方依赖，以及测试文件里的 node:/bun: 内置模块。别名只能
 // 登记在 web/tsconfig.base.json；配置只用于核对写死的别名表，不参与解析，出现多余条目、
-// 多个候选、条件映射或子配置 paths 时以退出码 2 失败。受检源码不允许符号链接，允许目标
-// 的真实路径也必须等于词法路径。
+// 多个候选、条件映射或子配置 paths 时以退出码 2 失败。子配置经 extends（含数组与省略
+// .json 的相对路径）引入的文件同样逐层核对；包名 extends 不在闭集内。受检源码不允许
+// 符号链接，允许目标的真实路径也必须等于词法路径。
 //
 // 退出码：1 表示发现越界导入；2 表示工具、配置、读取或解析失败。解析器和清理阶段共用
 // 同一个 watchdog，初始化、扫描或 close() 失联都不会让门禁无限等待。
@@ -19,6 +20,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  statSync,
 } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import type { Node, SourceFile } from "typescript/unstable/ast";
@@ -160,6 +162,49 @@ function listConfigFiles(webRoot: string, repositoryRoot: string): string[] {
   return [...configs].sort();
 }
 
+// 配置可以经 extends 引入仓库内任意相对路径文件（含省略 .json 的写法与数组形式）；
+// 只扫描 tsconfig*.json 会漏掉扩展文件里的 paths。包名 extends 需要 Node 解析规则，
+// 当前仓库没有这种配置，出现时失败关闭而不是假装已核对。
+function extendsTargets(
+  configPath: string,
+  config: Record<string, unknown>,
+  repositoryRoot: string,
+): string[] {
+  const value = config.extends;
+  if (value === undefined) {
+    return [];
+  }
+  const entries = Array.isArray(value) ? value : [value];
+  const targets: string[] = [];
+  for (const entry of entries) {
+    if (typeof entry !== "string" || entry === "") {
+      throw new Error(
+        `别名登记与检查器不一致：${relative(repositoryRoot, configPath)} 的 extends 格式无效`,
+      );
+    }
+    if (!entry.startsWith("./") && !entry.startsWith("../")) {
+      throw new Error(
+        `别名登记与检查器不一致：${relative(repositoryRoot, configPath)} 的 extends 不是相对路径：${entry}`,
+      );
+    }
+    const base = resolve(dirname(configPath), entry);
+    const candidate = [base, `${base}.json`].find((path) => {
+      try {
+        return statSync(path).isFile();
+      } catch {
+        return false;
+      }
+    });
+    if (candidate === undefined) {
+      throw new Error(
+        `别名登记与检查器不一致：无法解析 ${relative(repositoryRoot, configPath)} 的 extends：${entry}`,
+      );
+    }
+    targets.push(candidate);
+  }
+  return targets;
+}
+
 function collectDependencies(
   packageJson: Record<string, unknown>,
   packageJsonPath: string,
@@ -229,17 +274,31 @@ function validateAliasConfiguration(webRoot: string, repositoryRoot: string): vo
     }
   }
 
-  for (const configPath of listConfigFiles(webRoot, repositoryRoot)) {
+  // 跟随 extends 链逐层核对；visited 防止循环 extends 让扫描不终止。
+  const pending = listConfigFiles(webRoot, repositoryRoot);
+  const visited = new Set<string>();
+  while (pending.length > 0) {
+    const configPath = pending.pop();
+    if (configPath === undefined) {
+      break;
+    }
+    if (visited.has(configPath)) {
+      continue;
+    }
+    visited.add(configPath);
+    const config = readJson(configPath, repositoryRoot);
+    pending.push(...extendsTargets(configPath, config, repositoryRoot));
     if (configPath === basePath) {
       continue;
     }
-    const config = readJson(configPath, repositoryRoot);
     const otherOptions = config.compilerOptions;
     if (otherOptions === undefined) {
       continue;
     }
     if (typeof otherOptions !== "object" || otherOptions === null || Array.isArray(otherOptions)) {
-      throw new Error(`别名登记与检查器不一致：${configPath} 的 compilerOptions 不是对象`);
+      throw new Error(
+        `别名登记与检查器不一致：${relative(repositoryRoot, configPath)} 的 compilerOptions 不是对象`,
+      );
     }
     if (Object.hasOwn(otherOptions, "paths")) {
       throw new Error(
@@ -506,19 +565,20 @@ export async function runBoundaryCheck(repositoryRoot: string): Promise<0 | 1 | 
     failure = errorMessage(error);
   }
   if (timedOut) {
-    // 工作中的解析调用可能仍在使用快照；等它响应 timedOut 并退出后再释放资源。
-    void workPromise
-      .catch(() => undefined)
-      .then(cleanup)
-      .catch(() => undefined);
-  } else {
-    const cleanupPromise = cleanup();
+    // 工作中的解析调用可能仍在使用快照：先等它响应 timedOut 退出，再释放资源。
+    // 清理不能脱离本次结果，否则清理失败会在调用方退出后才出现。
+    await workPromise.catch(() => undefined);
+  }
+  const cleanupPromise = cleanup();
+  if (!timedOut) {
     try {
       await Promise.race([cleanupPromise, timeout.promise]);
     } catch (error) {
       failure ??= errorMessage(error);
       void cleanupPromise.catch(() => undefined);
     }
+  } else {
+    await cleanupPromise;
   }
   clearTimeout(watchdog);
   for (const diagnostic of diagnostics) {

@@ -287,8 +287,13 @@ pub(super) fn notifications(notifications: Vec<PlayerSupportNotification>) -> El
                                         {notification.state_reason.clone().unwrap_or_default()}
                                     }
                                     td {
-                                        if let Some(delivery_id) = notification.delivery_id.clone() {
-                                            Link { to: Route::DeliveryDetail { delivery_id }, {t!("support-open-delivery")} }
+                                        // 只有 MoogleMail 投递渠道有可打开的投递详情。
+                                        if notification.channel == "mm" {
+                                            if let Some(delivery_id) = notification.delivery_id.clone() {
+                                                Link { to: Route::DeliveryDetail { delivery_id }, {t!("support-open-delivery")} }
+                                            } else {
+                                                {t!("value-empty")}
+                                            }
                                         } else {
                                             {t!("value-empty")}
                                         }

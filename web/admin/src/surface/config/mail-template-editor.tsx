@@ -185,8 +185,6 @@ export function MailTemplateEditor(props: {
       </summary>
       <form
         class="admin-runtime-section__body"
-        action={`/api/v1/admin/mail-templates/${key}`}
-        method="post"
         aria-labelledby={`${fieldId}-label`}
         novalidate
         onSubmit={beginSave}

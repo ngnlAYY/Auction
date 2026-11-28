@@ -40,6 +40,10 @@ export function buildAdminCredentialCreateRequest(
     request.player_name = input.player_name;
   }
   if (input.secret !== undefined && input.secret !== "") {
+    if (input.login !== undefined) {
+      // 契约写明 Cookie 与论坛登录互斥；不能等到服务端 invalid_credential_request 才发现。
+      throw new TypeError("凭据导入请求不能同时提供 Cookie 与论坛登录");
+    }
     request.secret = input.secret;
   }
   if (input.login !== undefined) {

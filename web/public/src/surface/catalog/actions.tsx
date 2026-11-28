@@ -116,7 +116,7 @@ export function LiveCatalogActions(props: {
   const snapshots = useContext(CatalogProxySnapshotsContext);
   const auctionId = useContext(CatalogProxyAuctionContext);
   const droppedLot = props.lotId;
-  let publishedDialog: CommandDialogInput | null = null;
+  // 弹窗可能由行按钮、抽屉或恢复入口打开：只按目标拍品判定归属，不跟踪对象身份。
   const activeAction = createValueMemo((): CatalogAction | null => {
     const current = dialog?.();
     return current !== undefined && current !== null && current.lotId === props.lotId
@@ -273,9 +273,6 @@ export function LiveCatalogActions(props: {
         const merged = { ...next, action: current.action };
         if (!structuralEquals(merged, current)) {
           dialog.set(merged);
-          publishedDialog = merged;
-        } else if (publishedDialog === current) {
-          publishedDialog = current;
         }
       }
     },
@@ -322,7 +319,7 @@ export function LiveCatalogActions(props: {
     // GET 错误、分页或阶段切换可卸载行，但不能卸载页面级弹窗或冻结命令。
     if (dialog !== null) {
       const current = dialog.peek();
-      if (current !== null && current === publishedDialog && current.lotId === droppedLot) {
+      if (current !== null && current.lotId === droppedLot) {
         dialog.set({
           ...current,
           canBid: false,

@@ -409,9 +409,9 @@ pub fn TruncatedText(
             },
             onfocus: move |_| {
                 focused.set(true);
-                if !*interaction.dismissed.peek() {
-                    reveal.call(false);
-                }
+                // 新一次聚焦重新允许揭示：失焦延迟关闭会把 dismissed 置真，不能让它吞掉下一轮键盘焦点。
+                interaction.dismissed.set(false);
+                reveal.call(false);
             },
             onblur: move |_| {
                 focused.set(false);

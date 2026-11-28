@@ -6,7 +6,6 @@ import { validUuid } from "@auction/web-shared/ui/validation";
 import {
   accountNonempty,
   int,
-  nonnegative,
   object,
   optionalNonnegative,
   positive,
@@ -65,10 +64,20 @@ function validPriceHistoryStats(value: unknown): boolean {
   const stats = object(value);
   if (stats === null) return false;
   if (!jsonKeysOnly(stats, ["count", "min", "max", "median"], ["median_exact"])) return false;
-  return (
-    ["count", "min", "max", "median"].every((key) => nonnegative(stats[key])) &&
-    validExactHistoryMedian(stats)
-  );
+  const count = int(stats.count);
+  const minimum = int(stats.min);
+  const maximum = int(stats.max);
+  const median = int(stats.median);
+  if (count === null || minimum === null || maximum === null || median === null) return false;
+  // 与服务端统计校验一致：空集合三项全零且无精确中位数，非空集合满足 min ≤ median ≤ max。
+  const shape =
+    count === 0
+      ? minimum === 0 &&
+        maximum === 0 &&
+        median === 0 &&
+        (stats.median_exact === undefined || stats.median_exact === null)
+      : minimum > 0 && maximum >= minimum && median >= minimum && median <= maximum;
+  return shape && validExactHistoryMedian(stats);
 }
 
 // 精确字段只接受规范整数或 .5；以二倍整数核对范围，并保留旧 median 的 ties-to-even 口径。
@@ -80,10 +89,11 @@ function validExactHistoryMedian(value: JsonObject): boolean {
   const wholeText = dot < 0 ? exact : exact.slice(0, dot);
   const half = dot >= 0;
   if (half && exact.slice(dot + 1) !== "5") return false;
+  // 单次线性扫描，不为攻击者控制的长度分配逐字符数组。
   if (
     wholeText.length === 0 ||
     (wholeText.length > 1 && wholeText.startsWith("0")) ||
-    ![...wholeText].every((character) => "0123456789".includes(character))
+    !/^[0-9]+$/u.test(wholeText)
   ) {
     return false;
   }

@@ -109,8 +109,12 @@ pub(super) fn mount_portal(
         tooltip.set_text_content(Some(&request.value));
         tooltip
     };
+    // 与 wasm 分支一致：同一 ID 的浮层原地复用，悬停后再聚焦不能创建第二个节点。
     #[cfg(not(target_arch = "wasm32"))]
-    let tooltip = document.append_portal(parent, &request.tooltip_id, &request.value);
+    let tooltip = match _previous {
+        Some(previous) if document.refresh_portal(&previous, parent, &request.value) => previous,
+        _ => document.append_portal(parent, &request.tooltip_id, &request.value),
+    };
     #[cfg(any(target_arch = "wasm32", test))]
     position_portal(&tooltip, _position);
     Some(tooltip)

@@ -38,9 +38,27 @@ export interface RouterOptions {
 /** 路由对象所在上下文；没有提供方时 useContext 会直接报错。 */
 export const RouterContext = createContext<Router>();
 
+/** 外部导航可用的协议；站内路径不会走到这里。 */
+const ALLOWED_EXTERNAL_PROTOCOLS: Record<string, true> = {
+  "http:": true,
+  "https:": true,
+  "mailto:": true,
+  "tel:": true,
+};
+
+/** 外部导航只放行浏览器可安全跳转的协议；`javascript:`/`data:` 等目标既不跳转也不执行。 */
 function navigateExternal(href: string): void {
+  let target: URL;
   try {
-    window.location.assign(href);
+    target = new URL(href, window.location.href);
+  } catch {
+    return;
+  }
+  if (ALLOWED_EXTERNAL_PROTOCOLS[target.protocol] !== true) {
+    return;
+  }
+  try {
+    window.location.assign(target.href);
   } catch {
     // Dioxus 对外部导航失败同样只返回 false；函数签名没有错误通道。
     return;

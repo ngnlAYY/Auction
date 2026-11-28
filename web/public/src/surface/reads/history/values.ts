@@ -328,7 +328,7 @@ export function historyActiveFilterCount(query: PriceHistoryQuery): number {
   );
 }
 
-/** 是否具备发起历史读取的条件；具体世界单独选择时也计入筛选数并触发读取。 */
+/** 是否具备发起历史读取的条件；非法筛选与重复键必须先修正，具体世界单独选择时也计入筛选数。 */
 export function historyHasRequestCondition(query: PriceHistoryQuery): boolean {
   return historyActiveFilterCount(query) > 0;
 }

@@ -7,6 +7,7 @@ export function mailStatusClass(status: string): string {
   switch (status) {
     case "accepted":
       return "admin-mail__status admin-mail__status--accepted";
+    case "rejected":
     case "failed":
       return "admin-mail__status admin-mail__status--failed";
     default:

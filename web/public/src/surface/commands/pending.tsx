@@ -93,7 +93,7 @@ export function ConfirmPanel(props: {
 
 /** 只为代理输入框生成默认值：以 K 为单位的纯数字（无后缀按 K 解析），向上取到 1K 网格，不修改服务端下限或用户输入。 */
 export function initialProxyAmount(minimum: number): string {
-  if (minimum < 1 || minimum > MAX_PUBLIC_BID_AMOUNT) {
+  if (!Number.isFinite(minimum) || minimum < 1 || minimum > MAX_PUBLIC_BID_AMOUNT) {
     return "";
   }
   const amount = Math.trunc((minimum + 999) / 1_000) * 1_000;

@@ -18,7 +18,8 @@ export function decodeSuccess<TSchema extends v.GenericSchema>(
   schema: TSchema,
   validate: (value: unknown) => boolean,
 ): Result<v.InferOutput<TSchema>, string> {
-  const payload = response.json();
+  // 成功外壳同样要求已知顶层键唯一，避免重复 code/data 依赖解析器的后写覆盖语义。
+  const payload = response.json({ uniqueRootKeys: ["code", "message", "data"] });
   if (!payload.ok) {
     reportBrowserError("dto_decode");
     return err("invalid_response");
@@ -59,7 +60,7 @@ function decodeSuccessValue<TSchema extends v.GenericSchema>(
     return err("invalid_response");
   }
   if (
-    string(envelope.code) === null ||
+    string(envelope.code) !== "ok" ||
     string(envelope.message) === null ||
     !Object.hasOwn(envelope, "data")
   ) {

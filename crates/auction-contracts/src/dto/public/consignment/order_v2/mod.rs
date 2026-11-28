@@ -119,15 +119,20 @@ impl OrderV2 {
     }
 
     /// 不变量 6、10：卖方视图 P = F + S；买方视图不得带手续费与到手金额。
+    /// 金额边界与 `present_fee`/`present_seller_amount` 相同，序列化方向也逐项复验。
     fn validate_amounts(&self, price: i64) -> Result<(), &'static str> {
         match (self.role, self.fee, self.seller_amount) {
             (OrderRoleV2::Buyer, None, None) => Ok(()),
             (OrderRoleV2::Buyer, _, _) => Err("买方视图不得带手续费或到手金额"),
             (OrderRoleV2::Seller, Some(fee), Some(seller_amount)) => {
-                if fee < price && fee + seller_amount == price {
+                if (0..=PRICE_MAX).contains(&fee)
+                    && (1..=PRICE_MAX).contains(&seller_amount)
+                    && fee < price
+                    && fee + seller_amount == price
+                {
                     Ok(())
                 } else {
-                    Err("卖方金额不守恒：价格必须等于手续费加到手金额")
+                    Err("卖方金额不守恒或超出协议边界")
                 }
             }
             (OrderRoleV2::Seller, _, _) => Err("卖方成交订单必须带手续费与到手金额"),

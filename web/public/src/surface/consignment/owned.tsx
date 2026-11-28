@@ -74,7 +74,8 @@ function OwnedListings(props: {
         },
   );
   const recoveryError = createCell<ConsignmentPrivateError | null>(null);
-  const pending = useConsignmentPending(props.canUse, (result) => {
+  const pending = useConsignmentPending(props.canUse, (result, record) => {
+    if (record.operation !== "register") return;
     if (
       result.ok &&
       result.value.disposition === "registered" &&
@@ -145,7 +146,12 @@ function OwnedListings(props: {
                           </For>
                         </ul>
                       </Show>
-                      <OwnedPager query={filter()} total={page().total} onChange={location.push} />
+                      <OwnedPager
+                        query={filter()}
+                        total={page().total}
+                        onChange={location.push}
+                        onClamp={location.replace}
+                      />
                     </>
                   )}
                 </Match>
@@ -261,6 +267,7 @@ function OwnedPager(props: {
   readonly query: OwnedConsignmentQueryV2;
   readonly total: number;
   readonly onChange: (query: OwnedConsignmentQueryV2) => void;
+  readonly onClamp: (query: OwnedConsignmentQueryV2) => void;
 }): JSX.Element {
   // 与 PublicPager 及 3C 复用底层控件；PublicPager 自身会写拍卖 URL 与偏好。
   return (
@@ -292,7 +299,7 @@ function OwnedPager(props: {
       pageSizeApplyLabel={t("pagination-apply")}
       pageSizeInvalidLabel={t("pagination-size-limit", { maximum: String(MAX_PUBLIC_PAGE_SIZE) })}
       onPageChange={(page) => props.onChange({ ...props.query, page })}
-      onPageClamp={() => true}
+      onPageClamp={(page) => props.onClamp({ ...props.query, page })}
       onPageSizeChange={(pageSize) => props.onChange({ ...props.query, page: 1, pageSize })}
     />
   );

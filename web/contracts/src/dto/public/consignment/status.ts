@@ -25,7 +25,9 @@ export const ConsignmentStatusSchema = pipe(
   }),
   check((status) =>
     status.registration_ready
-      ? status.enabled
+      ? status.enabled &&
+        status.registration_modes.length > 0 &&
+        status.registration_worlds.length > 0
       : status.registration_modes.length === 0 && status.registration_worlds.length === 0,
   ),
 );

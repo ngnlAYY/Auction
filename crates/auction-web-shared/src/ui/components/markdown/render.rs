@@ -1,6 +1,6 @@
 //! Markdown 结构到安全 DOM 的渲染。
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
 use dioxus::prelude::*;
 
@@ -164,7 +164,7 @@ fn render_heading(level: u8, nodes: Vec<Inline>, anchor: Option<String>) -> Elem
 }
 
 /// 从标题行内节点提取纯文本并 slug 化为锚点 id；仅保留字母数字（含 CJK），其余折叠为
-/// 单个连字符。文本为空或全是标点时返回 `None`，不生成空 id。
+/// 单个连字符并去掉末尾连字符。文本为空或全是标点时返回 `None`，不生成空 id。
 pub(super) fn heading_anchor(nodes: &[Inline]) -> Option<String> {
     let mut text = String::new();
     collect_text(nodes, &mut text);
@@ -172,42 +172,35 @@ pub(super) fn heading_anchor(nodes: &[Inline]) -> Option<String> {
     let mut slug = String::new();
     for character in text.trim().chars() {
         if character.is_alphanumeric() {
-            slug.push(character.to_ascii_lowercase());
+            // 与 CI 的 GitHub slug 一致：按 Unicode 小写，非 ASCII 大写也要归一。
+            slug.extend(character.to_lowercase());
         } else if !slug.is_empty() && !slug.ends_with('-') {
             slug.push('-');
         }
     }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
     (!slug.is_empty()).then_some(slug)
 }
 
+/// 与 `ci/checks/markdown-links.pl` 及 GitHub 相同：重复标题依次为 base、base-1、base-2。
 pub(super) fn unique_heading_anchors(blocks: &[MarkdownBlock]) -> Vec<Option<String>> {
-    let bases = blocks
-        .iter()
-        .map(|block| match block {
-            MarkdownBlock::Heading { nodes, .. } => heading_anchor(nodes),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let reserved = bases.iter().flatten().cloned().collect::<HashSet<_>>();
     let mut used = HashSet::new();
-    let mut next_suffix = BTreeMap::<String, usize>::new();
-    bases
-        .into_iter()
-        .map(|base| {
-            let base = base?;
-            if used.insert(base.clone()) {
-                next_suffix.insert(base.clone(), 2);
-                return Some(base);
+    blocks
+        .iter()
+        .map(|block| {
+            let base = match block {
+                MarkdownBlock::Heading { nodes, .. } => heading_anchor(nodes)?,
+                _ => return None,
+            };
+            let mut candidate = base.clone();
+            let mut suffix = 0_usize;
+            while !used.insert(candidate.clone()) {
+                suffix = suffix.saturating_add(1);
+                candidate = format!("{base}-{suffix}");
             }
-            let suffix = next_suffix.entry(base.clone()).or_insert(2);
-            loop {
-                let index = *suffix;
-                *suffix = suffix.saturating_add(1);
-                let candidate = format!("{base}-{index}");
-                if !reserved.contains(&candidate) && used.insert(candidate.clone()) {
-                    return Some(candidate);
-                }
-            }
+            Some(candidate)
         })
         .collect()
 }

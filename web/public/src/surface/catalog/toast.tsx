@@ -80,13 +80,14 @@ export function CatalogToastHost(props: {
   return (
     // 播报区域常驻 DOM，内容出现时读屏才会朗读；它不抢焦点，也不拦截指针。
     <div class="public-toast-region" role="status" aria-live="polite" aria-atomic="true">
-      <Show when={current()}>
+      {/* 按整个提示对象重建节点：连续相同文案也会再次触发读屏播报与进入动画。 */}
+      <Show when={current()} keyed>
         {(toast) => (
           <div class="public-toast">
-            <b class="public-toast__code">{toast().lotCode}</b>
-            <span class="public-toast__message">{toast().message}</span>
-            <Show when={toast().detail !== null}>
-              <span class="public-toast__detail">{toast().detail ?? ""}</span>
+            <b class="public-toast__code">{toast.lotCode}</b>
+            <span class="public-toast__message">{toast.message}</span>
+            <Show when={toast.detail !== null}>
+              <span class="public-toast__detail">{toast.detail ?? ""}</span>
             </Show>
           </div>
         )}

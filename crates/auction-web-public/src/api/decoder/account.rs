@@ -189,6 +189,10 @@ pub(super) fn valid_transitions(value: Option<&Value>, authorization: &Map<Strin
         if !valid_transition(transition, i64::try_from(index + 1).unwrap_or(i64::MAX)) {
             return false;
         }
+        // 生命周期只能从 created 开始：state_version == 1 时没有前驱可供对照。
+        if index == 0 && string(transition.get("kind")) != Some("created") {
+            return false;
+        }
         if let Some(previous) = previous
             && (optional_int(transition, "old_maximum_amount")
                 != optional_int(previous, "new_maximum_amount")

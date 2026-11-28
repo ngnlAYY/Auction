@@ -35,12 +35,12 @@ export function AdminAuctionForumStatus(props: {
             value={auction().id}
             onChange={(event) => selected.set(event.currentTarget.value)}
           >
-            <For each={props.auctions} keyed={false}>
+            <For each={props.auctions} keyed>
               {(item) => (
-                <option value={item().id}>
+                <option value={item.id}>
                   {t("admin-auctions-row-heading", {
-                    number: item().sequence,
-                    world: adminWorldLabel(item().world_id),
+                    number: item.sequence,
+                    world: adminWorldLabel(item.world_id),
                   })}
                 </option>
               )}

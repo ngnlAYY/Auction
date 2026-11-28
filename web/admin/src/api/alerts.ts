@@ -23,6 +23,7 @@ import type { TransportResponse } from "@auction/web-shared/net/transport";
 import { type JsonFieldPolicy, parseJson } from "@auction/web-shared/net/wire";
 import { err, ok, type Result } from "@auction/web-shared/result";
 
+import { parseRustUuid, rustUuidIsNil } from "./credentials/decode";
 import {
   type AdminApiFailure,
   type AdminWriteFailure,
@@ -308,6 +309,9 @@ export function prepareAdminAlertAcknowledge(
   incidentGeneration: number,
   reason: string,
 ): AdminAlertCommandPreparation {
+  if (!Number.isSafeInteger(incidentGeneration) || incidentGeneration < 0) {
+    return () => err(writeNotSent("invalid_request"));
+  }
   return prepareJsonCommandOnce(
     (commandId): AdminAlertAcknowledgeRequest => ({
       command_id: commandId,
@@ -326,6 +330,9 @@ export function prepareAdminAlertSilence(
   silenceSeconds: number,
   reason: string,
 ): AdminAlertCommandPreparation {
+  if (!Number.isSafeInteger(incidentGeneration) || incidentGeneration < 0) {
+    return () => err(writeNotSent("invalid_request"));
+  }
   if (
     !Number.isInteger(silenceSeconds) ||
     silenceSeconds < MIN_SILENCE_SECONDS ||
@@ -376,7 +383,11 @@ async function submitAlertCommand(
   if (!validAlertId(alertId)) {
     return err(writeNotSent("invalid_request"));
   }
-  const prepared = prepare(commandId);
+  const canonicalCommandId = parseRustUuid(commandId);
+  if (canonicalCommandId === null || rustUuidIsNil(canonicalCommandId)) {
+    return err(writeNotSent("invalid_request"));
+  }
+  const prepared = prepare(canonicalCommandId);
   if (!prepared.ok) {
     return err(prepared.error);
   }
@@ -390,7 +401,7 @@ async function submitAlertCommand(
   if (!response.ok) {
     return err(response.error);
   }
-  return decodeAlertReceipt(response.value, commandId, alertId, action);
+  return decodeAlertReceipt(response.value, canonicalCommandId, alertId, action);
 }
 
 function decodeAlertReceipt(

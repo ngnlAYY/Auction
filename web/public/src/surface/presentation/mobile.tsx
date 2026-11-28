@@ -2,6 +2,7 @@
 
 import { EQUIPMENT_CATEGORY_CODES } from "@auction/contracts/dto/public/catalog/lot";
 import { focusElementById } from "@auction/web-shared/platform/a11y";
+import { listenDocumentEscape, topModal } from "@auction/web-shared/platform/a11y/escape";
 import { type Cell, createCell } from "@auction/web-shared/reactive/cell";
 import { Link, type RouteMatch } from "@auction/web-shared/router";
 import { t } from "@auction/web-shared/ui/i18n";
@@ -152,23 +153,18 @@ export function CategoryFilter(props: {
       if (!panelOpen) {
         return;
       }
-      const handleKeyDown = (event: KeyboardEvent): void => {
-        if (event.key !== "Escape") {
-          return;
-        }
-        event.preventDefault();
-        event.stopPropagation();
+      return listenDocumentEscape(document, () => {
+        if (topModal(document) !== null) return false;
         const toggle = document.getElementById(CATEGORY_TOGGLE_ID);
         if (catalogCategoryEscapeAction(toggle?.getClientRects().length ?? 0) === "cancel") {
           draft.set(props.active);
           props.focusRequest.set(false);
           open.set(false);
-          return;
+          return true;
         }
         close();
-      };
-      document.addEventListener("keydown", handleKeyDown);
-      return () => document.removeEventListener("keydown", handleKeyDown);
+        return true;
+      });
     },
   );
   const categoryCount = (category: string): number => {

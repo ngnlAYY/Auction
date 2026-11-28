@@ -6,8 +6,9 @@ use auction_web_shared::{AsyncState, AsyncStateKind, QueryWriteMode, Time};
 use dioxus::prelude::*;
 
 use super::{
-    PageKey, PublicPager, public_page_matches, update_public_page_size, update_public_query_state,
-    use_content_loading, use_public_query_state,
+    PageKey, PublicPageClampError, PublicPager, public_page_matches, public_page_within_offset,
+    update_public_page_size, update_public_query_state, use_content_loading,
+    use_public_page_bounds, use_public_query_state,
 };
 use crate::api::{BlacklistEntry, BlacklistPage, fetch_blacklist};
 
@@ -18,21 +19,31 @@ pub(super) fn page() -> Element {
     let query_state_signal = query_state.state;
     let page_number = use_memo(move || query_state_signal.read().page.max(1));
     let page_size = use_memo(move || query_state_signal.read().page_size);
+    // 越界页码先交给公共编号页纠偏，避免发出必然 400 且错误页无法自行纠正的请求。
+    let bounds = use_public_page_bounds(query_state_signal, "/blacklist", |query| {
+        [(PageKey::Page, query.page_size)]
+    });
     let blacklist = use_resource(move || {
         let _ = refresh_generation();
         let requested = (page_number(), page_size());
         async move {
+            if !public_page_within_offset(requested.0, requested.1) {
+                return None;
+            }
             let result = fetch_blacklist(requested.0, requested.1).await;
-            (requested, result)
+            Some((requested, result))
         }
     });
     let loaded = blacklist.read_unchecked();
     let current = loaded
         .as_ref()
+        .and_then(Option::as_ref)
         .filter(|(requested, _)| *requested == (page_number(), page_size()))
         .map(|(_, result)| result);
+    let clamp_failed = bounds.failed(PageKey::Page);
     // 没有当前页码的结果（含等待页码纠偏后的重读）时由顶栏提示加载，正文留空。
     use_content_loading(match current {
+        _ if clamp_failed => false,
         None => true,
         Some(Ok(page)) => {
             !public_page_matches(page.page, page.page_size, page_number(), page_size())
@@ -40,6 +51,7 @@ pub(super) fn page() -> Element {
         Some(Err(_)) => false,
     });
     match current {
+        _ if clamp_failed => rsx! { PublicPageClampError { bounds } },
         None => rsx! {},
         Some(Err(_)) => rsx! {
             AsyncState {

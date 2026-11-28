@@ -29,7 +29,10 @@ const ORDERS = "/api/v2/admin/consignment/orders";
 
 const RECEIPT_POLICY: JsonFieldPolicy = {
   uniqueKeys: "all",
-  integerPaths: [["data", "contract_version"]],
+  integerPaths: [
+    ["data", "schema_version"],
+    ["data", "contract_version"],
+  ],
 };
 
 type CommandOperation<T> = (
@@ -79,6 +82,7 @@ export function prepareAdminOrderRecheck(
     if (!decoded.ok) return err(writeOutcomeUnknown(decoded.error, response.status));
     const receipt = decoded.value.data;
     return response.status === 202 &&
+      receipt.contract_version === expectedVersion &&
       receipt.command_id === commandId &&
       receipt.contract_id === contractId
       ? ok(receipt)
@@ -136,6 +140,7 @@ export function prepareAdminOrderResolve(
       if (!decoded.ok) return err(writeOutcomeUnknown(decoded.error, response.status));
       const receipt = decoded.value.data;
       return input.action === "redispatch_original" &&
+        receipt.contract_version === input.expectedVersion &&
         receipt.command_id === commandId &&
         receipt.contract_id === contractId
         ? ok({ status: 202, receipt })
@@ -152,7 +157,10 @@ export function prepareAdminOrderResolve(
     );
     if (!decoded.ok) return err(writeOutcomeUnknown(decoded.error, response.status));
     const receipt = decoded.value.data;
+    const nextVersion =
+      input.expectedVersion < Number.MAX_SAFE_INTEGER ? input.expectedVersion + 1 : null;
     return response.status === 200 &&
+      receipt.contract_version === nextVersion &&
       receipt.command_id === commandId &&
       receipt.contract_id === contractId &&
       receipt.action === input.action

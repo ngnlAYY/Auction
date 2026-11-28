@@ -170,9 +170,17 @@ export function rememberPublicReadRetryAfter(
   ) {
     STORE.retryAfter.set(url, window);
     while (STORE.retryAfter.size > MAX_ENTRIES) {
-      const oldest = STORE.retryAfter.keys().next().value;
-      if (oldest === undefined) break;
-      STORE.retryAfter.delete(oldest);
+      // 驱逐最早到期的窗口；按插入顺序会误删仍在生效、只是被就地延长的条目。
+      let oldestKey: string | null = null;
+      let earliest = Number.POSITIVE_INFINITY;
+      for (const [key, value] of STORE.retryAfter) {
+        if (value.notBefore < earliest) {
+          earliest = value.notBefore;
+          oldestKey = key;
+        }
+      }
+      if (oldestKey === null) break;
+      STORE.retryAfter.delete(oldestKey);
     }
   }
   return STORE.retryAfter.get(url) ?? window;

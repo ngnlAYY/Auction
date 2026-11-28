@@ -90,6 +90,15 @@ export const ADMIN_ROUTES: readonly RouteDefinition[] = [
 ];
 // Dioxus 的 `/:..segments` 未匹配路由由共享路由器直接返回 not-found，不重复登记 catch-all。
 
+/** 按路由名取路径；路由表是路径的唯一来源，查不到时立即失败而不是静默回退。 */
+export function adminRoutePattern(name: AdminRouteName): string {
+  const route = ADMIN_ROUTES.find((candidate) => candidate.name === name);
+  if (route === undefined) {
+    throw new Error(`未登记 Admin 路由：${name}`);
+  }
+  return route.pattern;
+}
+
 /** 只有 Solid 提供寄售运营列表，进入路由后才载入。 */
 export const consignmentPage = lazyPage(() =>
   import("../consignment/list").then(({ page }) => page),

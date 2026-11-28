@@ -59,13 +59,20 @@ export type { PublicSession };
 /** 严格 RFC3339 解析也供论坛与偏好响应复用，保持历史上从会话模块导入的路径。 */
 export { parseStrictRfc3339 };
 
-/** 认证失败或身份前置条件冲突时，重新读取当前 Cookie 对应的权威身份。 */
+/** 认证失败或身份前置条件冲突时，重新读取当前 Cookie 对应的权威身份。
+ * `observedRevision` 是请求发出时的身份修订；期间已有更新的身份证据时，迟到的 409 不能撤销它。 */
 export function observePublicSessionFailure(
   status: number,
   code: string,
   expectedUser?: string,
+  observedRevision?: number,
 ): void {
-  if (status === 409 && code === "session_changed" && expectedUser !== undefined) {
+  if (
+    status === 409 &&
+    code === "session_changed" &&
+    expectedUser !== undefined &&
+    (observedRevision === undefined || observedRevision === publicSessionIdentityRevision())
+  ) {
     publishPublicSessionIdentity({ kind: "expected-user-rejected", userId: expectedUser });
   }
   if (status === 401 || (status === 409 && code === "session_changed")) {
@@ -409,7 +416,9 @@ async function synchronizePublicCookie(
   if (!synchronized.ok) {
     if (response.value.status === 409) {
       observePublicSessionFailure(409, synchronized.error, current.user_id);
-    } else if (mayHaveChangedCookie(response)) {
+    }
+    // 409 正文损坏同样不能证明 Cookie 未变，按可能需要重新核对处理。
+    if (mayHaveChangedCookie(response)) {
       rescheduleCookieSync(onReschedule);
     }
     return synchronized;

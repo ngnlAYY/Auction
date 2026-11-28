@@ -37,6 +37,16 @@ const SUPPRESSION_REASONS: &[&str] = &[
     "operations_alert_batch_terminal",
 ];
 
+/// 展示标记允许的退役原因闭集；与存储过滤 `retirement_reason` 的集合一致。
+const RETIREMENT_REASONS: &[&str] = &[
+    "lot_watch_invalidated",
+    "recipient_renamed",
+    "auction_opened",
+    "season_boundary_passed",
+    "season_reminder_resolved",
+    "payment_reminder_voided",
+];
+
 pub(super) fn decode_delivery_list(
     payload: StrictDeliveryEnvelope<AdminDeliveryListResponse>,
     requested_page: i64,
@@ -96,7 +106,9 @@ pub(super) fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, 
     let retirement_reason_valid = preflight_retirement_reason_valid(&value);
     // 展示标记必须绑定到已知退役原因及其来源、失败码，避免通过普通失败分支获得退役语义。
     if value.retirement_reason.as_deref().is_some_and(|reason| {
-        retirement_reason_valid != Some(true) || value.reason_code.as_deref() != Some(reason)
+        retirement_reason_valid != Some(true)
+            || value.reason_code.as_deref() != Some(reason)
+            || !RETIREMENT_REASONS.contains(&reason)
     }) || !valid_suppression_projection(&value)
     {
         return Err(());
@@ -124,7 +136,7 @@ pub(super) fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, 
     }
     let created_at = parse_delivery_time(&value.created_at).ok_or(())?;
     let updated_at = parse_delivery_time(&value.updated_at).ok_or(())?;
-    let _lease_expires_at = parse_optional_delivery_time(value.lease_expires_at.as_ref())?;
+    let lease_expires_at = parse_optional_delivery_time(value.lease_expires_at.as_ref())?;
     let claimed_at = parse_optional_delivery_time(value.claimed_at.as_ref())?;
     let sending_at = parse_optional_delivery_time(value.sending_at.as_ref())?;
     let completed_at = parse_optional_delivery_time(value.completed_at.as_ref())?;
@@ -141,6 +153,7 @@ pub(super) fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, 
         || is_zero_delivery_time(updated_at)
         || updated_at < created_at
         || claimed_at.is_some_and(is_zero_delivery_time)
+        || lease_expires_at.is_some_and(is_zero_delivery_time)
         || !valid_optional_text(value.external_reference.as_deref())
         || !valid_optional_text(value.failure_code.as_deref())
         || !valid_optional_text(value.reason_code.as_deref())
@@ -297,13 +310,18 @@ fn is_zero_delivery_time(value: Timestamp) -> bool {
 
 fn valid_timeline(
     created_at: Timestamp,
+    updated_at: Timestamp,
     claimed_at: Option<Timestamp>,
     sending_at: Option<Timestamp>,
     completed_at: Option<Timestamp>,
 ) -> bool {
-    claimed_at.is_none_or(|value| value >= created_at)
-        && sending_at.is_none_or(|value| claimed_at.is_some_and(|claimed| value >= claimed))
-        && completed_at.is_none_or(|value| sending_at.is_some_and(|sending| value >= sending))
+    claimed_at.is_none_or(|value| value >= created_at && value <= updated_at)
+        && sending_at.is_none_or(|value| {
+            claimed_at.is_some_and(|claimed| value >= claimed) && value <= updated_at
+        })
+        && completed_at.is_none_or(|value| {
+            sending_at.is_some_and(|sending| value >= sending) && value <= updated_at
+        })
 }
 
 fn valid_state_fields(
@@ -322,8 +340,9 @@ fn valid_state_fields(
             && value.external_reference.is_none()
             && !value.take_required
             && value.returned_mail_id.is_none()
-            && claimed_at
-                .is_none_or(|claimed| !is_zero_delivery_time(claimed) && claimed >= created_at)
+            && claimed_at.is_none_or(|claimed| {
+                !is_zero_delivery_time(claimed) && claimed >= created_at && claimed <= updated_at
+            })
             && completed_at.is_some_and(|completed| {
                 !is_zero_delivery_time(completed)
                     && completed >= created_at
@@ -386,6 +405,7 @@ fn valid_state_fields(
         && value.reason_code.as_deref() == Some("operations_alert_batch_terminal")
     {
         return claimed_at.is_none()
+            && value.retirement_reason.is_none()
             && matches!(
                 value.failure_code.as_deref(),
                 Some("dependency_mismatch" | "retry_exhausted")
@@ -407,7 +427,7 @@ fn valid_state_fields(
             && value.fencing_version > 0
             && valid_before_send();
     }
-    if !valid_timeline(created_at, claimed_at, sending_at, completed_at) {
+    if !valid_timeline(created_at, updated_at, claimed_at, sending_at, completed_at) {
         return false;
     }
     match value.status.as_str() {

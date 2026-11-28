@@ -252,7 +252,7 @@ export async function fetchDeliveries(
   pageSize: number,
   signal: AbortSignal,
 ): Promise<Result<DeliveryPage, string>> {
-  const bounds = validatePagination(page, pageSize, 100, 9_223_372_036_854_775_807n);
+  const bounds = validatePagination(page, pageSize, 100, 100_000);
   if (!bounds.ok) {
     return err(bounds.error);
   }

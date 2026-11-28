@@ -2,6 +2,7 @@
 
 import "../../../crates/auction-web-shared/style/base.css";
 import "../../../crates/auction-web-admin/assets/admin.css";
+import "../../../crates/auction-web-admin/assets/consignment.css";
 import "../../../crates/auction-web-admin/assets/desktop.css";
 import "../../../crates/auction-web-admin/assets/mobile.css";
 import "../../../crates/auction-web-shared/style/console.css";

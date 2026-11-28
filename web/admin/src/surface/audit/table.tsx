@@ -42,6 +42,7 @@ export function AuditTable(props: {
         columns={columns()}
         sort={props.sort}
         direction={props.direction}
+        defaultOrderLabel={t("admin-sort-default-order")}
         onSortChange={props.onSortChange}
       />
       <div class="admin-shell__table-wrap admin-audit-table-wrap">
