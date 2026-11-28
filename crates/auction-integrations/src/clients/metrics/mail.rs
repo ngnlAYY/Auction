@@ -9,7 +9,7 @@ use auction_application::external_metrics::{
 
 use super::super::mooglemail::{MoogleMailOperation, MoogleMailWorld};
 use super::mapping::{mail_operation, mail_world};
-use super::observation::observe_safely;
+use super::observation::{observe_dyn_safely, observe_safely};
 
 pub(crate) struct MailRequestGuard {
     observer: Arc<dyn ExternalMetricsObserver>,
@@ -32,11 +32,14 @@ impl MailRequestGuard {
 
     pub(crate) fn finish(mut self, category: MailRequestCategory) {
         self.completed = true;
-        self.observer.observe(ExternalMetricsEvent::MailRequestFinished {
-            world: self.world,
-            operation: self.operation,
-            category,
-        });
+        observe_safely(
+            &self.observer,
+            ExternalMetricsEvent::MailRequestFinished {
+                world: self.world,
+                operation: self.operation,
+                category,
+            },
+        );
     }
 }
 
@@ -80,12 +83,15 @@ impl MailGateWaitGuard {
 
     pub(crate) fn finish(mut self, outcome: WaitOutcome) {
         self.completed = true;
-        self.observer.observe(ExternalMetricsEvent::MailGateWait {
-            world: self.world,
-            operation: self.operation,
-            outcome,
-            waited: self.started.elapsed(),
-        });
+        observe_safely(
+            &self.observer,
+            ExternalMetricsEvent::MailGateWait {
+                world: self.world,
+                operation: self.operation,
+                outcome,
+                waited: self.started.elapsed(),
+            },
+        );
     }
 }
 
@@ -133,13 +139,16 @@ impl MailLockWaitGuard {
 
     pub(crate) fn acquired(mut self) {
         self.completed = true;
-        self.observer.observe(ExternalMetricsEvent::MailLockWait {
-            world: self.world,
-            operation: self.operation,
-            lock: self.lock,
-            outcome: MailLockOutcome::Acquired,
-            waited: self.started.elapsed(),
-        });
+        observe_safely(
+            &self.observer,
+            ExternalMetricsEvent::MailLockWait {
+                world: self.world,
+                operation: self.operation,
+                lock: self.lock,
+                outcome: MailLockOutcome::Acquired,
+                waited: self.started.elapsed(),
+            },
+        );
     }
 }
 
@@ -166,9 +175,12 @@ pub(crate) fn mail_signal(
     operation: MoogleMailOperation,
     signal: MailSignal,
 ) {
-    observer.observe(ExternalMetricsEvent::MailRequestSignal {
-        world: mail_world(world),
-        operation: mail_operation(operation),
-        signal,
-    });
+    observe_dyn_safely(
+        observer,
+        ExternalMetricsEvent::MailRequestSignal {
+            world: mail_world(world),
+            operation: mail_operation(operation),
+            signal,
+        },
+    );
 }

@@ -76,4 +76,10 @@ fn record(info: &PanicHookInfo<'_>) {
              line={line} column={column} payload={payload:?}"
         );
     }
+    // stderr 写入失败不能在 hook 中触发第二次 panic；只写同一组安全字段。
+    let _ = writeln!(
+        std::io::stderr().lock(),
+        "{TARGET} thread_name={thread_name:?} file={file:?} \
+         line={line} column={column} payload={payload:?}"
+    );
 }

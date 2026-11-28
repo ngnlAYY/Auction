@@ -200,8 +200,10 @@ fn parse_fields(bytes: &[u8]) -> anyhow::Result<BTreeMap<&'static str, String>> 
             "schema" => value == WEB_STACK_SCHEMA,
             "source_commit" => is_lower_hex(value, 40),
             "public_stack" | "admin_stack" => matches!(value, "solid" | "dioxus"),
+            // 与 web 安装的 build_id 口径一致：首字符必须是 ASCII 字母数字，否则要到安装时才被拒绝。
             "build_id" => {
                 (1..=64).contains(&value.len())
+                    && value.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
                     && value
                         .bytes()
                         .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))

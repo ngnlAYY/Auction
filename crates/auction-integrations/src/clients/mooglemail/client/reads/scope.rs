@@ -42,10 +42,15 @@ impl MailboxReads {
 
 impl ReadScope {
     pub(super) fn invalidate(&self) {
-        self.revision.fetch_add(1, Ordering::AcqRel);
+        // revision 与 current 在同一把状态锁内推进：并发 read_round 不会读到“已失效的
+        // epoch + 新 revision”组合而被无谓判失败。
         if let Ok(mut state) = self.state.lock() {
+            self.revision.fetch_add(1, Ordering::AcqRel);
             state.current = None;
             state.touched = Instant::now();
+        } else {
+            // 状态锁中毒时仍推进 revision，让所有旧轮次失败关闭。
+            self.revision.fetch_add(1, Ordering::AcqRel);
         }
     }
 }

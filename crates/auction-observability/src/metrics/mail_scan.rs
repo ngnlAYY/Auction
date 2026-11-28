@@ -145,8 +145,15 @@ pub(super) fn build(registry: &Registry) -> Result<Arc<dyn MailScanObserver>, Me
                 ]);
             }
             for (outcome, reason) in [
+                (MailScanOutcome::Error, MailScanReason::NoCheckpoint),
+                (MailScanOutcome::Error, MailScanReason::InvalidCheckpoint),
+                (MailScanOutcome::Error, MailScanReason::NoFullVerification),
                 (MailScanOutcome::Error, MailScanReason::DailyVerification),
-                (MailScanOutcome::Canceled, MailScanReason::Canceled),
+                (MailScanOutcome::Error, MailScanReason::RequestedFull),
+                (MailScanOutcome::Canceled, MailScanReason::DailyVerification),
+                (MailScanOutcome::Canceled, MailScanReason::NoFullVerification),
+                (MailScanOutcome::PageLimit, MailScanReason::DailyVerification),
+                (MailScanOutcome::PageLimit, MailScanReason::NoFullVerification),
             ] {
                 metrics.verification.with_label_values(&[
                     world,

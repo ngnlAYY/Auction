@@ -525,10 +525,11 @@ auction-cli --config-dir /etc/auction alert report   --backup-output-dir /var/ba
 
 ```bash
 auction-cli credential list --kind mail --status active
-printf '%s' "$COOKIE" | auction-cli credential import --kind mail --world main --label bot-main --actor ops
+printf '%s' "$COOKIE" | auction-cli credential import --kind mail --world main --label bot-main --actor ops \
+  --command-id <UUID>
 ```
 
-`import` 只从 stdin 读取 Cookie 头（去掉末尾换行），用敏感配置中的 `credential_data_key` 加密后写入，与 Admin 凭据页共用同一服务、命令账本与审计。两种凭据都必须含合法的 `ipb_member_id` 与 `ipb_pass_hash`：`--kind mail`（MoogleMail 游戏 Cookie）只保存这两个字段；`--kind forum`（E-Hentai 论坛 Cookie）保留通过校验的原始 Cookie 头。`--world shared` 同时服务 main 与 isekai。Worker 在启动时装载 active 凭据，导入后需重启 Worker 生效。`list` 只输出安全投影，不含密文或明文。
+`--command-id` 必填且必须由调用方生成：响应丢失或超时后用同一 ID 与相同参数重试，服务端只重放已提交结果，不会再登录远端或写入第二条 active 凭据。`import` 只从 stdin 读取 Cookie 头（去掉末尾换行），用敏感配置中的 `credential_data_key` 加密后写入，与 Admin 凭据页共用同一服务、命令账本与审计。两种凭据都必须含合法的 `ipb_member_id` 与 `ipb_pass_hash`：`--kind mail`（MoogleMail 游戏 Cookie）只保存这两个字段；`--kind forum`（E-Hentai 论坛 Cookie）保留通过校验的原始 Cookie 头。`--world shared` 同时服务 main 与 isekai。Worker 在启动时装载 active 凭据，导入后需重启 Worker 生效。`list` 只输出安全投影，不含密文或明文。
 
 ### 论坛写入恢复
 

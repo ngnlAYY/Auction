@@ -49,7 +49,7 @@ fn summary_from_read_snapshot(
     let world_marker = match summary.list_world_marker.as_deref() {
         Some("main") => Some(MoogleMailWorld::Main),
         Some("isekai") => Some(MoogleMailWorld::Isekai),
-        Some(_) => return Err(protocol_error(world)),
+        Some(_) => return Err(protocol_error(world, MoogleMailOperation::Inbox)),
         None => None,
     };
     let received_minute_raw = summary
@@ -65,7 +65,7 @@ fn summary_from_read_snapshot(
         world_marker,
     };
     if !summary.validate() {
-        return Err(configuration(world));
+        return Err(configuration(world, MoogleMailOperation::Inbox));
     }
     Ok(summary)
 }
@@ -108,7 +108,7 @@ impl MoogleMailGateway {
         consignment_candidates: bool,
     ) -> Result<MoogleMailPage, MoogleMailError> {
         if !claim.validate() {
-            return Err(configuration(world));
+            return Err(configuration(world, MoogleMailOperation::Inbox));
         }
         self.fetch_window(
             world,
@@ -134,16 +134,16 @@ impl MoogleMailGateway {
             || limit > MAX_FETCH_LIMIT
             || cursor.is_some_and(|value| !valid_opaque_id(value))
         {
-            return Err(configuration(world));
+            return Err(configuration(world, MoogleMailOperation::Inbox));
         }
         // 空白名单且未显式放行所有人时不可能授权任何详情，避免无意义地改变远端已读状态。
         // 拒绝拉取但保留原队列与游标，等待配置修正；不以列表显示名推断任何发件人身份。
         if !self.config.sender_allowlist_disabled && self.config.sender_allowlist.is_empty() {
-            return Err(configuration(world));
+            return Err(configuration(world, MoogleMailOperation::Inbox));
         }
         let configured_deadline = tokio::time::Instant::now()
             .checked_add(self.config.fetch_budget)
-            .ok_or_else(|| configuration(world))?;
+            .ok_or_else(|| configuration(world, MoogleMailOperation::Inbox))?;
         let deadline = requested_deadline.map_or(configured_deadline, |deadline| {
             tokio::time::Instant::from_std(deadline).min(configured_deadline)
         });
@@ -167,7 +167,7 @@ impl MoogleMailGateway {
                         ..Default::default()
                     },
                 );
-                fetch_budget_exhausted(world)
+                fetch_budget_exhausted(world, MoogleMailOperation::Inbox)
             })??;
         match tokio::time::timeout_at(
             deadline,
@@ -192,7 +192,7 @@ impl MoogleMailGateway {
                         ..Default::default()
                     },
                 );
-                Err(fetch_budget_exhausted(world))
+                Err(fetch_budget_exhausted(world, MoogleMailOperation::Inbox))
             }
             Ok(Ok(page)) => {
                 tokio::time::timeout_at(deadline, session.check_current()).await.map_err(
@@ -206,11 +206,11 @@ impl MoogleMailGateway {
                                 ..Default::default()
                             },
                         );
-                        fetch_budget_exhausted(world)
+                        fetch_budget_exhausted(world, MoogleMailOperation::Inbox)
                     },
                 )??;
                 if tokio::time::Instant::now() >= deadline {
-                    return Err(fetch_budget_exhausted(world));
+                    return Err(fetch_budget_exhausted(world, MoogleMailOperation::Inbox));
                 }
                 Ok(page)
             }
@@ -226,7 +226,7 @@ impl MoogleMailGateway {
                                 ..Default::default()
                             },
                         );
-                        fetch_budget_exhausted(world)
+                        fetch_budget_exhausted(world, MoogleMailOperation::Inbox)
                     },
                 )??;
                 Err(error)
@@ -256,7 +256,8 @@ impl MoogleMailGateway {
                 .pending_reads(
                     claim.clone(),
                     world.as_str().to_owned(),
-                    u16::try_from(limit).map_err(|_| configuration(world))?,
+                    u16::try_from(limit)
+                        .map_err(|_| configuration(world, MoogleMailOperation::Inbox))?,
                 )
                 .await
                 .map_err(safe_diagnostics::warn_map(
@@ -265,14 +266,14 @@ impl MoogleMailGateway {
                     || read_journal_unavailable(world),
                 ))?;
             if pending.len() > limit {
-                return Err(protocol_error(world));
+                return Err(protocol_error(world, MoogleMailOperation::Inbox));
             }
             for summary in pending.into_iter().rev() {
                 if !summary.validate()
                     || summary.world_id != world.as_str()
                     || !seen.insert(summary.external_mail_id.clone())
                 {
-                    return Err(protocol_error(world));
+                    return Err(protocol_error(world, MoogleMailOperation::Inbox));
                 }
                 if summary.received_minute_raw.is_none() {
                     missing_list_snapshot.insert(summary.external_mail_id.clone());
@@ -297,7 +298,7 @@ impl MoogleMailGateway {
                     pending.remove(&summary.external_mail_id)
                     && (summary.world != expected_world || summary.received_at != expected_at)
                 {
-                    return Err(protocol_error(world));
+                    return Err(protocol_error(world, MoogleMailOperation::Inbox));
                 }
                 if missing_list_snapshot.remove(&summary.external_mail_id) {
                     resolved.insert(summary.external_mail_id.clone(), summary.clone());
@@ -310,7 +311,7 @@ impl MoogleMailGateway {
                         pending.remove(&summary.external_mail_id)
                         && (summary.world != expected_world || summary.received_at != expected_at)
                     {
-                        return Err(protocol_error(world));
+                        return Err(protocol_error(world, MoogleMailOperation::Inbox));
                     }
                     if missing_list_snapshot.remove(&summary.external_mail_id) {
                         resolved.insert(summary.external_mail_id.clone(), summary.clone());
@@ -436,7 +437,7 @@ impl MoogleMailGateway {
             // 业务身份与白名单只使用详情完整发件人；旧待读摘要的截断名称不参与授权。
             // 不匹配时保留队列，也不执行任何业务命令。
             if !self.allowed_sender(&message.sender) {
-                return Err(configuration(world));
+                return Err(configuration(world, MoogleMailOperation::Inbox));
             }
             if candidate_shaped
                 && detail_route(&message.sender, &message.subject, true) == DetailRoute::Consignment
@@ -460,7 +461,7 @@ impl MoogleMailGateway {
             return Ok(MoogleMailPage { messages, next_cursor: cursor.map(str::to_owned) });
         }
         if messages.is_empty() {
-            return Err(fetch_budget_exhausted(world));
+            return Err(fetch_budget_exhausted(world, MoogleMailOperation::Inbox));
         }
         let next_cursor = messages.last().map(|message| message.external_mail_id().to_owned());
         Ok(MoogleMailPage { messages, next_cursor })

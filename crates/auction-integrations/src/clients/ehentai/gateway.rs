@@ -201,12 +201,21 @@ impl auction_application::forum::ForumTargetProfileReader for EhentaiGateway {
     > {
         Box::pin(async move {
             tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
-                let session = self.credentials.begin(None).map_err(safe_diagnostics::warn_map(
+                let mut session = self.credentials.begin(None).map_err(safe_diagnostics::warn_map(
                     "forum_profile",
                     "acquire_session",
                     || auction_application::settlement::InternalEvidenceError::Unavailable,
                 ))?;
-                self.client.read_target_profile(&target_uid, session.cookie()).await
+                let result = self.client.read_target_profile(&target_uid, session.cookie()).await;
+                // 资料读取已明确证明当前 Cookie 失效（登录页或 owner 撤销）时停止复用：
+                // 不撤销会在后续读取中反复送出同一失效凭据。
+                if matches!(
+                    &result,
+                    Err(auction_application::settlement::InternalEvidenceError::Revoked)
+                ) {
+                    let _ = session.invalidate_current().await;
+                }
+                result
             })
             .await
             .map_err(|diagnostic_cause| {

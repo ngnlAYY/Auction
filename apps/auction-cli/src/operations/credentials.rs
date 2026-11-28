@@ -9,7 +9,6 @@ use auction_application::admin::{
     AdminCredentialStatus, AdminCredentialWorld, MAX_ADMIN_CREDENTIAL_SECRET_BYTES,
 };
 use auction_integrations::{CredentialAcquirer, CredentialSealer};
-use uuid::Uuid;
 
 use crate::app::print_json;
 use crate::cli::{CredentialCommand, CredentialKindArg, CredentialStatusArg, CredentialWorldArg};
@@ -60,13 +59,15 @@ async fn execute(
                 "credentials": page.credentials,
             }))
         }
-        CredentialCommand::Import { kind, world, label, player_name, actor } => {
+        CredentialCommand::Import { kind, world, label, player_name, actor, command_id } => {
             let actor = text::actor(&actor)?.to_owned();
             let secret = AdminCredentialSecret::new(read_cookie()?)
                 .map_err(|_| anyhow::anyhow!("stdin 中的 Cookie 无效"))?;
             let credential = service
                 .import(AdminCredentialImportCommand {
-                    command_id: Uuid::new_v4(),
+                    // 稳定命令 ID：提交后响应丢失时，同一 ID 与参数重试只重放已提交结果，
+                    // 不会再登录远端或写入第二条 active 凭据。
+                    command_id: text::command_id(command_id, "--command-id")?,
                     kind: credential_kind(kind),
                     world: credential_world(world),
                     label,

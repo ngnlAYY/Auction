@@ -15,10 +15,13 @@ use anyhow::Context;
 use auction_config::AppConfig;
 use serde::{Deserialize, Serialize};
 
-use self::directory::{open_child_file, open_directory, read_directory_names};
+use self::directory::{open_child_file, read_directory_names};
 use self::path_validation::validate_component;
 use crate::support::digest::sha256_bytes;
 use crate::support::files::{Facts, FileIdentity, Kind};
+
+// 解包输出目录与来源目录共用同一祖先信任口径。
+pub(crate) use self::directory::open_directory;
 
 mod directory;
 mod path_validation;

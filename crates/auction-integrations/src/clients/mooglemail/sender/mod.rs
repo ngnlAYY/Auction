@@ -52,7 +52,7 @@ impl MoogleMailSendRequest {
         self.message.validate()
             && self.credits >= 0
             && self.cod >= 0
-            && self.equipment_ids.len() <= MAX_SEND_ATTACHMENTS
+            && self.equipment_ids.len() + usize::from(self.credits > 0) <= MAX_SEND_ATTACHMENTS
             && self.equipment_ids.iter().all(|id| valid_decimal_id(id))
             && self.equipment_ids.iter().collect::<HashSet<_>>().len() == self.equipment_ids.len()
             && (self.cod == 0 || self.credits > 0 || !self.equipment_ids.is_empty())

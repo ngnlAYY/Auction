@@ -21,6 +21,12 @@ use super::DecryptedCookie;
 use crate::ehentai::{EhentaiClient, EhentaiClientConfig, EhentaiCookie, EhentaiErrorCategory};
 use crate::safe_diagnostics;
 
+/// 论坛 Cookie 检查的请求间隔与单请求超时。
+const CHECK_REQUEST_INTERVAL: Duration = Duration::from_secs(2);
+const CHECK_REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
+/// 外层预算覆盖一次限速排队(2s)+一个完整请求(4s)并留余量；5s 会把合法 Cookie 报成不确定。
+const CHECK_BUDGET: Duration = Duration::from_secs(8);
+
 /// 只接受数据库密文信封的 Admin 侧认证探测器；进程内不持有 HentaiVerse 客户端。
 pub struct CredentialVerifier {
     opener: Arc<dyn AdminCredentialOpener>,
@@ -43,8 +49,8 @@ impl CredentialVerifier {
             "configure_forum",
             unavailable,
         ))?;
-        forum.request_timeout = Duration::from_secs(4);
-        forum.minimum_request_interval = Duration::from_secs(2);
+        forum.request_timeout = CHECK_REQUEST_TIMEOUT;
+        forum.minimum_request_interval = CHECK_REQUEST_INTERVAL;
         Ok(Self {
             opener,
             forum: EhentaiClient::with_config(forum).map_err(safe_diagnostics::warn_map(
@@ -104,11 +110,10 @@ impl AdminCredentialVerifier for CredentialVerifier {
             )?);
             let mut checks = Vec::new();
             for world in credential_check_worlds(credential.kind, credential.world) {
-                // 论坛登录态不区分世界，只有一个范围；最多五秒（含限速与正文），无重试。
-                let status =
-                    tokio::time::timeout(Duration::from_secs(5), self.check_forum(&secret.0))
-                        .await
-                        .unwrap_or(AdminCredentialCheckStatus::Inconclusive);
+                // 论坛登录态不区分世界，只有一个范围；无重试，预算覆盖限速排队与完整请求。
+                let status = tokio::time::timeout(CHECK_BUDGET, self.check_forum(&secret.0))
+                    .await
+                    .unwrap_or(AdminCredentialCheckStatus::Inconclusive);
                 checks.push(AdminCredentialCheckObservation { world: *world, status });
             }
             Ok(checks)

@@ -20,6 +20,8 @@ impl MoogleMailParser {
     ) -> Result<MoogleMailBalanceSnapshot, MoogleMailError> {
         let document =
             super::identity::trusted_document(document, world, MoogleMailOperation::Balance)?;
+        // 余额页与身份/库存页同样要求 MAIN_URL 世界证明；只看余额文本会接受同源错误世界的页面。
+        super::identity::verify_main_url(&document, world, MoogleMailOperation::Balance)?;
         self.parse_balance_document(&document, world, observed_at)
     }
 

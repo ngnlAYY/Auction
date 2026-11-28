@@ -31,7 +31,10 @@ impl R2BackupStore {
             self.multipart(&path, file, bytes).await
         } else {
             let (_, payload) = read_chunk(file, bytes as usize).await?;
-            if payload.len() as u64 != bytes || lower_hex(&Sha256::digest(&payload)) != sha256 {
+            // 十六进制摘要大小写只是书写差异，不改变对象身份。
+            if payload.len() as u64 != bytes
+                || !lower_hex(&Sha256::digest(&payload)).eq_ignore_ascii_case(sha256)
+            {
                 return Err(BackupStoreError::LocalRead);
             }
             self.store

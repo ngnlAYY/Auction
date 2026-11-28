@@ -2,7 +2,10 @@
 
 use serde::Deserialize;
 
-/// 启动时冻结的 readiness 配置；修改后须重启，不由 Admin runtime 覆盖。
+/// 启动时读取的 readiness 基线；修改只影响下次启动。
+///
+/// `migration_compatibility_mode` 在此冻结；`audit_failure_mode` 与 `cache_enabled` 可被数据库
+/// 运行时开关覆盖（前者三角色，后者仅 Public/Admin，Worker control 的缓存只跟随本基线）。
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ReadinessConfig {
@@ -10,7 +13,8 @@ pub struct ReadinessConfig {
     pub audit_failure_mode: auction_application::operations::AuditFailureMode,
     /// 迁移兼容模式；默认 shadow，只有显式 compatible 才放宽数据库超前。
     pub migration_compatibility_mode: auction_application::operations::MigrationCompatibilityMode,
-    /// 是否缓存 HTTP 最终判定并合并并发检查；默认启用。
+    /// 是否缓存 HTTP 最终判定并合并并发检查；默认启用，Public/Admin 可被在线开关
+    /// `readiness_cache_enabled` 覆盖（Worker 只跟随本基线）。
     pub cache_enabled: bool,
 }
 

@@ -220,8 +220,11 @@ impl MoogleMailSender {
             && let Some(anchor) = shadow_anchor.as_ref()
         {
             // 完整校验轮同时观察前缀，供影子比较；失败只丢弃样本，不改变完整结果。
+            let shadow_deadline = Instant::now()
+                .checked_add(self.verification_budget / 3)
+                .map_or(deadline, |limit| limit.min(deadline));
             if let Ok(Ok(scan)) = timeout_at(
-                deadline,
+                shadow_deadline,
                 self.client.observe_sent_prefix_strict(
                     cookie,
                     &round,

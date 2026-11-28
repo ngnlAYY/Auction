@@ -1,9 +1,9 @@
 //! 当前会话账号统一警告渠道；严格 JSON、CSRF 与无查询参数边界。
 use std::net::SocketAddr;
 
-use auction_application::core::diagnostics::DiagnosticError;
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
 use auction_application::public::{
-    LotWatchError, LotWatchPreference, SetLotWatchPreferenceCommand,
+    LotWatchError, LotWatchPreference, LotWatchPreferencePort, SetLotWatchPreferenceCommand,
 };
 use auction_contracts::ApiResponse;
 use auction_contracts::{PublicLotWatchPreferenceResponse, PublicSetLotWatchPreferenceRequest};
@@ -38,7 +38,7 @@ pub(crate) async fn get_watch_preference(
     let Some(port) = state.watch_preference() else {
         return failure(LotWatchError::Unavailable);
     };
-    let pm_available = port.pm_available(identity.user_id).await.unwrap_or(false);
+    let pm_available = load_pm_available(port, identity.user_id).await;
     match port.get(identity.user_id).await {
         Ok(value) if valid(&value, identity.user_id) => success(value, pm_available),
         Ok(_) => failure(LotWatchError::Unavailable),
@@ -94,10 +94,25 @@ pub(crate) async fn set_watch_preference(
                 && value.channel == input.channel
                 && Some(value.version) == input.expected_version.checked_add(1) =>
         {
-            success(value, port.pm_available(identity.user_id).await.unwrap_or(false))
+            success(value, load_pm_available(port, identity.user_id).await)
         }
         Ok(_) => failure(LotWatchError::Unavailable),
         Err(error) => failure(error),
+    }
+}
+/// PM 渠道可用性读取失败时失败关闭为不可用，但必须留下安全诊断，不能伪装成稳定的账号状态。
+async fn load_pm_available(port: &dyn LotWatchPreferencePort, user_id: uuid::Uuid) -> bool {
+    match port.pm_available(user_id).await {
+        Ok(available) => available,
+        Err(cause) => {
+            diagnostics::warn(
+                "public_watch_preference",
+                "read_pm_available",
+                DiagnosticError::diagnostic_kind(&cause),
+                DiagnosticContext::default(),
+            );
+            false
+        }
     }
 }
 fn valid(value: &LotWatchPreference, user_id: uuid::Uuid) -> bool {

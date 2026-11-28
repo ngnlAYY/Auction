@@ -119,6 +119,11 @@ impl AuctionConfig {
                 "settlement.mode 只能是 legacy_zero_v0、hold_curve_v1 或 hold_curve_v2",
             ),
         )?;
+        if auction_domain::ProxyMode::from_name(&self.economics.proxy_default_mode).is_none() {
+            return Err(ConfigError::InvalidAuctionConfig(
+                "economics.proxy_default_mode 只能是 fast 或 slow",
+            ));
+        }
         let recovery_mode = match self.settlement.recovery.mode.as_str() {
             "remind_v1" => RecoveryMode::RemindV1,
             _ => {

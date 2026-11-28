@@ -56,12 +56,24 @@ impl DiagnosticLogWindows {
                 Some(deadline) => tokio::select! {
                     () = &mut changed => continue,
                     () = tokio::time::sleep_until(deadline) => {
-                        let mut windows = match self.windows.lock() {
-                            Ok(windows) => windows,
-                            Err(poison) => poison.into_inner(),
+                        // 锁内只挑出到期窗口；汇总事件发在锁外，订阅者/OTLP 是任意代码。
+                        let due: Vec<RateLimitedLog> = {
+                            let mut windows = match self.windows.lock() {
+                                Ok(windows) => windows,
+                                Err(poison) => poison.into_inner(),
+                            };
+                            let now = tokio::time::Instant::now();
+                            windows.retain(|_, window| window.deadline().is_some());
+                            // 到期窗口要整体移出锁内状态：`extract_if` 一次遍历取走条目，
+                            // 不再先攒 key 再按 key 删除。
+                            windows
+                                .extract_if(|_, window| {
+                                    window.deadline().is_some_and(|deadline| now >= deadline)
+                                })
+                                .map(|(_, window)| window)
+                                .collect()
                         };
-                        for window in windows.values_mut() { window.flush_if_due(); }
-                        windows.retain(|_, window| window.deadline().is_some());
+                        for mut window in due { window.flush_if_due(); }
                         return;
                     }
                 },
@@ -73,11 +85,15 @@ impl DiagnosticLogWindows {
     /// 在原排空完成后汇总并停止抑制；不延后停止通知或取消业务 future。
     pub fn close(&self) {
         self.active.store(false, Ordering::Release);
-        let mut windows = match self.windows.lock() {
-            Ok(windows) => windows,
-            Err(poison) => poison.into_inner(),
+        // 窗口移出后再 drop：Drop 汇总同样发出日志事件，不能占用诊断锁。
+        let windows = {
+            let mut windows = match self.windows.lock() {
+                Ok(windows) => windows,
+                Err(poison) => poison.into_inner(),
+            };
+            std::mem::take(&mut *windows)
         };
-        windows.clear();
+        drop(windows);
         self.changed.notify_one();
     }
 }

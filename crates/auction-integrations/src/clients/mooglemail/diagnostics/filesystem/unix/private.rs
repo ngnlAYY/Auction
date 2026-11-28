@@ -26,6 +26,11 @@ pub(super) fn private_directory(
                 return Err(MailDiagnosticError::Io);
             }
         }
+        // 只有确认不存在才算目录缺席；权限/IO 错误必须失败关闭，
+        // 否则保留清理会把不可读的归档目录报告成空目录。
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(MailDiagnosticError::NotFound);
+        }
         Err(diagnostic_cause) => {
             safe_diagnostics::error(
                 "mooglemail_diagnostics",
@@ -33,7 +38,7 @@ pub(super) fn private_directory(
                 safe_diagnostics::project(&diagnostic_cause),
                 DiagnosticContext::default(),
             );
-            return Err(MailDiagnosticError::NotFound);
+            return Err(MailDiagnosticError::Io);
         }
     }
     let metadata = fs::symlink_metadata(&path).map_err(safe_diagnostics::error_map(

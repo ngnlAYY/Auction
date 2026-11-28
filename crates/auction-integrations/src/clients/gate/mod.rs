@@ -113,9 +113,18 @@ mod tests {
         let cancelled_gate = Arc::clone(&gate);
         let cancelled =
             tokio::spawn(async move { cancelled_gate.wait(GateClass::Background).await });
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        // 等到票据真正登记再取消；固定 sleep 在慢机器上可能还没登记，断言就空过了。
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while gate.queued() == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("waiter registers");
         cancelled.abort();
         let _ = cancelled.await;
+        // 取消必须同步撤销票据；只比较耗时会漏掉“泄漏一个空槽但总时长仍在界内”的情形。
+        assert_eq!(gate.queued(), 0, "aborted waiter must cancel its ticket");
         let started = Instant::now();
         gate.wait(GateClass::Foreground).await.expect("slot after cancellation");
         // 取消的票据不能额外占用一个完整间隔。

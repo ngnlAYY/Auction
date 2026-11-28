@@ -72,10 +72,12 @@ pub(super) fn is_hex_digest(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-/// 构建号同时是目录名：1–64 位 `[A-Za-z0-9._-]`，且不以点开头（`.`、`..` 与暂存目录都排除在外）。
+/// 构建号同时是目录名：1–64 位、首字符为 ASCII 字母数字，其余 `[A-Za-z0-9._-]`。
+/// 与服务端 `auction-observability::is_valid_build_id` 同一规则：`-x`、`_x` 之类能让
+/// `web install/switch` 装好并切换到服务启动时拒绝的挂载，必须在这里就拒绝。
 pub(super) fn validate_build_id(value: &str) -> anyhow::Result<()> {
     let valid = (1..=64).contains(&value.len())
-        && !value.starts_with('.')
+        && value.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
         && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte));
     if valid { Ok(()) } else { anyhow::bail!("build_id 含非法字符或长度：{value}") }
 }

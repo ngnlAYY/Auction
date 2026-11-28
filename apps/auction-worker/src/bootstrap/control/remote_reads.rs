@@ -377,8 +377,13 @@ impl auction_application::operations::WorkerRemoteReadPort for WorkerRemoteReads
                                         .errors
                                         .push("forum_scan_incomplete_metadata".to_owned()),
                                 }
-                                for (post_number, post) in
-                                    scan.post_numbers.iter().zip(&scan.preview.posts)
+                                // 固定楼层页（目录续页与系统日志）在前、用户回帖在后；
+                                // `ForumTopicScan::validate` 保证与预览帖子等长且一一对应。
+                                for (post_number, post) in scan
+                                    .fixed_post_numbers
+                                    .iter()
+                                    .chain(scan.post_numbers.iter())
+                                    .zip(&scan.preview.posts)
                                 {
                                     if *post_number > target.after_post_number {
                                         if response.forum.len() >= maximum_entries {

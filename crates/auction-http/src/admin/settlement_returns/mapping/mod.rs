@@ -67,7 +67,8 @@ pub(super) fn map_summary(
         || !matches!(summary.world_id.as_str(), "main" | "isekai")
         || summary.credits < 0
         || summary.cod < 0
-        || summary.external_mail_id.is_empty()
+        || !valid_text(&summary.external_mail_id, 256)
+        || summary.closed_at.is_some() == summary.status.open()
     {
         return None;
     }

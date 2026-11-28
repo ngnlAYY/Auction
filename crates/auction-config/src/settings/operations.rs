@@ -79,6 +79,7 @@ fn apply_mail(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsConf
     let mail = &mut worker.mooglemail;
     // 不覆盖 endpoint、Cookie、全局 enabled 或邮箱身份，持久化 due、游标和租约也不在此改写。
     mail.send_intervals = candidate.send_intervals;
+    mail.send_classes = candidate.send_classes;
     mail.schedule = candidate.schedule.clone();
     mail.maximum_response_bytes = candidate.maximum_response_bytes;
     mail.minimum_request_interval_millis = candidate.minimum_request_interval_millis;
@@ -192,7 +193,7 @@ mod tests {
     use crate::settings::WorkerConfig;
 
     #[test]
-    fn managed_mail_projects_reply_budget_at_startup() {
+    fn managed_mail_projects_reply_budget_and_send_classes_at_startup() {
         let mut worker = WorkerConfig::default();
         let mut operations = AdminRuntimeOperationsConfig::default();
         let mail = operations.mail.get_or_insert_with(AdminRuntimeMailConfig::default);
@@ -201,11 +202,14 @@ mod tests {
         mail.account_reply_window_seconds = 120;
         mail.explanation_mail_window_seconds = 60;
         mail.explanation_mail_limit = 5;
+        mail.send_classes.account_reply = false;
 
         apply_mail(&mut worker, &operations);
         assert!(!worker.mooglemail.rekey_enabled);
         assert_eq!(worker.mooglemail.account_reply_window_seconds, 120);
         assert_eq!(worker.mooglemail.explanation_mail_window_seconds, 60);
         assert_eq!(worker.mooglemail.explanation_mail_limit, 5);
+        // 启动投影必须与热读取采用同一 `send_classes`，否则接管后首轮热读取前行为不一致。
+        assert!(!worker.mooglemail.send_classes.account_reply);
     }
 }

@@ -261,7 +261,8 @@ pub(crate) struct MigrationReport {
 }
 
 /// 在 SQLx 迁移锁内以迁移 owner 执行全部待执行迁移；空库会建立完整 schema，
-/// 未知非空库被拒绝。服务运行账号没有 DDL 权限，因此不能用于本路径。
+/// 未知非空库被拒绝。服务运行账号没有 DDL 权限，因此不能用于本路径。迁移后版本必须等于
+/// 制品内嵌的期望版本：数据库来自更新的制品时 `migrate` 只是空操作，不能报告成功。
 pub(crate) async fn apply_migrations(
     config: &auction_config::AppConfig,
     owner: &auction_config::PostgresOwnerSecrets,
@@ -278,11 +279,18 @@ pub(crate) async fn apply_migrations(
         progress(format_args!("迁移 {}：当前版本 {before}", target.database));
         store.migrate().await.context("执行数据库迁移失败")?;
         let after = latest_version(&preflight(store, &target.database).await?);
+        let expected_version = auction_storage::postgres_expected_migration_version();
+        if after != expected_version {
+            anyhow::bail!(
+                "迁移后数据库版本 {after} 与制品期望版本 {expected_version} 不一致\
+                 （数据库可能由更新的制品迁移过，或迁移未全部应用）；保持停机核对后再启动服务"
+            );
+        }
         Ok(MigrationReport {
             database: target.database.clone(),
             before_version: before,
             after_version: after,
-            expected_version: auction_storage::postgres_expected_migration_version(),
+            expected_version,
             applied: after - before,
         })
     })

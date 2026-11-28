@@ -22,11 +22,14 @@ sha2.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
-libc.workspace = true
 uuid.workspace = true
 rustls.workspace = true
 url.workspace = true
 object_store = { workspace = true, optional = true }
+
+# libc 只在 unix 文件实现中使用；非 unix 走 unsupported 平台桩，按平台声明避免未使用依赖报错。
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
 
 [features]
 default = []

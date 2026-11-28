@@ -83,8 +83,9 @@ impl MaintenanceWorldObservation {
 impl ExternalAccountTracker {
     /// 读取当前快照；未观察到任何事实时仍返回合法的 Idle 投影。
     pub fn snapshot_status(&self) -> Option<ExternalAccountStatus> {
-        let observed_at = Timestamp::now();
+        // 取得锁后再取时间：事件在锁内应用，last_*_at 因此不会晚于 observed_at。
         let state = self.inner.lock().ok()?;
+        let observed_at = Timestamp::now();
         let failed =
             state.maintenance_worlds.iter().filter(|world| world.failed).collect::<Vec<_>>();
         let running_since =

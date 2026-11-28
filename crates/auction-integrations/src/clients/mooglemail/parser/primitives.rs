@@ -37,14 +37,19 @@ pub(crate) fn subject_is_list_projection(list_subject: &str, detail_subject: &st
     if detail_subject.starts_with(list_subject) {
         return true;
     }
-    let without_replacement = list_subject.trim_end_matches('\u{FFFD}');
-    if !without_replacement.is_empty() && detail_subject.starts_with(without_replacement) {
-        return true;
+    // 截断可能同时留下 U+FFFD 与省略号（顺序不定）：逐个剥离，直到不再变化。
+    let mut prefix = list_subject;
+    loop {
+        let shorter = prefix
+            .strip_suffix('\u{FFFD}')
+            .or_else(|| prefix.strip_suffix('\u{2026}'))
+            .or_else(|| prefix.strip_suffix("..."));
+        match shorter {
+            Some(shorter) => prefix = shorter,
+            None => break,
+        }
     }
-    let without_ellipsis = without_replacement
-        .strip_suffix("\u{2026}")
-        .or_else(|| without_replacement.strip_suffix("..."));
-    without_ellipsis.is_some_and(|prefix| !prefix.is_empty() && detail_subject.starts_with(prefix))
+    !prefix.is_empty() && detail_subject.starts_with(prefix)
 }
 
 pub(crate) fn parse_detail_actions(

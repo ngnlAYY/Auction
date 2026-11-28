@@ -25,6 +25,7 @@ impl WorkerMailCredentialCheckPort for WorkerRemoteReadClient {
                 .exchange::<_, serde_json::Value>(
                     WORKER_CONTROL_MAIL_CREDENTIAL_CHECK_PATH,
                     &request,
+                    super::MAX_RESPONSE_BYTES,
                 )
                 .await
             {

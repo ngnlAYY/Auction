@@ -19,7 +19,7 @@ use reqwest::redirect::Policy;
 use serde::{Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
-/// 与 server 中间件一致的状态/命令响应上限；远端读取有独立的 1 MiB 上界。
+/// 与 server 中间件一致的状态/命令响应上限；远端读取使用独立的按路由上界。
 const MAX_RESPONSE_BYTES: usize = 64 << 10;
 
 /// Worker control 的稳定错误分类；不保存远端正文。

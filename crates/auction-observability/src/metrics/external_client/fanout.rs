@@ -18,7 +18,10 @@ impl ExternalMetricsFanout {
 impl ExternalMetricsObserver for ExternalMetricsFanout {
     fn observe(&self, event: ExternalMetricsEvent) {
         for observer in &self.observers {
-            observer.observe(event);
+            // 与 clients::metrics::observation 一致：单个 sink 的 panic 不能吞掉其他观测。
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                observer.observe(event);
+            }));
         }
     }
 }

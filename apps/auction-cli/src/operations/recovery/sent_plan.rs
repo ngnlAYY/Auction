@@ -40,6 +40,7 @@ pub(super) struct SentMatchPlan {
     pub(super) frozen_count: usize,
     pub(super) restored_payload_count: usize,
     pub(super) candidates: usize,
+    /// 无法唯一归属 Sent 的投递数；与 `ambiguous_deliveries` 同口径，每条投递只计一次。
     pub(super) ambiguous: usize,
     pub(super) asset_mismatch: usize,
     pub(super) identity_mismatch: usize,
@@ -242,6 +243,7 @@ impl SentMatchPlan {
                     // 隔离前 fence 静默改写成 1。此类精确匹配改走未决阻塞（manual_reconcile），
                     // 审计保留原 fence=0，绝不重发。
                     if self.expectations[delivery_index].fencing_version == 0 {
+                        self.ambiguous += 1;
                         self.ambiguous_deliveries.insert(delivery_index);
                     } else {
                         matches.push((delivery_index, candidate, detail.clone(), sent_at));
@@ -267,6 +269,7 @@ impl SentMatchPlan {
         for (delivery_index, candidate, detail, sent_at) in matches {
             let detail_key = (detail.world.clone(), detail.external_mail_id.clone());
             if mid_counts.get(&detail_key).copied().unwrap_or(0) > 1 {
+                self.ambiguous += 1;
                 self.ambiguous_deliveries.insert(delivery_index);
                 continue;
             }

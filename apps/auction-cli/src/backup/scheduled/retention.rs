@@ -156,6 +156,8 @@ fn receipt_id(name: &str) -> Option<Uuid> {
     (name == format!("{run_id}.json") && !run_id.is_nil()).then_some(run_id)
 }
 
+/// archive/manifest 必须存在且身份一致；范围 sidecar 与密文只是附加证据，已经缺失时按已清理
+/// 处理，仍存在的必须身份一致——否则一次半途清理或人工删除会让该恢复点永久无法淘汰。
 fn validate_files(output: &PrivateDirectory, receipt: &RunReceipt) -> anyhow::Result<()> {
     let archive = receipt.archive.as_ref().context("回执缺少 archive")?;
     for (name, expected) in [
@@ -171,8 +173,14 @@ fn validate_files(output: &PrivateDirectory, receipt: &RunReceipt) -> anyhow::Re
             (&scope.sidecar_file_name, scope.sidecar_identity),
             (&scope.bundle_file_name, scope.bundle_identity),
         ] {
-            if FileIdentity::of(&output.open(name)?.metadata()?) != expected {
-                anyhow::bail!("备份范围文件已被替换或改变大小");
+            match output.open(name) {
+                Ok(file) => {
+                    if FileIdentity::of(&file.metadata()?) != expected {
+                        anyhow::bail!("备份范围文件已被替换或改变大小");
+                    }
+                }
+                Err(error) if super::super::scope::is_not_found(&error) => {}
+                Err(error) => return Err(error),
             }
         }
     }

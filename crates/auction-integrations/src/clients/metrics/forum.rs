@@ -10,7 +10,7 @@ use auction_application::external_metrics::{
 use auction_application::forum::ForumWriteProgress;
 
 use super::super::ehentai::EhentaiError;
-use super::observation::observe_safely;
+use super::observation::{observe_dyn_safely, observe_safely};
 
 pub(crate) struct ForumRequestGuard {
     observer: Arc<dyn ExternalMetricsObserver>,
@@ -31,11 +31,14 @@ impl ForumRequestGuard {
 
     pub(crate) fn finish(mut self, category: ForumRequestCategory) {
         self.completed = true;
-        self.observer.observe(ExternalMetricsEvent::ForumRequestFinished {
-            world: self.world,
-            operation: self.operation,
-            category,
-        });
+        observe_safely(
+            &self.observer,
+            ExternalMetricsEvent::ForumRequestFinished {
+                world: self.world,
+                operation: self.operation,
+                category,
+            },
+        );
     }
 }
 
@@ -73,12 +76,15 @@ impl ForumGateWaitGuard {
 
     pub(crate) fn finish(mut self, outcome: WaitOutcome) {
         self.completed = true;
-        self.observer.observe(ExternalMetricsEvent::ForumGateWait {
-            world: self.world,
-            operation: self.operation,
-            outcome,
-            waited: self.started.elapsed(),
-        });
+        observe_safely(
+            &self.observer,
+            ExternalMetricsEvent::ForumGateWait {
+                world: self.world,
+                operation: self.operation,
+                outcome,
+                waited: self.started.elapsed(),
+            },
+        );
     }
 }
 
@@ -136,12 +142,15 @@ impl ForumPmOperationGuard {
 
     pub(crate) fn finish(mut self, outcome: ForumPmOutcome, category: ForumPmCategory) {
         self.completed = true;
-        self.observer.observe(ExternalMetricsEvent::ForumPmOperation {
-            world: self.world,
-            phase: self.phase,
-            outcome,
-            category,
-        });
+        observe_safely(
+            &self.observer,
+            ExternalMetricsEvent::ForumPmOperation {
+                world: self.world,
+                phase: self.phase,
+                outcome,
+                category,
+            },
+        );
     }
 }
 
@@ -282,11 +291,14 @@ pub(crate) fn topic_scan_discovered(
     outcome: ForumTopicScanOutcome,
     pages: usize,
 ) {
-    observer.observe(ExternalMetricsEvent::ForumTopicScanPages {
-        world,
-        mode: ForumTopicScanMode::Full,
-        measure: ForumTopicScanMeasure::Discovered,
-        outcome,
-        pages,
-    });
+    observe_dyn_safely(
+        observer,
+        ExternalMetricsEvent::ForumTopicScanPages {
+            world,
+            mode: ForumTopicScanMode::Full,
+            measure: ForumTopicScanMeasure::Discovered,
+            outcome,
+            pages,
+        },
+    );
 }

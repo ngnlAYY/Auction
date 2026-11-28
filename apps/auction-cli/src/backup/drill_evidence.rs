@@ -9,7 +9,7 @@
 //! 目录只读一层，跳过符号链接、非普通文件、超过 1 MiB 的文件与无法解析的 JSON；目录本身
 //! 不可读时返回错误，由调用方把来源标记为不完整。
 
-use std::{fs, path::Path};
+use std::{fs, io::Read, path::Path};
 
 use anyhow::Context;
 use auction_time::Timestamp;

@@ -83,8 +83,12 @@ impl Journal {
                 previous.outcome = Outcome::Interrupted;
                 previous.finished_at = Some(Timestamp::now());
                 // 保留最后 checkpoint 的已知耗时，不把停机时长当作执行耗时，也不补发打卡。
-                previous.failure =
-                    Some(Failure { stage: previous.stage, error_code: "interrupted".to_owned() });
+                // checkpoint 里已记录的首个失败（如异机副本失败）是证据，不能被通用
+                // `interrupted` 覆盖；只有没有任何已知失败时才补记中断。
+                previous.failure.get_or_insert_with(|| Failure {
+                    stage: previous.stage,
+                    error_code: "interrupted".to_owned(),
+                });
                 self.publish(&previous)?;
                 progress(format_args!("backup run_id={} outcome=interrupted", previous.run_id));
                 true

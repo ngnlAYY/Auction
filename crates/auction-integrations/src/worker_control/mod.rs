@@ -27,8 +27,12 @@ use auction_application::operations::{
 };
 use serde::{Deserialize, Serialize};
 use url::Url;
-/// 恢复扫描响应最多包含 2000 条摘要；与其他只读路由共用 1 MiB 上界。
+
+/// 装备读取与凭据检查等小响应的上限。
 const MAX_RESPONSE_BYTES: usize = 1 << 20;
+/// Sent 核查与恢复扫描的合法响应包含数千条摘要与数万个论坛楼层，1 MiB 会误判为不兼容；
+/// 按路由放大，但仍保留硬上界，不能把对端响应当无界缓冲。
+const MAX_RECOVERY_RESPONSE_BYTES: usize = 16 << 20;
 
 /// 构造期错误；运行期错误统一走 `WorkerRemoteReadError`。
 #[derive(Debug, thiserror::Error)]
@@ -76,12 +80,17 @@ impl WorkerRemoteReadClient {
         Ok(Self { client })
     }
 
-    async fn post<I, T>(&self, path: &str, input: &I) -> Result<T, WorkerRemoteReadError>
+    async fn post<I, T>(
+        &self,
+        path: &str,
+        input: &I,
+        maximum_response_bytes: usize,
+    ) -> Result<T, WorkerRemoteReadError>
     where
         I: Serialize,
         T: for<'de> Deserialize<'de>,
     {
-        let (status, envelope) = self.exchange::<I, T>(path, input).await?;
+        let (status, envelope) = self.exchange::<I, T>(path, input, maximum_response_bytes).await?;
         match (status.as_u16(), envelope.code.as_str()) {
             (200..=299, "ok") => envelope.data.ok_or(WorkerRemoteReadError::Incompatible),
             (409, "paused") => Err(WorkerRemoteReadError::Paused),
@@ -102,6 +111,7 @@ impl WorkerRemoteReadClient {
         &self,
         path: &str,
         input: &I,
+        maximum_response_bytes: usize,
     ) -> Result<(reqwest::StatusCode, Envelope<T>), WorkerRemoteReadError>
     where
         I: Serialize,
@@ -135,13 +145,13 @@ impl WorkerRemoteReadClient {
         {
             return Err(WorkerRemoteReadError::Incompatible);
         }
-        if response.content_length().is_some_and(|length| length > MAX_RESPONSE_BYTES as u64) {
+        if response.content_length().is_some_and(|length| length > maximum_response_bytes as u64) {
             return Err(WorkerRemoteReadError::Incompatible);
         }
         let mut raw = Vec::new();
         let mut response = response;
         while let Some(chunk) = response.chunk().await.map_err(classify_request_error)? {
-            if chunk.len() > MAX_RESPONSE_BYTES - raw.len() {
+            if chunk.len() > maximum_response_bytes - raw.len() {
                 return Err(WorkerRemoteReadError::Incompatible);
             }
             raw.extend_from_slice(&chunk);
@@ -164,7 +174,7 @@ impl WorkerRemoteReadPort for WorkerRemoteReadClient {
             if !request.validate() {
                 return Err(WorkerRemoteReadError::Invalid);
             }
-            self.post(EQUIPMENT_READ_PATH, &request).await
+            self.post(EQUIPMENT_READ_PATH, &request, MAX_RESPONSE_BYTES).await
         })
     }
 
@@ -176,7 +186,16 @@ impl WorkerRemoteReadPort for WorkerRemoteReadClient {
             if !request.validate() {
                 return Err(WorkerRemoteReadError::Invalid);
             }
-            self.post(SENT_LOOKUP_PATH, &request).await
+            // control 响应是不可信输入：与 recovery_scan 同口径，状态闭集/候选字段/世界绑定
+            // 不通过即失败关闭，不能把对端文本写进 CLI 证据。
+            // Sent 核查可携带单个 MID 的完整附件编号列表，不能用小响应上限拒绝合法结果。
+            let response: WorkerSentLookupResponse =
+                self.post(SENT_LOOKUP_PATH, &request, MAX_RECOVERY_RESPONSE_BYTES).await?;
+            if response.validate_for_world(&request.world) {
+                Ok(response)
+            } else {
+                Err(WorkerRemoteReadError::Incompatible)
+            }
         })
     }
 
@@ -189,7 +208,7 @@ impl WorkerRemoteReadPort for WorkerRemoteReadClient {
                 return Err(WorkerRemoteReadError::Invalid);
             }
             let response: WorkerRecoveryScanResponse =
-                self.post(RECOVERY_SCAN_PATH, &request).await?;
+                self.post(RECOVERY_SCAN_PATH, &request, MAX_RECOVERY_RESPONSE_BYTES).await?;
             if response.validate() {
                 Ok(response)
             } else {
@@ -352,6 +371,52 @@ mod tests {
         let server = tokio::spawn(serve_once(listener, "HTTP/1.1 200 OK", "ok", Some("{}"), "v1"));
         let error = client(path).read_equipment(equipment_request()).await;
         assert_matches!(error, Err(WorkerRemoteReadError::Incompatible));
+        server.await.expect("server task");
+    }
+
+    fn sent_lookup_request() -> WorkerSentLookupRequest {
+        WorkerSentLookupRequest {
+            world: "main".to_owned(),
+            recipient: "Sample·Fixture".to_owned(),
+            subject: "Withdrawn return".to_owned(),
+            external_equipment_id: "317632875".to_owned(),
+        }
+    }
+
+    /// 消费侧必须执行端口校验：闭集状态可通过，任意状态串直接判为不兼容。
+    #[tokio::test]
+    async fn sent_lookup_response_is_validated_before_reaching_the_caller() {
+        let (path, listener) = socket_path();
+        let server = tokio::spawn(serve_once(
+            listener,
+            "HTTP/1.1 200 OK",
+            "ok",
+            Some(concat!(
+                "{\"status\":\"NotObserved\",\"scan_complete\":true,\"pages_scanned\":1,",
+                "\"observed_at\":\"2026-11-04T00:00:00Z\",\"candidates\":[]}"
+            )),
+            "v1",
+        ));
+        let response = client(path).lookup_sent(sent_lookup_request()).await.expect("状态可接受");
+        assert_eq!(response.status, "NotObserved");
+        assert_eq!(server.await.expect("server task"), "/v1/mail/sent:lookup");
+
+        let (path, listener) = socket_path();
+        let server = tokio::spawn(serve_once(
+            listener,
+            "HTTP/1.1 200 OK",
+            "ok",
+            Some(concat!(
+                "{\"status\":\"unique\",\"scan_complete\":true,\"pages_scanned\":1,",
+                "\"observed_at\":\"2026-11-04T00:00:00Z\",\"candidates\":[]}"
+            )),
+            "v1",
+        ));
+        assert_matches!(
+            client(path).lookup_sent(sent_lookup_request()).await,
+            Err(WorkerRemoteReadError::Incompatible),
+            "非闭集状态串必须失败关闭"
+        );
         server.await.expect("server task");
     }
 

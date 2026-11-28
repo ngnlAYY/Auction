@@ -43,7 +43,9 @@ fn split_canonical(canonical: &str) -> MoogleMailSentReceipt {
     let tail = &lines[lines.len() - tail_len..];
     // 块开头的空行是与原正文的分隔，必须至少有一个；块内至少一条回执行。
     let separator = tail.iter().take_while(|line| line.trim().is_empty()).count();
-    if separator == 0 || separator == tail.len() || separator == lines.len() {
+    // `separator == lines.len()` 不可达（separator 已达 tail.len()）；改为要求回执块前
+    // 至少一行为原正文，否则全空行正文会被当成空原正文摘要。
+    if separator == 0 || separator == tail.len() || tail_len == lines.len() {
         return MoogleMailSentReceipt::None;
     }
     let block_start = lines.len() - tail_len + separator;

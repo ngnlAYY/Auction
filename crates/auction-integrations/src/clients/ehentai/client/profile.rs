@@ -69,7 +69,12 @@ fn profile_get_failure(error: ForumPmError) -> InternalEvidenceError {
         safe_diagnostics::project(&error),
         DiagnosticContext::default(),
     );
-    InternalEvidenceError::Unavailable
+    // 资料 GET 的明确登录失效必须与“暂时不可用”区分，调用方才能撤销已失效 Cookie；
+    // 其余失败保持不可用，不能把网络/限速升级成凭据撤销。
+    match error {
+        ForumPmError::Authentication => InternalEvidenceError::Revoked,
+        _ => InternalEvidenceError::Unavailable,
+    }
 }
 
 impl EhentaiClient {

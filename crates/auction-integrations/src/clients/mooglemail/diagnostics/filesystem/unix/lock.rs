@@ -118,7 +118,9 @@ pub(super) fn locked_directory(
     ))?;
 
     // Probe ownership using descriptor-relative creation and cleanup.
-    let probe_name = format!(".{}.tmp", Uuid::new_v4());
+    // 探针名不落入受管的 `.<uuid>.tmp` 临时证据模式：unlink 失败残留会作为未识别目录项
+    // 暴露给保留快照，而不是被静默计为在途临时文件。
+    let probe_name = format!(".lock-probe-{}", Uuid::new_v4());
     let probe = super::path::openat_file(
         &directory,
         &probe_name,

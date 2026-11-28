@@ -275,8 +275,9 @@ fn map_pool_page(
         page_size: page.limit,
         total: if cursor { None } else { page.total },
         cursor: raw_cursor,
-        next_cursor: cursor
-            .then(|| page.next_cursor.as_ref().map_or_default(encode_public_compensation_cursor)),
+        // 最后一页没有后继游标时必须省略字段：`has_more == next_cursor.is_some()` 是端口契约，
+        // 空串回填会让客户端把 `?cursor=` 的无效令牌当成下一页。
+        next_cursor: page.next_cursor.as_ref().map(encode_public_compensation_cursor),
         has_more: cursor.then_some(page.has_more),
     }
 }
@@ -517,7 +518,7 @@ mod tests {
     use axum::response::IntoResponse;
     use uuid::Uuid;
 
-    use super::{lots, map_reader_error, movements, pool};
+    use super::{lots, map_pool_page, map_reader_error, movements, pool};
     use crate::middleware::security::PublicHttpSecurity;
     use crate::server::contract_fixtures::assert_http;
     use crate::state::PublicApiState;
@@ -769,5 +770,27 @@ mod tests {
             .into_response();
             assert_http(name, StatusCode::OK, response).await;
         }
+    }
+
+    // 最后一页没有后继游标时必须省略 next_cursor，否则客户端会拿空令牌重试。
+    #[test]
+    fn terminal_cursor_page_omits_next_cursor() {
+        let response = map_pool_page(
+            PublicCompensationPage {
+                balance: 1_025,
+                updated_at: round(false).settled_at,
+                entries: Vec::new(),
+                total: None,
+                limit: 1,
+                offset: 0,
+                next_cursor: None,
+                has_more: false,
+            },
+            1,
+            Some("start".to_owned()),
+        );
+        assert_eq!(response.cursor.as_deref(), Some("start"));
+        assert_eq!(response.next_cursor, None);
+        assert_eq!(response.has_more, Some(false));
     }
 }

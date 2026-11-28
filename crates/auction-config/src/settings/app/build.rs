@@ -276,9 +276,11 @@ impl AppConfig {
             let limit = http_security
                 .anonymous_read_concurrency
                 .unwrap_or_else(|| (available.saturating_sub(1) / 2).max(1));
-            if available > 1 && limit >= available {
+            // 池只剩 1 个普通连接时没有可保留的写路径连接，读闸门只能取 1；显式配置更大的值
+            // 会让读队列盖过写请求，因此同样拒绝，而不是跳过检查。
+            if limit > 1 && limit >= available {
                 return Err(ConfigError::InvalidHttpSecurity(
-                    "anonymous_read_concurrency 必须小于 Public 服务池扣除长期连接后的可用连接数",
+                    "anonymous_read_concurrency 必须小于 Public 服务池扣除长期连接后的可用连接数（池仅剩 1 个普通连接时只能为 1）",
                 ));
             }
             http_security.anonymous_read_concurrency = Some(limit);

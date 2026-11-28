@@ -11,6 +11,7 @@ use std::{
 use anyhow::Context;
 
 use crate::support::files;
+use crate::support::process;
 
 /// 子进程 stderr 的有界捕获上限；失败原因进入 PostgreSQL 或 systemd 日志，不进入回执文件。
 pub(super) const STDERR_LIMIT: usize = 4096;
@@ -50,35 +51,49 @@ impl Drop for TempPathGuard {
     }
 }
 
-/// manifest 是发布证据：以 create_new/0600 创建、写满后用描述符设为 [`STAGED_MODE`]，fsync
-/// 文件与目录后才返回成功；目标已存在即失败，不覆盖既有证据。
+/// manifest 是发布证据：先以 create_new/0600 写入固定临时名、用描述符设为 [`STAGED_MODE`]，
+/// fsync 后再硬链接到最终名（目标已存在即失败，不覆盖既有证据）并同步目录。最终名因此只可能
+/// 指向已落盘的内容，中断不会留下可被用作证据的半截 manifest。
 pub(super) fn write_staged_manifest(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    let name = path.file_name().context("暂存 manifest 缺少文件名")?;
+    let directory = path.parent().context("暂存 manifest 缺少父目录")?;
+    let mut temporary_name = name.to_os_string();
+    temporary_name.push(".tmp");
+    let temporary = path.with_file_name(temporary_name);
+    // 固定临时名：上次中断只可能留下从未发布的残留，清理后重写即可。
+    process::remove_stale(&temporary, "暂存 manifest 临时文件")?;
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)
-        .with_context(|| format!("创建暂存 manifest 失败：{}", path.display()))?;
+        .open(&temporary)
+        .with_context(|| format!("创建暂存 manifest 临时文件失败：{}", temporary.display()))?;
     file.write_all(bytes).context("写入暂存 manifest 失败")?;
     file.set_permissions(fs::Permissions::from_mode(STAGED_MODE))
         .context("设置暂存 manifest 权限失败")?;
     file.sync_all().context("同步暂存 manifest 失败")?;
-    files::sync_directory(path.parent().context("暂存 manifest 缺少父目录")?, "暂存目录")
+    let published = fs::hard_link(&temporary, path)
+        .with_context(|| format!("发布暂存 manifest 失败：{}", path.display()));
+    // 本次临时名无论发布成败都不再需要；清理失败不覆盖主结果。
+    let _ = fs::remove_file(&temporary);
+    published?;
+    files::sync_directory(directory, "暂存目录")
 }
 
-/// 可重写的本机小证据：固定临时名以 0600 新建或截断、写满后设为 `mode` 并 fsync，再改名
-/// 覆盖目标并同步目录。只用于允许重复写入的上传证据，不用于只追加的发布证据。
+/// 可重写的本机小证据：固定临时名先清理上次残留、再以 create_new/0600 新建，写满后设为
+/// `mode` 并 fsync，最后改名覆盖目标并同步目录。只用于允许重复写入的上传证据，不用于只追加的
+/// 发布证据；不截断既有路径，避免复用残留名时改写到别的链接指向的文件。
 pub(super) fn replace_staged_file(
     target: &Path,
     temporary: &Path,
     bytes: &[u8],
     mode: u32,
 ) -> anyhow::Result<()> {
+    process::remove_stale(temporary, "暂存证据临时文件")?;
     let mut file = OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
         .open(temporary)
@@ -130,7 +145,7 @@ mod tests {
         assert_eq!(fs::read(&path).expect("读取"), b"{}");
     }
 
-    /// 可重写证据复用固定临时名（崩溃残留被截断），按调用方给定的权限发布并可覆盖旧值。
+    /// 可重写证据复用固定临时名（崩溃残留先清理再新建），按调用方给定的权限发布并可覆盖旧值。
     #[test]
     fn replaceable_evidence_reuses_temporary_name_and_mode() {
         let root = TempRoot::new();

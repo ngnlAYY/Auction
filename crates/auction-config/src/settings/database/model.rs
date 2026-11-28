@@ -17,7 +17,8 @@ pub struct DatabaseRolesConfig {
 }
 
 impl DatabaseRolesConfig {
-    /// 账号名会原样出现在 SQL 标识符位置，只能是无需引号的小写标识符。
+    /// 账号名只出现在 SQL 标识符位置（统一经 `quote_identifier` 加引号），因此只接受受限的
+    /// 小写标识符；RESERVED 关键字加引号后同样可用，不是拒绝条件。
     pub(crate) fn validate(&self) -> Result<(), crate::ConfigError> {
         let Some(owner) = self.owner.as_deref() else { return Ok(()) };
         let invalid = || crate::ConfigError::InvalidDatabaseRole("database_roles.owner");

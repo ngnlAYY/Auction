@@ -336,7 +336,7 @@ impl DrillReceipt {
         Ok(minimum)
     }
 
-    /// 证据清单摘要有效、没有未解释的异常且结论为 passed。
+    /// 证据清单摘要有效、`anomalies` 为空（任何异常记录都不作为部署依据）且结论为 passed。
     fn validate_conclusion(&self) -> anyhow::Result<()> {
         let mut names = BTreeSet::new();
         if self.evidence_files.is_empty() {

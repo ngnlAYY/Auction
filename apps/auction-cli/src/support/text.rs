@@ -5,13 +5,19 @@ use uuid::Uuid;
 
 use super::digest;
 
-/// 1–`max` 字节、首尾无空白且不含控制字符的单行文本；操作者、恢复点标识、停机原因与
+/// 会断行的字符：`char::is_control`（Cc）之外，Unicode 行/段分隔符同样把“单行”文本断成多行，
+/// 写入回执、审计与日志的单行字段时一律拒绝。
+pub(crate) fn is_line_break(character: char) -> bool {
+    character.is_control() || matches!(character, '\u{2028}' | '\u{2029}')
+}
+
+/// 1–`max` 字节、首尾无空白且不含断行字符的单行文本；操作者、恢复点标识、停机原因与
 /// 演练回执字段共用同一判定，各调用方保留自己的错误文案。
 pub(crate) fn single_line(value: &str, max: usize) -> bool {
     !value.is_empty()
         && value.len() <= max
         && value.trim() == value
-        && !value.chars().any(char::is_control)
+        && !value.chars().any(is_line_break)
 }
 
 /// 操作者须为 1-128 字节、首尾无空白且不含控制字符的单行文本。
@@ -38,13 +44,13 @@ pub(crate) fn confirmation(actual: &str, expected: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 错误链 `{error:#}` 的单行摘要：控制字符换成空格，按字符截断到 `max_chars` 并去掉首尾空白；
+/// 错误链 `{error:#}` 的单行摘要：断行字符换成空格，按字符截断到 `max_chars` 并去掉首尾空白；
 /// 正文为空时返回 `None`，由调用方给出自己的占位文案。错误正文本身只含已脱敏的上下文，这里
 /// 只限制形状，不做内容过滤。
 pub(crate) fn error_summary(error: &anyhow::Error, max_chars: usize) -> Option<String> {
     let text: String = format!("{error:#}")
         .chars()
-        .map(|character| if character.is_control() { ' ' } else { character })
+        .map(|character| if is_line_break(character) { ' ' } else { character })
         .take(max_chars)
         .collect();
     let text = text.trim();

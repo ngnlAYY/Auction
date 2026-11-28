@@ -69,6 +69,10 @@ impl EhentaiClientConfig {
             || self.minimum_request_interval.is_zero()
             || self.request_timeout.is_zero()
             || self.request_timeout > Duration::from_secs(300)
+            // 测试板块模式不读取两个世界的板块号；其余情况必须在构造期拒绝非正板块，
+            // 否则创建/回复会先发出请求再失败。
+            || (!self.test_board_mode
+                && (self.main_board_id <= 0 || self.isekai_board_id <= 0))
         {
             return Err(EhentaiError::configuration(operation));
         }

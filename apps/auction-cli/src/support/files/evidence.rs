@@ -1,9 +1,16 @@
 //! 一次性证据与回执文件：父目录私有、目标不存在才以 create_new/0600 写入，并同步父目录。
 
 use std::{
-    fs::{self, OpenOptions},
+    ffi::CString,
+    fs::{self, File, OpenOptions},
     io::Write,
-    os::unix::fs::{MetadataExt, OpenOptionsExt},
+    os::{
+        fd::{AsRawFd, FromRawFd},
+        unix::{
+            ffi::OsStrExt,
+            fs::{MetadataExt, OpenOptionsExt},
+        },
+    },
     path::Path,
 };
 
@@ -49,16 +56,40 @@ fn directory_problem(real_directory: bool, uid: u32, mode: u32, euid: u32) -> Op
     None
 }
 
-/// 以 create_new/0600 写入新文件，完成文件与父目录 fsync 后才返回成功。
+/// 以 create_new/0600 写入新文件，完成文件与父目录 fsync 后才返回成功。父目录只按描述符使用：
+/// 校验、创建与同步都作用在同一个打开目录上，检查后被改名或替换也不会把证据写进另一棵树。
 pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     require_private_target(path)?;
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)
-        .with_context(|| format!("创建私有文件失败：{}", path.display()))?;
+    let parent_path = path.parent().context("输出路径缺少父目录")?;
+    let name = path.file_name().context("输出路径缺少文件名")?;
+    let name = CString::new(name.as_bytes()).context("输出文件名包含 NUL")?;
+    let parent = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(parent_path)
+        .with_context(|| format!("读取输出父目录失败：{}", parent_path.display()))?;
+    let metadata = parent.metadata().context("读取输出父目录元数据失败")?;
+    if let Some(problem) =
+        directory_problem(metadata.is_dir(), metadata.uid(), metadata.mode(), effective_uid())
+    {
+        anyhow::bail!("输出父目录{problem}：{}", parent_path.display());
+    }
+    // SAFETY：父目录描述符与单分量名称均有效；O_EXCL 保证不覆盖已有文件。
+    let mode: libc::mode_t = 0o600;
+    let descriptor = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            mode,
+        )
+    };
+    if descriptor < 0 {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("创建私有文件失败：{}", path.display()));
+    }
+    // SAFETY：openat 已成功，描述符由本调用独占拥有。
+    let mut file = unsafe { File::from_raw_fd(descriptor) };
     file.write_all(bytes).context("写入私有文件失败")?;
     file.sync_all().context("同步私有文件失败")?;
     sync_parent(path)

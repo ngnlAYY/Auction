@@ -3,6 +3,10 @@
 // 测试里的断言直接解包；该豁免只在测试构建生效，生产构建仍按 workspace lint 拒绝 unwrap/expect。
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+// reqwest 只作为 OTLP 传输的 feature 载体（见 Cargo.toml），不提供本 crate 的 API；
+// 这里的 `as _` 让 Cargo 的 unused_dependencies 检查认可该声明，又不引入可用名字。
+use reqwest as _;
+
 mod build_identity;
 mod health;
 mod logging;

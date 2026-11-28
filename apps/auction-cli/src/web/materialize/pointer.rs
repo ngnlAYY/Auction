@@ -4,8 +4,10 @@
 //! `fsync` 与 `rename` 原子替换；换之前两边 build 目录都重新逐文件核对，独立入口始终是 Solid，
 //! 回切旧壳只改默认入口、永不改独立入口。服务只在启动时读取指针，切换后须重启 Public/Admin。
 
+use std::ffi::CString;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
@@ -57,8 +59,18 @@ pub(super) fn read_pointer(
 
 /// 同目录临时文件 + fsync + rename + 目录 fsync；失败时临时文件被删除、原指针不变。
 pub(super) fn write_pointer(surface_root: &Path, pointer: &EntryPointer) -> anyhow::Result<()> {
+    publish_pointer(surface_root, pointer, true).map(|_| ())
+}
+
+/// 发布入口指针；`replace=false` 时以 `RENAME_NOREPLACE` 只在目标不存在时成功，返回是否发布。
+/// 首次安装与 `switch` 共用同一临时文件流程，区别只在最终改名是否允许覆盖。
+fn publish_pointer(
+    surface_root: &Path,
+    pointer: &EntryPointer,
+    replace: bool,
+) -> anyhow::Result<bool> {
     let temporary = surface_root.join(format!(".{ENTRY_FILE}.tmp-{}", Uuid::new_v4()));
-    let result = (|| -> anyhow::Result<()> {
+    let result = (|| -> anyhow::Result<bool> {
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -69,16 +81,37 @@ pub(super) fn write_pointer(surface_root: &Path, pointer: &EntryPointer) -> anyh
         file.sync_all().context("同步入口指针失败")?;
         fs::set_permissions(&temporary, fs::Permissions::from_mode(0o644))
             .context("设置入口指针权限失败")?;
-        fs::rename(&temporary, surface_root.join(ENTRY_FILE)).context("替换入口指针失败")
+        let target = surface_root.join(ENTRY_FILE);
+        if replace {
+            fs::rename(&temporary, target).context("替换入口指针失败")?;
+            return Ok(true);
+        }
+        match rename_no_replace(&temporary, &target) {
+            Ok(()) => Ok(true),
+            // 另一个写入者先建立了指针：目标与目录项都未变，如实报告未发布。
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+            Err(error) => Err(error).context("发布入口指针失败"),
+        }
     })();
-    if let Err(error) = result {
+    let published = match result {
+        Ok(published) => published,
+        Err(error) => {
+            return match fs::remove_file(&temporary) {
+                Ok(()) => Err(error),
+                Err(cleanup) if cleanup.kind() == std::io::ErrorKind::NotFound => Err(error),
+                Err(cleanup) => Err(error.context(format!("且清理临时文件失败：{cleanup}"))),
+            };
+        }
+    };
+    if !published {
         return match fs::remove_file(&temporary) {
-            Ok(()) => Err(error),
-            Err(cleanup) if cleanup.kind() == std::io::ErrorKind::NotFound => Err(error),
-            Err(cleanup) => Err(error.context(format!("且清理临时文件失败：{cleanup}"))),
+            Ok(()) => Ok(false),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error).context("清理未发布的入口指针临时文件失败"),
         };
     }
-    files::sync_directory(surface_root, "surface 目录")
+    files::sync_directory(surface_root, "surface 目录")?;
+    Ok(true)
 }
 
 /// 指针指向的默认 build 与独立 build 构成的记录；`independent` 必须是 Solid。
@@ -104,7 +137,8 @@ fn pointer_for(
     })
 }
 
-/// 首次安装新 build 时建立指针：默认与独立入口都是它。指针已存在时不改动，返回 `false`。
+/// 首次安装新 build 时建立指针：默认与独立入口都是它。指针已存在时不改动，返回 `false`；
+/// 无覆盖发布保证并发 `install` 只有一个能建立首次指针，后到者不会替换已提交的入口。
 pub(super) fn init_pointer(
     surface_root: &Path,
     surface: Surface,
@@ -114,8 +148,7 @@ pub(super) fn init_pointer(
         return Ok(false);
     }
     let facts = verify_build_dir(surface_root, surface, build_id)?;
-    write_pointer(surface_root, &pointer_for(surface, &facts, &facts)?)?;
-    Ok(true)
+    publish_pointer(surface_root, &pointer_for(surface, &facts, &facts)?, false)
 }
 
 /// 规划把入口切到 `build_id`：只核对、不写任何文件，返回将要换入的指针。`to` 只是对目标栈的断言

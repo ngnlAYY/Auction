@@ -11,13 +11,24 @@ pub(crate) fn normalize_stat_value(value: &str) -> Option<String> {
     let mut digits = 0;
     let mut normalized = String::with_capacity(value.len());
     normalized.push(first as char);
-    for byte in value.as_bytes()[1..].iter().copied() {
-        match byte {
-            b'0'..=b'9' => {
+    let bytes = value.as_bytes();
+    for index in 1..bytes.len() {
+        match bytes[index] {
+            byte @ b'0'..=b'9' => {
                 digits += 1;
                 normalized.push(byte as char);
             }
-            b',' if !dot_seen => {}
+            // 千位分隔符只能出现在整数部分：前面有数字、后面恰好三位数字，再后面不得是数字。
+            b',' if !dot_seen => {
+                let rest = &bytes[index + 1..];
+                let grouped = rest.len() >= 3
+                    && rest[..3].iter().all(u8::is_ascii_digit)
+                    && rest.get(3).is_none_or(|byte| !byte.is_ascii_digit())
+                    && bytes[index - 1].is_ascii_digit();
+                if !grouped {
+                    return None;
+                }
+            }
             b'.' if !dot_seen => {
                 dot_seen = true;
                 normalized.push('.');

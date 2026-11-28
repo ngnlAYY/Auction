@@ -8,6 +8,7 @@ use auction_application::admin::{
     AdminCredentialSealer,
 };
 use auction_application::core::ApplicationError;
+use auction_domain::DataKeyDomain;
 use ring::rand::SystemRandom;
 use uuid::Uuid;
 
@@ -49,6 +50,10 @@ impl CredentialSealer {
         scope: &str,
         secret: &[u8],
     ) -> Result<AdminCredentialEnvelope, ApplicationError> {
+        // Cookie 用途必须使用独立凭据域密钥环；兄弟适配器同样在入口拒绝别的域。
+        if self.keys.domain() != DataKeyDomain::Credential {
+            return Err(AdminCredentialError::InvalidRequest.into());
+        }
         if credential_id.is_nil()
             || scope.is_empty()
             || scope.len() > 128
@@ -81,6 +86,9 @@ impl CredentialSealer {
         scope: &str,
         envelope: &AdminCredentialEnvelope,
     ) -> Result<Vec<u8>, ApplicationError> {
+        if self.keys.domain() != DataKeyDomain::Credential {
+            return Err(crypto_error());
+        }
         if credential_id.is_nil()
             || scope.is_empty()
             || scope.len() > 128
@@ -183,7 +191,8 @@ struct DecryptedCookie(Vec<u8>);
 
 impl Drop for DecryptedCookie {
     fn drop(&mut self) {
-        self.0.fill(0);
+        // 普通 fill(0) 可能在释放前被优化掉；与邮件客户端的敏感缓冲共用同一 volatile 清零。
+        crate::clients::mooglemail::wipe_bytes(&mut self.0);
     }
 }
 

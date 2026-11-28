@@ -114,8 +114,12 @@ pub fn render_first_dispatch(
     let payment = facts.payment;
     // main：原件 COD，标的就是挂单的规范装备；isekai：main 世界 1 Credit 付款载体，无装备
     // （D9 §4.1、§5.1）。世界与义务种类不配对说明合同图异常，失败关闭。
-    let (kind, equipment_ids) = match (facts.world, payment.kind) {
-        (SettlementWorld::Main, SettlementObligationKind::WinnerEquipmentCod) => {
+    let (kind, equipment_ids) = match (facts.world, payment.world, payment.kind) {
+        (
+            SettlementWorld::Main,
+            SettlementWorld::Main,
+            SettlementObligationKind::WinnerEquipmentCod,
+        ) if payment.carrier_credit == 0 => {
             (ConsignmentSubjectKind::EquipmentCod, vec![facts.canonical_eid.to_owned()])
         }
         (SettlementWorld::Isekai, SettlementObligationKind::WinnerPaymentCarrierCod) => {

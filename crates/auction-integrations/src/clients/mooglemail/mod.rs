@@ -6,6 +6,15 @@ use auction_application::core::diagnostics::{DiagnosticContext, diagnostic_world
 
 use crate::safe_diagnostics;
 
+/// 在释放敏感缓冲前清零：volatile 写加编译器屏障，避免清零在 Drop 后被优化掉。
+pub(crate) fn wipe_bytes(bytes: &mut [u8]) {
+    for byte in bytes {
+        // SAFETY: 每个 byte 都是可变借用的已初始化字节，且写入发生在释放缓冲区之前。
+        unsafe { std::ptr::write_volatile(byte, 0) };
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}
+
 mod client;
 mod diagnostics;
 mod error;

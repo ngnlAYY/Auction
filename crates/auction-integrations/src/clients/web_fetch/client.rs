@@ -14,6 +14,8 @@ use super::policy::{WebFetchPolicy, WebRepresentation};
 pub enum WebFetchError {
     #[error("源站地址无效：{0}")]
     InvalidOrigin(&'static str),
+    #[error("取回限额无效：{0}")]
+    InvalidPolicy(&'static str),
     #[error("请求路径不安全：{0}")]
     InvalidPath(String),
     #[error("创建 HTTP 客户端失败")]
@@ -51,6 +53,7 @@ impl WebFetchClient {
     /// 直连旧二进制本机监听，不能指向任何公网主机。
     pub fn new(origin: &Url, policy: WebFetchPolicy) -> Result<Self, WebFetchError> {
         validate_origin(origin)?;
+        policy.validate().map_err(WebFetchError::InvalidPolicy)?;
         let _ = rustls::crypto::ring::default_provider().install_default();
         // 未启用任何解压 feature，响应体保持源站发出的实体字节；重定向与代理一并关闭。
         let http = Client::builder()

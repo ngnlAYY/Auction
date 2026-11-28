@@ -31,7 +31,7 @@ impl MoogleMailGateway {
         }
         let deadline = tokio::time::Instant::now()
             .checked_add(self.config.fetch_budget)
-            .ok_or_else(|| configuration(world))?;
+            .ok_or_else(|| configuration(world, MoogleMailOperation::Balance))?;
         let result = tokio::time::timeout_at(deadline, async {
             let session = self.credentials.begin_read(world, MoogleMailOperation::Balance).await?;
             let result = async {
@@ -52,7 +52,8 @@ impl MoogleMailGateway {
                     Ok(snapshot)
                 }
                 Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
-                    session.invalidate_current().await?;
+                    // 撤销失败不得替换原始的登录失效错误。
+                    let _ = session.invalidate_current().await;
                     Err(error)
                 }
                 Err(error) => Err(error),
@@ -66,10 +67,10 @@ impl MoogleMailGateway {
                 safe_diagnostics::project(&diagnostic_cause),
                 DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
             );
-            fetch_budget_exhausted(world)
+            fetch_budget_exhausted(world, MoogleMailOperation::Balance)
         })?;
         if tokio::time::Instant::now() >= deadline {
-            return Err(fetch_budget_exhausted(world));
+            return Err(fetch_budget_exhausted(world, MoogleMailOperation::Balance));
         }
         result
     }
@@ -90,7 +91,7 @@ impl MoogleMailGateway {
         }
         let deadline = tokio::time::Instant::now()
             .checked_add(self.config.fetch_budget)
-            .ok_or_else(|| configuration(world))?;
+            .ok_or_else(|| configuration(world, MoogleMailOperation::Inventory))?;
         let result = tokio::time::timeout_at(deadline, async {
             let session =
                 self.credentials.begin_read(world, MoogleMailOperation::Inventory).await?;
@@ -112,7 +113,8 @@ impl MoogleMailGateway {
                     Ok(snapshot)
                 }
                 Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
-                    session.invalidate_current().await?;
+                    // 撤销失败不得替换原始的登录失效错误。
+                    let _ = session.invalidate_current().await;
                     Err(error)
                 }
                 Err(error) => Err(error),
@@ -126,10 +128,10 @@ impl MoogleMailGateway {
                 safe_diagnostics::project(&diagnostic_cause),
                 DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
             );
-            fetch_budget_exhausted(world)
+            fetch_budget_exhausted(world, MoogleMailOperation::Inventory)
         })?;
         if tokio::time::Instant::now() >= deadline {
-            return Err(fetch_budget_exhausted(world));
+            return Err(fetch_budget_exhausted(world, MoogleMailOperation::Inventory));
         }
         result
     }

@@ -69,7 +69,9 @@ impl DrainCoordinator {
     /// 调用方先 close；交接和关键段均结束后零活动才是稳定结果，不以计数代替 owner 的 join。
     pub async fn wait_critical(&self) {
         loop {
-            let changed = self.0.idle.notified();
+            // 先登记等待再读计数：notify_waiters 不保留许可，迟到的通知会永久丢失。
+            let mut changed = std::pin::pin!(self.0.idle.notified());
+            changed.as_mut().enable();
             if self.0.active.load(Ordering::Acquire) == 0 {
                 return;
             }

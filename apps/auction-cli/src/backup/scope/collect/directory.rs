@@ -17,7 +17,7 @@ use anyhow::Context;
 
 use crate::support::files::{Facts, ancestor_problem, effective_uid};
 
-pub(super) fn open_directory(path: &Path) -> anyhow::Result<File> {
+pub(crate) fn open_directory(path: &Path) -> anyhow::Result<File> {
     if !path.is_absolute() {
         anyhow::bail!("备份范围目录必须是绝对路径：{}", path.display());
     }
@@ -92,8 +92,9 @@ pub(super) fn open_directory(path: &Path) -> anyhow::Result<File> {
 }
 
 pub(super) fn read_directory_names(directory: &File) -> std::io::Result<Vec<OsString>> {
-    // SAFETY: directory is a valid descriptor; dup returns a separately owned descriptor.
-    let descriptor = unsafe { libc::dup(directory.as_raw_fd()) };
+    // SAFETY: directory 是有效描述符；F_DUPFD_CLOEXEC 返回独立拥有的描述符，且复制出的描述符
+    // 保持 close-on-exec，不会在枚举期间泄漏给并发启动的子进程。
+    let descriptor = unsafe { libc::fcntl(directory.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 0) };
     if descriptor < 0 {
         return Err(std::io::Error::last_os_error());
     }
