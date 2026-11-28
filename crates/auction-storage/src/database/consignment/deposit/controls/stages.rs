@@ -325,6 +325,9 @@ pub(super) async fn hold_stage(
                 None,
             )
             .map_err(domain_write)?;
+            // 私有运营说明只进审计：Admin v2 读模型要求 reason_code=admin_delisted 的挂单
+            // 能连到带 `admin_delist_reason` 的成功审计，否则整条记录判为不可用。
+            writer.set_private_audit_note("admin_delist_reason", command.reason.as_str());
             writer.finish(receipt.clone(), now).await?;
             Ok(FirstOutcome::Accepted {
                 receipt,
@@ -418,17 +421,19 @@ pub(super) async fn release_stage(
     if current.snapshot.state_version != command.expected_version {
         return reject(writer, DepositBusinessRejection::StaleVersion, now).await;
     }
+    // 按命令携带的止售 UUID 选中该组的那一行：`version` 是逐 position 计数，
+    // 多 position 的组不能用它挑出主行（主行 ID 是 `insert_hold_controls` 写在首个 position 上的）。
     let hold = sqlx::query(
         "SELECT hold.id, hold.command_id
          FROM public.consignment_custody_controls hold
          JOIN public.consignment_custody_positions position ON position.id = hold.position_id
-         WHERE hold.kind = 'hold_set' AND position.listing_id = $1
+         WHERE hold.kind = 'hold_set' AND position.listing_id = $1 AND hold.id = $2
            AND NOT EXISTS (
                SELECT 1 FROM public.consignment_custody_controls release
-               WHERE release.predecessor_id = hold.id)
-         ORDER BY hold.version DESC, hold.id LIMIT 1",
+               WHERE release.predecessor_id = hold.id)",
     )
     .bind(command.listing_id)
+    .bind(command.hold_id)
     .fetch_optional(writer.connection())
     .await?;
     let Some(hold) = hold else {

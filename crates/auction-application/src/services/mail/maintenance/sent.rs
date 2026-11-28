@@ -71,9 +71,11 @@ impl MailboxMaintenanceService {
         {
             return Ok(RecoveryStep::default());
         }
+        // 同一轮所有候选共用一次时钟：逐条读取会让后来的候选看到更晚的围栏，等于按迭代顺序放宽证据窗口。
+        let now = self.clock.now();
         let hits = entries
             .iter()
-            .filter(|entry| frozen_entry_matches(candidate, expectation, entry, self.clock.now()))
+            .filter(|entry| frozen_entry_matches(candidate, expectation, entry, now))
             .take(EXACT_MATCH_CANDIDATES + 1)
             .collect::<Vec<_>>();
         if hits.is_empty() || hits.len() > EXACT_MATCH_CANDIDATES {
@@ -109,7 +111,7 @@ impl MailboxMaintenanceService {
                 && other.operation == "send"
                 && other.send_expectation.as_ref().is_some_and(|other_expectation| {
                     same_send_content(expectation, other_expectation)
-                        && frozen_entry_matches(other, other_expectation, entry, self.clock.now())
+                        && frozen_entry_matches(other, other_expectation, entry, now)
                 })
         }) {
             return Ok(step);

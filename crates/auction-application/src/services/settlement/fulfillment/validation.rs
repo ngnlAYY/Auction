@@ -144,6 +144,8 @@ pub(super) fn valid_external_equipment_id(value: &str) -> bool {
     !value.is_empty() && value.len() <= 32 && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
+/// 远端邮件 ID 必须仍是 Sent 扫描能解析的规范 MID；非规范值失败关闭，
+/// 不能拿任意文本去读远端 Sent 并无限延期。
 pub(super) fn valid_external_mail_id(value: &str) -> bool {
-    auction_domain::valid_text(value, 256)
+    crate::ports::mail::numeric_mail_scan_id(value).is_some()
 }

@@ -81,7 +81,15 @@ pub(super) async fn finish_forced_rejection<T>(
     now: Timestamp,
 ) -> Result<ListingCommandOutcome<T>, WriteError> {
     let collision = stage_closure(&mut writer, current, listing, change, now).await?;
-    // 碰撞外键需要在同事务先写原命令账本。此组合保留同一个 writer 的事件及拒绝。
+    // 强制关闭同样结束该挂单的有效预约：否则预约码仍可读、实物占用不放。
+    let command_id = writer.tx.command_id;
+    crate::database::consignment::eligibility::claims::cancel_active_reservations(
+        writer.connection(),
+        current.listing_id,
+        command_id,
+        now,
+    )
+    .await?;
     writer
         .finish_with_collisions(
             Decision::Rejected {
@@ -115,11 +123,16 @@ pub(super) async fn retire_occupants(
     let ids: Vec<_> = expired.keys().copied().collect();
     let rows = lock_listings(writer.connection(), &ids).await?;
     let mut collisions = Vec::new();
+    let mut retired = Vec::new();
     for current in &rows {
         let reason = expired
             .get(&current.listing_id)
             .copied()
             .ok_or_else(|| WriteError::invariant("consignment_occupant_reason"))?;
+        // 代管态只由寄售代管生命周期收口：旧 v1 迁移对它们一律拒绝，不能因此中止本命令。
+        if current.snapshot.state.is_custody_managed() {
+            continue;
+        }
         let facts = ForcedTerminationFacts {
             auction_lot_created: reason == ListingReason::AuctionLotCreated,
             seller_ineligible: reason == ListingReason::SellerIneligible,
@@ -139,12 +152,13 @@ pub(super) async fn retire_occupants(
         if reason == ListingReason::AuctionLotCreated {
             collisions.push(current.listing_id);
         }
+        retired.push(current.listing_id);
     }
     if rows.len() != ids.len() {
         return Err(WriteError::invariant("consignment_occupant_missing"));
     }
     // 先处理全部相关工作，再退休凭证。按 UUID 保持同件多行的锁顺序。
-    for listing_id in ids {
+    for listing_id in retired {
         retire_secret(writer.connection(), listing_id, now).await?;
     }
     Ok(collisions)

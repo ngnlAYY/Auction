@@ -56,6 +56,7 @@ pub(super) async fn dashboard_snapshot_postgres(
                 CASE WHEN state.paused THEN (
                     SELECT command.created_at FROM public.mail_admin_commands AS command
                     WHERE command.mailbox_key = state.mailbox_key
+                      AND command.command_kind = 'set_polling_paused'
                       AND command.result_payload -> 'paused' = 'true'::jsonb
                     ORDER BY command.created_at DESC, command.command_id DESC
                     LIMIT 1

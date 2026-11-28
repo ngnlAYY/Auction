@@ -251,6 +251,36 @@ pub fn apply_custody_proof_batch(
     if positions.is_empty() {
         return Err(DepositError::EvidenceUnproven);
     }
+    // 整封证明必须覆盖本批全部 position：每件 position 的规范 EID 在冻结清单中恰好出现一次，
+    // 且清单每一项都能对应到本批 position；缺项、多项或重复都不得授予处分权。
+    let mut covered = Vec::with_capacity(positions.len());
+    for position in positions {
+        let eid = position.equipment.external_equipment_id();
+        if covered.contains(&eid) {
+            return Err(DepositError::EvidenceConflict);
+        }
+        covered.push(eid);
+    }
+    for eid in &covered {
+        let matches = proof
+            .expected_attachments
+            .iter()
+            .filter(|attachment| attachment.canonical_eid.as_deref() == Some(*eid))
+            .count();
+        match matches {
+            1 => {}
+            0 => return Err(DepositError::EvidenceUnproven),
+            _ => return Err(DepositError::EvidenceConflict),
+        }
+    }
+    for attachment in &proof.expected_attachments {
+        let Some(eid) = attachment.canonical_eid.as_deref() else {
+            return Err(DepositError::EvidenceUnproven);
+        };
+        if !covered.contains(&eid) {
+            return Err(DepositError::EvidenceUnproven);
+        }
+    }
     positions.iter().map(|position| apply_custody_proof(position, proof)).collect()
 }
 
@@ -459,6 +489,21 @@ mod tests {
         assert_eq!(
             apply_custody_proof(&custody, &proof()),
             Err(DepositError::InvalidPositionState)
+        );
+    }
+
+    #[test]
+    fn batch_requires_every_position_in_the_frozen_manifest() {
+        let mut short = proof();
+        short.expected_attachments.pop();
+        short.removed_markers.pop();
+        assert_eq!(
+            apply_custody_proof_batch(&[position(1, "42"), position(2, "43")], &short),
+            Err(DepositError::EvidenceUnproven)
+        );
+        assert_eq!(
+            apply_custody_proof_batch(&[position(1, "42")], &proof()),
+            Err(DepositError::EvidenceUnproven)
         );
     }
 }

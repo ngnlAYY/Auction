@@ -51,6 +51,14 @@ async fn postgres_consignment_prerequisite_pointing_to_auction_obligation_is_rep
     .execute(pool)
     .await
     .expect("写入场次");
+    // 迁移 000147 起数据库层拒绝跨身份前置；这里临时禁用触发器来模拟历史遗留违规行，
+    // 巡检仍必须能报告存量问题。
+    succeeds(
+        pool,
+        "ALTER TABLE public.settlement_obligations
+         DISABLE TRIGGER settlement_obligations_prerequisite_000147",
+    )
+    .await;
     succeeds(
         pool,
         &format!(
@@ -79,6 +87,12 @@ async fn postgres_consignment_prerequisite_pointing_to_auction_obligation_is_rep
              SET prerequisite_obligation_id = '{AUCTION_OBLIGATION}'
              WHERE contract_id IS NOT NULL AND obligation_kind = 'seller_payout';"
         ),
+    )
+    .await;
+    succeeds(
+        pool,
+        "ALTER TABLE public.settlement_obligations
+         ENABLE TRIGGER settlement_obligations_prerequisite_000147",
     )
     .await;
 

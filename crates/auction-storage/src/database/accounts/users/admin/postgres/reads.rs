@@ -21,11 +21,9 @@ pub(crate) async fn list_postgres(
     store
         .pool()
         .observe_transaction(auction_observability::DatabaseTransactionOwner::Admin, async {
-            let mut transaction = store
-                .pool()
-                .begin_with("BEGIN ISOLATION LEVEL SERIALIZABLE")
-                .await
-                .map_err(map_storage_error)?;
+            // 只读列表共用 REPEATABLE READ 快照：不取 SSI 谓词锁，也不会因并发写事务以 40001 失败。
+            let mut transaction =
+                store.pool().begin_read_snapshot().await.map_err(map_storage_error)?;
             let name = request.name.as_deref().filter(|value| !value.is_empty());
             let status = request.status.map(AdminUserStatus::as_str);
             let total: i64 = sqlx::query_scalar(

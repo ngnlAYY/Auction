@@ -446,8 +446,9 @@ fn valid_observation_optional_fields(observation: &Value) -> bool {
                     .is_none_or(|value| value.as_i64().is_some_and(|amount| amount >= 0))
             },
         )
+        // 观察端在无法规范化时会持久化 JSON null；与缺省列表同义（`decode_sent_observation` 同口径）。
         && observation.get("remaining_equipment_ids").is_none_or(|value| {
-            value.as_array().is_some_and(|ids| ids.iter().all(Value::is_string))
+            value.is_null() || value.as_array().is_some_and(|ids| ids.iter().all(Value::is_string))
         })
 }
 fn timestamp(value: Option<&Value>) -> Option<Timestamp> {

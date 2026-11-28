@@ -3,7 +3,9 @@
 use auction_application::admin::{
     AdminLotSummary, AdminLotUpdateCommand, AdminLotUpdateSnapshot, AdminLotUpdateTransaction,
 };
-use auction_application::core::{CompetitionTransactionError, StoredCommand};
+use auction_application::core::{
+    CommandInsert, CommandLedgerError, CompetitionTransactionError, StoredCommand,
+};
 use auction_domain::{AuctionId, LotId};
 use auction_time::Timestamp;
 use sqlx::Row;
@@ -30,7 +32,16 @@ impl AdminLotUpdateTransaction for PostgresCompetitionTransaction {
         &mut self,
         command: StoredCommand,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
-        async move { self.insert_command_inner(&command).await.map(|_| ()) }
+        async move {
+            // 计划已在本事务应用，重复的账本行不能再当作成功：回滚并让调用方按原 ID 重试，
+            // 由账本重放给出原结果，避免同命令写两遍事实。
+            match self.insert_command_inner(&command).await? {
+                CommandInsert::Inserted => Ok(()),
+                CommandInsert::Duplicate(_) => {
+                    Err(CompetitionTransactionError::CommandLedger(CommandLedgerError::Conflict))
+                }
+            }
+        }
     }
 
     fn load_admin_lot_for_update(

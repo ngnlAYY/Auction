@@ -103,10 +103,10 @@ pub(crate) async fn resolve_pending(
         // 待定事实每行只属于一个渠道；闭集之外的渠道名按事实损坏处理。
         let channel = LotWatchChannel::from_name(&channel).ok_or_else(corrupt)?;
         // MM 的 recipient 是冻结用户名；旧行可能为空，此时保留当前名称并在发送前检查。
-        // PM 的 recipient 是冻结的论坛账号。
+        // PM 的 recipient 是冻结的论坛账号：缺失必须保持缺失，事后再绑定账号不能补发旧提醒。
         let (username, forum_account_id) = match channel {
             LotWatchChannel::Mm => (recipient.unwrap_or(target.username), target.forum_account_id),
-            LotWatchChannel::Pm => (target.username, recipient.or(target.forum_account_id)),
+            LotWatchChannel::Pm => (target.username, recipient),
         };
         let target = OutbidTarget {
             watch_version,

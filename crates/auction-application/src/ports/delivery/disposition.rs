@@ -28,6 +28,8 @@ pub struct DeliveryAcknowledgementCommand {
 
 impl DeliveryAcknowledgementCommand {
     /// 同 ID 同参重放的稳定摘要；`request_id` 有意不进入摘要。
+    /// 两个自由文本都按字节长度前缀编码：引号、反斜杠或分隔符本身不能让不同参数拼出
+    /// 同一段字节，否则不同的操作者或原因会被当成同一命令重放。
     pub fn request_hash(
         delivery_id: Uuid,
         expected_fencing_version: i64,
@@ -39,18 +41,20 @@ impl DeliveryAcknowledgementCommand {
         payload.extend_from_slice(delivery_id.as_hyphenated().to_string().as_bytes());
         payload.extend_from_slice(b"\",\"expected_fencing_version\":");
         payload.extend_from_slice(expected_fencing_version.to_string().as_bytes());
-        payload.extend_from_slice(b",\"kind\":\"operator_acknowledged\",\"actor_id\":\"");
-        payload.extend_from_slice(actor_id.as_bytes());
-        payload.extend_from_slice(b"\",\"reason\":");
-        payload.extend_from_slice(reason.len().to_string().as_bytes());
-        payload.push(b':');
-        payload.extend_from_slice(reason.as_bytes());
+        payload.extend_from_slice(b",\"kind\":\"operator_acknowledged\",\"actor_id\":");
+        push_length_prefixed(&mut payload, actor_id);
+        payload.extend_from_slice(b",\"reason\":");
+        push_length_prefixed(&mut payload, reason);
         payload.push(b'}');
         RequestHash::from_canonical_bytes(&payload)
     }
 
     /// 命令形状校验；资格仍由最终事务重新读取，不能把已校验形状当作处置依据。
     pub fn validate(&self) -> Result<(), DeliveryDispositionCommandError> {
+        // 摘要必须能由命令自身字段重新算出，重放身份不能由调用方另行注入。
+        let Self { delivery_id, expected_fencing_version, actor_id, reason, .. } = self;
+        let canonical_hash =
+            Self::request_hash(*delivery_id, *expected_fencing_version, actor_id, reason);
         if self.command_id.is_nil()
             || self.delivery_id.is_nil()
             || self.expected_fencing_version <= 0
@@ -71,12 +75,19 @@ impl DeliveryAcknowledgementCommand {
                 .request_id
                 .as_ref()
                 .is_some_and(|value| value.is_empty() || value != value.trim())
-            || self.request_hash.as_bytes() == [0; 32]
+            || self.request_hash != canonical_hash
         {
             return Err(DeliveryDispositionCommandError::Invalid);
         }
         Ok(())
     }
+}
+
+/// 摘要中的自由文本按字节长度前缀逐字写入，不复用其它命令的转义约定。
+fn push_length_prefixed(output: &mut Vec<u8>, value: &str) {
+    output.extend_from_slice(value.len().to_string().as_bytes());
+    output.push(b':');
+    output.extend_from_slice(value.as_bytes());
 }
 
 /// 原命令结果永久由处置事实行保存，同 ID 同参重放不重复追加。
@@ -135,7 +146,7 @@ impl From<auction_domain::DeliveryDispositionError> for DeliveryDispositionComma
 mod tests {
     use uuid::Uuid;
 
-    use crate::ports::delivery::DeliveryAcknowledgementCommand;
+    use crate::ports::delivery::{DeliveryAcknowledgementCommand, DeliveryDispositionCommandError};
 
     fn command() -> DeliveryAcknowledgementCommand {
         let delivery_id = Uuid::from_u128(7);
@@ -206,5 +217,27 @@ mod tests {
                 "另一条原因",
             )
         );
+        // 引号与已有长度前缀不能让不同操作者/原因拼出同一摘要。
+        assert_ne!(
+            DeliveryAcknowledgementCommand::request_hash(
+                base.delivery_id,
+                base.expected_fencing_version,
+                "a",
+                "x\",\"reason\":1:y",
+            ),
+            DeliveryAcknowledgementCommand::request_hash(
+                base.delivery_id,
+                base.expected_fencing_version,
+                "a\",\"reason\":15:x",
+                "y",
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_digest_that_does_not_match_command_fields() {
+        let mut tampered = command();
+        tampered.reason = "另一条原因".to_owned();
+        assert_eq!(tampered.validate(), Err(DeliveryDispositionCommandError::Invalid));
     }
 }

@@ -9,6 +9,7 @@
 //! 都由 `SessionUnlock` 守卫承担：只有确认 `pg_advisory_unlock` 返回 true 才解除关闭标记。
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use auction_observability::{BidQueueOutcome, DatabaseRecorder};
 use sqlx::Postgres;
@@ -17,6 +18,9 @@ use uuid::Uuid;
 
 use super::AuctionBidQueue;
 use crate::database::TrackedConnection;
+
+/// 解锁语句预算：连接卡住时不能把同一场次的后续命令永久挡在进程内凭证之后。
+const UNLOCK_BUDGET: Duration = Duration::from_secs(5);
 
 /// 跨实例会话锁的连接守卫。`Drop` 时若仍持有连接，一律关闭会话（服务端释放全部会话锁）。
 struct SessionUnlock {
@@ -34,11 +38,15 @@ impl SessionUnlock {
         let Some(connection) = self.connection.as_mut() else {
             return;
         };
-        let unlocked = sqlx::query_scalar::<_, bool>("SELECT pg_advisory_unlock($1)")
-            .bind(self.key)
-            .fetch_one(&mut **connection)
-            .await;
-        if matches!(unlocked, Ok(true)) {
+        // 超时按未确认处理：关闭会话（服务端释放全部会话锁），不把可能持锁的连接放回池。
+        let unlocked = tokio::time::timeout(
+            UNLOCK_BUDGET,
+            sqlx::query_scalar::<_, bool>("SELECT pg_advisory_unlock($1)")
+                .bind(self.key)
+                .fetch_one(&mut **connection),
+        )
+        .await;
+        if matches!(unlocked, Ok(Ok(true))) {
             self.connection = None;
         } else {
             connection.close_on_drop();
@@ -66,6 +74,8 @@ pub(crate) struct AuctionBidQueueLease {
     gate: Option<OwnedMutexGuard<()>>,
     /// 是否已经走完正常释放路径；未释放的 `Drop` 记为取消。
     released: bool,
+    /// 解锁语句正在等待；期间被取消的连接可能带着半个查询，只能关闭会话，不能复用。
+    unlocking: bool,
     recorder: DatabaseRecorder,
 }
 
@@ -78,6 +88,7 @@ impl AuctionBidQueueLease {
             auction_id: None,
             gate: None,
             released: false,
+            unlocking: false,
             recorder: DatabaseRecorder::default(),
         }
     }
@@ -96,16 +107,20 @@ impl AuctionBidQueueLease {
             auction_id: Some(auction_id),
             gate: Some(gate),
             released: false,
+            unlocking: false,
             recorder,
         }
     }
 
     /// 正常结束路径：确认解锁后归还连接，再释放进程内凭证。
+    /// 只有解锁真正返回后才置 `released`；等待期间被取消时由 `Drop` 关闭会话并记取消。
     pub(crate) async fn release(mut self) {
-        self.released = true;
         if let Some(session) = self.session.as_mut() {
+            self.unlocking = true;
             session.unlock().await;
+            self.unlocking = false;
         }
+        self.released = true;
         drop(self);
     }
 
@@ -127,6 +142,11 @@ impl Drop for AuctionBidQueueLease {
         };
         if !self.released {
             self.recorder.bid_queue_outcome(BidQueueOutcome::Canceled);
+        }
+        // 解锁已被取消：连接上可能有执行到一半的查询，不能再次发语句，只能关闭会话。
+        if self.unlocking {
+            drop(session);
+            return;
         }
         // 取消/panic 时不能 await：把解锁交给当前运行时，没有运行时则直接关闭会话。
         if let Ok(handle) = tokio::runtime::Handle::try_current() {

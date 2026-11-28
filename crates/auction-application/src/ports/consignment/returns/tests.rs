@@ -245,8 +245,21 @@ fn consumption_happens_once_and_cash_is_returned_once() {
     // 重放与不同命令 ID 的再次消费都只读原结果，不产生第二次回补。
     assert!(consume(&fake, &receipt, 33, 72).unwrap().replayed);
     let other_command = consume(&fake, &receipt, 34, 72).unwrap();
+    // 回执的命令 ID 是本次提交的那个，与生产账本按新命令 ID 记录重放一致。
+    assert_eq!(other_command.command_id, CommandId::from_uuid(id(34)));
     assert_eq!(other_command.proof_id, consumed.proof_id);
     assert_eq!((fake.counters().consumptions, fake.counters().cash_returns), (1, 1));
+}
+
+#[test]
+fn a_command_id_bound_to_another_operation_is_a_conflict() {
+    let fake = FakeReturns::default();
+    let receipt = acquire(&fake, "200", ReturnLeg::CashPayout, 10).unwrap();
+    fake.set_claim(receipt.work_id, claim(20, 1, true));
+    fake.seed_proof(id(90), proof(85, "200", true));
+    // 接管已占用命令 ID 10 与同一摘要：换操作在生产账本里是身份冲突，不得重新执行或覆盖账本。
+    assert_eq!(consume(&fake, &receipt, 10, 90).unwrap_err(), ConsignmentError::CommandIdConflict);
+    assert_eq!((fake.counters().consumptions, fake.counters().cash_returns), (0, 0));
 }
 
 #[test]

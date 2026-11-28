@@ -60,6 +60,8 @@ impl RecoveryConfirmationCommand {
         if self.command_id.is_nil()
             || self.recovery_id.is_nil()
             || self.expected_state_version <= 0
+            // 摘要参与 recovery 命令账本的冲突检测；全零摘要不是任何请求的指纹。
+            || self.request_hash.as_bytes() == [0; 32]
             || self.actor.actor_id.trim().is_empty()
             || self.actor.actor_id.chars().count() > 256
             || self.request_id.as_ref().is_some_and(|request_id| {

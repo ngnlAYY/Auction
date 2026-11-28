@@ -199,7 +199,8 @@ pub(super) async fn add_mail_auction_intake_inner(
             return Err(failed("MoogleMail 装备写入计划无效"));
         }
         let existing_equipment = sqlx::query(
-            r#"SELECT equipment.id, equipment.name, equipment.category, secret.fingerprint
+            r#"SELECT equipment.id, equipment.name, equipment.category,
+                      equipment.attributes, secret.fingerprint
                FROM public.equipment AS equipment
                LEFT JOIN public.equipment_secrets AS secret
                  ON secret.equipment_id = equipment.id
@@ -216,6 +217,8 @@ pub(super) async fn add_mail_auction_intake_inner(
             let existing_id: Uuid = row.try_get("id").map_err(map_sql_error)?;
             let existing_name: String = row.try_get("name").map_err(map_sql_error)?;
             let existing_category: String = row.try_get("category").map_err(map_sql_error)?;
+            let existing_attributes: serde_json::Value =
+                row.try_get("attributes").map_err(map_sql_error)?;
             let existing_fingerprint: Option<String> =
                 row.try_get("fingerprint").map_err(map_sql_error)?;
             let Some(existing_fingerprint) = existing_fingerprint else {
@@ -259,6 +262,7 @@ pub(super) async fn add_mail_auction_intake_inner(
             .map_err(map_sql_error)?;
             if item.name != existing_name
                 || item.category != existing_category
+                || item.attributes != existing_attributes
                 || item.key_envelope.fingerprint() != existing_fingerprint
                 || !resale_authorized
             {

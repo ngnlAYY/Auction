@@ -178,7 +178,13 @@ impl MailEquipmentDiagnosticSnapshot {
                     | "attributes_invalid"
                     | "tradeable_required"
             ),
-            (_, None) => true,
+            // 这两类必须带闭集原因码：与 inbound_mail 的 CHECK 一致，提前失败关闭，而不是等到
+            // 写入入站事实时才被数据库拒绝并中断整批邮件提交。
+            (_, None) => !matches!(
+                self.category,
+                MailEquipmentDiagnosticCategory::SnapshotInvalid
+                    | MailEquipmentDiagnosticCategory::FilterRejected
+            ),
             _ => false,
         };
         let evidence_valid = match self.evidence_status {
@@ -286,4 +292,51 @@ fn safe_error_code(value: &str) -> bool {
             | "retention_cancelled"
             | "recorder_unavailable"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        MailEquipmentDiagnosticCategory, MailEquipmentDiagnosticSnapshot,
+        MailEquipmentDiagnosticStage, MailEquipmentEvidenceStatus,
+    };
+
+    fn snapshot(
+        category: MailEquipmentDiagnosticCategory,
+        detail_code: Option<&str>,
+    ) -> MailEquipmentDiagnosticSnapshot {
+        MailEquipmentDiagnosticSnapshot {
+            schema_version: 1,
+            equipment_id: "300753957".to_owned(),
+            attachment_position: 1,
+            stage: MailEquipmentDiagnosticStage::Validate,
+            category,
+            detail_code: detail_code.map(str::to_owned),
+            http_status: None,
+            elapsed_millis: None,
+            evidence_id: None,
+            evidence_status: MailEquipmentEvidenceStatus::Disabled,
+            retention_error: None,
+        }
+    }
+
+    /// 两类业务判定必须带闭集原因码：与 inbound_mail 的 CHECK 同一口径，端口提前失败关闭，
+    /// 避免写入入站事实时才被数据库拒绝并中断整批邮件提交。
+    #[test]
+    fn judged_categories_require_a_detail_code() {
+        for category in [
+            MailEquipmentDiagnosticCategory::SnapshotInvalid,
+            MailEquipmentDiagnosticCategory::FilterRejected,
+        ] {
+            assert!(!snapshot(category, None).validate(), "{category:?} 缺原因码必须拒绝");
+        }
+        assert!(
+            snapshot(MailEquipmentDiagnosticCategory::SnapshotInvalid, Some("name_invalid"))
+                .validate()
+        );
+        assert!(
+            snapshot(MailEquipmentDiagnosticCategory::FilterRejected, Some("level_not_allowed"))
+                .validate()
+        );
+    }
 }

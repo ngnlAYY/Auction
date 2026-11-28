@@ -201,6 +201,8 @@ pub trait MailEquipmentReader: Send + Sync {
     }
 
     /// 有界留存失败证据并生成安全摘要；诊断失败不能成为业务错误。
+    /// 默认实现没有记录器：已准备的证据只能如实报告留存不可用；准备阶段已经失败时必须保留
+    /// 原失败状态和机器码，不能降级成 disabled，否则拒绝证据的失败原因被静默丢弃。
     fn retain_failure(
         &self,
         observation: crate::ports::mail::MailEquipmentObservation,
@@ -213,6 +215,25 @@ pub trait MailEquipmentReader: Send + Sync {
                 .prepared
                 .as_ref()
                 .map(crate::ports::mail::diagnostics::PreparedMailEvidence::evidence_id);
+            let (evidence_status, retention_error) = if evidence_id.is_some() {
+                (
+                    crate::ports::mail::MailEquipmentEvidenceStatus::SaveFailed,
+                    Some("recorder_unavailable".to_owned()),
+                )
+            } else if observation.preparation_status
+                == crate::ports::mail::MailEquipmentEvidenceStatus::PrepareFailed
+            {
+                (
+                    crate::ports::mail::MailEquipmentEvidenceStatus::PrepareFailed,
+                    Some(
+                        observation
+                            .preparation_error
+                            .unwrap_or_else(|| "invalid_context".to_owned()),
+                    ),
+                )
+            } else {
+                (crate::ports::mail::MailEquipmentEvidenceStatus::Disabled, None)
+            };
             crate::ports::mail::MailEquipmentDiagnosticSnapshot {
                 schema_version: 1,
                 equipment_id: observation.context.external_equipment_id,
@@ -223,12 +244,8 @@ pub trait MailEquipmentReader: Send + Sync {
                 http_status: observation.http_status,
                 elapsed_millis: observation.elapsed_millis,
                 evidence_id,
-                evidence_status: if evidence_id.is_some() {
-                    crate::ports::mail::MailEquipmentEvidenceStatus::SaveFailed
-                } else {
-                    crate::ports::mail::MailEquipmentEvidenceStatus::Disabled
-                },
-                retention_error: evidence_id.map(|_| "recorder_unavailable".to_owned()),
+                evidence_status,
+                retention_error,
             }
         })
     }
@@ -236,11 +253,19 @@ pub trait MailEquipmentReader: Send + Sync {
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+
     use auction_domain::EquipmentKey;
     use auction_time::Timestamp;
 
-    use super::{MailEquipmentAttachment, MailMessage};
-    use crate::ports::mail::MailProcessingError;
+    use super::{MailEquipmentAttachment, MailEquipmentReader, MailMessage};
+    use crate::ports::admin::AdminIntakeSourceSnapshot;
+    use crate::ports::core::ApplicationFuture;
+    use crate::ports::mail::{
+        MailEquipmentDiagnosticCategory, MailEquipmentDiagnosticContext,
+        MailEquipmentDiagnosticStage, MailEquipmentEvidenceStatus, MailEquipmentObservation,
+        MailProcessingError,
+    };
 
     fn message(attachment_ids: &[&str]) -> MailMessage {
         MailMessage {
@@ -287,5 +312,68 @@ mod tests {
             Err(MailProcessingError::InvalidMessage)
         );
         assert_eq!(message(&[]).validate(), Ok(()), "没有附件的普通邮件不受影响");
+    }
+
+    /// 只轮询立即就绪的默认留存 future，不引入额外异步运行时依赖。
+    fn block_on<F: Future>(future: F) -> F::Output {
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        let mut future = Box::pin(future);
+        match future.as_mut().poll(&mut context) {
+            std::task::Poll::Ready(value) => value,
+            std::task::Poll::Pending => panic!("默认留存的 future 不应挂起"),
+        }
+    }
+
+    struct DiagnosticOnlyReader;
+
+    impl MailEquipmentReader for DiagnosticOnlyReader {
+        fn read(
+            &self,
+            _world_id: String,
+            _attachment: MailEquipmentAttachment,
+        ) -> ApplicationFuture<'_, AdminIntakeSourceSnapshot> {
+            Box::pin(async { unreachable!("默认留存不重新读取装备") })
+        }
+    }
+
+    fn diagnostic_observation() -> MailEquipmentObservation {
+        MailEquipmentObservation::unavailable(MailEquipmentDiagnosticContext {
+            mailbox_key: "mooglemail:main".to_owned(),
+            world_id: "main".to_owned(),
+            external_mail_id: "3125357".to_owned(),
+            external_equipment_id: "300753957".to_owned(),
+            attachment_position: 1,
+        })
+    }
+
+    /// 默认留存没有记录器：未准备证据时报告 disabled，准备已失败时保留原失败码，不得伪报成
+    /// disabled；两种快照都必须通过安全投影校验才能进入入站事实。
+    #[test]
+    fn default_retention_reports_the_real_preparation_state() {
+        let reader = DiagnosticOnlyReader;
+        let disabled = block_on(reader.retain_failure(
+            diagnostic_observation(),
+            MailEquipmentDiagnosticStage::Response,
+            MailEquipmentDiagnosticCategory::Timeout,
+            None,
+        ));
+        assert!(disabled.validate());
+        assert_eq!(disabled.evidence_status, MailEquipmentEvidenceStatus::Disabled);
+        assert_eq!(disabled.evidence_id, None);
+        assert_eq!(disabled.retention_error, None);
+
+        let prepare_failed = block_on(reader.retain_failure(
+            MailEquipmentObservation {
+                preparation_status: MailEquipmentEvidenceStatus::PrepareFailed,
+                preparation_error: Some("payload_too_large".to_owned()),
+                ..diagnostic_observation()
+            },
+            MailEquipmentDiagnosticStage::Response,
+            MailEquipmentDiagnosticCategory::ProtocolDrift,
+            None,
+        ));
+        assert!(prepare_failed.validate());
+        assert_eq!(prepare_failed.evidence_status, MailEquipmentEvidenceStatus::PrepareFailed);
+        assert_eq!(prepare_failed.retention_error.as_deref(), Some("payload_too_large"));
     }
 }

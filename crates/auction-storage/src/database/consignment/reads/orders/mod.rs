@@ -151,7 +151,8 @@ async fn load_legs(
                 EXISTS (SELECT 1 FROM public.delivery_sent_bindings b
                         WHERE b.delivery_id = lr.delivery_id) AS has_sent,
                 EXISTS (SELECT 1 FROM public.consignment_handoff_proofs h
-                        WHERE h.obligation_id = o.id) AS has_claim_proof,
+                        WHERE h.obligation_id = o.id
+                          AND h.delivery_id = lr.delivery_id) AS has_claim_proof,
                 EXISTS (SELECT 1 FROM public.consignment_dispatch_attempts attempt
                         JOIN public.consignment_dispatch_evidence e ON e.attempt_id = attempt.attempt_id
                         WHERE attempt.delivery_id = lr.delivery_id

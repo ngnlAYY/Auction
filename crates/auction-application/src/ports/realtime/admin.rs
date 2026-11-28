@@ -263,6 +263,9 @@ impl RealtimeReplayCommand {
             && self.public_payload.is_object()
             && serde_json::to_vec(&self.public_payload)
                 .is_ok_and(|payload| payload.len() <= MAX_REALTIME_REPLAY_PAYLOAD_BYTES)
+            // actor_id 会写入审计身份，request_hash 是命令账本的冲突判据；两者都必须有界/非全零。
+            && valid_required_text(&self.actor_id, 256)
+            && self.request_hash.as_bytes() != [0; 32]
             && auction_domain::valid_optional_text(self.request_id.as_deref(), 128, false)
             && self.created_at.timestamp_micros() != 0
     }

@@ -312,6 +312,9 @@ pub(crate) async fn apply_read_mode(
                 "处置读侧的配对口径不可读"
             );
             if mode == DispositionReadMode::Classified {
+                // 履约快照仍是迁移前终态判据，不能冒充分类读数；按来源不可用收口。
+                snapshot.fulfillment = None;
+                snapshot.collection_overdue_items.clear();
                 return Ok(snapshot);
             }
             snapshot.delivery = None;

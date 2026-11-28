@@ -119,8 +119,13 @@ async fn user_id_for_reference(
                FROM public.settlement_obligation_fulfillments AS fulfillment
                JOIN public.settlement_obligations AS obligation
                  ON obligation.id = fulfillment.obligation_id
+               JOIN public.deliveries AS fulfilled_delivery
+                 ON fulfilled_delivery.id = fulfillment.delivery_id
                WHERE fulfillment.delivery_id = $1
                  AND obligation.recipient_user_id IS NOT NULL
+                 AND ($2::boolean OR NOT "#,
+        extended_projection_delivery_sql!("fulfilled_delivery"),
+        r#")
                UNION ALL
                SELECT notification.user_id, 5 AS priority
                FROM public.lot_watch_notifications AS notification

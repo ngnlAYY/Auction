@@ -257,6 +257,47 @@ async fn seed_matrix(pool: &PgPool) {
         .await
         .expect("写入 lot");
         let to_user = matches!(kind, "winner_equipment_cod" | "buyer_refund");
+        // 前置义务必须与本义务同场次/同 lot/同装备（迁移 000147）；为每个带前置的用例
+        // 先写一条同身份的 winner_equipment_cod，作为可满足的前置根。
+        let prerequisite_id = prerequisite.map(|_| case_id("obligation-parent", number));
+        if let Some(parent) = prerequisite_id {
+            sqlx::query(
+                "INSERT INTO public.settlement_obligations
+                    (id, auction_id, lot_id, world_id, origin_command_id, policy_version,
+                     obligation_kind, business_state, recipient_user_id, amount, carrier_credit,
+                     equipment_id, prerequisite_obligation_id, created_at, updated_at)
+                 VALUES ($1, $2, $3, 'main', $4, 1, 'winner_equipment_cod', 'ready', $5,
+                         1000, 0, $6, NULL, $7, $7)",
+            )
+            .bind(parent)
+            .bind(auction)
+            .bind(lot)
+            .bind(command)
+            .bind(buyer)
+            .bind(equipment)
+            .bind(ended)
+            .execute(pool)
+            .await
+            .expect("写入前置义务");
+            // 只有被引用用例已满足时才补履约行：缺失履约等于“未满足”，既保持那一例
+            // 等待前置的语义，也不会给待办计数凭空加一行。
+            let satisfied = prerequisite.is_some_and(|referenced| {
+                CASES.iter().any(|case| case.0 == referenced && case.3 == "satisfied")
+            });
+            if satisfied {
+                sqlx::query(
+                    "INSERT INTO public.settlement_obligation_fulfillments
+                        (obligation_id, execution_state, dispatch_world, delivery_operation,
+                         completed_at)
+                     VALUES ($1, 'satisfied', 'main', 'send', $2)",
+                )
+                .bind(parent)
+                .bind(ended)
+                .execute(pool)
+                .await
+                .expect("写入前置履约");
+            }
+        }
         sqlx::query(
             "INSERT INTO public.settlement_obligations
                 (id, auction_id, lot_id, world_id, origin_command_id, policy_version,
@@ -275,7 +316,7 @@ async fn seed_matrix(pool: &PgPool) {
         .bind((!to_user).then_some("alert-entry-seller"))
         .bind(if kind == "unsold_return" { 0_i64 } else { 1_000 })
         .bind(equipment)
-        .bind(prerequisite.map(|number| case_id("obligation", number)))
+        .bind(prerequisite_id)
         .bind(ended)
         .execute(pool)
         .await

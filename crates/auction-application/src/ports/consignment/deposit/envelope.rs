@@ -126,14 +126,30 @@ impl EnvelopeReceipt {
     }
 
     /// 校验回执形状；存储与 DTO 测试共用。
+    ///
+    /// 引用与逐件 L 都来自同一事务的新行，零 UUID 或零代只可能是形状串线；已提交回执不能因此
+    /// 变成不可读记录。
     pub fn validate_shape(&self) -> Result<(), auction_domain::consignment::deposit::DepositError> {
         use auction_domain::consignment::deposit::DepositError;
         if self.schema_version != DEPOSIT_SCHEMA_VERSION
             || self.operation != DepositOperation::DecideEnvelope
+            || self.command_id.is_nil()
             || self.decision_id.is_nil()
             || (self.disposition == ReceiptDisposition::ReturnAcquired)
                 != self.return_intake.is_some()
         {
+            return Err(DepositError::InvalidRequest);
+        }
+        let bad_quarantine = self
+            .quarantine
+            .is_some_and(|quarantine| quarantine.quarantine_id.is_nil() || quarantine.version == 0);
+        let bad_intake = self.return_intake.is_some_and(|intake| {
+            intake.return_intake_id.is_nil()
+                || intake.original_round == 0
+                || intake.take_work_id.is_nil()
+                || intake.take_delivery_id.is_nil()
+        });
+        if bad_quarantine || bad_intake {
             return Err(DepositError::InvalidRequest);
         }
         match self.disposition {
@@ -374,25 +390,32 @@ impl ReleaseReceipt {
         }
     }
 
-    /// 校验结果分支字段；第 4 期不得产生 `acquire_return` 成功回执。
+    /// 校验结果分支字段：只允许所属分支的引用，且引用不得为零 UUID。
+    ///
+    /// 形状与 `mail_quarantine_releases` 的 kind 分支约束、Admin 记录映射逐项一致；否则已提交回执
+    /// 会被写端持久化成 Admin 读路径拒绝的记录。
     pub fn validate_shape(&self) -> Result<(), auction_domain::consignment::deposit::DepositError> {
         use auction_domain::consignment::deposit::DepositError;
         if self.schema_version != DEPOSIT_SCHEMA_VERSION
             || self.operation != DepositOperation::ReleaseQuarantine
+            || self.command_id.is_nil()
+            || self.quarantine_id.is_nil()
             || self.release_id.is_nil()
             || self.decision_id.is_nil()
         {
             return Err(DepositError::InvalidRequest);
         }
-        let auction_fields_empty = self.obligation_id.is_none()
-            && self.return_mail_id.is_none()
-            && self.return_evidence_id.is_none()
-            && self.recovery_id.is_none()
-            && self.recovery_handoff_id.is_none()
-            && self.return_intake_id.is_none()
+        let non_nil = |value: Option<Uuid>| value.is_some_and(|id| !id.is_nil());
+        let take_fields_empty = self.return_intake_id.is_none()
             && self.original_round.is_none()
             && self.take_work_id.is_none()
             && self.take_delivery_id.is_none();
+        let auction_only_empty = self.obligation_id.is_none()
+            && self.return_mail_id.is_none()
+            && self.return_evidence_id.is_none()
+            && self.recovery_id.is_none()
+            && self.recovery_handoff_id.is_none();
+        let auction_fields_empty = take_fields_empty && auction_only_empty;
         match self.decision_kind {
             ReleaseKind::Accept => {
                 if self.listing_changes.is_empty() || !auction_fields_empty {
@@ -405,32 +428,38 @@ impl ReleaseReceipt {
                 }
             }
             ReleaseKind::AuctionReturnCase => {
+                // 交原案只带案件两引用；DB `c4_release_branch_ck` 要求证据引用等于原退件，
+                // 义务可空（E2 旧件），但非空时必须是真实 UUID。
                 if !self.listing_changes.is_empty()
-                    || self.return_mail_id.is_none()
-                    || self.return_evidence_id.is_none()
+                    || !take_fields_empty
                     || self.recovery_id.is_some()
                     || self.recovery_handoff_id.is_some()
-                    || self.return_intake_id.is_some()
+                    || self.obligation_id.is_some_and(|id| id.is_nil())
+                    || !non_nil(self.return_mail_id)
+                    || self.return_evidence_id != self.return_mail_id
                 {
                     return Err(DepositError::InvalidRequest);
                 }
             }
             ReleaseKind::AuctionRecoveryReturn => {
                 if !self.listing_changes.is_empty()
-                    || self.obligation_id.is_none()
-                    || self.return_mail_id.is_none()
-                    || self.recovery_id.is_none()
-                    || self.recovery_handoff_id.is_none()
-                    || self.return_intake_id.is_some()
+                    || self.return_evidence_id.is_some()
+                    || !take_fields_empty
+                    || !non_nil(self.obligation_id)
+                    || !non_nil(self.return_mail_id)
+                    || !non_nil(self.recovery_id)
+                    || !non_nil(self.recovery_handoff_id)
                 {
                     return Err(DepositError::InvalidRequest);
                 }
             }
             ReleaseKind::AcquireReturn => {
-                if self.return_intake_id.is_none()
-                    || self.original_round.is_none()
-                    || self.take_work_id.is_none()
-                    || self.take_delivery_id.is_none()
+                if !self.listing_changes.is_empty()
+                    || !auction_only_empty
+                    || self.original_round.is_none_or(|round| round == 0)
+                    || !non_nil(self.return_intake_id)
+                    || !non_nil(self.take_work_id)
+                    || !non_nil(self.take_delivery_id)
                 {
                     return Err(DepositError::InvalidRequest);
                 }
@@ -467,4 +496,85 @@ pub trait EnvelopeStore: Send + Sync {
         &self,
         command: ReleaseQuarantineCommand,
     ) -> ConsignmentFuture<'_, ReleaseReceipt>;
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_domain::CommandId;
+    use uuid::Uuid;
+
+    use super::{
+        EnvelopeDisposition, EnvelopeReceipt, QuarantineReference, ReleaseKind, ReleaseReceipt,
+    };
+
+    fn id(value: u128) -> Uuid {
+        Uuid::from_u128(value)
+    }
+
+    fn released(kind: ReleaseKind) -> ReleaseReceipt {
+        ReleaseReceipt::released(CommandId::from_uuid(id(1)), id(2), id(3), id(4), kind)
+    }
+
+    /// 不回填其他分支引用：DB 分支约束与 Admin 记录映射同样拒绝混合形状。
+    #[test]
+    fn release_shape_rejects_foreign_branch_fields() {
+        let mut case = released(ReleaseKind::AuctionReturnCase);
+        case.return_mail_id = Some(id(5));
+        case.return_evidence_id = Some(id(5));
+        assert_eq!(case.validate_shape(), Ok(()));
+        let mut mismatched_evidence = case.clone();
+        mismatched_evidence.return_evidence_id = Some(id(6));
+        assert!(mismatched_evidence.validate_shape().is_err());
+        let mut take_polluted = case.clone();
+        take_polluted.original_round = Some(1);
+        assert!(take_polluted.validate_shape().is_err());
+        let mut recovery_polluted = case.clone();
+        recovery_polluted.recovery_id = Some(id(7));
+        assert!(recovery_polluted.validate_shape().is_err());
+        let mut nil_obligation = case;
+        nil_obligation.obligation_id = Some(Uuid::nil());
+        assert!(nil_obligation.validate_shape().is_err());
+
+        let mut recovery = released(ReleaseKind::AuctionRecoveryReturn);
+        recovery.obligation_id = Some(id(8));
+        recovery.return_mail_id = Some(id(5));
+        recovery.recovery_id = Some(id(9));
+        recovery.recovery_handoff_id = Some(id(10));
+        assert_eq!(recovery.validate_shape(), Ok(()));
+        let mut evidence_polluted = recovery;
+        evidence_polluted.return_evidence_id = Some(id(6));
+        assert!(evidence_polluted.validate_shape().is_err());
+
+        let mut acquire = released(ReleaseKind::AcquireReturn);
+        acquire.return_intake_id = Some(id(11));
+        acquire.original_round = Some(1);
+        acquire.take_work_id = Some(id(12));
+        acquire.take_delivery_id = Some(id(13));
+        assert_eq!(acquire.validate_shape(), Ok(()));
+        let mut zero_round = acquire.clone();
+        zero_round.original_round = Some(0);
+        assert!(zero_round.validate_shape().is_err());
+        let mut legacy_polluted = acquire;
+        legacy_polluted.obligation_id = Some(id(8));
+        assert!(legacy_polluted.validate_shape().is_err());
+    }
+
+    /// 隔离与接管引用来自同事务新行；零 UUID 或零代不能被当作合法回执。
+    #[test]
+    fn envelope_shape_rejects_nil_references() {
+        let mut receipt = EnvelopeReceipt::new(
+            CommandId::from_uuid(id(1)),
+            EnvelopeDisposition::Quarantined,
+            id(2),
+        );
+        receipt.quarantine = Some(QuarantineReference { quarantine_id: id(3), version: 1 });
+        assert_eq!(receipt.validate_shape(), Ok(()));
+        receipt.quarantine = Some(QuarantineReference { quarantine_id: Uuid::nil(), version: 1 });
+        assert!(receipt.validate_shape().is_err());
+        receipt.quarantine = Some(QuarantineReference { quarantine_id: id(3), version: 0 });
+        assert!(receipt.validate_shape().is_err());
+        receipt.quarantine = Some(QuarantineReference { quarantine_id: id(3), version: 1 });
+        receipt.command_id = CommandId::from_uuid(Uuid::nil());
+        assert!(receipt.validate_shape().is_err());
+    }
 }

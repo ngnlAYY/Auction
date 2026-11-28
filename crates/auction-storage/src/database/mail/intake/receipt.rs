@@ -23,6 +23,7 @@ pub(super) async fn load_submission_receipt(
          FROM public.auction_submissions AS submission
          INNER JOIN public.auctions AS auction ON auction.id = submission.auction_id
          INNER JOIN public.lots AS lot ON lot.submission_id = submission.id
+                                       AND lot.auction_id = submission.auction_id
          INNER JOIN public.equipment AS equipment ON equipment.id = lot.equipment_id
          WHERE submission.id = $1
          ORDER BY lot.lot_number",

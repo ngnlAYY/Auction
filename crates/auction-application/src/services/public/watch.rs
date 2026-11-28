@@ -65,7 +65,8 @@ where
                         || result.user_id != command.user_id
                         || result.auction_id != auction_id
                         || result.watch.lot_id != command.lot_id
-                        || result.watch.version <= 0
+                        // CAS 写入只会产生 expected_version + 1；重放返回别的版本说明账本损坏。
+                        || command.expected_version.checked_add(1) != Some(result.watch.version)
                         || result.watch.channel != command.channel
                         || result.watch.watched != command.watched
                     {
@@ -148,7 +149,10 @@ impl OutbidNotice<'_> {
             ("notification_id", notification_id.as_str()),
         ];
         let body = templates.render(key, &variables)?;
-        crate::ports::mail::valid_notification_body(Some(&body)).then_some(body)
+        // 可选整行占位符自带换行，模板以其结尾时渲染结果会多出尾部空白；投递正文要求首尾
+        // 无空白，先裁剪再校验，避免合法模板被静默丢弃并回落到默认正文。
+        let body = body.trim();
+        crate::ports::mail::valid_notification_body(Some(body)).then(|| body.to_owned())
     }
 
     /// 自定义模板不可用（缺键、缺变量或展开越界）时回落到默认正文，避免模板问题阻断竞价事务。
@@ -231,4 +235,41 @@ pub fn lot_watch_notification(
         attachment_ids: vec![],
         notification_body: Some(body),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AdminRuntimeMailTemplatesConfig, OutbidNotice};
+
+    /// 以可选整行占位符结尾的合法模板不能因展开出的尾部换行被替换成默认正文。
+    #[test]
+    fn custom_template_ending_with_an_optional_line_renders_instead_of_falling_back() {
+        let mut templates = AdminRuntimeMailTemplatesConfig::default();
+        assert!(
+            templates.set_body(
+                "lot_watch",
+                "Outbid {item_name} ({lot_code})\n{lot_url_line}".to_owned()
+            )
+        );
+        let notice = OutbidNotice {
+            lot_code: "Clo01",
+            item_name: "Cloak",
+            deadline: None,
+            site_url: Some("https://auction.example"),
+        };
+        let body = notice
+            .frozen_body(
+                uuid::Uuid::from_u128(7),
+                1_000,
+                &templates,
+                "lot_watch",
+                uuid::Uuid::from_u128(8),
+            )
+            .expect("合法模板必须渲染");
+        assert_eq!(
+            body,
+            "Outbid Cloak (Clo01)\nView the lot: \
+             https://auction.example/lots/00000000-0000-0000-0000-000000000007"
+        );
+    }
 }

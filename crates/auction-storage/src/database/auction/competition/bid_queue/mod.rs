@@ -159,6 +159,9 @@ impl AuctionBidQueue {
         let started = Instant::now();
         let Ok(guard) = tokio::time::timeout_at(deadline, gate.lock_owned()).await else {
             pool.recorder().bid_queue_outcome(BidQueueOutcome::TimedOut);
+            // `lock_owned` 把 gate 的最后一个引用移进等待 future；超时丢弃 future 即释放，
+            // 之后才能安全回收空闲条目。
+            self.forget_idle_gate(auction_id);
             return Err(CompetitionTransactionError::QueueWaitTimeout);
         };
         pool.recorder().bid_queue_wait(BidQueueWaitStage::InProcess, started.elapsed());
@@ -178,6 +181,7 @@ impl AuctionBidQueue {
             Err(error) => {
                 // gate 随 guard 一起释放；失败分类已在此记录，避免重复计数。
                 drop(guard);
+                self.forget_idle_gate(auction_id);
                 Err(error)
             }
         }

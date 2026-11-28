@@ -126,10 +126,8 @@ impl RuntimeSwitchCommand {
             // 安全策略只允许在线收紧；放宽仍需修改经过部署审阅的 TOML 并重启。
             return Err(RuntimeSwitchError::UnsafeRelaxation);
         }
-        if self.expires_at.is_some_and(|until| {
-            until.timestamp_subsec_nanos() >= 1_000_000_000
-                || until.timestamp_subsec_nanos() % 1000 != 0
-        }) {
+        // PostgreSQL timestamptz 只保存微秒；先拒绝更细的精度，重放时的严格相等才成立。
+        if self.expires_at.is_some_and(|until| until.timestamp_subsec_nanos() % 1000 != 0) {
             return Err(RuntimeSwitchError::Invalid);
         }
         let event = self.event(Timestamp::now())?;

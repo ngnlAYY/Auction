@@ -32,7 +32,8 @@ pub(super) async fn list_postgres(
             let total: i64 = sqlx::query_scalar(
                 "SELECT count(*)
          FROM public.credential_keys
-         WHERE ($1::text IS NULL OR credential_kind = $1)
+         WHERE credential_kind IN ('mail_cookie', 'forum_cookie')
+           AND ($1::text IS NULL OR credential_kind = $1)
            AND ($2::text IS NULL OR scope = $2 OR scope = $3)
            AND ($4::text IS NULL OR status = $4)",
             )
@@ -47,7 +48,8 @@ pub(super) async fn list_postgres(
                 "SELECT id, credential_kind, scope, label, player_name, status, state_version,
                 created_at, rotated_at, updated_at
          FROM public.credential_keys
-         WHERE ($1::text IS NULL OR credential_kind = $1)
+         WHERE credential_kind IN ('mail_cookie', 'forum_cookie')
+           AND ($1::text IS NULL OR credential_kind = $1)
            AND ($2::text IS NULL OR scope = $2 OR scope = $3)
            AND ($4::text IS NULL OR status = $4)
          ORDER BY created_at DESC, id DESC

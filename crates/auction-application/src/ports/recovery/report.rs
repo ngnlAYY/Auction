@@ -100,11 +100,16 @@ pub fn recovery_confirmation_requires_blacklist(
 
 /// 从已持久化、已满足的 action 事实派生允许的确认动作。
 /// 这段闭集规则只决定 Admin 可以看到哪些确认按钮，不会改变 recovery 状态；真正确认时
-/// 仍需由确认命令的 Serializable 事务重新锁定并验证全部事实。
+/// 仍需由确认命令的 Serializable 事务重新锁定并验证全部事实。按钮的准入与确认事务的
+/// `validate_actions`/`validate_custody_evidence` 对齐：投影里能看到的字段先挡掉必然失败的
+/// 命令，reference/digest 不在安全投影内，仍由确认事务重新校验。
 pub fn allowed_recovery_commands(entry: &RecoveryReportEntry) -> Vec<String> {
     if entry.stage != "reclaiming"
         || entry.blocking_code.is_some()
-        || entry.custody_proof_kind.is_none()
+        // 人工对账中的投递必须先由 Admin 处理；确认事务在任何证据校验之前就拒绝。
+        || entry.manual_reconcile_delivery_id.is_some()
+        // 收口只接受收回投递产生的取回证明；其他非空证明同样不可确认。
+        || entry.custody_proof_kind.as_deref() != Some("delivery_recovery_take_succeeded")
         || entry.custody_proof_observed_at.is_none()
     {
         return Vec::new();
@@ -131,6 +136,13 @@ pub fn allowed_recovery_commands(entry: &RecoveryReportEntry) -> Vec<String> {
         let Some(next) = next else {
             continue;
         };
+        // 与确认事务同一准入：候选动作必须绑定一次投递，且其证明就是 recovery 的 custody 证明。
+        if action.delivery_id.is_none()
+            || action.proof_kind.as_deref() != entry.custody_proof_kind.as_deref()
+            || action.proof_observed_at != entry.custody_proof_observed_at
+        {
+            return Vec::new();
+        }
         if candidate.is_some_and(|current| current != next) {
             return Vec::new();
         }
@@ -164,26 +176,30 @@ mod tests {
     };
     use crate::ports::recovery::commands::RecoveryConfirmationAction;
 
+    /// 投影夹具的固定观察时刻；recovery custody 证明与收回动作证明必须同源。
+    fn observed() -> Timestamp {
+        Timestamp::from_ymd_hms(2026, 11, 5, 9, 0, 0).unwrap()
+    }
+
     fn action(kind: &str, state: &str) -> RecoveryActionReport {
         RecoveryActionReport {
             id: SettlementId::from_uuid(Uuid::new_v4()),
             kind: kind.to_owned(),
             state: state.to_owned(),
-            delivery_id: None,
+            delivery_id: Some(SettlementId::from_uuid(Uuid::new_v4())),
             failure_code: None,
             proof_kind: Some("delivery_recovery_take_succeeded".to_owned()),
-            proof_observed_at: None,
-            updated_at: Timestamp::from_ymd_hms(2026, 11, 5, 9, 0, 0).unwrap(),
+            proof_observed_at: Some(observed()),
+            updated_at: observed(),
         }
     }
-
     fn entry(
         world: &str,
         count: i32,
         limit: i32,
         actions: Vec<RecoveryActionReport>,
     ) -> RecoveryReportEntry {
-        let at = Timestamp::from_ymd_hms(2026, 11, 5, 9, 0, 0).unwrap();
+        let at = observed();
         RecoveryReportEntry {
             id: SettlementId::from_uuid(Uuid::from_u128(1)),
             auction_id: AuctionId::from_uuid(Uuid::from_u128(2)),
@@ -279,5 +295,32 @@ mod tests {
             )),
             ["equipment_recovered"]
         );
+    }
+
+    #[test]
+    fn button_requires_the_same_custody_evidence_and_a_bound_delivery() {
+        let take = || vec![action("cancel_carrier_take", "satisfied")];
+        assert_eq!(allowed_recovery_commands(&entry("isekai", 1, 3, take())), ["cancelled"]);
+
+        let mut unbound = take();
+        unbound[0].delivery_id = None;
+        assert!(allowed_recovery_commands(&entry("isekai", 1, 3, unbound)).is_empty());
+
+        let mut other_kind = take();
+        other_kind[0].proof_kind = Some("mooglemail_sent_collected".to_owned());
+        assert!(allowed_recovery_commands(&entry("isekai", 1, 3, other_kind)).is_empty());
+
+        let mut other_time = take();
+        other_time[0].proof_observed_at =
+            Some(Timestamp::from_ymd_hms(2026, 11, 5, 10, 0, 0).unwrap());
+        assert!(allowed_recovery_commands(&entry("isekai", 1, 3, other_time)).is_empty());
+
+        let mut foreign_custody = entry("isekai", 1, 3, take());
+        foreign_custody.custody_proof_kind = Some("mooglemail_sent_collected".to_owned());
+        assert!(allowed_recovery_commands(&foreign_custody).is_empty());
+
+        let mut manual = entry("isekai", 1, 3, take());
+        manual.manual_reconcile_delivery_id = Some(SettlementId::from_uuid(Uuid::from_u128(9)));
+        assert!(allowed_recovery_commands(&manual).is_empty());
     }
 }

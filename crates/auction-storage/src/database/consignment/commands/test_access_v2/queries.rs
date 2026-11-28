@@ -62,8 +62,10 @@ pub async fn test_deposit_audit_count(
     command_id: Uuid,
 ) -> Result<i64, String> {
     sqlx::query_scalar(
+        // 能定位挂单的命令把审计实体写成 `consignment_listing`；命令身份以 metadata 的
+        // command_id 为唯一链接（与 Admin 读模型的 ADMIN_JOIN 同口径）。
         "SELECT count(*) FROM public.audit_records
-         WHERE entity_type = 'consignment_command' AND entity_id = $1::text",
+         WHERE metadata->>'command_id' = $1::text",
     )
     .bind(command_id)
     .fetch_one(store.postgres_pool())
@@ -77,8 +79,9 @@ pub async fn test_deposit_rejected_audit_count(
     command_id: Uuid,
 ) -> Result<i64, String> {
     sqlx::query_scalar(
+        // 同 `test_deposit_audit_count`：实体可能是挂单，命令身份只看 metadata.command_id。
         "SELECT count(*) FROM public.audit_records
-         WHERE entity_type = 'consignment_command' AND entity_id = $1::text
+         WHERE metadata->>'command_id' = $1::text
            AND result = 'rejected'",
     )
     .bind(command_id)

@@ -64,13 +64,16 @@ pub struct BlockClearanceEvidence {
 
 /// 判定能否解除。只有 Take 证明、只消费邮件、仅有处罚事实、未知、过租与手工说明都不够。
 pub fn may_clear_block(leg: BlockedLeg, evidence: &BlockClearanceEvidence) -> bool {
+    // 载体本金腿的本金核销与“确定未 Take”彼此独立：后者只证明没有外写，不能替代核销证据。
+    let principal_ok = leg != BlockedLeg::CarrierPrincipal || evidence.principal_settled;
+    if !principal_ok {
+        return false;
+    }
     if evidence.take_disproved_and_permit_sealed {
         return true;
     }
-    let principal_ok = leg != BlockedLeg::CarrierPrincipal || evidence.principal_settled;
     evidence.exact_take_proven
         && evidence.funding_consumed
         && evidence.returned_delivery_recorded
         && evidence.purpose_restored
-        && principal_ok
 }

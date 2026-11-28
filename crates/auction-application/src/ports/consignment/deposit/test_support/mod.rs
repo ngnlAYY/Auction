@@ -5,6 +5,7 @@
 
 mod control;
 mod ports;
+mod read;
 mod reads_v2;
 mod records;
 mod replay;
@@ -142,8 +143,12 @@ impl FakeDepositStore {
     ) -> (Uuid, TokenText) {
         let mut state = self.lock();
         let reservation_id = self.next_id(&mut state);
-        let generation = 7;
-        let token = format_token([generation as u8; 32]);
+        let generation: u64 = 7;
+        // 令牌按预约身份派生：不同预约（含跨挂单）不共享同一码，避免替身掩盖串号。
+        let mut entropy = [0u8; 32];
+        entropy[..16].copy_from_slice(reservation_id.as_bytes());
+        entropy[16..24].copy_from_slice(&generation.to_be_bytes());
+        let token = format_token(entropy);
         state.reservations.insert(
             reservation_id,
             ReservationRecord {
@@ -192,6 +197,7 @@ impl FakeDepositStore {
                     items: Vec::new(),
                 }],
                 owner: None,
+                released_at: None,
                 release_receipt: None,
             },
         );

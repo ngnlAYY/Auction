@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::atomic::{Ordering, compiler_fence};
 
 use auction_domain::{EquipmentKey, valid_text, valid_text_allow_empty};
 use serde::{Deserialize, Serialize};
@@ -94,7 +95,11 @@ impl CanonicalEquipment {
     /// 清零 key 的 UTF-8 缓冲区，供请求生命周期结束前调用。
     pub fn clear_secret(&mut self) {
         let mut bytes = std::mem::take(&mut self.key).into_bytes();
-        bytes.fill(0);
+        for byte in &mut bytes {
+            // SAFETY: `byte` 指向已初始化且独占的敏感字节；volatile 写避免清零被优化掉。
+            unsafe { std::ptr::write_volatile(byte, 0) };
+        }
+        compiler_fence(Ordering::SeqCst);
     }
 
     /// 校验 canonical 输入的边界和封闭字段。

@@ -1,5 +1,7 @@
 //! 代管件灭失的命令、回执、写端口与卖家本人回执读端口；回执不含任何合同、付款、退款或发行字段。
 
+use std::fmt;
+
 use auction_domain::consignment::{ListingState, ListingVersion};
 use auction_domain::{CommandId, UserId};
 use auction_time::Timestamp;
@@ -14,7 +16,7 @@ use crate::ports::consignment::errors::{ConsignmentError, ConsignmentFuture};
 use crate::ports::core::RequestHash;
 
 /// 灭失证据的最后确定位置：与私有说明同一安全文本规则（1–256 字节单行，拒装备链接与已知凭据形态）。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct LossLastKnownRef(String);
 
 impl LossLastKnownRef {
@@ -27,6 +29,13 @@ impl LossLastKnownRef {
     /// 借用文本，供规范编码与持久化。
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl fmt::Debug for LossLastKnownRef {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // 与私有说明同一内容类：命令或回执被打印时不能带出该文本原文。
+        formatter.write_str("[REDACTED]")
     }
 }
 

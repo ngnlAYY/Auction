@@ -142,7 +142,18 @@ impl DiagnosticError for crate::ports::core::CompetitionTransactionError {
             Error::CommandLedger(crate::ports::core::CommandLedgerError::Storage) => {
                 SafeErrorKind::REPOSITORY_FAILED
             }
-            _ => SafeErrorKind::COMPETITION_REJECTED,
+            // 其余变体是同一类“状态或身份被拒”，但仍逐项列出：新增变体必须在这里选定
+            // 诊断类别，不能靠通配落入拒绝类而掩盖存储失败或不可用语义。
+            Error::NotFound
+            | Error::AdminIntakeUnavailable
+            | Error::IntakeClosed
+            | Error::AdminIntakeSellerBlacklisted
+            | Error::AdminIntakeEquipmentConflict
+            | Error::EquipmentHeld
+            | Error::StaleState
+            | Error::InvalidState
+            | Error::BidderIneligible
+            | Error::StaleSlowProxy => SafeErrorKind::COMPETITION_REJECTED,
         }
     }
 }

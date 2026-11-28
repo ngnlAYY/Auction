@@ -39,7 +39,8 @@ use webhook::{claim_due_webhook_postgres, finish_webhook_postgres};
 #[cfg(feature = "test-db")]
 pub use snapshot::benchmark_sql;
 
-const MAX_ATTEMPTS: u32 = 3;
+/// 单一上限来自应用端口：Worker 的耗尽判定与这里领取/收口的 SQL 必须用同一个值。
+const MAX_ATTEMPTS: u32 = auction_application::operations::MAX_OPERATIONS_ALERT_WEBHOOK_ATTEMPTS;
 
 /// SQL 绑定用的同一重试上限（`attempt_count` 列为 integer）；过期收口、重新领取与失败退避都
 /// 绑定它，不在 SQL 里另写字面量。编译期确认可无损表示。

@@ -242,10 +242,17 @@ pub struct WorkerSentLookupResponse {
 impl WorkerSentLookupResponse {
     /// 只接受属于请求世界、字段完整且条目有界的 Sent 核查结果。
     ///
-    /// 控制面响应是不可信输入：未通过完整校验的详情不能进入恢复核对，否则越界值会放大内存，
-    /// 或让已发送的邮件被当作不存在并放行失败/重试（不变量 4、6）。
+    /// 控制面响应是不可信输入：`status` 只允许 Worker 的闭集标签（生产者的
+    /// `MoogleMailSentLookupStatus` 名称；application 不能依赖 integrations，故在此列出同一
+    /// 闭集），未知值直接拒绝，避免任意文本进入 CLI 证据；未通过完整校验的详情也不能进入
+    /// 恢复核对，否则越界值会放大内存，或让已发送的邮件被当作不存在并放行失败/重试
+    /// （不变量 4、6）。
     pub fn validate_for_world(&self, world: &str) -> bool {
         matches!(world, "main" | "isekai")
+            && matches!(
+                self.status.as_str(),
+                "Unique" | "CollectedUnproven" | "Multiple" | "NotObserved" | "Incomplete"
+            )
             && self.observed_at.timestamp_nanos_opt().is_some()
             && self.candidates.len() <= MAX_RECOVERY_SCAN_ENTRIES
             && self
@@ -590,6 +597,47 @@ mod tests {
                 .validate()
         );
         assert!(!WorkerSentLookupRequest { recipient: String::new(), ..sent }.validate());
+    }
+
+    fn sent_lookup_candidate(world: &str) -> WorkerSentLookupCandidate {
+        WorkerSentLookupCandidate {
+            world: world.to_owned(),
+            external_mail_id: "3125345".to_owned(),
+            recipient: "Sample·Fixture".to_owned(),
+            subject: "Withdrawn return".to_owned(),
+            sent_at: Some(Timestamp::now() - TimeDelta::seconds(60)),
+            remaining_credits: 0,
+            cod_pending: 0,
+            remaining_equipment_ids: vec!["317632875".to_owned()],
+            collected: false,
+            observed_at: Timestamp::now(),
+        }
+    }
+
+    fn sent_lookup_response(
+        status: &str,
+        candidates: Vec<WorkerSentLookupCandidate>,
+    ) -> WorkerSentLookupResponse {
+        WorkerSentLookupResponse {
+            status: status.to_owned(),
+            scan_complete: true,
+            pages_scanned: 1,
+            observed_at: Timestamp::now(),
+            candidates,
+        }
+    }
+
+    /// `status` 只接受 Worker 闭集标签；候选必须属于请求世界且逐字段有效。
+    #[test]
+    fn sent_lookup_response_enforces_status_and_world_closed_sets() {
+        let valid = sent_lookup_response("NotObserved", Vec::new());
+        assert!(valid.validate_for_world("main"));
+        assert!(!sent_lookup_response("unique", Vec::new()).validate_for_world("main"));
+        assert!(!sent_lookup_response("Unknown", Vec::new()).validate_for_world("main"));
+
+        let foreign = sent_lookup_response("Unique", vec![sent_lookup_candidate("main")]);
+        assert!(foreign.validate_for_world("main"));
+        assert!(!foreign.validate_for_world("isekai"), "候选 world 必须等于请求 world");
     }
 
     #[test]

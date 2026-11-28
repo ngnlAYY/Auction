@@ -568,6 +568,7 @@ async fn seed_second_listing(pool: &PgPool) -> (Uuid, Uuid, Uuid) {
                    \"canonical_alias_ambiguous\":false,\"unknown_attachment\":false,
                    \"system_rts\":false,\"legacy_auction_owner\":null,
                    \"received_minute_raw\":\"2026-01-01T05:00\",
+                   \"asset_count\":2,
                    \"items\":[{\"ordinal\":1,\"world\":\"main\",\"tradeable\":true,
                                \"history_ok\":true},
                               {\"ordinal\":2,\"world\":\"main\",\"tradeable\":true,

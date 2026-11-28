@@ -67,8 +67,8 @@ impl fmt::Debug for AdminCredentialEnvelope {
 
 impl Drop for AdminCredentialEnvelope {
     fn drop(&mut self) {
-        self.ciphertext.fill(0);
-        self.nonce.fill(0);
+        wipe_bytes(&mut self.ciphertext);
+        wipe_bytes(&mut self.nonce);
     }
 }
 

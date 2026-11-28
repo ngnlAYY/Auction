@@ -1,5 +1,6 @@
 //! 内存假实现的端口 trait 实现。
 
+use std::collections::BTreeSet;
 use std::future;
 
 use auction_domain::SettlementWorld;
@@ -113,7 +114,11 @@ impl ReservationStore for FakeDepositStore {
                 state.claims.retain(|_, reservation_id| !expired_claims.contains(reservation_id));
                 let reservation_id = Uuid::from_u128(state.next_id);
                 state.next_id = state.next_id.saturating_add(1);
-                let token = format_token([u8::try_from(generation).unwrap_or(255); 32]);
+                // 令牌按预约身份派生：不同预约（含跨挂单）不共享同一码，避免替身掩盖串号。
+                let mut entropy = [0u8; 32];
+                entropy[..16].copy_from_slice(reservation_id.as_bytes());
+                entropy[16..24].copy_from_slice(&generation.to_be_bytes());
+                let token = format_token(entropy);
                 let mut expires_at = state
                     .clock
                     .checked_add_signed(Duration::hours(24))
@@ -176,14 +181,22 @@ impl ReservationStore for FakeDepositStore {
                 if reservation.state != ReservationState::Active {
                     return Err(DepositBusinessRejection::ListingNotActive.into());
                 }
-                if matches!(command.invalidation, ReservationInvalidation::Cancelled { .. }) {
-                    // 裁定：取消只能作为挂单命令的随附事实，expire_reservation 不能单独声明。
-                    return Err(DepositBusinessRejection::ActionNotAllowed.into());
-                }
-                if let ReservationInvalidation::Expired { expires_at } = command.invalidation
-                    && state.clock < expires_at
-                {
-                    return Err(DepositBusinessRejection::ActionNotAllowed.into());
+                match command.invalidation {
+                    // 到期事实必须与库内截止逐字相同，等号即失效（与 `expire_stage` 一致）。
+                    ReservationInvalidation::Expired { expires_at }
+                        if expires_at == reservation.expires_at && state.clock >= expires_at => {}
+                    ReservationInvalidation::Expired { .. } => {
+                        return Err(DepositBusinessRejection::ActionNotAllowed.into());
+                    }
+                    // 假实现不建模服务控制面（停用标志与代际）：无法证明“已停用且代际相符”，失败关闭。
+                    ReservationInvalidation::ServiceDisabled { .. } => {
+                        return Err(DepositBusinessRejection::ActionNotAllowed.into());
+                    }
+                    ReservationInvalidation::IdentityLost { .. } => {}
+                    ReservationInvalidation::Cancelled { .. } => {
+                        // 裁定：取消只能作为挂单命令的随附事实，expire_reservation 不能单独声明。
+                        return Err(DepositBusinessRejection::ActionNotAllowed.into());
+                    }
                 }
                 if let Some(record) = state.reservations.get_mut(&command.reservation_id) {
                     record.state = ReservationState::Retired;
@@ -267,6 +280,7 @@ impl EnvelopeStore for FakeDepositStore {
                                     items: safe_items(&command.facts.observation),
                                 }],
                                 owner: None,
+                                released_at: None,
                                 release_receipt: None,
                             },
                         );
@@ -280,35 +294,80 @@ impl EnvelopeStore for FakeDepositStore {
                         receipt
                     }
                     EnvelopeDecision::Accept(items) => {
-                        let mut changes = Vec::new();
+                        // 与 `accept_items_in_tx` 一致：先整封复判（非空、上限、唯一键、状态、身份、
+                        // 预约代与截止、凭证引用），全部通过后才逐件推进；重复项不得二次推进版本。
+                        if items.is_empty() || items.len() > 20 {
+                            return Err(DepositBusinessRejection::EvidenceUnproven.into());
+                        }
+                        let mut ordinals = BTreeSet::new();
+                        let mut eids = BTreeSet::new();
+                        let mut listing_ids = BTreeSet::new();
+                        let mut reservation_ids = BTreeSet::new();
                         for item in items {
+                            if item.ordinal == 0
+                                || !ordinals.insert(item.ordinal)
+                                || !eids.insert(item.equipment.external_equipment_id().to_owned())
+                                || !listing_ids.insert(item.listing_id)
+                                || !reservation_ids.insert(item.reservation_id)
+                            {
+                                return Err(DepositBusinessRejection::EvidenceUnproven.into());
+                            }
                             let listing = state
                                 .listings
                                 .get(&item.listing_id)
                                 .ok_or(DepositBusinessRejection::ListingNotActive)?;
+                            if listing.seller_user_id != item.seller_user_id
+                                || listing.canonical_eid != item.equipment.external_equipment_id()
+                            {
+                                return Err(DepositBusinessRejection::EvidenceUnproven.into());
+                            }
+                            if listing.state != ListingState::AwaitingDeposit {
+                                return Err(DepositBusinessRejection::ListingNotActive.into());
+                            }
                             if listing.version != item.listing_version.value() {
                                 return Err(DepositBusinessRejection::StaleVersion.into());
                             }
-                            if let Some(reservation) =
-                                state.reservations.get_mut(&item.reservation_id)
+                            let reservation = state
+                                .reservations
+                                .get(&item.reservation_id)
+                                .ok_or(DepositBusinessRejection::ListingNotActive)?;
+                            if reservation.state != ReservationState::Active
+                                || reservation.generation != item.reservation_generation
+                                || reservation.listing_id != item.listing_id
+                                || reservation.seller_user_id != item.seller_user_id
+                                || reservation.canonical_eid
+                                    != item.equipment.external_equipment_id()
                             {
-                                reservation.state = ReservationState::Consumed;
+                                return Err(DepositBusinessRejection::EvidenceUnproven.into());
                             }
+                            // 截止后首次处理不能倒签；锁后时刻等号即失效（D9 §2.1 第 4 条）。
+                            if state.clock >= reservation.expires_at
+                                || item.credential_ref.is_none()
+                            {
+                                return Err(DepositBusinessRejection::EvidenceUnproven.into());
+                            }
+                        }
+                        let mut changes = Vec::new();
+                        for item in items {
+                            let Some(reservation) =
+                                state.reservations.get_mut(&item.reservation_id)
+                            else {
+                                return Err(ConsignmentError::Unavailable);
+                            };
+                            reservation.state = ReservationState::Consumed;
                             state
                                 .claims
                                 .retain(|_, reservation_id| *reservation_id != item.reservation_id);
-                            if let Some(listing) = state.listings.get_mut(&item.listing_id) {
-                                listing.state = ListingState::DepositAccepted;
-                                listing.version = listing.version.saturating_add(1);
-                                changes.push(crate::ports::consignment::ListingStateChange {
-                                    listing_id: item.listing_id,
-                                    listing_version: listing.version,
-                                    state: listing.state,
-                                });
-                            }
-                        }
-                        if changes.is_empty() {
-                            return Err(DepositBusinessRejection::ActionNotAllowed.into());
+                            let Some(listing) = state.listings.get_mut(&item.listing_id) else {
+                                return Err(ConsignmentError::Unavailable);
+                            };
+                            listing.state = ListingState::DepositAccepted;
+                            listing.version = listing.version.saturating_add(1);
+                            changes.push(crate::ports::consignment::ListingStateChange {
+                                listing_id: item.listing_id,
+                                listing_version: listing.version,
+                                state: listing.state,
+                            });
                         }
                         let mut receipt = EnvelopeReceipt::new(
                             command.command_id,
@@ -444,6 +503,8 @@ impl EnvelopeStore for FakeDepositStore {
                 if command.proposed_kind == ReleaseKind::AcquireReturn {
                     return Err(DepositBusinessRejection::EvidenceUnproven.into());
                 }
+                // 解除时刻在本事务锁定；回放与后续读取都用它，不随测试时钟漂移。
+                let released_at = state.clock;
                 let quarantine = state
                     .quarantines
                     .get_mut(&command.quarantine_id)
@@ -454,13 +515,6 @@ impl EnvelopeStore for FakeDepositStore {
                 if quarantine.version != command.expected_version {
                     return Err(DepositBusinessRejection::StaleVersion.into());
                 }
-                if !quarantine
-                    .observations
-                    .iter()
-                    .any(|observation| observation.observation_id == command.observation_id)
-                {
-                    return Err(DepositBusinessRejection::EvidenceUnproven.into());
-                }
                 if let Some(owner) = quarantine.owner {
                     if owner == command.proposed_kind
                         && let Some(receipt) = &quarantine.release_receipt
@@ -468,6 +522,15 @@ impl EnvelopeStore for FakeDepositStore {
                         return Ok((LedgerReceipt::Release(receipt.clone()), receipt.clone()));
                     }
                     return Err(DepositBusinessRejection::DispositionConflict.into());
+                }
+                // 与 `release_quarantine_port` 一致：解除必须绑定当前版本的那次追加观察
+                // （即最后一次 append），旧观察只属历史，不能充当本次解除证据。
+                let latest = quarantine
+                    .observations
+                    .last()
+                    .ok_or(DepositBusinessRejection::EvidenceUnproven)?;
+                if latest.observation_id != command.observation_id {
+                    return Err(DepositBusinessRejection::EvidenceUnproven.into());
                 }
                 let release_id = Uuid::from_u128(state.next_id);
                 state.next_id = state.next_id.saturating_add(1);
@@ -482,12 +545,11 @@ impl EnvelopeStore for FakeDepositStore {
                 );
                 match command.proposed_kind {
                     ReleaseKind::AuctionReturnCase => {
+                        // 与生产一致：案件证据引用就是原退件 MID。
                         let return_mail_id = Uuid::from_u128(state.next_id);
                         state.next_id = state.next_id.saturating_add(1);
-                        let evidence_id = Uuid::from_u128(state.next_id);
-                        state.next_id = state.next_id.saturating_add(1);
                         receipt.return_mail_id = Some(return_mail_id);
-                        receipt.return_evidence_id = Some(evidence_id);
+                        receipt.return_evidence_id = Some(return_mail_id);
                         state.settlement_owners = state.settlement_owners.saturating_add(1);
                     }
                     ReleaseKind::AuctionRecoveryReturn => {
@@ -512,6 +574,7 @@ impl EnvelopeStore for FakeDepositStore {
                 }
                 quarantine.active = false;
                 quarantine.owner = Some(command.proposed_kind);
+                quarantine.released_at = Some(released_at);
                 quarantine.release_receipt = Some(receipt.clone());
                 Ok((LedgerReceipt::Release(receipt.clone()), receipt))
             },

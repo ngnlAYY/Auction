@@ -128,8 +128,9 @@ pub(super) async fn notify(
 }
 
 pub(super) fn slow_proxy_can_act(target: &OutbidTarget, occurred_at: Timestamp) -> bool {
+    // Final 仍接受出价且慢代理可能在该阶段反击；与 `resolve_pending` 的开放状态集合同口径。
     target.slow_active
-        && target.auction_status == "live"
+        && matches!(target.auction_status.as_str(), "live" | "final")
         && target.deadline.is_some_and(|deadline| deadline > occurred_at)
 }
 

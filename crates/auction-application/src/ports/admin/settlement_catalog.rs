@@ -43,7 +43,9 @@ impl SettlementCatalogEntry {
         !self.auction_id.is_nil()
             && matches!(self.world_id.as_str(), "main" | "isekai")
             && self.sequence > 0
+            // 结算时间必须是可表示的纳秒时刻，且不能是未写入的纪元零值。
             && self.settled_at.timestamp_micros() != 0
+            && self.settled_at.timestamp_nanos_opt().is_some()
     }
 }
 

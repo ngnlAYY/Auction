@@ -34,6 +34,7 @@ pub(crate) async fn claim(
            AND ($2 = true OR paused = false)
            AND ($2 = true OR next_poll_at <= $3)
            AND (claim_expires_at IS NULL OR claim_expires_at <= $3)
+           AND (claim_expires_at IS NULL OR claim_expires_at <= clock_timestamp())
            ORDER BY next_poll_at, mailbox_key
          LIMIT $4
          FOR UPDATE SKIP LOCKED",
@@ -75,7 +76,8 @@ pub(crate) async fn claim(
                  state_version = state_version + 1, updated_at = CURRENT_TIMESTAMP
              WHERE mailbox_key = $1
                AND ($6 = true OR paused = false)
-               AND (claim_expires_at IS NULL OR claim_expires_at <= $5)",
+               AND (claim_expires_at IS NULL OR claim_expires_at <= $5)
+               AND (claim_expires_at IS NULL OR claim_expires_at <= clock_timestamp())",
         )
         .bind(&mailbox_key)
         .bind(claim_token)
