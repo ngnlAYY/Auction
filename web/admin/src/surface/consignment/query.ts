@@ -8,7 +8,7 @@ import {
 import { type QueryPair, type QueryState, useQueryState } from "@auction/web-shared/net/query";
 
 import type { ListingFilters } from "../../api/consignment/list";
-import { pairValue, parsePage, pushPage, pushText } from "../query/primitives";
+import { parseChoice, parsePage, parseUuidText, pushPage, pushText } from "../query/primitives";
 
 const FILTER_KEYS = ["world", "mode", "state", "seller_user_id", "page"] as const;
 

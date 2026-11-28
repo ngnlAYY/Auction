@@ -167,8 +167,16 @@ test("无效的卖家或枚举书签按未设置读取，不转发畸形值", as
       await settle();
       expect(
         tree.find((node) => node.textContent === "请求参数无效。请检查输入内容后重试。"),
-      ).not.toBeNull();
-      expect(requests).toEqual([]);
+      ).toBeNull();
+      expect(requests.map((request) => request.url)).toEqual([`${LISTINGS}?page=1&page_size=20`]);
+      if (query.startsWith("seller_user_id=")) {
+        const seller = requireElement(
+          tree.find((node) => node.id === "consignment-seller-id"),
+          "卖家输入",
+        );
+        expect(seller.value).toBe("");
+        expect(seller.getAttribute("aria-invalid")).toBe("false");
+      }
     });
   }
 });

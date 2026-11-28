@@ -182,7 +182,8 @@ test("summary_projection_decodes_to_the_same_catalog_rows：摘要投影解码�
 
 test("multi_category_requests_match_rows_and_selected_count_total：多分类按集合核对行与总数", () => {
   const counts = categoryCounts({ all: 4, clo: 1, lig: 2, sta: 1 });
-  const selectedRows = [summaryEquipment(), summaryEquipment("Light")];
+  // 两个所选分类的计数和是 3；页长也要与该区间应有的行数一致。
+  const selectedRows = [summaryEquipment(), summaryEquipment("Light"), summaryEquipment("Light")];
   // 两个所选分类的计数和是 3；误用 all=4 的旧实现会把这组响应判错。
   expect(decodeCatalog(listEnvelopeWithRows(selectedRows, 3, counts), "clo,lig").ok).toBe(true);
   expect(decodeCatalog(listEnvelopeWithRows(selectedRows, 4, counts), "clo,lig").ok).toBe(false);

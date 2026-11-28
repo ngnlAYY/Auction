@@ -445,7 +445,12 @@ function rescheduleCookieSync(
 
 function mayHaveChangedCookie(response: Result<TransportResponse, TransportError>): boolean {
   if (response.ok) {
-    return responseOk(response.value) || response.value.status >= 500;
+    return (
+      responseOk(response.value) ||
+      response.value.status >= 500 ||
+      // 409 的错误正文无法证明冲突类别时，Cookie 仍可能已随该响应改写。
+      (response.value.status === 409 && decodeErrorCode(response.value) === "invalid_response")
+    );
   }
   const error = response.error;
   return (

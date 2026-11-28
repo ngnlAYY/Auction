@@ -330,7 +330,7 @@ export function historyActiveFilterCount(query: PriceHistoryQuery): number {
 
 /** 是否具备发起历史读取的条件；非法筛选与重复键必须先修正，具体世界单独选择时也计入筛选数。 */
 export function historyHasRequestCondition(query: PriceHistoryQuery): boolean {
-  return historyActiveFilterCount(query) > 0;
+  return historyActiveFilterCount(query) > 0 && Object.keys(historyQueryErrors(query)).length === 0;
 }
 
 /** 已应用查询中属于本页表单的部分；世界也是表单字段，须随前进后退和跨页进入同步草稿。 */

@@ -52,7 +52,8 @@ export function NumberInput(props: {
       return null;
     }
     const pending = edit();
-    const show = (pending === null ? historicError() : pending.reported) || inSummary();
+    const show =
+      (pending === null ? historicError() : pending.reported || historicError()) || inSummary();
     return show ? numberIssueMessage(currentIssue, props.minimum, props.maximum) : null;
   });
   const id = createValueMemo(() => fieldId(props.path));
@@ -106,10 +107,19 @@ export function NumberInput(props: {
           const nextIssue = numberIssue(value, props.minimum, props.maximum);
           // 输入只延续或清除已展示的错误；新错误在离焦或提交后展示。
           const pending = edit.peek();
+          // 等待离焦播报期间错误种类变化：只撤销旧播报，已展示的错误延续到新错误。
+          const changed = pending?.announced === true && pending.issue !== nextIssue;
+          if (changed) {
+            announcer.clearField(id());
+          }
           const reported =
             (pending === null ? historicError() : pending.reported) ||
             issues.peek().some((issue) => issue.path === props.path);
-          edit.set({ issue: nextIssue, reported: reported && nextIssue !== null });
+          edit.set({
+            issue: nextIssue,
+            reported: reported && nextIssue !== null,
+            announced: nextIssue !== null && !changed && pending?.announced === true,
+          });
           if (reported && nextIssue === null) {
             announcer.clearField(id());
           }

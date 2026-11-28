@@ -3,15 +3,7 @@
 import { JSON_MAX_SAFE_INTEGER, type JsonObject, jsonKeysOnly } from "@auction/web-shared/net/wire";
 import { validUuid } from "@auction/web-shared/ui/validation";
 
-import {
-  accountNonempty,
-  int,
-  object,
-  optionalNonnegative,
-  positive,
-  string,
-  time,
-} from "..";
+import { accountNonempty, int, object, optionalNonnegative, positive, string, time } from "..";
 import { validNumberedPage } from "./auction";
 
 /** 校验价格历史编号页、逐行字段与统计形状。 */
