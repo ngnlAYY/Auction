@@ -9,10 +9,12 @@ cd "$(dirname "$0")/../.."
 # 与 auction-release 的 tag 守卫同一口径；其他 tag（如临时标记）不代表已发布版本。
 # 与发布工作流采用相同的 tag 语法；有效的预发布版本也作为实际发布候选参与排序。
 release_pattern='^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$'
-mapfile -t release_tags < <(
-	git -c versionsort.suffix=- tag --list 'v[0-9]*' --sort=-v:refname |
-		grep -E "$release_pattern" || true
-)
+# tag 枚举本身失败（非仓库、refs 不可读）必须拒绝；只有 grep 的“无匹配”才允许空列表。
+tag_list=$(git -c versionsort.suffix=- tag --list 'v[0-9]*' --sort=-v:refname) || {
+	printf '%s\n' '无法枚举 Git tag；发布版本依赖审计不能跳过。' >&2
+	exit 1
+}
+mapfile -t release_tags < <(printf '%s\n' "$tag_list" | grep -E "$release_pattern" || true)
 if [[ ${#release_tags[@]} -eq 0 ]]; then
 	printf '%s\n' '没有发布 tag（v<版本>）；跳过发布版本依赖审计。'
 	exit 0

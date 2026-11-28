@@ -153,7 +153,8 @@ sub mark_typescript_boundaries {
         } elsif ($symbol eq '*' && $adjacent eq '/') {
             ($block_after, $later_block_after) = ($index + 2, $block_after);
         } elsif ($symbol eq "\n" || $symbol eq "\r" || $symbol eq "\x{2028}" || $symbol eq "\x{2029}") {
-            $line_break = $index if $symbol eq "\r" || $symbol eq "\n";
+            # 行注释在 JS/TS 的任一 LineTerminator 处结束，与 typescript_marks 的行计数一致。
+            $line_break = $index;
             %line_quote_end = () unless $mark->[ESCAPED];
         }
 
@@ -292,7 +293,8 @@ sub blank_source_ranges {
         my ($start, $end) = @$range;
         push @pieces, source_slice($source, $copied, $start);
         my $removed = source_slice($source, $start, $end);
-        $removed =~ s/[^\n]/ /g;
+        # 保留扫描器视为换行的全部字符：裸 CR、U+2028/U+2029 也会影响后续行号。
+        $removed =~ s/[^\r\n\x{2028}\x{2029}]/ /g;
         push @pieces, $removed;
         $copied = $end;
     }

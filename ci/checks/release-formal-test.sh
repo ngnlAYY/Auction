@@ -72,6 +72,17 @@ branch_suffix=$(GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push GITHUB_REF_TYPE=branc
 	bash -c 'source ci/release/build-identity.sh; release_candidate_suffix')
 [[ $branch_suffix == -candidate ]] || fail "分支候选必须带 -candidate：$branch_suffix"
 
+# GITHUB_ACTIONS 不是 true 时，即使事件、引用与工作流形状都像正式发行，也不构成正式身份。
+non_actions_env=(GITHUB_EVENT_NAME=push GITHUB_REF_TYPE=tag "GITHUB_REF_NAME=v$version"
+	GITHUB_REPOSITORY=fixture/repo
+	"GITHUB_WORKFLOW_REF=fixture/repo/.github/workflows/release.yml@refs/tags/v$version")
+identity "${non_actions_env[@]}" AUCTION_WEB_STACK=dioxus >/dev/null ||
+	fail 'GITHUB_ACTIONS 缺失时不应套用正式发行断言'
+non_actions_suffix=$(env "${non_actions_env[@]}" bash -c \
+	'source ci/release/build-identity.sh; release_candidate_suffix')
+[[ $non_actions_suffix == -candidate ]] ||
+	fail "GITHUB_ACTIONS 缺失时必须带 -candidate：$non_actions_suffix"
+
 # 调用方声明的 release_kind 必须与调用身份一致（release-build.yml 在安装工具前执行同一函数）。
 release_kind() {
 	env "$@" bash -c 'source ci/release/build-identity.sh && assert_release_kind "$RELEASE_KIND"' 2>&1
@@ -87,6 +98,15 @@ output=$(release_kind GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GI
 for invalid in '' Formal other; do
 	output=$(release_kind "${formal_env[@]}" "RELEASE_KIND=$invalid") && fail "release_kind=$invalid 应被拒绝"
 	[[ $output == *'release_kind 只允许 formal 或 candidate'* ]] || fail "release_kind=$invalid 拒绝缺少诊断：$output"
+done
+# 非正式调用同样只能声明 candidate：白名单校验不能只在正式身份下执行。
+candidate_kind_env=(GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF_TYPE=tag
+	"GITHUB_REF_NAME=v$version" AUCTION_WEB_STACK=solid)
+for invalid in '' Formal other; do
+	output=$(release_kind "${candidate_kind_env[@]}" "RELEASE_KIND=$invalid") &&
+		fail "候选 release_kind=$invalid 应被拒绝"
+	[[ $output == *'release_kind 只允许 formal 或 candidate'* ]] ||
+		fail "候选 release_kind=$invalid 拒绝缺少诊断：$output"
 done
 
 # 二、release.sh：正式身份不合格时，在任何工具与目录副作用之前拒绝；只读入口照常运行。
@@ -277,10 +297,16 @@ make_package() {
 	web_stack_render "$commit" "$fingerprint" solid solid \
 		"$(web_stack_sha256_file "$root/docs/WEB-PUBLIC-SHA256")" \
 		"$(web_stack_sha256_file "$root/docs/WEB-ADMIN-SHA256")" 0123456789abcdef0123456789abcdef >"$root/docs/WEB-STACK.v1"
+	chmod 0644 "$root/docs/WEB-STACK.v1"
 	"$mutate" "$root"
-	printf 'schema=auction-release-manifest/1\npackage=%s\nsource_commit=%s\nsource_fingerprint=%s\n%sfiles=\n' \
-		"${root##*/}" "$commit" "$fingerprint" "$manifest_extra" >"$root/RELEASE-MANIFEST.v1"
-	(cd "$root" && find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum >SHA256SUMS)
+	{
+		printf 'schema=auction-release-manifest/1\npackage=%s\nsource_commit=%s\nsource_fingerprint=%s\n%sfiles=\n' \
+			"${root##*/}" "$commit" "$fingerprint" "$manifest_extra"
+		(cd "$root" && find . -type f ! -name RELEASE-MANIFEST.v1 ! -name SHA256SUMS -printf '644 %P\n')
+		printf '644 RELEASE-MANIFEST.v1\n644 SHA256SUMS\n'
+	} >"$root/RELEASE-MANIFEST.v1"
+	(cd "$root" && find . -type f ! -name SHA256SUMS ! -name RELEASE-MANIFEST.v1 -printf '%P\0' |
+		LC_ALL=C sort -z | xargs -0 sha256sum >SHA256SUMS)
 	tar --create --gzip --file "$directory/${root##*/}.tar.gz" --directory "$directory" "${root##*/}"
 	cp "$root/docs/DEPENDENCIES.md" "$directory/DEPENDENCIES.md"
 	(cd "$directory" && sha256sum DEPENDENCIES.md "${root##*/}.tar.gz" >SHA256SUMS)
@@ -329,6 +355,13 @@ if verify_package "$archive" v0.1.9 --receipt "$receipt" >/dev/null; then fail '
 legacy=$(make_package legacy 0.1.8 mutate_legacy)
 output=$(verify_package "$legacy" v0.1.8 --receipt "$fixture/legacy-receipt.v1") || fail "旧版本旧格式包应通过：$output"
 grep -qx 'web_stack_id=none' "$fixture/legacy-receipt.v1" || fail '旧格式包回执应为 web_stack_id=none'
+
+# 旧版本仍自带 WEB-STACK.v1 时也必须核对页面凭据，旧格式豁免不能跳过它。
+legacy_stack=$(make_package legacy-stack 0.1.8)
+output=$(verify_package "$legacy_stack" v0.1.8 --receipt "$fixture/legacy-stack-receipt.v1") ||
+	fail "旧版本自带页面凭据的包应通过：$output"
+grep -qx 'web_stack_id=public-solid_admin-solid' "$fixture/legacy-stack-receipt.v1" ||
+	fail '旧版本自带页面凭据时回执应为 web_stack_id=public-solid_admin-solid'
 
 expect_reject '摘要被改一字节' bad-digest 0.1.9 mutate_digest
 expect_reject '新版本缺 WEB-STACK.v1' no-stack 0.1.9 mutate_missing

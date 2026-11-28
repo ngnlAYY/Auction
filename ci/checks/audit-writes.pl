@@ -17,11 +17,12 @@ my $token = qr{
     | (?<char> b?'(?:\\(?:u\{[0-9a-fA-F_]+\}|x[0-9a-fA-F]{2}|.)|[^'\\\n])' )
 }xs;
 my $insert = qr/\binsert\s+into\s+(?:public\s*\.\s*)?audit_records\b/i;
-# 内联测试模块之后不是生产代码（cfg 与 mod 之间可隔属性与注释行）；外部 `#[cfg(test)] mod x;` 声明不截断。
+# 内联测试模块之后不是生产代码（cfg 与 mod 之间可隔属性、注释行或空行）；外部 `#[cfg(test)] mod x;`
+# 声明不截断。截止位置在掩码文本上匹配，注释或字面量里的同形文本已被换成空白，不会提前截止。
 my $inline_test = qr{
     ^\#\[cfg\(test\)\][ \t]*\n
-    (?:[ \t]*(?:\#\[[^\n]*\]|//[^\n]*)[ \t]*\n)*
-    [ \t]*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{
+    (?:[ \t]*\n|[ \t]*\#[^\n]*\][ \t]*\n)*
+    [ \t]*(?:pub(?:\([^)]*\))?\s+)?mod\s+(?:r\#)?\w+\s*\{
 }xm;
 
 my @files = sort split /\0/, do { local $/; <STDIN> // '' };
@@ -31,7 +32,6 @@ for my $file (@files) {
     next if $file =~ m{(?:^|/)(?:tests\.rs|[^/]*_tests\.rs)$};
     open my $source, '<', $file or die "$file: $!\n";
     my $code = do { local $/; <$source> };
-    $code = substr($code, 0, $-[0]) if $code =~ $inline_test;
 
     # 掩码文本：注释与字面量换成等长空白（保留换行），只留下可判断语句边界的代码。
     my ($masked, @literals) = ($code);
@@ -42,6 +42,13 @@ for my $file (@files) {
         (my $blank = $text) =~ s/[^\n]/ /g;
         substr($masked, $start, $end - $start) = $blank;
         push @literals, [$start, $end] if $is_sql && $text =~ $insert;
+    }
+
+    if ($masked =~ $inline_test) {
+        my $cut = $-[0];
+        $code = substr($code, 0, $cut);
+        $masked = substr($masked, 0, $cut);
+        @literals = grep { $_->[0] < $cut } @literals;
     }
 
     for my $literal (@literals) {

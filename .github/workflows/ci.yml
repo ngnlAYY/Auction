@@ -64,14 +64,19 @@ jobs:
         run: |
           if [[ "$EVENT_NAME" == push && "$REF_TYPE" == branch &&
             "$REF_NAME" != "$DEFAULT_BRANCH" ]]; then
-            heads=$(gh api --method GET --paginate "repos/$GH_REPO/pulls" \
+            # gh 失败（限流、网络、令牌）时不能跳过检查：按“未抑制”处理，并记录原因。
+            if heads=$(gh api --method GET --paginate "repos/$GH_REPO/pulls" \
               -f state=open -f "head=$REPOSITORY_OWNER:$REF_NAME" \
-              --jq '.[] | [.head.repo.full_name, .head.sha] | @tsv')
-            if grep -Fxq -- "$GH_REPO"$'\t'"$SOURCE_SHA" <<<"$heads"; then
-              printf 'run-checks=false\n' >> "$GITHUB_OUTPUT"
-              printf '%s\n' '同提交已有 PR 检查；跳过重复 push。' \
+              --jq '.[] | [.head.repo.full_name, .head.sha] | @tsv'); then
+              if grep -Fxq -- "$GH_REPO"$'\t'"$SOURCE_SHA" <<<"$heads"; then
+                printf 'run-checks=false\n' >> "$GITHUB_OUTPUT"
+                printf '%s\n' '同提交已有 PR 检查；跳过重复 push。' \
+                  >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+            else
+              printf '%s\n' '无法读取同分支的 PR 元数据；不跳过检查。' \
                 >> "$GITHUB_STEP_SUMMARY"
-              exit 0
             fi
           fi
           printf 'run-checks=true\n' >> "$GITHUB_OUTPUT"
@@ -170,6 +175,7 @@ jobs:
         run: mise run web-prepare
       - name: Run gate self-tests
         run: mise run gate-self-test
+      # 与 verify 作业同一口径：非 PR 事件才写缓存，避免 merge-ref 键挤占仓库额度。
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
@@ -177,6 +183,7 @@ jobs:
           cache-workspace-crates: "true"
           cache-on-failure: "true"
           cache-bin: "false"
+          save-if: ${{ github.event_name != 'pull_request' }}
       - name: Install PostgreSQL 18 for integration tests
         run: |
           sudo apt-get update
@@ -192,11 +199,12 @@ jobs:
           sudo pg_lsclusters
           port="$(pg_lsclusters -h | awk '$1 == 18 { print $3; exit }')"
           test -n "$port"
+          # 集群启动可能失败（例如已在运行或配置损坏）；显式探测端口就绪，不把失败留到测试阶段。
+          pg_isready -h 127.0.0.1 -p "$port"
           # 测试夹具会在该维护连接上创建 auction_runtime 角色与模板库；
           # 生产运行账号本身没有 DDL，这两个属性只属于 CI 测试维护角色。
           sudo -u postgres psql -p "$port" -v ON_ERROR_STOP=1 -c "CREATE ROLE auction_test LOGIN CREATEDB CREATEROLE PASSWORD 'auction_test';"
           sudo -u postgres createdb -p "$port" -O auction_test auction_test
-          echo "AUCTION_TEST_DATABASE_URL=postgresql://auction_test:auction_test@127.0.0.1:$port/auction_test" >> "$GITHUB_ENV"
       - name: Run pure and double tests
         run: mise run test
       - name: Run web behavior tests

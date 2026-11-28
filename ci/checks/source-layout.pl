@@ -13,11 +13,12 @@ use warnings;
 use utf8;
 use open qw(:std :encoding(UTF-8));
 
-# 截止口径与 audit-writes.pl 一致：只有内联测试模块之后不是生产代码。
+# 截止口径与 audit-writes.pl 一致：只有内联测试模块之后不是生产代码。截止位置在掩码文本上匹配，
+# 注释或字面量里的同形文本已换成空白，不会提前截止；cfg 与 mod 之间可隔属性、注释行或空行。
 my $inline_test = qr{
     ^\#\[cfg\(test\)\][ \t]*\n
-    (?:[ \t]*(?:\#\[[^\n]*\]|//[^\n]*)[ \t]*\n)*
-    [ \t]*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{
+    (?:[ \t]*\n|[ \t]*\#[^\n]*\][ \t]*\n)*
+    [ \t]*(?:pub(?:\([^)]*\))?\s+)?mod\s+(?:r\#)?\w+\s*\{
 }xm;
 # 注释、字符串与字符字面量换成等长空白（保留换行），文档示例与字面量里的 `use …::*` 不计入。
 # 前置的首字符断言只是加速：每种非代码片段都以这些字符开头。
@@ -70,14 +71,18 @@ my (@oversized, @globs);
 for my $file (@files) {
     open my $handle, '<', $file or die "$file: $!\n";
     my $code = do { local $/; <$handle> };
-    $code = substr($code, 0, $-[0]) if $code =~ $inline_test;
+    # 掩码文本用于定位截止位置与检查 glob：注释、字面量换成等长空白并保留换行。
+    (my $masked = $code) =~ s{$non_code}{ (my $blank = $&) =~ tr/\n/ /c; $blank }ge;
+    if ($masked =~ $inline_test) {
+        my $cut = $-[0];
+        $code = substr($code, 0, $cut);
+        $masked = substr($masked, 0, $cut);
+    }
 
     my $lines = () = $code =~ /\n/g;
     $lines++ if length $code && substr($code, -1) ne "\n";
     my $limit = $file =~ m{(?:^|/)mod\.rs$} ? 500 : 600;
     push @oversized, "$file ($lines 行，上限 $limit)" if $lines > $limit;
-
-    (my $masked = $code) =~ s{$non_code}{ (my $blank = $&) =~ tr/\n/ /c; $blank }ge;
     # 整条语句匹配，跨行与花括号嵌套都按一条 use 处理；pub / pub(..) use 是门面再导出，不检查，
     # 但 pub(self)、pub(in self) 等同私有。
     while ($masked =~ /(?<![\w\$])(pub(?:\s*\([^()]*\))?\s+)?use\s+([^;]*);/g) {

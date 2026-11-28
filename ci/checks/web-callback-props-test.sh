@@ -22,7 +22,8 @@ check_fixture() {
 	fi
 	printf '%s\t预期 %s\t实际 %s\n' "$name" "$expected_status" "$status"
 	if [[ $status -ne $expected_status ]] ||
-		[[ $expected_status -eq 1 && ${diagnostic#*$'\n'} != "${expected_lines%$'\n'}" ]]; then
+		[[ $expected_status -eq 1 && ${diagnostic#*$'\n'} != "${expected_lines%$'\n'}" ]] ||
+		[[ $expected_status -eq 0 && $diagnostic != 'Web 回调属性门禁通过' ]]; then
 		printf '%s\n' 'Web 回调属性门禁回归失败，退出码或字段行号不匹配。' "$diagnostic" >&2
 		test_failed=1
 	fi

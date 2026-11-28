@@ -177,7 +177,7 @@ check_public_redaction() {
 	local addresses hits ipv4 markdown_addresses failed=0 status=0
 	local -a fixture_roots=() roots=(./docs ./ops ./ci ./.github)
 	hits=$(rg --hidden --line-number --with-filename -g '!.git' -g '!**/target/**' -g '!Cargo.lock' \
-		-e '/home/[a-z_][a-z0-9_-]*/' -e '/Users/[A-Za-z][A-Za-z0-9._-]*/' \
+		-e '/home/[A-Za-z0-9._-]+(/|[^-A-Za-z0-9._-]|$)' -e '/Users/[A-Za-z][A-Za-z0-9._-]*/' \
 		-e '(?-u:\b)192\.168\.[0-9]{1,3}\.[0-9]{1,3}(?-u:\b)' \
 		-e 'auction-test-(?:public|admin|worker|\{|\*)' -- .) || status=$?
 	if ((status > 1)); then
@@ -405,8 +405,18 @@ check_systemd_templates() {
 }
 
 check_config_examples() {
-	local missing
+	local missing list status=0
 
+	if ! list=$(mktemp); then
+		printf '%s\n' "配置示例枚举失败：无法创建临时文件" >&2
+		return 1
+	fi
+	rg --files ops/config/examples -g '*.toml' >"$list" || status=$?
+	if ((status != 0)) || [[ ! -s "$list" ]]; then
+		printf '%s\n' "配置示例枚举失败：ops/config/examples 缺失或没有 .toml 文件" >&2
+		rm -f -- "$list"
+		return 1
+	fi
 	missing=$(
 		while IFS= read -r file; do
 			awk '
@@ -430,8 +440,9 @@ check_config_examples() {
         }
         { previous = $0 }
       ' "$file"
-		done < <(rg --files ops/config/examples -g '*.toml' | sort)
+		done <"$list"
 	)
+	rm -f -- "$list"
 	if [[ -n "$missing" ]]; then
 		printf '%s\n' "配置示例字段缺少紧邻的中文可选/必填注释：" >&2
 		printf '%s\n' "$missing" >&2
@@ -751,7 +762,7 @@ check_work_item_ids() {
 	hits=$(rg --hidden --only-matching --line-number --with-filename \
 		-g '!.git' -g '!**/target/**' -g '!migrations/postgres/*.sql' -g '!Cargo.lock' \
 		-g '!mise.lock' -g '!**/tests/fixtures/**' -g '!**/tests/assets-fixture/**' \
-		-e '\bW[0-9]+\.[0-9]+\b' -e '决策 ?[0-9]+' -e 'D-W[0-9]' -- .) || status=$?
+		-e '(?-u:\b)W[0-9]+\.[0-9]+(?-u:\b)' -e '决策 ?[0-9]+' -e 'D-W[0-9]' -- .) || status=$?
 	if ((status > 1)); then
 		printf '%s\n' "工作项编号扫描失败（rg 退出码 $status）。" >&2
 		return 1

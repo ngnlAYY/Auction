@@ -146,12 +146,16 @@ if (%rust_help_keys && %ts_help_keys) {
 }
 my %derived_help_keys = (%rust_help_keys, %ts_help_keys);
 
-my $failed = 0;
+my @unused;
 for my $key (sort keys %keys) {
     next if $lits{$key};
     # 动态 setup 帮助键只对有限字段 ID 映射中存在、且对应渲染器仍构造帮助键的项放行。
     next if $derived_help_keys{$key};
-    $failed = 1;
+    push @unused, $key;
 }
-exit 1 if $failed;
+if (@unused) {
+    print STDERR "en.ftl 中存在源码未引用的译文键：\n";
+    print STDERR "  $_\n" for @unused;
+    exit 1;
+}
 print "未引用译文键检查通过（$ftl，", scalar(keys %keys), " 个键）\n";

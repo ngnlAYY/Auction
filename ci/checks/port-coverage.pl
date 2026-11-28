@@ -35,15 +35,20 @@ sub read_code {
     return $code;
 }
 
-# 只统计“应用端口 trait for 存储类型”的实现块：trait 路径以端口名结尾，实现者是
-# `DatabaseStore` 或 `Database*` 适配器；测试模块与私有辅助 impl 不计入。
+# 只统计“应用端口 trait for 存储类型”的实现块：实现者是 `DatabaseStore` 或 `Database*`
+# 适配器；标准库 trait（如 `fmt::Display`）不是端口，测试模块与私有辅助 impl 不计入。
+my %std_trait = map { $_ => 1 }
+    qw(Display Debug Clone Default From TryFrom PartialEq Eq PartialOrd Ord Hash Iterator Drop
+    AsRef AsMut Deref DerefMut Borrow);
 my %methods;
 for my $file (rust_files($source_root)) {
     next if $file =~ m{/tests?/};
     my $code = read_code($file);
     $code =~ s/\#\[cfg\(test\)\]\s*mod\s+tests\s*\{.*//s;
-    while ($code =~ /\bimpl(?:<[^>{]*>)?\s+((?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Z][A-Za-z0-9_]*))(?:<[^>{]*>)?\s+for\s+(Database[A-Za-z0-9_]*)(?:<[^>{]*>)?\s*\{/g) {
+    # 实现者后的 `where` 子句可跨行（如 `impl<C> AdminMailReader for DatabaseAdminMailCommands<C> where …`）。
+    while ($code =~ /\bimpl(?:<[^>{]*>)?\s+((?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Z][A-Za-z0-9_]*))(?:<[^>{]*>)?\s+for\s+(Database[A-Za-z0-9_]*)(?:<[^>{]*>)?\s*(?:where\b[^{;]*)?\{/g) {
         my ($trait, $implementer) = ($2, $3);
+        next if $std_trait{$trait};
         my $start = pos($code);
         my ($depth, $index) = (1, $start);
         while ($depth > 0 && $index < length $code) {

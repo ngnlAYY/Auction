@@ -26,7 +26,7 @@ sender_allowlist = []
 # 可选：明确设为 true 才读取任意发件人的详情；默认 false。
 sender_allowlist_disabled = false
 
-# 可选区块：拍卖邮件装备过滤；默认关闭，来源仍必须标记为可交易。
+# 可选区块（与 worlds 组必须同时存在或同时省略；worlds 内至少一个 world 启用）：拍卖邮件装备过滤；默认关闭，来源仍必须标记为可交易。
 [equipment_filter]
 # 可选：是否启用前后缀、分类、类型和等级过滤；品质门槛始终启用，默认 false。
 enabled = false

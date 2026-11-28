@@ -179,6 +179,9 @@ TS
 check_fixture denied-contracts-to-shared 1 "web/contracts/src/to-shared.ts:1: 跨包导入必须使用登记的导入名，不能使用相对路径：../../shared/src/banned" web/contracts/src/to-shared.ts <<'TS'
 import { banned } from "../../shared/src/banned";
 TS
+check_fixture denied-contracts-to-shared-alias 1 "web/contracts/src/to-shared-alias.ts:1: 不允许从 contracts 导入 shared：@auction/web-shared/banned" web/contracts/src/to-shared-alias.ts <<'TS'
+import { banned } from "@auction/web-shared/banned";
+TS
 
 check_fixture denied-public-to-backend 1 "web/public/src/to-backend.ts:1: 不允许导入 web/ 之外的源码或资产：../../../crates/auction-web-public/src/backend" web/public/src/to-backend.ts <<'TS'
 import { source } from "../../../crates/auction-web-public/src/backend";
@@ -240,6 +243,14 @@ const target = "../../admin/src/banned";
 export const load = () => import(target);
 TS
 
+check_fixture allowed-jsx-regex-decoys 0 '' web/public/src/decoys.tsx <<'TSX'
+// JSX 文本里的 import(...) 与正则字面量都不是模块说明符，不得报违规。
+const text = <div>import("../../admin/src/banned") ' "</div>;
+const pattern = /import\("\.\.\/admin/;
+export { text, pattern };
+TSX
+
+# 真实违规单独成例；诱饵已由上一例证明不会误报，避免第 3 行掩盖前两行。
 check_fixture denied-jsx-regex-quotes 1 "web/public/src/quotes.tsx:3: 跨包导入必须使用登记的导入名，不能使用相对路径：../../admin/src/banned" web/public/src/quotes.tsx <<'TSX'
 const text = <div>import("../../admin/src/banned") ' "</div>;
 const pattern = /import\("\.\.\/admin/;
@@ -340,9 +351,39 @@ TS
 	rm -rf -- "$fixture"
 }
 
+check_extended_paths_failure() {
+	local name=$1 fixture status=0 diagnostic
+	fixture=$(mktemp -d)
+	create_fixture "$fixture"
+	cat >"$fixture/web/shared-aliases.json" <<'JSON'
+{
+  "compilerOptions": {
+    "paths": {
+      "@auction/web-public/*": ["./public/src/*"]
+    }
+  }
+}
+JSON
+	# 数组 extends + 省略 .json：扩展文件不在 tsconfig*.json 名单里，也必须被核对。
+	cat >"$fixture/web/public/tsconfig.json" <<'JSON'
+{
+  "extends": ["../tsconfig.base.json", "../shared-aliases"],
+  "include": ["src"]
+}
+JSON
+	diagnostic=$( (cd "$fixture" && bun --no-install "$checker" "$fixture") 2>&1 ) || status=$?
+	printf '%s\t预期 2\t实际 %s\n' "$name" "$status"
+	if [[ $status -ne 2 ]] || ! grep -Fq -- "别名只能登记在 web/tsconfig.base.json：web/shared-aliases.json" <<<"$diagnostic"; then
+		printf '%s\n' "Web 包边界检查回归失败：$name 没有以退出码 2 报告 extends 链里的 paths。" "$diagnostic" >&2
+		test_failed=1
+	fi
+	rm -rf -- "$fixture"
+}
+
 check_child_paths_failure config-child-paths
 check_source_symlink_failure config-source-symlink
 check_target_symlink_violation config-target-symlink
+check_extended_paths_failure config-extended-paths
 
 check_config_failure config-extra-alias "别名登记与检查器不一致" '{
   "compilerOptions": {

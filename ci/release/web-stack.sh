@@ -42,6 +42,10 @@ web_stack_check_file() {
 		printf 'WEB-STACK.v1 必须是普通文件：%s\n' "$file" >&2
 		return 1
 	fi
+	if [[ $(stat -c '%a' -- "$file") != 644 ]]; then
+		printf 'WEB-STACK.v1 必须是 0644 权限：%s\n' "$file" >&2
+		return 1
+	fi
 	mapfile -t lines <"$file"
 	if [[ ${#lines[@]} -ne ${#web_stack_keys[@]} || $(tail -c 1 -- "$file" | od -An -tx1) != ' 0a' ]]; then
 		printf 'WEB-STACK.v1 行数或结尾无效\n' >&2
@@ -55,7 +59,7 @@ web_stack_check_file() {
 		schema) pattern="^${web_stack_schema}$" ;;
 		source_commit) pattern='^[0-9a-f]{40}$' ;;
 		public_stack | admin_stack) pattern='^(solid|dioxus)$' ;;
-		build_id) pattern='^[A-Za-z0-9._-]{1,64}$' ;;
+		build_id) pattern='^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' ;;
 		*) pattern='^[0-9a-f]{64}$' ;;
 		esac
 		if [[ $line != "$key="* || ! $value =~ $pattern ]]; then
@@ -89,7 +93,7 @@ web_stack_payload_paths() {
 }
 
 # 核对导出树 <root> 的路径集合与逐文件摘要必须与 <sha_file> 完全一致：缺文件、多文件、
-# 同名异字节、符号链接与特殊文件都拒绝。
+# 同名异字节、符号链接、特殊文件与非 0644 文件都拒绝。
 web_stack_verify_tree() {
 	local root=$1 sha_file=$2 expected actual
 	expected=$(web_stack_payload_paths "$sha_file") || return 1
@@ -99,6 +103,10 @@ web_stack_verify_tree() {
 	fi
 	if [[ -n $(find "$root" ! -type f ! -type d -print -quit) ]]; then
 		printf '页面导出树含符号链接或特殊文件：%s\n' "$root" >&2
+		return 1
+	fi
+	if [[ -n $(find "$root" -type f ! -perm 0644 -print -quit) ]]; then
+		printf '页面导出树含非 0644 文件：%s\n' "$root" >&2
 		return 1
 	fi
 	actual=$(cd "$root" && find . -type f -printf '%P\n' | LC_ALL=C sort) || return 1

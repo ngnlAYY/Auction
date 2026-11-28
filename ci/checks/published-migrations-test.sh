@@ -55,7 +55,24 @@ if output=$(run); then fail '新增编号不大于已发布最大编号应失败
 [[ $output == *'只能追加更大的编号'* ]] || fail "顺序拒绝缺少诊断：$output"
 rm -f "$repo/migrations/postgres/000002_other.up.sql"
 
+# 严格小于最大编号的新文件同样拒绝：不能只拦“等于最大编号”。
+printf 'inserted\n' >"$repo/migrations/postgres/000001_extra.up.sql"
+if output=$(run); then fail '新增编号小于已发布最大编号应失败'; fi
+[[ $output == *'只能追加更大的编号'* ]] || fail "低编号顺序拒绝缺少诊断：$output"
+rm -f "$repo/migrations/postgres/000001_extra.up.sql"
+
 # 删除新迁移后恢复通过，确认前面的拒绝没有留下失败状态。
 output=$(run) || fail "删除越序文件后应恢复通过：$output"
+
+# 第二个发布 tag：门禁必须检查全部 tag（旧 tag 的文件仍受保护），并跨 tag 取最大已发布编号。
+git -C "$repo" add -A
+git -C "$repo" commit -q -m 'v0.2.0'
+git -C "$repo" tag v0.2.0
+output=$(run) || fail "增加第二个发布 tag 后应通过：$output"
+[[ $output == *'2 个发布 tag'* ]] || fail "多 tag 摘要不符：$output"
+printf 'rewritten\n' >>"$repo/migrations/postgres/000001_first.up.sql"
+if output=$(run); then fail '较早 tag 的已发布迁移改写应失败'; fi
+[[ $output == *'已发布迁移被修改'* ]] || fail "较早 tag 改写拒绝缺少诊断：$output"
+git -C "$repo" checkout -q -- migrations/postgres/000001_first.up.sql
 
 printf '已发布迁移门禁自测通过\n'

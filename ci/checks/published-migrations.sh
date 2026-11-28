@@ -35,7 +35,7 @@ for tag in "${release_tags[@]}"; do
 	while IFS=$'\t' read -r metadata path; do
 		[[ -z ${path-} || $path != *.up.sql ]] && continue
 		base=${path##*/}
-		if [[ $base =~ ^([0-9]{6})_ ]]; then
+		if [[ $base =~ ^([0-9]+)_ ]]; then
 			version=$((10#${BASH_REMATCH[1]}))
 			if ((version > max_published)); then max_published=$version; fi
 		fi
@@ -72,8 +72,14 @@ done
 for path in migrations/postgres/*.up.sql; do
 	[[ -f $path ]] || continue
 	base=${path##*/}
-	[[ $base =~ ^([0-9]{6})_ ]] || continue
+	[[ $base =~ ^([0-9]+)_ ]] || continue
 	version=$((10#${BASH_REMATCH[1]}))
+	# SQLx 按前导数字解析版本；名称必须是六位编号，否则会绕过下面的顺序比较。
+	if [[ ! $base =~ ^[0-9]{6}_ ]]; then
+		printf '迁移文件名必须是六位编号：%s\n' "$path" >&2
+		failures=1
+		continue
+	fi
 	if ((version <= max_published)) && [[ -z ${published_paths[$path]-} ]]; then
 		printf '新增迁移编号 %06d 不大于已发布最大编号 %06d；只能追加更大的编号：%s\n' \
 			"$version" "$max_published" "$path" >&2
