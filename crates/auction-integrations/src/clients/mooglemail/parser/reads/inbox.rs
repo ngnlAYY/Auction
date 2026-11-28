@@ -171,7 +171,11 @@ impl MoogleMailParser {
         let text = text.trim_end_matches('.');
         let missing = text.eq_ignore_ascii_case("Mail does not exist")
             || text.eq_ignore_ascii_case("Mail does not exist, kupo!");
-        if messages.next().is_none() && message.select(hidden).next().is_none() && missing {
+        if messages.next().is_none()
+            && !matches!(message.value().name(), "script" | "style" | "noscript" | "textarea")
+            && message.select(hidden).next().is_none()
+            && missing
+        {
             Ok(None)
         } else {
             Err(error)

@@ -107,6 +107,11 @@ pub(crate) fn parse_raw_attachment_manifest(
         }
         valid
     });
+    // `mail_state` 存在但超出 u8/闭集：与 count/cod 一致，转换失败也必须是未判，
+    // 不能让 "var mail_state=300" 通过冻结清单。
+    if state_raw.is_some() && mail_state.is_none() {
+        unknown = true;
+    }
 
     let lists = document.select(list_selector).take(2).collect::<Vec<_>>();
     if lists.len() > 1 {

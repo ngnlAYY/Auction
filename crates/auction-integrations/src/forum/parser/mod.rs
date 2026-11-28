@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use auction_application::admin::{AdminForumCatalog, AdminForumPreviewResult};
+use auction_application::admin::{AdminForumBidPost, AdminForumCatalog, AdminForumPreviewResult};
 use auction_application::forum::{
     FORUM_CATALOG_PAGE_SIZE, MAX_FORUM_CATALOG_PAGES, forum_catalog_page_marker,
 };
@@ -75,6 +75,8 @@ fn parse_thread_with_identity(
             .filter(|value| !value.is_nil())
             .map(AuctionId::from_uuid)
     });
+    // 已合并的目录续页数（必须从第 2 楼起连续）；这些楼层只提供拍品事实，不能再当竞价帖解析。
+    let mut merged_catalog_posts = 0_usize;
     if let Some(auction_id) = auction_id {
         let mut codes = catalog.1.iter().map(|lot| lot.code.clone()).collect::<HashSet<_>>();
         for (index, post) in posts.iter().enumerate().skip(1) {
@@ -111,6 +113,7 @@ fn parse_thread_with_identity(
                 warning.post_id = Some(post.id.clone());
             }
             catalog_warnings.extend(warnings);
+            merged_catalog_posts += 1;
         }
     }
     let mut result = AdminForumPreviewResult {
@@ -126,7 +129,19 @@ fn parse_thread_with_identity(
     };
     // 完整目录只建一次借用索引；每条命令无需线性扫描全部拍品。
     let lot_codes = result.catalog.lots.iter().map(|lot| lot.code.as_str()).collect();
+    let mut merged_remaining = merged_catalog_posts;
     for post in posts.into_iter().skip(1) {
+        if merged_remaining > 0 {
+            merged_remaining -= 1;
+            // 目录续页已被合并为拍品事实；保留楼层但标记忽略，不再产生 invalid_command 噪音。
+            result.posts.push(AdminForumBidPost {
+                post: results::map_post(post),
+                commands: Vec::new(),
+                warnings: Vec::new(),
+                ignored: true,
+            });
+            continue;
+        }
         let (parsed, warnings) = commands::parse_bid_post(post, &lot_codes);
         result.warnings.extend(warnings);
         result.posts.push(parsed);

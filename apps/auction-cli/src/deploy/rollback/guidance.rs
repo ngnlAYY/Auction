@@ -74,11 +74,14 @@ pub(super) fn install_failed(
 /// 安装目录仍是回退前的程序、数据库未改变时的处置：保留的 CLI 已在停机前核对为与数据库同版本，
 /// `service start` 的迁移是空操作，只重新启动回退前的角色程序；或修复原因后以原记录重试回退。
 fn pre_rollback_recovery(install_dir: &Path, record: &RollbackRecord) -> String {
+    let cli = install_dir.join("auction-cli");
     format!(
         "恢复原状请用 {} service start --owner-secrets <迁移 owner 凭据>（沿用本次的 --config-dir、\
-         --state-dir 与 unit 参数；保留的 CLI 与数据库同版本，迁移为空操作），或修复原因后用 \
-         auction-cli rollback --receipt-id {} 重试回退",
-        install_dir.join("auction-cli").display(),
+         --state-dir 与 unit 参数；保留的 CLI 与数据库同版本，迁移为空操作），或修复原因后用 {} \
+         rollback --receipt-id {} 重试回退（rollback 只接受安装目录的 CLI，沿用本次的 \
+         --config-dir、--state-dir 与 unit 参数）",
+        cli.display(),
+        cli.display(),
         record.record_id
     )
 }

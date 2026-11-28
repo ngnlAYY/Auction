@@ -68,7 +68,7 @@ impl RateLimitedLog {
             }
         };
         if !summary_enabled {
-            self.flush();
+            // 仅放行本条：不能因低级别日志提前结束其他级别仍在生效的窗口。
             return true;
         }
 

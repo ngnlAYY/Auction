@@ -1,5 +1,7 @@
 //! 论坛预览的结果映射、警告和排序辅助。
 
+use std::cmp::Ordering;
+
 use auction_application::admin::{AdminForumPost, AdminForumWarning};
 
 use super::model::ParsedPost;
@@ -32,7 +34,21 @@ pub(super) fn warning(
 
 pub(super) fn sort_warnings(warnings: &mut [AdminForumWarning]) {
     warnings.sort_by(|left, right| {
-        left.post_id.cmp(&right.post_id).then_with(|| left.line.cmp(&right.line))
+        let by_post = match (&left.post_id, &right.post_id) {
+            (None, None) => Ordering::Equal,
+            (None, Some(_)) => Ordering::Less,
+            (Some(_), None) => Ordering::Greater,
+            (Some(left_id), Some(right_id)) if left_id == right_id => Ordering::Equal,
+            // 帖子 ID 是十进制文本：先按位数再按字典序，不能直接比较 String。
+            (Some(left_id), Some(right_id)) => {
+                if super::decimal_id_precedes(left_id, right_id) {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            }
+        };
+        by_post.then_with(|| left.line.cmp(&right.line))
     });
 }
 

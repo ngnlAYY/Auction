@@ -115,7 +115,14 @@ impl Libpq {
         for (key, value) in parsed.query_pairs() {
             match key.as_ref() {
                 "host" | "hostaddr" | "port" | "dbname" | "user" | "statement-cache-capacity" => {}
-                "password" => password = Some(value.into_owned()),
+                // query_pairs 已解码百分号转义：控制字符（尤其换行）会向 passfile 注入额外记录，
+                // 因此与 userinfo 口令走同一拒绝口径，而不是原样写入。
+                "password" => {
+                    if value.chars().any(char::is_control) {
+                        anyhow::bail!("数据库连接参数含控制字符");
+                    }
+                    password = Some(value.into_owned());
+                }
                 "sslmode" | "ssl-mode" => {
                     let mode = value.to_ascii_lowercase();
                     if !matches!(

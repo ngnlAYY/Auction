@@ -166,6 +166,24 @@ where
         user_id: Uuid,
         envelope: MailLoginKeyEnvelope,
     ) -> Result<MailLoginKey, ApplicationError> {
+        self.open_envelope_with(user_id, envelope, false)
+    }
+
+    /// Admin 重放/改名回滚可能读到手工封装的 32–256 字节 key；Worker 读取保持 canonical 闭集。
+    fn open_admin_envelope_now(
+        &self,
+        user_id: Uuid,
+        envelope: MailLoginKeyEnvelope,
+    ) -> Result<MailLoginKey, ApplicationError> {
+        self.open_envelope_with(user_id, envelope, true)
+    }
+
+    fn open_envelope_with(
+        &self,
+        user_id: Uuid,
+        envelope: MailLoginKeyEnvelope,
+        allow_admin_manual: bool,
+    ) -> Result<MailLoginKey, ApplicationError> {
         if user_id.is_nil() {
             return Err(MailProcessingError::InvalidLoginKey.into());
         }
@@ -196,7 +214,11 @@ where
         let Ok(encoded) = std::str::from_utf8(opened.as_bytes()) else {
             return Err(crypto_error(LoginKeyCryptoError::InvalidPlaintext));
         };
-        MailLoginKey::from_encoded(encoded).map_err(ApplicationError::from)
+        let canonical = MailLoginKey::from_encoded(encoded);
+        if allow_admin_manual && canonical.is_err() {
+            return MailLoginKey::from_admin_manual(encoded).map_err(ApplicationError::from);
+        }
+        canonical.map_err(ApplicationError::from)
     }
 }
 
@@ -218,7 +240,7 @@ where
         user_id: Uuid,
         envelope: MailLoginKeyEnvelope,
     ) -> ApplicationFuture<'_, MailLoginKey> {
-        Box::pin(async move { self.open_envelope_now(user_id, envelope) })
+        Box::pin(async move { self.open_admin_envelope_now(user_id, envelope) })
     }
 }
 

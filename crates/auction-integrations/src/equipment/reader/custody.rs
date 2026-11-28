@@ -53,7 +53,16 @@ impl CustodyEquipmentObservation {
         digest.update(u64::try_from(self.name.len()).unwrap_or(u64::MAX).to_be_bytes());
         digest.update(self.name.as_bytes());
         digest.update(self.category.as_bytes());
-        digest.update(self.level.map_or(0_i32, i32::from).to_be_bytes());
+        // 未分配/魂绑与 Assigned(0) 必须可区分；编码只在本进程重算，不进入持久化格式。
+        match self.level {
+            Some(level) => {
+                digest.update([1_u8]);
+                digest.update(level.to_be_bytes());
+            }
+            None => {
+                digest.update([0_u8]);
+            }
+        }
         digest.update([u8::from(self.tradeable)]);
         digest.update(self.observed_at.to_rfc3339().as_bytes());
         digest.finalize().into()
@@ -145,6 +154,11 @@ impl EquipmentSourceAdapter {
             .with_bytes(|bytes| std::str::from_utf8(bytes).map(str::to_owned))
             .map_err(invalid_key_material)?
             .map_err(invalid_key_text)?;
+        // 装备编号必须先通过本地规范十进制校验再拼路径；否则 `/ ? # %` 可改变请求目标。
+        // 与后续 canonical_eid 同口径（允许前导零，但必须含非零数字且不超 32 位）。
+        if canonical_eid(&attachment.external_equipment_id).is_none() {
+            return Err(CustodyEquipmentError::InvalidRequest);
+        }
         let prefix = if world == MoogleMailWorld::Isekai { "/isekai/equip/" } else { "/equip/" };
         let mut target = self.endpoint.clone();
         target.set_path(&format!("{prefix}{}/{}", attachment.external_equipment_id, key));

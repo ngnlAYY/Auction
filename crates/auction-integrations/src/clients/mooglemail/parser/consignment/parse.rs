@@ -12,7 +12,7 @@ use super::ConsignmentDetailObservation;
 use super::ConsignmentListRow;
 use crate::clients::mooglemail::parser::{
     MAX_ATTACHMENT_ENTRIES, RawAttachmentKind, canonical_mail_body_digest, canonical_positive_eid,
-    equipment_keys, extract_mid, normalize_text, parse_detail_actions_lenient,
+    equipment_keys_partial, extract_mid, normalize_text, parse_detail_actions_lenient,
     parse_detail_fields_for, parse_raw_attachment_manifest, parse_world_marker, read_selector,
     subject_is_list_projection, unique_element, valid_inbox_header, valid_message_body,
 };
@@ -137,18 +137,9 @@ pub fn parse_consignment_detail(
     let raw = parse_raw_attachment_manifest(&parsed, world);
     let wanted =
         raw.entries.iter().filter_map(|entry| entry.raw_eid.clone()).collect::<HashSet<_>>();
-    let mut keys = equipment_keys(&parsed, &body, &wanted, world).unwrap_or_default();
-    for raw_eid in &wanted {
-        if keys.contains_key(raw_eid) {
-            continue;
-        }
-        let singleton = HashSet::from([raw_eid.clone()]);
-        if let Ok(mut found) = equipment_keys(&parsed, &body, &singleton, world)
-            && let Some(key) = found.remove(raw_eid)
-        {
-            keys.insert(raw_eid.clone(), key);
-        }
-    }
+    // 一次性宽容提取：单次扫描正文与全部脚本，个别附件读不出 key 时只把它标为未判，
+    // 不再逐 ID 重跑整段正文（正文与附件数由对方控制，逐 ID 重扫可放大到 GiB 级）。
+    let mut keys = equipment_keys_partial(&parsed, &body, &wanted, world).unwrap_or_default();
 
     let mut items = Vec::with_capacity(raw.entries.len());
     let mut raw_seen = HashSet::new();

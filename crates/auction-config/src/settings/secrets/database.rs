@@ -95,8 +95,8 @@ pub(super) fn resolve_database_url(
         .transpose()
 }
 
-/// 旧 URI 保留驱动的凭据、TLS 和查询覆盖语义，但 host/socket 与库名必须明确。
-/// 省略端口使用 PostgreSQL 的固定默认值，不继承进程环境中的 PGPORT。
+/// 旧 URI 保留驱动的凭据、TLS 和查询覆盖语义，但 host/socket 与库名必须明确；同一目标键
+/// 重复出现且取值冲突时按歧义目标拒绝，不依赖后写覆盖。
 fn explicit_database_url(value: String) -> Result<String, ConfigError> {
     let invalid = || ConfigError::InvalidDatabaseConfig("database_url");
     if value != value.trim() || !valid_url_encoding(&value) {
@@ -115,6 +115,9 @@ fn explicit_database_url(value: String) -> Result<String, ConfigError> {
     let mut hostaddr: Option<String> = None;
     let mut database = !url.path().trim_start_matches('/').is_empty();
     let mut port = url.port();
+    // 查询参数里的目标键按出现顺序覆盖；重复键只允许取值一致，避免驱动与本校验分叉。
+    let mut query_database: Option<String> = None;
+    let mut query_port: Option<u16> = None;
     for (key, value) in url.query_pairs() {
         match key.as_ref() {
             "host" | "hostaddr" => {
@@ -127,8 +130,21 @@ fn explicit_database_url(value: String) -> Result<String, ConfigError> {
                 }
                 *selected = Some(value.into_owned());
             }
-            "dbname" => database = !value.is_empty(),
-            "port" => port = Some(value.parse::<u16>().map_err(|_| invalid())?),
+            "dbname" => {
+                if query_database.as_deref().is_some_and(|existing| existing != value.as_ref()) {
+                    return Err(invalid());
+                }
+                database = !value.is_empty();
+                query_database = Some(value.into_owned());
+            }
+            "port" => {
+                let parsed = value.parse::<u16>().map_err(|_| invalid())?;
+                if query_port.is_some_and(|existing| existing != parsed) {
+                    return Err(invalid());
+                }
+                query_port = Some(parsed);
+                port = Some(parsed);
+            }
             _ => {}
         }
     }
@@ -166,9 +182,11 @@ fn validate_text(field: &'static str, value: &str, maximum: usize) -> Result<(),
 /// 不读取 PGUSER 或当前系统账号，避免把本机身份误判为部署账号。
 pub fn database_url_username(database_url: &str) -> Option<String> {
     let url = Url::parse(database_url).ok()?;
+    // URL userinfo 是序列化的百分号编码文本；与 `user` 查询参数一样先解码，
+    // 才能按真实登录名与配置中的账号分工比较。
     let userinfo = url.username();
     if !userinfo.is_empty() {
-        return Some(userinfo.to_owned());
+        return auction_application::core::strict_percent_decode(userinfo).map(Cow::into_owned);
     }
     url.query_pairs()
         .find(|(key, value)| key.as_ref() == "user" && !value.is_empty())
@@ -177,7 +195,7 @@ pub fn database_url_username(database_url: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::explicit_database_url;
+    use super::{database_url_username, explicit_database_url};
 
     #[test]
     fn accepts_query_only_tcp_and_unix_socket_endpoints() {
@@ -197,6 +215,8 @@ mod tests {
             "postgresql:///auction?host=&port=5432",
             "postgresql://db.example/auction?host=other.example&port=5432",
             "postgresql:///auction?host=db.example&host=db.other&port=5432",
+            "postgresql:///auction?dbname=auction&dbname=other",
+            "postgresql:///auction?host=db.example&port=5432&port=5433",
         ] {
             assert!(explicit_database_url(url.to_owned()).is_err(), "{url}");
         }
@@ -208,6 +228,14 @@ mod tests {
                 "postgresql:///auction?host=db.example&hostaddr=127.0.0.1&port=5432".to_owned()
             )
             .is_ok()
+        );
+    }
+
+    #[test]
+    fn decodes_percent_encoded_userinfo_for_account_comparison() {
+        assert_eq!(
+            database_url_username("postgresql://auction%40owner:secret@db:5432/auction").as_deref(),
+            Some("auction@owner")
         );
     }
 }

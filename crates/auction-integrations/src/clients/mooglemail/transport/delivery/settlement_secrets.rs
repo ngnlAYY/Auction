@@ -3,10 +3,10 @@
 use auction_application::core::ApplicationError;
 use auction_application::core::diagnostics::DiagnosticContext;
 use auction_application::delivery::DeliveryTransportError;
+use auction_application::settlement::valid_external_positive_id;
 use auction_domain::EquipmentId;
 use uuid::Uuid;
 
-use crate::clients::mooglemail::protocol::valid_decimal_id;
 use crate::clients::mooglemail::transport::types::MoogleMailDeliveryTransport;
 use crate::clients::mooglemail::transport::{
     SettlementEquipmentSecretReference, equipment_secret_not_found, equipment_secret_unavailable,
@@ -54,7 +54,7 @@ impl MoogleMailDeliveryTransport {
                 }
             };
             if secret.equipment_id != equipment_id
-                || !valid_decimal_id(&secret.external_equipment_id)
+                || !valid_external_positive_id(&secret.external_equipment_id)
                 || result.contains(&secret.external_equipment_id)
             {
                 return Err(equipment_secret_unavailable());

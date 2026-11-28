@@ -41,9 +41,13 @@ pub(crate) trait AssetSource: Send + Sync + 'static {
     fn paths(&self) -> Box<dyn Iterator<Item = Cow<'_, str>> + '_>;
 
     /// 带内容指纹的站点图标路径：`assets/favicon-<指纹>.svg`。
+    ///
+    /// 挂载来源的路径按 `HashMap` 顺序枚举；多个候选时取字典序最小者，
+    /// 保证同一份挂载在每次启动都返回同一表示（ETag 与正文不随迭代顺序变化）。
     fn favicon_path(&self) -> Option<String> {
         self.paths()
-            .find(|path| path.starts_with("assets/favicon-") && path.ends_with(".svg"))
+            .filter(|path| path.starts_with("assets/favicon-") && path.ends_with(".svg"))
+            .min()
             .map(Cow::into_owned)
     }
 }

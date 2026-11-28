@@ -82,8 +82,10 @@ pub async fn serve_admin_setup_asset<A: rust_embed::RustEmbed + 'static>(
     web_script_policy: WebScriptPolicy,
 ) -> Response {
     let mut response = serve::<A>(Surface::Admin, request, true, web_script_policy);
-    // 首次设置不属于正式 CDN 表面，连静态资源也不允许边缘保存。
+    // 首次设置不属于正式 CDN 表面：契约要求全部响应（页面、图标与静态资源）都禁止缓存，
+    // 因此浏览器 `Cache-Control` 也一并覆盖，保留的静态标记不能放宽。
     response.extensions_mut().remove::<StaticCachePolicy>();
+    response.headers_mut().insert("cache-control", HeaderValue::from_static("no-store"));
     response.headers_mut().insert("cdn-cache-control", HeaderValue::from_static("no-store"));
     response
         .headers_mut()
@@ -513,6 +515,14 @@ mod tests {
             serve_admin_setup_asset::<SolidAssets>(request("/setup", None), WebScriptPolicy::Solid)
                 .await;
         assert_eq!(setup.status(), StatusCode::OK);
+        // 契约：首次设置的全部响应禁止缓存，包括页面、图标与带指纹静态资源。
+        for path in ["/setup", "/favicon.ico", "/assets/index-B2UikXgQ.js"] {
+            let cached =
+                serve_admin_setup_asset::<SolidAssets>(request(path, None), WebScriptPolicy::Solid)
+                    .await;
+            assert_eq!(cached.status(), StatusCode::OK, "{path}");
+            assert_eq!(cached.headers()[header::CACHE_CONTROL], "no-store", "{path}");
+        }
         for path in ADMIN_CONSIGNMENT_PAGES {
             let page =
                 serve_admin_setup_asset::<SolidAssets>(request(path, None), WebScriptPolicy::Solid)

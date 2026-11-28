@@ -1,6 +1,7 @@
 //! 范围证据的离线解密与恢复校验：先完整验证密文与打包摘要，再逐个写入全新私有目录。
 
 use std::{
+    collections::BTreeSet,
     ffi::CString,
     fs::{self, File, OpenOptions},
     io::Write,
@@ -35,6 +36,14 @@ pub(crate) struct Options<'a> {
 pub(crate) async fn run(options: Options<'_>) -> anyhow::Result<()> {
     if let Some(receipt) = options.receipt {
         files::require_private_target(receipt)?;
+    }
+    // 回执与 JSON 输出按 UTF-8 路径投影；提前拒绝无法表示的路径，避免解出证据后 panic。
+    for path in [Some(options.output_dir), options.receipt].into_iter().flatten() {
+        anyhow::ensure!(
+            path.to_str().is_some(),
+            "路径必须能被 JSON 回执表示为 UTF-8：{}",
+            path.display()
+        );
     }
     let verified = crate::backup::verify_pair(options.manifest, options.database).await?;
     let scope =
@@ -105,21 +114,11 @@ pub(crate) async fn run(options: Options<'_>) -> anyhow::Result<()> {
 
 fn prepare_output(output_dir: &Path) -> anyhow::Result<File> {
     super::collect::validate_absolute(output_dir)?;
-    match fs::symlink_metadata(output_dir) {
-        Ok(metadata) => {
-            if !metadata.is_dir() || metadata.file_type().is_symlink() {
-                anyhow::bail!("范围输出必须是真实目录：{}", output_dir.display());
-            }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error).context("读取范围输出目录失败"),
-    }
     files::ensure_private_dir(output_dir)?;
-    let directory = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(output_dir)
-        .context("固定范围输出目录失败")?;
+    // 与来源目录共用祖先信任口径：逐级打开并复核，只有当前账号或 root 拥有的祖先（root 的
+    // sticky 目录除外）才不会被他人改名或替换，随后的路径式写入因此仍落在受控目录树里。
+    // 叶子目录的类型、符号链接与权限也在这里一并复核。
+    let directory = super::collect::open_directory(output_dir).context("固定范围输出目录失败")?;
     let metadata = directory.metadata().context("读取范围输出目录元数据失败")?;
     if !metadata.is_dir()
         || metadata.uid() != files::effective_uid()
@@ -265,11 +264,13 @@ struct Extractor {
     root: PathBuf,
     current: Option<(String, File)>,
     files: u64,
+    /// 本次写入用到的相对父目录；`finish` 逐级补同步，崩溃后新建目录项仍可见。
+    directories: BTreeSet<PathBuf>,
 }
 
 impl Extractor {
     fn new(root: PathBuf) -> Self {
-        Self { root, current: None, files: 0 }
+        Self { root, current: None, files: 0, directories: BTreeSet::new() }
     }
 
     fn write(&mut self, _kind: &SourceKind, path: &str, chunk: &[u8]) -> anyhow::Result<()> {
@@ -281,6 +282,11 @@ impl Extractor {
             let target = self.root.join(path);
             if !target.starts_with(&self.root) {
                 anyhow::bail!("范围条目路径越界");
+            }
+            if let Some(relative_parent) = Path::new(path).parent()
+                && !relative_parent.as_os_str().is_empty()
+            {
+                self.directories.insert(relative_parent.to_owned());
             }
             if let Some(parent) = target.parent() {
                 fs::DirBuilder::new()
@@ -309,8 +315,18 @@ impl Extractor {
     fn finish(mut self) -> anyhow::Result<u64> {
         if let Some((path, file)) = self.current.take() {
             file.sync_all().with_context(|| format!("同步范围输出文件失败：{path}"))?;
-            let parent = self.root.join(&path);
-            files::sync_parent(&parent)?;
+            files::sync_parent(&self.root.join(&path))?;
+        }
+        // 新建的每一层目录都要在其父目录同步后才在崩溃后保留；从最深一层补齐到输出根。
+        let mut synced = BTreeSet::new();
+        for relative in std::mem::take(&mut self.directories) {
+            let mut level = self.root.join(relative);
+            while synced.insert(level.clone()) {
+                files::sync_directory(&level, "范围输出目录")?;
+                if level == self.root || !level.pop() {
+                    break;
+                }
+            }
         }
         Ok(self.files)
     }

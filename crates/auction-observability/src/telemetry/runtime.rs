@@ -217,7 +217,10 @@ fn build_provider(
         config.max_export_batch_size,
         config.batch_timeout,
     )?;
-    let sampler = Sampler::ParentBased(Box::new(Sampler::TraceIdRatioBased(config.sample_ratio)));
+    // 远端父级已采样不能无条件 AlwaysOn：外部请求可用 traceparent 尾缀 01 强制采样，
+    // 令采样预算与有界队列失效；远端父级显式复用同一比例采样器。
+    let sampler = Sampler::parent_based(Sampler::TraceIdRatioBased(config.sample_ratio))
+        .with_remote_parent_sampled(Sampler::TraceIdRatioBased(config.sample_ratio));
     let resource = Resource::builder()
         .with_service_name(service.to_owned())
         .with_attributes([

@@ -4,7 +4,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use auction_domain::{EquipmentId, EquipmentKey, EquipmentKeyEnvelope};
+use auction_domain::{DataKeyDomain, EquipmentId, EquipmentKey, EquipmentKeyEnvelope};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use ring::{aead, hmac, rand::SystemRandom};
 use thiserror::Error;
@@ -212,6 +212,10 @@ impl EquipmentKeyOpener {
         equipment_id: EquipmentId,
         envelope: &EquipmentKeyEnvelope,
     ) -> Result<EquipmentKey, EquipmentKeyOpenerError> {
+        // 装备 key 只能由装备域密钥环解密；同 key id 出现在别的域密钥环时必须拒绝。
+        if self.keys.domain() != DataKeyDomain::Equipment {
+            return Err(EquipmentKeyOpenerError::KeyMismatch);
+        }
         if equipment_id.is_nil() {
             return Err(EquipmentKeyOpenerError::InvalidEquipmentId);
         }

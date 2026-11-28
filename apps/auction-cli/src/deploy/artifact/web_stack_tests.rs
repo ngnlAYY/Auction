@@ -311,6 +311,8 @@ fn web_stack_file_must_be_closed_and_ordered() {
         |text: &str| text.replace("build_id=build-1\n", "build_id=build-1\nextra=1\n"),
         |text: &str| text.replace("build_id=build-1\n", "\nbuild_id=build-1\n"),
         |text: &str| text.replace("build_id=build-1\n", "build_id=bad id\n"),
+        // 与 web 安装口径一致：以 `.` 开头的 build_id 不能通过制品校验。
+        |text: &str| text.replace("build_id=build-1\n", "build_id=.hidden\n"),
         |text: &str| text.trim_end_matches('\n').to_owned(),
     ] {
         let root = Fixture::solid().build();

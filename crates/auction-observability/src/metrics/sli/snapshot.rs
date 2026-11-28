@@ -37,6 +37,8 @@ pub(super) struct Collector {
     outbid_non_positive: GaugeVec,
     outbid_unknown: GaugeVec,
     flow_available: IntGaugeVec,
+    /// 采集期间独占共享 gauge 写入；并发抓取不能交错两个快照版本。
+    collection_gate: std::sync::Mutex<()>,
 }
 
 impl Collector {
@@ -95,6 +97,7 @@ impl Collector {
                 &["world", "channel", "deadline_state"],
             )?,
             flow_available,
+            collection_gate: std::sync::Mutex::new(()),
         })
     }
 
@@ -200,9 +203,12 @@ impl PrometheusCollector for Collector {
                             snapshot.value.outbid[world_index][channel.index()][state.index()];
                         let labels = [world.label(), channel.label(), state.label()];
                         if margin.samples == 0 {
-                            let _ = self.outbid_samples.remove_label_values(&labels);
-                            let _ = self.outbid_non_positive.remove_label_values(&labels);
-                            let _ = self.outbid_unknown.remove_label_values(&labels);
+                            // 没有样本时只抑制分位数；覆盖缺口（unknown）必须继续上报。
+                            self.outbid_samples.with_label_values(&labels).set(0.0);
+                            self.outbid_non_positive.with_label_values(&labels).set(0.0);
+                            self.outbid_unknown
+                                .with_label_values(&labels)
+                                .set(margin.unknown as f64);
                             for quantile in ["p01", "p05"] {
                                 let _ = self.outbid_margin.remove_label_values(&[
                                     world.label(),

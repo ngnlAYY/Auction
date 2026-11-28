@@ -194,11 +194,19 @@ async fn read_bounded(
     }
 }
 
-/// systemd unit 名称闭集：防止参数注入或误把模板/路径当作 unit。
+/// systemd unit 名称闭集：防止参数注入，并拒绝空基名与模板（`foo@.service`）：模板能通过
+/// `show` 的装载检查，却只会在停机后的 `start` 才失败。
 fn validate_unit(unit: &str) -> anyhow::Result<()> {
-    let valid = unit.ends_with(".service")
-        && unit.len() <= 256
+    let stem = unit.strip_suffix(".service").filter(|stem| !stem.is_empty());
+    let name_and_instance = stem.is_some_and(|stem| match stem.split_once('@') {
+        Some((name, instance)) => {
+            !name.is_empty() && !instance.is_empty() && !instance.contains('@')
+        }
+        None => true,
+    });
+    let valid = unit.len() <= 256
         && !unit.starts_with('-')
+        && name_and_instance
         && unit.bytes().all(|byte| byte.is_ascii_alphanumeric() || b":_.@-\\".contains(&byte));
     if !valid {
         anyhow::bail!("systemd unit 名称无效：{unit}");
@@ -389,4 +397,28 @@ fn stop_timeout(value: &str) -> anyhow::Result<Duration> {
         anyhow::bail!("TimeoutStopUSec 必须大于零");
     }
     Ok(Duration::from_micros(micros))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_unit;
+
+    /// unit 名称闭集拒绝空基名与模板：它们能通过 `show`，却只会在停机后的 `start` 才失败。
+    #[test]
+    fn unit_names_reject_empty_bases_and_templates() {
+        for valid in ["auction-worker.service", "auction@blue.service"] {
+            validate_unit(valid).expect(valid);
+        }
+        for invalid in [
+            ".service",
+            "-worker.service",
+            "auction@.service",
+            "auction@a@b.service",
+            "worker.socket",
+            "worker",
+            "/opt/worker.service",
+        ] {
+            assert!(validate_unit(invalid).is_err(), "{invalid}");
+        }
+    }
 }

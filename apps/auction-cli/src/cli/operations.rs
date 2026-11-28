@@ -37,6 +37,9 @@ pub(crate) enum CredentialCommand {
         /// 写入审计的操作者标识。
         #[arg(long)]
         actor: String,
+        /// 稳定命令 UUID；响应丢失后必须用同一 ID 与相同输入重试并重放已提交结果。
+        #[arg(long)]
+        command_id: Uuid,
     },
 }
 

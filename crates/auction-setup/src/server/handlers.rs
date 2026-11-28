@@ -84,16 +84,20 @@ pub(super) async fn complete(
     // `spawn_blocking` continues after the request future is cancelled; mark the operation unknown
     // before handoff so another request cannot race a still-running publication.
     operation.status = SetupStatus::OutcomeUnknown;
+    let token_file = state.token_file.clone();
     let joined = tokio::task::spawn_blocking(move || {
-        if initialize_and_start {
+        let written = if initialize_and_start {
             options.write_managed_to(&output_dir)
         } else {
             options.write_to(&output_dir)
-        }
+        };
+        // 发布与一次性令牌删除在同一不可取消的阻塞任务内完成：请求被取消也不能留下可用令牌。
+        let removed = written.is_ok() && remove_setup_token(&token_file).is_ok();
+        (written, removed)
     })
     .await;
-    let written = match joined {
-        Ok(written) => written,
+    let (written, removed) = match joined {
+        Ok(result) => result,
         Err(_) => {
             operation.status = SetupStatus::OutcomeUnknown;
             if let Some(sender) = operation.shutdown.take() {
@@ -104,18 +108,15 @@ pub(super) async fn complete(
     };
     match written {
         // 发布和保存授权目标使用同一门禁，让监管进程按这次确认复核重读的配置。
-        Ok(()) => {
-            let token_file = state.token_file.clone();
-            let removed =
-                tokio::task::spawn_blocking(move || remove_setup_token(&token_file)).await;
-            if !matches!(removed, Ok(Ok(()))) {
-                operation.status = SetupStatus::OutcomeUnknown;
-                if let Some(sender) = operation.shutdown.take() {
-                    let _ = sender.send(());
-                }
-                return Err(error(StatusCode::INTERNAL_SERVER_ERROR, "setup_outcome_unknown"));
-            }
+        Ok(()) if removed => {
             operation.status = SetupStatus::Completed(confirmed_database);
+        }
+        Ok(()) => {
+            operation.status = SetupStatus::OutcomeUnknown;
+            if let Some(sender) = operation.shutdown.take() {
+                let _ = sender.send(());
+            }
+            return Err(error(StatusCode::INTERNAL_SERVER_ERROR, "setup_outcome_unknown"));
         }
         Err(FirstRunError::OutcomeUnknown) => {
             // 目录可能已经发布，保留终态直到人工检查并停止此进程，不能恢复为可重试状态。

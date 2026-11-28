@@ -18,8 +18,8 @@ use super::{MoogleMailDeliveryTransport, MoogleMailNotificationTemplates, render
 use crate::clients::mooglemail::gateway::MoogleMailCredentialSession;
 use crate::clients::mooglemail::parser::canonical_mail_body_digest;
 use crate::clients::mooglemail::{
-    MoogleMailCredentialSet, MoogleMailDiscardOutcome, MoogleMailError, MoogleMailErrorCategory,
-    MoogleMailOperation, MoogleMailSender, MoogleMailSentListEntry, MoogleMailWorld,
+    MoogleMailCredentialSet, MoogleMailDiscardOutcome, MoogleMailError, MoogleMailOperation,
+    MoogleMailSender, MoogleMailSentListEntry, MoogleMailWorld,
 };
 use crate::safe_diagnostics;
 
@@ -129,7 +129,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
             {
                 Ok(outcome) => outcome,
                 Err(error) => {
-                    if error.category == MoogleMailErrorCategory::SessionExpired {
+                    if error.is_session_expired() && !error.write_started() {
                         let _ = session.invalidate_current().await;
                     }
                     return Err(maintenance_remote_error(error, "compose 草稿丢弃失败"));

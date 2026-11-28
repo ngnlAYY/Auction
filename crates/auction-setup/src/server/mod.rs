@@ -272,9 +272,12 @@ pub async fn run_first_run_with_policy<A: RustEmbed + 'static>(
         .remote
         .as_ref()
         .map_or_else(|| format!("http://{}", policy.listen), |remote| remote.origin.clone());
-    let mut stderr = io::stderr().lock();
-    write_setup_banner(&mut stderr, &origin, &state.token_file)
-        .map_err(|_| "cannot write setup token file path")?;
+    {
+        // 锁只覆盖横幅写入：std 的 stderr 锁是线程相关的，不能跨 serve().await 持有。
+        let mut stderr = io::stderr().lock();
+        write_setup_banner(&mut stderr, &origin, &state.token_file)
+            .map_err(|_| "cannot write setup token file path")?;
+    }
 
     let reason = lifecycle::serve(listener, app, signals, shutdown_receiver).await?;
     // 强制收口后不再次无界等待操作锁；无法确认终态时禁止后续迁移和角色启动。
@@ -650,11 +653,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn setup_asset_fallback_fingerprints_follow_the_selected_policy() {
-        for (policy, expected) in [
-            (WebScriptPolicy::Solid, "public, max-age=31536000, immutable"),
-            (WebScriptPolicy::Dioxus, "no-cache"),
-        ] {
+    async fn setup_asset_fallback_fingerprints_are_never_cached() {
+        // 契约：首次设置的全部响应禁止缓存；带指纹的静态资源同样覆盖技术栈的默认缓存策略。
+        for policy in [WebScriptPolicy::Solid, WebScriptPolicy::Dioxus] {
             let request = Request::builder()
                 .uri("/assets/index-B2UikXgQ.js")
                 .body(Body::empty())
@@ -664,7 +665,7 @@ mod tests {
             assert_eq!(response.status(), StatusCode::OK, "{policy:?}");
             assert_eq!(
                 response.headers()[axum::http::header::CACHE_CONTROL],
-                expected,
+                "no-store",
                 "{policy:?}"
             );
         }

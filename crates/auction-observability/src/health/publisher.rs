@@ -166,23 +166,23 @@ impl HeartbeatPublisher {
             .load(Ordering::Relaxed)
             .checked_add(1)
             .ok_or(HealthError::InvalidCommand)?;
-        let result = if valid_details(&details) {
-            self.store
-                .publish(HeartbeatCommand {
-                    service_name: self.service_name,
-                    process_role: self.process_role,
-                    instance_id: self.instance_id.clone(),
-                    version: self.version.clone(),
-                    started_at: self.started_at,
-                    status,
-                    readiness,
-                    audit_failure_count,
-                    tracing,
-                    observation_sequence,
-                    ttl: self.ttl,
-                    details,
-                })
-                .await
+        let command = HeartbeatCommand {
+            service_name: self.service_name,
+            process_role: self.process_role,
+            instance_id: self.instance_id.clone(),
+            version: self.version.clone(),
+            started_at: self.started_at,
+            status,
+            readiness,
+            audit_failure_count,
+            tracing,
+            observation_sequence,
+            ttl: self.ttl,
+            details,
+        };
+        // 存储端按发布器已校验的闭集写库；负计数、超长 TTL 或坏序列必须在这里失败关闭。
+        let result = if command.validate() {
+            self.store.publish(command).await
         } else {
             Err(HealthError::InvalidCommand)
         };

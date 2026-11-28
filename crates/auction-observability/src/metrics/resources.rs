@@ -166,7 +166,7 @@ fn parse_boot_time(content: &str) -> Option<u64> {
     content.lines().find_map(|line| line.strip_prefix("btime "))?.trim().parse().ok()
 }
 
-/// 软限制为 `unlimited` 时没有可导出的数值。
+/// 软限制为 `unlimited` 时退回硬限制；两者都无限时没有可导出的数值。
 fn parse_max_open_files(content: &str) -> Option<u64> {
     content
         .lines()
@@ -241,6 +241,13 @@ mod tests {
                 "Max open files            unlimited            unlimited            files\n"
             ),
             None
+        );
+        // 软限制无上限时退回硬限制，避免导出 process_max_fds = 0。
+        assert_eq!(
+            parse_max_open_files(
+                "Max open files            unlimited            524288               files\n"
+            ),
+            Some(524_288)
         );
 
         assert_eq!(

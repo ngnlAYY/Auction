@@ -12,11 +12,9 @@ pub(super) fn read_journal_unavailable(world: MoogleMailWorld) -> MoogleMailErro
     )
 }
 
-pub(super) fn fetch_budget_exhausted(world: MoogleMailWorld) -> MoogleMailError {
-    MoogleMailError::new(
-        MoogleMailOperation::Inbox,
-        world,
-        MoogleMailErrorCategory::RemoteTemporary,
-        true,
-    )
+pub(super) fn fetch_budget_exhausted(
+    world: MoogleMailWorld,
+    operation: MoogleMailOperation,
+) -> MoogleMailError {
+    MoogleMailError::new(operation, world, MoogleMailErrorCategory::RemoteTemporary, true)
 }

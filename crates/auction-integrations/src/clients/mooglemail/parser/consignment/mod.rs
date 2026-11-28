@@ -22,7 +22,7 @@ pub use receipt::observe_take_receipt;
 pub const CONSIGNMENT_PARSER_VERSION: &str = "mooglemail-consignment-parser-v1-unsigned";
 
 /// 收件列表中的一行；保留原始分钟文本和列表显示身份。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ConsignmentListRow {
     /// 远端 MID。
     pub external_mail_id: String,
@@ -38,6 +38,21 @@ pub struct ConsignmentListRow {
     pub received_minute_raw: String,
     /// 由原始分钟文本解释出的 UTC 时刻。
     pub received_at: Timestamp,
+}
+
+impl fmt::Debug for ConsignmentListRow {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ConsignmentListRow")
+            .field("external_mail_id", &self.external_mail_id)
+            .field("world", &self.world)
+            .field("world_marker", &self.world_marker)
+            .field("sender", &"[REDACTED]")
+            .field("subject", &"[REDACTED]")
+            .field("received_minute_raw", &self.received_minute_raw)
+            .field("received_at", &self.received_at)
+            .finish()
+    }
 }
 
 /// 原始附件观察；保留原文 EID、种类、显示名和短生命周期装备 key。
@@ -175,7 +190,7 @@ pub struct FrozenMailAttachment {
 }
 
 /// 可在写前逐项比较的整封冻结清单。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct FrozenMailManifest {
     /// 世界。
     pub world: MoogleMailWorld,
@@ -201,6 +216,26 @@ pub struct FrozenMailManifest {
     pub attachments: Vec<FrozenMailAttachment>,
     /// 与观察一致的清单摘要。
     pub manifest_digest: [u8; 32],
+}
+
+impl fmt::Debug for FrozenMailManifest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("FrozenMailManifest")
+            .field("world", &self.world)
+            .field("external_mail_id", &self.external_mail_id)
+            .field("sender", &"[REDACTED]")
+            .field("recipient", &"[REDACTED]")
+            .field("subject", &"[REDACTED]")
+            .field("body_digest", &self.body_digest)
+            .field("credits", &self.credits)
+            .field("cod", &self.cod)
+            .field("received_minute_raw", &self.received_minute_raw)
+            .field("received_at", &self.received_at)
+            .field("attachment_count", &self.attachments.len())
+            .field("manifest_digest", &self.manifest_digest)
+            .finish()
+    }
 }
 
 /// Take 成功后从响应页得到的受控观察；任何一项不成立都不授予处分权。

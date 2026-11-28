@@ -51,7 +51,11 @@ impl AdminLoginDefense {
             state.started = now;
             state.attempts = 0;
         }
-        if state.last_failure.is_some_and(|last| now.duration_since(last) >= self.window) {
+        // 退避仍在生效时不得清空失败历史：窗口可配置到 1 秒，而退避最多 60 秒；
+        // 提前清零会让攻击者在退避到期前重新开始连续失败计数。
+        if state.blocked_until.is_none_or(|until| now >= until)
+            && state.last_failure.is_some_and(|last| now.duration_since(last) >= self.window)
+        {
             state.failures = 0;
             state.blocked_until = None;
         }
@@ -149,5 +153,20 @@ mod tests {
         defense.succeeded();
         assert_eq!(defense.state.lock().unwrap().failures, 0);
         assert!(defense.allow().is_some());
+    }
+
+    // 窗口可配置到 1 秒，但退避最长 60 秒；窗口过期不得提前解除仍在生效的退避。
+    #[test]
+    fn short_window_cannot_truncate_an_active_backoff() {
+        let defense = AdminLoginDefense::new(100, Duration::from_secs(1));
+        let mut state = defense.state.lock().unwrap();
+        let start = state.started;
+        for _ in 0..6 {
+            defense.failed_at(&mut state, start);
+        }
+        // 第 6 次失败进入 2 秒退避；1 秒窗口过期时仍应拒绝并保留失败历史。
+        assert_eq!(defense.allow_at(&mut state, start + Duration::from_secs(1)), Some(1));
+        assert_eq!(state.failures, 6);
+        assert_eq!(defense.allow_at(&mut state, start + Duration::from_secs(2)), None);
     }
 }

@@ -30,7 +30,9 @@ mod form;
 mod response;
 
 const LOGIN_DIGEST_DOMAIN: &[u8] = b"auction/credential/forum-login-command/v1\0";
-const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
+// 覆盖最坏但健康的路径：登录页 4s + 间隔 1s + 提交 4s + 间隔 1s + 会话证明（排队≤1s + 4s）
+// 约 15s；低于此值会把慢而成功的登录截成 LoginUnavailable，让会话分类不可达。
+const LOGIN_TIMEOUT: Duration = Duration::from_secs(20);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
 const REQUEST_INTERVAL: Duration = Duration::from_secs(1);
 const LOGIN_COOLDOWN: Duration = Duration::from_secs(30);

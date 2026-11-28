@@ -21,7 +21,11 @@ pub(super) fn is_html_content_type(headers: &header::HeaderMap) -> bool {
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.split(';').next())
-        .is_some_and(|value| matches!(value.trim(), "text/html" | "application/xhtml+xml"))
+        .is_some_and(|value| {
+            let value = value.trim();
+            value.eq_ignore_ascii_case("text/html")
+                || value.eq_ignore_ascii_case("application/xhtml+xml")
+        })
 }
 
 pub(super) fn is_javascript_content_type(headers: &header::HeaderMap) -> bool {

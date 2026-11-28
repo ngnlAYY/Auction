@@ -20,11 +20,15 @@ pub async fn readiness_runtimes(
     gateways: &HashMap<MoogleMailWorld, Arc<MoogleMailGateway>>,
 ) -> Vec<MailEvidenceReadinessRuntime> {
     let mut runtimes = Vec::new();
-    let deadline = Instant::now() + std::time::Duration::from_secs(30);
-    for world_config in config.worker.mooglemail.configured_worlds() {
+    let worlds = config.worker.mooglemail.configured_worlds();
+    // 单次启动共用一个 30 秒上限，但按候选世界均分：就绪会话只在此处读取一次，
+    // 前一个世界的网络超时不得把后面的世界推到已过期的截止时间，否则整个运行期都不注册。
+    let per_world =
+        std::time::Duration::from_secs(30) / u32::try_from(worlds.len().max(1)).unwrap_or(1);
+    for world_config in worlds {
         let Some(world) = MoogleMailWorld::parse(&world_config.world_id) else { continue };
         let Some(gateway) = gateways.get(&world) else { continue };
-        let session = match gateway.readiness_session(world, deadline).await {
+        let session = match gateway.readiness_session(world, Instant::now() + per_world).await {
             Ok(session) => session,
             Err(error) => {
                 tracing::warn!(

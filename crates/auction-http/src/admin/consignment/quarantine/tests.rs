@@ -151,8 +151,9 @@ fn release_receipt(command_id: CommandId, kind: ReleaseKind) -> ReleaseReceipt {
             });
         }
         ReleaseKind::AuctionReturnCase => {
+            // DB `c4_release_branch_ck`：案件证据引用就是原退件 MID。
             receipt.return_mail_id = Some(fixture_uuid(0xa2));
-            receipt.return_evidence_id = Some(fixture_uuid(0xa3));
+            receipt.return_evidence_id = Some(fixture_uuid(0xa2));
         }
         ReleaseKind::AuctionRecoveryReturn => {
             receipt.obligation_id = Some(fixture_uuid(0xa4));

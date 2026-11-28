@@ -262,7 +262,7 @@ fn form_configuration(operation: MoogleMailOperation) -> MoogleMailError {
 
 fn clear_string(value: &mut String) {
     let mut bytes = std::mem::take(value).into_bytes();
-    bytes.fill(0);
+    crate::clients::mooglemail::wipe_bytes(&mut bytes);
 }
 
 pub(super) fn valid_body(value: &str) -> bool {

@@ -43,7 +43,7 @@ impl MoogleMailGateway {
         }
         let deadline = tokio::time::Instant::now()
             .checked_add(self.config.fetch_budget)
-            .ok_or_else(|| configuration(world))?;
+            .ok_or_else(|| configuration(world, MoogleMailOperation::Sent))?;
         let result = tokio::time::timeout_at(deadline, async {
             let session = self.credentials.begin_read(world, MoogleMailOperation::Sent).await?;
             match self
@@ -61,7 +61,8 @@ impl MoogleMailGateway {
                     Ok(snapshot)
                 }
                 Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
-                    session.invalidate_current().await?;
+                    // 撤销失败不得替换原始的登录失效错误。
+                    let _ = session.invalidate_current().await;
                     Err(error)
                 }
                 Err(error) => Err(error),
@@ -75,11 +76,11 @@ impl MoogleMailGateway {
                 safe_diagnostics::project(&diagnostic_cause),
                 DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
             );
-            fetch_budget_exhausted(world)
+            fetch_budget_exhausted(world, MoogleMailOperation::Sent)
         })?;
         // timeout_at 不抢占同步解析，也可能直接接受已就绪的缓存结果。
         if tokio::time::Instant::now() >= deadline {
-            return Err(fetch_budget_exhausted(world));
+            return Err(fetch_budget_exhausted(world, MoogleMailOperation::Sent));
         }
         result
     }
@@ -115,19 +116,23 @@ impl MoogleMailGateway {
                     ..Default::default()
                 },
             );
-            fetch_budget_exhausted(request.world)
+            fetch_budget_exhausted(request.world, MoogleMailOperation::Sent)
         })??;
         tokio::time::timeout_at(deadline, async {
             match self.lookup_sent_with_cookie(&request, session.cookie(), deadline).await {
                 Ok(report) => {
                     session.check_current().await?;
                     if tokio::time::Instant::now() >= deadline {
-                        return Err(fetch_budget_exhausted(request.world));
+                        return Err(fetch_budget_exhausted(
+                            request.world,
+                            MoogleMailOperation::Sent,
+                        ));
                     }
                     Ok(report)
                 }
                 Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
-                    session.invalidate_current().await?;
+                    // 撤销失败不得替换原始的登录失效错误。
+                    let _ = session.invalidate_current().await;
                     Err(error)
                 }
                 Err(error) => Err(error),
@@ -144,7 +149,7 @@ impl MoogleMailGateway {
                     ..Default::default()
                 },
             );
-            fetch_budget_exhausted(request.world)
+            fetch_budget_exhausted(request.world, MoogleMailOperation::Sent)
         })?
     }
 
@@ -170,7 +175,7 @@ impl MoogleMailGateway {
                     ..Default::default()
                 },
             );
-            fetch_budget_exhausted(request.world)
+            fetch_budget_exhausted(request.world, MoogleMailOperation::Sent)
         })??;
         let mut candidates = Vec::new();
         for summary in list.summaries.iter().filter(|summary| {
@@ -194,7 +199,7 @@ impl MoogleMailGateway {
                         ..Default::default()
                     },
                 );
-                fetch_budget_exhausted(request.world)
+                fetch_budget_exhausted(request.world, MoogleMailOperation::Sent)
             })??;
             let snapshot = self
                 .client
@@ -209,7 +214,7 @@ impl MoogleMailGateway {
                 )
                 .await?;
             if tokio::time::Instant::now() >= deadline {
-                return Err(fetch_budget_exhausted(request.world));
+                return Err(fetch_budget_exhausted(request.world, MoogleMailOperation::Sent));
             }
             if snapshot.recipient.eq_ignore_ascii_case(&request.recipient)
                 && snapshot.subject == request.subject
@@ -227,7 +232,7 @@ impl MoogleMailGateway {
         }
         self.client.check_read_round(cookie, &round).await?;
         if tokio::time::Instant::now() >= deadline {
-            return Err(fetch_budget_exhausted(request.world));
+            return Err(fetch_budget_exhausted(request.world, MoogleMailOperation::Sent));
         }
         let status = if candidates.len() >= 2 {
             MoogleMailSentLookupStatus::Multiple
@@ -276,7 +281,7 @@ impl MoogleMailGateway {
                 )
                 .await?;
             if tokio::time::Instant::now() >= deadline {
-                return Err(fetch_budget_exhausted(world));
+                return Err(fetch_budget_exhausted(world, MoogleMailOperation::Sent));
             }
             if let Some(found) =
                 page.summaries.into_iter().find(|entry| entry.external_mail_id == external_mail_id)
@@ -311,7 +316,7 @@ impl MoogleMailGateway {
         };
         let deadline = tokio::time::Instant::now()
             .checked_add(self.config.fetch_budget)
-            .ok_or_else(|| configuration(world))?;
+            .ok_or_else(|| configuration(world, MoogleMailOperation::Sent))?;
         tokio::time::timeout_at(deadline, async {
             // 已知 MID 的正向列表身份证明不依赖无关尾页。
             // 这不是新发送的基线/候选搜索，不能据此缩短后者的完整扫描或放宽资金证据期限。
@@ -366,7 +371,7 @@ impl MoogleMailGateway {
             // parser 改为从页面读取身份时必须在此恢复逐字段复核。
             self.client.check_read_round(cookie, &round).await?;
             if tokio::time::Instant::now() >= deadline {
-                return Err(fetch_budget_exhausted(world));
+                return Err(fetch_budget_exhausted(world, MoogleMailOperation::Sent));
             }
             Ok(snapshot)
         })
@@ -378,7 +383,7 @@ impl MoogleMailGateway {
                 safe_diagnostics::project(&diagnostic_cause),
                 DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
             );
-            fetch_budget_exhausted(world)
+            fetch_budget_exhausted(world, MoogleMailOperation::Sent)
         })?
     }
 }

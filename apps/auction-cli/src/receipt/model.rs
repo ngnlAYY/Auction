@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use super::deploy::{CliIdentity, DeploySection, RoleIdentity};
 use crate::support::digest::is_lower_hex;
-use crate::support::text::single_line;
+use crate::support::text::{is_line_break, single_line};
 
 /// 新回执的格式标识；读取时只接受它与 [`LEGACY_FORMAT`]，未知版本一律拒绝。
 pub(crate) const FORMAT: &str = "auction-deployment-receipt.v2";
@@ -223,7 +223,7 @@ pub(crate) fn validate_backup_id(value: &str) -> anyhow::Result<()> {
 fn validate_failure(value: &str) -> anyhow::Result<()> {
     if value.trim().is_empty()
         || value.chars().count() > MAX_FAILURE_CHARS
-        || value.chars().any(char::is_control)
+        || value.chars().any(is_line_break)
     {
         anyhow::bail!("部署回执的失败摘要无效");
     }

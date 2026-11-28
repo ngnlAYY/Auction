@@ -43,7 +43,8 @@ impl R2BackupStore {
             length = length.checked_add(chunk.len() as u64).ok_or(BackupStoreError::Conflict)?;
             digest.update(&chunk);
         }
-        if length != bytes || lower_hex(&digest.finalize()) != sha256 {
+        // 十六进制摘要大小写只是书写差异；否则同一对象的既有副本会让重试永久失败。
+        if length != bytes || !lower_hex(&digest.finalize()).eq_ignore_ascii_case(sha256) {
             return Err(BackupStoreError::Conflict);
         }
         Ok(Some(BackupObject {
@@ -61,7 +62,8 @@ impl R2BackupStore {
             object_store::Error::NotFound { .. } => BackupStoreError::RemoteRecord,
             error => BackupStoreError::from_store(error),
         })?;
-        if result.meta.size > RECORD_LIMIT as u64 {
+        let declared_size = result.meta.size;
+        if declared_size > RECORD_LIMIT as u64 {
             return Err(BackupStoreError::RemoteRecord);
         }
         let mut stream = result.into_stream();
@@ -72,6 +74,9 @@ impl R2BackupStore {
                 return Err(BackupStoreError::RemoteRecord);
             }
             bytes.extend_from_slice(&chunk);
+        }
+        if bytes.len() as u64 != declared_size {
+            return Err(BackupStoreError::RemoteRecord);
         }
         Ok(bytes)
     }

@@ -10,6 +10,7 @@ use axum::{
 
 use crate::diagnostics;
 use crate::errors::{CAPABILITY_NOT_PROVIDED, DATABASE_NOT_CONFIGURED, api_error};
+use crate::session::internal_error;
 
 pub(crate) fn feature_unavailable() -> Response {
     crate::errors::feature_unavailable(DATABASE_NOT_CONFIGURED)
@@ -62,6 +63,10 @@ pub(crate) fn map_delivery_error(error: ApplicationError) -> Response {
         ApplicationError::DeliveryAdmin(DeliveryAdminError::CommandConflict) => {
             api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
                 .into_response()
+        }
+        // 持久化结果损坏是确定性内部错误；不能报告为可重试的依赖不可用。
+        ApplicationError::DeliveryAdmin(DeliveryAdminError::StoredResultCorrupt) => {
+            internal_error()
         }
         _ => {
             api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")

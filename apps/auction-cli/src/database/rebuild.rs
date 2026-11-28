@@ -144,8 +144,16 @@ pub(super) async fn run(options: Options<'_>) -> anyhow::Result<()> {
     };
     receipt["finished_at"] = json!(Timestamp::now());
     receipt["outcome"] = json!(if outcome.is_ok() { "completed" } else { "failed" });
-    files::write_private(receipt_path, &serde_json::to_vec_pretty(&receipt)?)
-        .context("重建已执行，但回执写入失败")?;
+    let bytes = serde_json::to_vec_pretty(&receipt)?;
+    if let Err(write_error) = files::write_private(receipt_path, &bytes) {
+        // 破坏性操作已经执行：回执写不进去时仍要报告重建本身的结果，不能只留回执错误。
+        return Err(match &outcome {
+            Ok(()) => write_error.context("重建已执行，但回执写入失败"),
+            Err(error) => {
+                anyhow::anyhow!("{error:#}；重建回执也未写入：{write_error:#}")
+            }
+        });
+    }
     outcome?;
     print_json(&json!({
         "outcome": "completed", "guard": guard.mode, "mode": mode, "receipt": receipt_path,

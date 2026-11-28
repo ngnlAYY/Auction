@@ -179,16 +179,14 @@ pub(super) fn valid_settlement_report(report: &SettlementReport, auction_id: Uui
 
 /// 结算报告必须复用旧版 Admin 快照的时间与生命周期不变量，避免错误状态进入 wire。
 fn valid_report_auction_lifecycle(auction: &SettlementAuctionSnapshot) -> bool {
-    if auction.preview_manual_open && auction.preview_opened_at.is_none()
-        || auction
-            .opened_at
-            .is_some_and(|opened| auction.preview_opened_at.is_none_or(|preview| opened < preview))
-        || auction
-            .final_phase_at
-            .is_some_and(|final_phase| auction.opened_at.is_none_or(|opened| final_phase < opened))
-        || auction
-            .settled_at
-            .is_some_and(|settled| auction.opened_at.is_none_or(|opened| settled < opened))
+    let preview_opened = auction.preview_opened_at;
+    let opened = auction.opened_at;
+    let final_phase = auction.final_phase_at;
+    let settled = auction.settled_at;
+    if auction.preview_manual_open && preview_opened.is_none()
+        || opened.is_some_and(|opened| preview_opened.is_none_or(|preview| opened < preview))
+        || final_phase.is_some_and(|final_phase| opened.is_none_or(|opened| final_phase < opened))
+        || settled.is_some_and(|settled| opened.is_none_or(|opened| settled < opened))
     {
         return false;
     }

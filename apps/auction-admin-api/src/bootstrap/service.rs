@@ -207,6 +207,8 @@ async fn run_service(
             Err(anyhow::anyhow!("admin-api 排空被信号 {signal} 中断"))
         }
         Err(error) => {
+            // 排空信号路径已失效：强制收口后不再复用同一信号等待 tracing 刷新。
+            *forced = true;
             force_admin_tasks(&mut heartbeat_task, &mut server_task).await;
             Err(error).context("等待 admin-api 排空失败")
         }

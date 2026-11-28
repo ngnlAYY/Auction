@@ -18,7 +18,7 @@ isekai_board_id = 90             # isekai 世界拍卖板块
 poll_interval_seconds = 300
 ```
 
-需要 `equipment_data_key` 解析目录装备链接，并提供论坛 Cookie。配置完整的 `credential_data_key` 时只读取数据库中适用 scope 的 active 论坛凭据（在 Admin “Cookie 池”或 `auction-cli credential import --kind forum` 录入），不回退配置 Cookie；未配置该密钥时使用敏感配置 `ehentai_cookie`。同一时刻只有一个 Worker 持有论坛 Cookie 的运行时所有权。完整参数见 `ops/config/examples/worker.toml` 的 `[worker.forum]`。
+需要 `equipment_data_key` 解析目录装备链接，并提供论坛 Cookie。配置完整的 `credential_data_key` 时只读取数据库中适用 scope 的 active 论坛凭据（在 Admin “Cookie 池”或 `auction-cli credential import --kind forum --command-id <UUID>` 录入，`--command-id` 必填且重试须复用同一 ID），不回退配置 Cookie；未配置该密钥时使用敏感配置 `ehentai_cookie`。同一时刻只有一个 Worker 持有论坛 Cookie 的运行时所有权。完整参数见 `ops/config/examples/worker.toml` 的 `[worker.forum]`。
 
 ## 主题结构
 

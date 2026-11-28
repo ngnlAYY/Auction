@@ -160,6 +160,8 @@ fn map_error(error: ApplicationError) -> Response {
         )) => api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
             .into_response(),
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(CAPABILITY_NOT_PROVIDED),
+        // 存储结果损坏是确定性内部错误；503 会诱导客户端按依赖不可用重试。
+        ApplicationError::AdminWorld(AdminWorldError::StoredResultCorrupt) => internal_error(),
         _ => storage_unavailable("业务世界状态暂不可用"),
     };
     let response = body();

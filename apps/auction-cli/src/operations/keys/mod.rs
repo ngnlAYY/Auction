@@ -17,7 +17,7 @@ use auction_time::Timestamp;
 use serde_json::json;
 use uuid::Uuid;
 
-use self::rewrite::{DomainOutcome, FailureStage, reencrypt_domain};
+use self::rewrite::{DomainFailure, DomainOutcome, FailureStage, reencrypt_domain};
 use super::keyring;
 use crate::app::print_json;
 use crate::cli::{KeysCommand, KeysReencryptArgs};
@@ -213,75 +213,49 @@ async fn reencrypt(config_dir: &ConfigDir, args: KeysReencryptArgs) -> anyhow::R
                 ));
                 return task.await.context("等待密钥重加密收口与审计任务失败")?;
             }
-            let mut processed = Vec::with_capacity(keyrings.len());
-            let mut failure = None;
-            for (domain, ring) in &keyrings {
-                let mut outcome = DomainOutcome::new(*domain);
-                let result = reencrypt_domain(
-                    store,
-                    ring,
-                    *domain,
-                    args.page_size,
-                    args.apply,
-                    &mut outcome,
-                )
-                .await;
-                processed.push(ProcessedDomain {
-                    domain: *domain,
-                    outcome,
-                    failure_stage: result.as_ref().err().map(|failure| failure.stage),
-                });
-                if let Err(error) = result {
-                    failure = Some((*domain, error));
-                    break;
-                }
+            // `plan.apply` 为 Some 时已在上面提前返回；这里只走演练：不写入任何信封，
+            // 失败直接返回原因，不留回执。
+            let (processed, failure) =
+                reencrypt_domains(store, &keyrings, args.page_size, false).await;
+            if let Some((_, failure)) = failure {
+                return Err(failure.error);
             }
-            let receipt_id = Uuid::new_v4();
-            let summary = failure.as_ref().map(|(domain, failure)| (*domain, failure.stage));
-            let document =
-                receipt_document(receipt_id, args.apply, started_at, &processed, summary);
-            let Some(identity) = &plan.apply else {
-                // 演练不写入任何信封：失败直接返回原因，不留回执。
-                if let Some((_, failure)) = failure {
-                    return Err(failure.error);
-                }
-                if let Some(path) = &args.receipt {
-                    let encoded =
-                        serde_json::to_vec_pretty(&document).context("序列化重加密回执失败")?;
-                    files::write_private(path, &encoded)?;
-                }
-                return print_json(&document);
-            };
-            let recorded = record_apply(
-                store,
-                args.receipt.as_deref(),
-                identity,
-                receipt_id,
-                &document,
-                &processed,
-            )
-            .await;
-            // 输出失败不能吞掉回执、审计与改写失败的原因，三者合并返回。
-            let printed = print_json(&document);
-            let Some((domain, failure)) = failure else {
-                return recorded.and(printed);
-            };
-            let error = failure.error.context(format!(
-                "{} 域重加密中途失败（阶段 {}）；已提交的改写数见 outcome=partial 回执与审计，\
-                 修复原因后重新运行会继续处理剩余信封",
-                domain.as_str(),
-                failure.stage.as_str()
-            ));
-            let mut messages = vec![format!("{error:#}")];
-            messages.extend(recorded.err().map(|record_error| format!("{record_error:#}")));
-            messages.extend(printed.err().map(|print_error| format!("{print_error:#}")));
-            if messages.len() == 1 {
-                return Err(error);
+            let document = receipt_document(Uuid::new_v4(), false, started_at, &processed, None);
+            if let Some(path) = &args.receipt {
+                let encoded =
+                    serde_json::to_vec_pretty(&document).context("序列化重加密回执失败")?;
+                files::write_private(path, &encoded)?;
             }
-            Err(anyhow::anyhow!(messages.join("；")))
+            print_json(&document)
         },
     )
     .await
+}
+
+/// 逐域重加密，中途失败即停止：返回已进入循环的域与首个失败，供演练与 `--apply` 共用同一
+/// 顺序与计数口径。`apply=false` 只解密核对，不写任何信封。
+async fn reencrypt_domains(
+    store: &Arc<DatabaseStore>,
+    keyrings: &[(DataKeyDomain, Arc<Keyring>)],
+    page_size: i64,
+    apply: bool,
+) -> (Vec<ProcessedDomain>, Option<(DataKeyDomain, DomainFailure)>) {
+    let mut processed = Vec::with_capacity(keyrings.len());
+    let mut failure = None;
+    for (domain, ring) in keyrings {
+        let mut outcome = DomainOutcome::new(*domain);
+        let result = reencrypt_domain(store, ring, *domain, page_size, apply, &mut outcome).await;
+        processed.push(ProcessedDomain {
+            domain: *domain,
+            outcome,
+            failure_stage: result.as_ref().err().map(|failure| failure.stage),
+        });
+        if let Err(error) = result {
+            failure = Some((*domain, error));
+            break;
+        }
+    }
+    (processed, failure)
 }
 
 /// Apply 的重写与收口运行在拥有全部输入的任务中；调用方 future 被取消时，任务继续写回执与审计。
@@ -295,21 +269,7 @@ async fn reencrypt_apply_task(
     started_at: Timestamp,
 ) -> anyhow::Result<()> {
     let identity = ApplyIdentity { actor: &actor, operator };
-    let mut processed = Vec::with_capacity(keyrings.len());
-    let mut failure = None;
-    for (domain, ring) in &keyrings {
-        let mut outcome = DomainOutcome::new(*domain);
-        let result = reencrypt_domain(&store, ring, *domain, page_size, true, &mut outcome).await;
-        processed.push(ProcessedDomain {
-            domain: *domain,
-            outcome,
-            failure_stage: result.as_ref().err().map(|failure| failure.stage),
-        });
-        if let Err(error) = result {
-            failure = Some((*domain, error));
-            break;
-        }
-    }
+    let (processed, failure) = reencrypt_domains(&store, &keyrings, page_size, true).await;
     let receipt_id = Uuid::new_v4();
     let summary = failure.as_ref().map(|(domain, failure)| (*domain, failure.stage));
     let document = receipt_document(receipt_id, true, started_at, &processed, summary);

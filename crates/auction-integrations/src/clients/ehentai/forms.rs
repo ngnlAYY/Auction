@@ -79,6 +79,8 @@ pub(super) fn posting_form_values(
         || single_value_for(&values, "CODE") != Some("01")
         || single_value_for(&values, "f") != Some(board.as_str())
         || single_value_for(&values, "auth_key").is_none_or(str::is_empty)
+        // 新主题不能携带既有主题/帖子目标；隐藏 t/p 会把这次 POST 改投到已有帖子。
+        || values.iter().any(|(name, _)| matches!(name.as_str(), "t" | "p"))
     {
         return None;
     }

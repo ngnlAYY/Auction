@@ -94,11 +94,14 @@ pub(crate) async fn create_backup(
                 std::fs::hard_link(temporary.as_path(), output)
                     .with_context(|| format!("发布 archive 失败：{}", output.display()))?;
                 archive_published = true;
+                // 先让 archive 目录项落盘再发布 manifest：崩溃后最多留下没有 manifest 的
+                // archive（可重新备份），不会出现引用不存在 archive 的 manifest。
+                files::sync_parent(output)?;
                 std::fs::hard_link(&staged_manifest, &manifest_path).with_context(|| {
                     format!("发布 archive manifest 失败：{}", manifest_path.display())
                 })?;
                 manifest_published = true;
-                files::sync_parent(output)?;
+                files::sync_parent(&manifest_path)?;
                 Ok(())
             })();
             if let Err(error) = publish_result {

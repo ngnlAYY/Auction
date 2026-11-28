@@ -188,7 +188,7 @@ impl MoogleMailCookie {
         let mut value = value.into();
         if !valid_secret(value.trim(), MAX_COOKIE_BYTES) {
             let mut bytes = value.into_bytes();
-            bytes.fill(0);
+            crate::clients::mooglemail::wipe_bytes(&mut bytes);
             return Err(MoogleMailError::new(
                 MoogleMailOperation::Inbox,
                 MoogleMailWorld::Main,
@@ -200,7 +200,7 @@ impl MoogleMailCookie {
         if value.trim().len() != value.len() {
             let trimmed = value.trim().to_owned();
             let mut bytes = std::mem::replace(&mut value, trimmed).into_bytes();
-            bytes.fill(0);
+            crate::clients::mooglemail::wipe_bytes(&mut bytes);
         }
         Ok(Self(Arc::new(MoogleMailCookieValue {
             value: value.into_boxed_str(),
@@ -252,7 +252,7 @@ impl Eq for MoogleMailCookie {}
 impl Drop for MoogleMailCookieValue {
     fn drop(&mut self) {
         let mut bytes = std::mem::take(&mut self.value).into_boxed_bytes();
-        bytes.fill(0);
+        crate::clients::mooglemail::wipe_bytes(&mut bytes);
     }
 }
 
@@ -285,7 +285,7 @@ impl MoogleMailToken {
 impl Drop for MoogleMailToken {
     fn drop(&mut self) {
         let mut bytes = std::mem::take(&mut self.0).into_boxed_bytes();
-        bytes.fill(0);
+        crate::clients::mooglemail::wipe_bytes(&mut bytes);
     }
 }
 
@@ -325,7 +325,7 @@ impl MoogleMailEquipmentKey {
     }
 
     pub fn clear(&mut self) {
-        self.0.fill(0);
+        crate::clients::mooglemail::wipe_bytes(&mut self.0);
     }
 }
 

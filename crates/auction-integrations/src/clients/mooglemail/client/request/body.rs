@@ -109,7 +109,7 @@ pub(in crate::clients::mooglemail::client) struct DiagnosticResponse {
 impl Drop for DiagnosticResponse {
     fn drop(&mut self) {
         if let Some(body) = &mut self.body {
-            body.fill(0);
+            crate::clients::mooglemail::wipe_bytes(body);
         }
     }
 }
@@ -121,6 +121,6 @@ pub(in crate::clients::mooglemail::client) struct SensitiveBytes(
 
 impl Drop for SensitiveBytes {
     fn drop(&mut self) {
-        self.0.fill(0);
+        crate::clients::mooglemail::wipe_bytes(&mut self.0);
     }
 }

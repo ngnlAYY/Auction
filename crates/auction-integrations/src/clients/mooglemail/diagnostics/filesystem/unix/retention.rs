@@ -116,7 +116,11 @@ pub(in super::super) fn purge_ordinary_expired(
     let locked = match locked_directory(&target, false) {
         Ok(locked) => locked,
         Err(MailDiagnosticError::NotFound) => {
-            return Ok(MailDiagnosticPurgeOutcome::default());
+            // 目录缺失没有可核对的证据；按 `needs_follow_up` 的文档语义要求人工确认。
+            return Ok(MailDiagnosticPurgeOutcome {
+                needs_follow_up: true,
+                ..MailDiagnosticPurgeOutcome::default()
+            });
         }
         Err(error) => return Err(error),
     };

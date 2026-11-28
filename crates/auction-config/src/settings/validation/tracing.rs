@@ -43,17 +43,24 @@ pub(crate) fn validate_tracing(
     if !config.endpoint.is_empty() {
         let parsed = Url::parse(&config.endpoint)
             .map_err(|_| ConfigError::InvalidTracingConfig("endpoint 必须是绝对 HTTP(S) 地址"))?;
+        // 原文只用于拒绝隐藏的 userinfo 与首尾空白：解析器会规范化空路径、默认端口与主机大小写，
+        // 与 `as_str()` 逐字节比较会误拒合法地址；exporter 直接使用该字符串。
+        let authority = config
+            .endpoint
+            .split_once("://")
+            .map(|(_, rest)| rest.split(['/', '?', '#']).next().unwrap_or_default());
         if !matches!(parsed.scheme(), "http" | "https")
             || parsed.host_str().is_none()
             || parsed.username() != ""
             || parsed.password().is_some()
             || parsed.query().is_some()
             || parsed.fragment().is_some()
-            || parsed.as_str() != config.endpoint
+            || authority.is_none_or(|authority| authority.contains('@'))
+            || config.endpoint.trim() != config.endpoint.as_str()
             || config.endpoint.chars().any(char::is_control)
         {
             return Err(ConfigError::InvalidTracingConfig(
-                "endpoint 不能包含 userinfo、query、fragment 或控制字符",
+                "endpoint 不能包含 userinfo、query、fragment、首尾空白或控制字符",
             ));
         }
     }

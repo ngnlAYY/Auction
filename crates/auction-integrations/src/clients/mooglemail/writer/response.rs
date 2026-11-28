@@ -32,24 +32,21 @@ impl MoogleMailParser {
         Result<Option<MoogleMailSendResponseFailure>, MoogleMailError>,
         Result<Option<String>, MoogleMailError>,
     ) {
-        let (source, parsed) = match parse_response(document, world) {
+        let parsed = match parse_response(document, world) {
             Ok(value) => value,
             Err(error) => return (Err(error), Err(error)),
         };
-        let failure = classify_send_response_failure(source, &parsed, world);
+        let failure = classify_send_response_failure(&parsed, world);
         let confirmation = if matches!(&failure, Ok(Some(_))) {
             Ok(None)
         } else {
-            prove_send_completed(source, &parsed, world)
+            prove_send_completed(&parsed, world)
         };
         (failure, confirmation)
     }
 }
 
-fn parse_response(
-    document: &[u8],
-    world: MoogleMailWorld,
-) -> Result<(&str, Html), MoogleMailError> {
+fn parse_response(document: &[u8], world: MoogleMailWorld) -> Result<Html, MoogleMailError> {
     let source = str::from_utf8(document).map_err(safe_diagnostics::warn_map(
         "mooglemail_send",
         "decode_send_document",
@@ -58,11 +55,10 @@ fn parse_response(
     if source.trim().is_empty() {
         return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    Ok((source, Html::parse_document(source)))
+    Ok(Html::parse_document(source))
 }
 
 fn prove_send_completed(
-    source: &str,
     parsed: &Html,
     world: MoogleMailWorld,
 ) -> Result<Option<String>, MoogleMailError> {
@@ -76,14 +72,13 @@ fn prove_send_completed(
         if phrase.to_ascii_lowercase().contains("message has been sent")
             || is_css_send_confirmation(confirmation)
         {
-            return Ok(response_mail_id(source));
+            return Ok(response_mail_id(&confirmation.html()));
         }
     }
     Err(compose_error(world, MoogleMailErrorCategory::WriteUnknown))
 }
 
 fn classify_send_response_failure(
-    source: &str,
     parsed: &Html,
     world: MoogleMailWorld,
 ) -> Result<Option<MoogleMailSendResponseFailure>, MoogleMailError> {
@@ -120,7 +115,7 @@ fn classify_send_response_failure(
     ];
     if RECIPIENT_NOT_FOUND_PHRASES.iter().any(|phrase| visible.contains(phrase)) {
         return Ok(Some(MoogleMailSendResponseFailure::RecipientNotFound {
-            returned_mail_id: response_mail_id(source),
+            returned_mail_id: response_mail_id(&message.html()),
         }));
     }
     if visible.contains("cannot afford the postage") {
@@ -160,10 +155,10 @@ mod tests {
         ] {
             let parsed = Html::parse_document(page);
             assert_eq!(
-                classify_send_response_failure(page, &parsed, world).expect("拒绝页可分类"),
+                classify_send_response_failure(&parsed, world).expect("拒绝页可分类"),
                 Some(expected)
             );
-            let error = prove_send_completed(page, &parsed, world).expect_err("拒绝页不得证明成功");
+            let error = prove_send_completed(&parsed, world).expect_err("拒绝页不得证明成功");
             assert_eq!(error.category, MoogleMailErrorCategory::WriteUnknown);
         }
     }

@@ -32,7 +32,7 @@ impl MoogleMailGateway {
         }
         let deadline = tokio::time::Instant::now()
             .checked_add(self.config.fetch_budget)
-            .ok_or_else(|| configuration(world))?;
+            .ok_or_else(|| configuration(world, MoogleMailOperation::Detail))?;
         let result = tokio::time::timeout_at(deadline, async {
             let session = self.credentials.begin_read(world, MoogleMailOperation::Detail).await?;
             let target = self.client.detail(world, external_mail_id)?;
@@ -78,10 +78,10 @@ impl MoogleMailGateway {
                 safe_diagnostics::project(&diagnostic_cause),
                 DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
             );
-            fetch_budget_exhausted(world)
+            fetch_budget_exhausted(world, MoogleMailOperation::Detail)
         })?;
         if tokio::time::Instant::now() >= deadline {
-            return Err(fetch_budget_exhausted(world));
+            return Err(fetch_budget_exhausted(world, MoogleMailOperation::Detail));
         }
         result
     }

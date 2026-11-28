@@ -17,7 +17,9 @@ use super::window::{RecoveryRows, incoming_window_rows, new_mail_ids};
 use crate::clients::mooglemail::error::MoogleMailError;
 use crate::clients::mooglemail::gateway::protocol_error;
 use crate::clients::mooglemail::parser::MoogleMailSummary;
-use crate::clients::mooglemail::protocol::{MoogleMailCookie, MoogleMailWorld};
+use crate::clients::mooglemail::protocol::{
+    MoogleMailCookie, MoogleMailOperation, MoogleMailWorld,
+};
 use crate::clients::mooglemail::scan_checkpoint::advance_scan_checkpoint;
 
 impl MoogleMailGateway {
@@ -113,7 +115,7 @@ impl MoogleMailGateway {
             .observe_incoming_list(cookie, round, self.config.maximum_pages, read_mail)
             .await?;
         if !list.complete {
-            return Err(protocol_error(world));
+            return Err(protocol_error(world, MoogleMailOperation::Inbox));
         }
         self.observe_scan(
             world,
@@ -268,7 +270,7 @@ impl MoogleMailGateway {
             if let Some(prefix) = &prefix {
                 return Ok(incoming_window_rows(&prefix.summaries, cursor, limit));
             }
-            return Err(protocol_error(world));
+            return Err(protocol_error(world, MoogleMailOperation::Inbox));
         }
         if let Some(prefix) = &prefix {
             self.compare_incoming_shadow(world, &full.summaries, &prefix.summaries, cursor);

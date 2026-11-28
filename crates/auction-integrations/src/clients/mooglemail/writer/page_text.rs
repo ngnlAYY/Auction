@@ -108,7 +108,7 @@ pub(super) fn visible_confirmation_text(
     element: ElementRef<'_>,
     world: MoogleMailWorld,
 ) -> Result<String, MoogleMailError> {
-    let text = normalize_text(element.text().collect::<String>());
+    let text = visible_body_text(element);
     if !text.is_empty() {
         return Ok(text);
     }
@@ -181,7 +181,7 @@ pub(super) fn response_mail_id(source: &str) -> Option<String> {
             return None;
         }
         let value = &source[value_start..value_end];
-        if !valid_decimal_id(value) {
+        if !valid_decimal_id(value) || value.starts_with('0') {
             return None;
         }
         if found.replace(value).is_some() {

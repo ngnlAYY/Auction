@@ -21,6 +21,21 @@ pub(crate) fn equipment_keys(
     wanted: &HashSet<String>,
     world: MoogleMailWorld,
 ) -> Result<HashMap<String, MoogleMailEquipmentKey>, MoogleMailError> {
+    let keys = equipment_keys_partial(document, body, wanted, world)?;
+    if keys.len() != wanted.len() || wanted.iter().any(|id| !keys.contains_key(id)) {
+        return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
+    }
+    Ok(keys)
+}
+
+/// 与 [`equipment_keys`] 相同的单次扫描，但允许个别附件读不出 key：缺失项由调用方标记未判，
+/// 避免为每个缺失 ID 重扫整段正文与全部脚本（正文与附件数都由对方控制，扫描量会线性放大）。
+pub(crate) fn equipment_keys_partial(
+    document: &Html,
+    body: &str,
+    wanted: &HashSet<String>,
+    world: MoogleMailWorld,
+) -> Result<HashMap<String, MoogleMailEquipmentKey>, MoogleMailError> {
     let mut keys = body_equipment_keys(body, wanted, world)?;
     let mut script_keys = HashMap::new();
     let script_selector = read_selector!("script", MoogleMailOperation::Detail, world)?;
@@ -64,9 +79,6 @@ pub(crate) fn equipment_keys(
         } else {
             keys.insert(equipment_id, key);
         }
-    }
-    if keys.len() != wanted.len() || wanted.iter().any(|id| !keys.contains_key(id)) {
-        return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
     Ok(keys)
 }

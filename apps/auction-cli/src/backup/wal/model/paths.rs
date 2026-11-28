@@ -1,7 +1,7 @@
 //! 暂存文件命名、路径与目录校验。
 
 use std::fs;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -12,6 +12,7 @@ use super::{
     BASE_CIPHER_SUFFIX, BASE_ID_PREFIX, BASE_MANIFEST_SUFFIX, BASE_RECEIPT_SUFFIX, BECH32,
     CIPHER_SUFFIX, MANIFEST_SUFFIX, WAL_UPLOAD_SUFFIX,
 };
+use crate::support::files;
 
 /// PostgreSQL 的 `%f` 只可能是 WAL 段、时间线历史文件或基础备份标签。
 pub(crate) fn valid_segment_name(name: &str) -> bool {
@@ -124,17 +125,13 @@ pub(crate) fn require_staging_dir(directory: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 源文件必须是普通文件；只接受 PostgreSQL 传入的 WAL 文件本身。
+/// 源文件必须是普通文件；只接受 PostgreSQL 传入的 WAL 文件本身。以 `open_regular` 的
+/// O_NOFOLLOW/O_NONBLOCK 打开：FIFO 等特殊文件不会让归档命令永久阻塞在打开阶段，
+/// 类型检查与摘要读取共用同一描述符。
 pub(crate) fn source_identity(path: &Path) -> anyhow::Result<SourceIdentity> {
-    let mut file = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)
+    let mut file = files::open_regular(path)
         .with_context(|| format!("打开 WAL 文件失败：{}", path.display()))?;
     let metadata = file.metadata().context("读取 WAL 文件元数据失败")?;
-    if !metadata.is_file() {
-        anyhow::bail!("WAL 源必须是普通文件：{}", path.display());
-    }
     let modified = metadata.modified().context("读取 WAL 文件时间失败")?;
     let elapsed =
         modified.duration_since(SystemTime::UNIX_EPOCH).context("WAL 文件时间早于 UNIX 纪元")?;

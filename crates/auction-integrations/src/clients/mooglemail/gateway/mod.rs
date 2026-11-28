@@ -25,12 +25,12 @@ pub use reader::{
     PreparedConsignmentDisposition,
 };
 
-fn configuration(world: MoogleMailWorld) -> MoogleMailError {
-    operation_error(MoogleMailOperation::Inbox, world, MoogleMailErrorCategory::Configuration)
+fn configuration(world: MoogleMailWorld, operation: MoogleMailOperation) -> MoogleMailError {
+    operation_error(operation, world, MoogleMailErrorCategory::Configuration)
 }
 
-fn protocol_error(world: MoogleMailWorld) -> MoogleMailError {
-    operation_error(MoogleMailOperation::Inbox, world, MoogleMailErrorCategory::ProtocolDrift)
+fn protocol_error(world: MoogleMailWorld, operation: MoogleMailOperation) -> MoogleMailError {
+    operation_error(operation, world, MoogleMailErrorCategory::ProtocolDrift)
 }
 
 fn operation_error(

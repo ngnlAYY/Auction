@@ -67,7 +67,7 @@ pub(super) fn extract_equipment_page(
     let mut children = panel.select(selectors.children);
     let name_element = children.next().ok_or(EquipmentParseError::PageStructure)?;
     let details = children.next().ok_or(EquipmentParseError::PageStructure)?;
-    let name = normalize_text(name_element.text().collect::<String>());
+    let name = element_text(name_element);
     if !valid_text(&name, 512) {
         return Err(EquipmentParseError::InvalidName);
     }
@@ -76,7 +76,7 @@ pub(super) fn extract_equipment_page(
     if headers.next().is_some() {
         return Err(EquipmentParseError::PageStructure);
     }
-    let header = normalize_text(header.text().collect::<String>());
+    let header = element_text(header);
     let stats = parse_stats(details, &selectors)?;
     Ok(EquipmentPageFields { name, header, stats })
 }
@@ -97,7 +97,7 @@ fn parse_stats(
         if element.value().classes().any(|class| matches!(class, "ex" | "ep")) {
             continue;
         }
-        let text = normalize_text(element.text().collect::<String>());
+        let text = element_text(element);
         let title = element.value().attr("title");
         // 普通说明或锻造提示可有自己的 title；只有 Base 声明或值在前的文本才是主属性。
         // 已识别主属性缺失/损坏 Base 不能被当成可选说明静默丢弃。
@@ -112,7 +112,7 @@ fn parse_stats(
         let mut rows = group.children().filter_map(ElementRef::wrap);
         let group_name = if group.value().classes().any(|class| class == "ep") {
             let heading = rows.next().ok_or(EquipmentParseError::InvalidAttributes)?;
-            let name = normalize_text(heading.text().collect::<String>());
+            let name = element_text(heading);
             if heading.children().any(|child| ElementRef::wrap(child).is_some())
                 || !valid_text(&name, 128)
                 || declares_base(heading.value().attr("title"))
@@ -133,7 +133,7 @@ fn parse_stats(
             if group_name.is_none()
                 && value_element.is_none()
                 && !declares_base(title)
-                && !has_stat_marker(&normalize_text(row.text().collect::<String>()))
+                && !has_stat_marker(&element_text(row))
             {
                 continue;
             }
@@ -149,7 +149,7 @@ fn parse_stats(
                 normalize_stat_value(&normalize_text(value_element.text().collect::<String>()))
                     .ok_or(EquipmentParseError::InvalidAttributes)?;
             if let Some(unit_element) = unit_element {
-                let unit = normalize_text(unit_element.text().collect::<String>());
+                let unit = element_text(unit_element);
                 if unit != "%" && unit != "x" {
                     return Err(EquipmentParseError::InvalidAttributes);
                 }
@@ -171,6 +171,18 @@ fn parse_stats(
         return Err(EquipmentParseError::InvalidAttributes);
     }
     Ok(stats)
+}
+
+/// 元素内多个文本节点按空白分隔后再规范化；紧凑 HTML 的相邻 span 不能把名称与数值粘成一个词。
+fn element_text(element: ElementRef<'_>) -> String {
+    let mut joined = String::new();
+    for text in element.text() {
+        if !joined.is_empty() {
+            joined.push(' ');
+        }
+        joined.push_str(text);
+    }
+    normalize_text(joined)
 }
 
 fn declares_base(title: Option<&str>) -> bool {

@@ -199,25 +199,46 @@ impl MoogleMailCredentialSession {
         if let (Some(persistent_id), Some(invalidator)) =
             (current.persistent_id, self.set.invalidator.as_ref())
         {
-            invalidator.mark_invalid(persistent_id, Timestamp::now()).await.map_err(
-                |diagnostic_cause| {
-                    safe_diagnostics::warn(
-                        "mooglemail_credentials",
-                        "persist_revocation",
-                        safe_diagnostics::project(&diagnostic_cause),
-                        DiagnosticContext {
-                            world: diagnostic_world(self.world.as_str()),
-                            ..Default::default()
-                        },
-                    );
+            // 持久化放进独立任务：调用方预算到期只放弃等待，已经确认的失效回写仍会完成，
+            // 不会在进程重启后从数据库重新载入这枚凭据。
+            let invalidator = std::sync::Arc::clone(invalidator);
+            let persisted = tokio::spawn(async move {
+                invalidator.mark_invalid(persistent_id, Timestamp::now()).await
+            });
+            let joined = persisted.await.map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_credentials",
+                    "join_revocation",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(self.world.as_str()),
+                        ..Default::default()
+                    },
+                );
 
-                    operation_error(
-                        self.operation,
-                        self.world,
-                        MoogleMailErrorCategory::CredentialUnavailable,
-                    )
-                },
-            )?;
+                operation_error(
+                    self.operation,
+                    self.world,
+                    MoogleMailErrorCategory::CredentialUnavailable,
+                )
+            })?;
+            joined.map_err(|diagnostic_cause| {
+                safe_diagnostics::warn(
+                    "mooglemail_credentials",
+                    "persist_revocation",
+                    safe_diagnostics::project(&diagnostic_cause),
+                    DiagnosticContext {
+                        world: diagnostic_world(self.world.as_str()),
+                        ..Default::default()
+                    },
+                );
+
+                operation_error(
+                    self.operation,
+                    self.world,
+                    MoogleMailErrorCategory::CredentialUnavailable,
+                )
+            })?;
         }
         Ok(())
     }

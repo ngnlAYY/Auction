@@ -118,7 +118,7 @@ fn seller_and_bid(description: &str, lower: &str) -> Result<SellerAndBid, ()> {
         return Ok((None, None, None));
     };
     let content_start = start + "(seller:".len();
-    let Some(end_offset) = description[content_start..].find(')') else {
+    let Some(end_offset) = seller_value_end(&description[content_start..]) else {
         return Ok((None, None, None));
     };
     let end = content_start + end_offset;
@@ -162,6 +162,20 @@ fn seller_and_bid(description: &str, lower: &str) -> Result<SellerAndBid, ()> {
         }
     }
     Ok(((!seller.is_empty()).then_some(seller), bidder, price))
+}
+
+/// 卖家名可含括号（如 `Bob (alt)`），按括号配平取闭合 `)`；不配平时退回首个 `)` 保持旧行为。
+fn seller_value_end(value: &str) -> Option<usize> {
+    let mut depth = 0_usize;
+    for (offset, character) in value.char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' if depth > 0 => depth -= 1,
+            ')' => return Some(offset),
+            _ => {}
+        }
+    }
+    value.find(')')
 }
 
 /// 仅识别目录渲染器的终态尾注；不放宽用户竞价命令或金额解析。

@@ -14,7 +14,7 @@ use crate::clients::mooglemail::gateway::credentials::MoogleMailCredentialSet;
 use crate::clients::mooglemail::gateway::model::MoogleMailGatewayConfig;
 use crate::clients::mooglemail::gateway::{MAX_HARD_PAGES, configuration};
 use crate::clients::mooglemail::parser::MoogleMailParser;
-use crate::clients::mooglemail::protocol::MoogleMailWorld;
+use crate::clients::mooglemail::protocol::{MoogleMailOperation, MoogleMailWorld};
 
 impl MoogleMailGateway {
     /// 配置的列表页数硬上限；恢复核对只能在同一上限内请求更小预算。
@@ -32,7 +32,7 @@ impl MoogleMailGateway {
             || config.maximum_pages > MAX_HARD_PAGES
             || config.fetch_budget.is_zero()
         {
-            return Err(configuration(MoogleMailWorld::Main));
+            return Err(configuration(MoogleMailWorld::Main, MoogleMailOperation::Inbox));
         }
         for (index, sender) in config.sender_allowlist.iter().enumerate() {
             if !auction_domain::valid_text(sender, 256)
@@ -40,7 +40,7 @@ impl MoogleMailGateway {
                     .iter()
                     .any(|previous| previous.eq_ignore_ascii_case(sender))
             {
-                return Err(configuration(MoogleMailWorld::Main));
+                return Err(configuration(MoogleMailWorld::Main, MoogleMailOperation::Inbox));
             }
         }
         let client = Arc::new(client.as_ref().clone().with_ownership(credentials.ownership()));

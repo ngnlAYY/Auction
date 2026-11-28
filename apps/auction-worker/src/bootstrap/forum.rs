@@ -71,14 +71,16 @@ pub(super) async fn configure_forum(
         };
         let mut cookies = Vec::with_capacity(records.len());
         for record in records {
-            let secret = opener
+            let mut secret = opener
                 .open(record.kind, record.id, &record.scope, &record.envelope)
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+            let cookie = EhentaiCookie::from_bytes(&secret);
+            // 解密明文只在建立 Cookie 时使用；解析成功与失败路径都要清零后再丢弃缓冲。
+            secret.fill(0);
             cookies.push((
                 record.id,
                 record.scope,
-                EhentaiCookie::from_bytes(&secret)
-                    .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+                cookie.map_err(|error| anyhow::Error::msg(error.to_string()))?,
             ));
         }
         let invalidator: Arc<dyn AdminCredentialRuntimeWriter> = store.clone();

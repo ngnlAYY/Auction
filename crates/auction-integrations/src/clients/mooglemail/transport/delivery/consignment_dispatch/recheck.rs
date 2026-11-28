@@ -20,7 +20,7 @@ use crate::clients::mooglemail::parser::subject_is_list_projection;
 use crate::clients::mooglemail::transport::types::MoogleMailDeliveryTransport;
 use crate::clients::mooglemail::{
     MoogleMailCookie, MoogleMailError, MoogleMailOperation, MoogleMailSentObservation,
-    MoogleMailWorld,
+    MoogleMailSentReceipt, MoogleMailWorld,
 };
 
 /// 单次复核最多读取的候选详情数；超出时不猜测，按无法确定处理。
@@ -126,7 +126,8 @@ impl MoogleMailDeliveryTransport {
         let scanned = self.sender.scan_sent_summaries(cookie, world).await?;
         let floor = minute_floor(target.sending_at);
         // 列表只有分钟精度：从 `sending_at` 所在分钟起比较，保留整个重叠分钟。
-        let covered = scanned.complete || scanned.covered_from.is_some_and(|from| from <= floor);
+        // 与应用层 `covers` 同口径：前缀只有覆盖到 sending_at 所在分钟才能证明缺失。
+        let covered = scanned.complete && scanned.covered_from.is_none_or(|from| floor >= from);
         let candidates: Vec<_> = scanned
             .summaries
             .iter()
@@ -191,11 +192,18 @@ fn matches_target(
     let intact = observation.remaining_credits == target.credits
         && observation.cod_pending == target.cod
         && observation.remaining_equipment_ids == target.equipment_ids;
-    // 已领取（`collected`）时 Sent 详情只剩零余量，原 Credits、COD 与附件不可观察，不再比较资产；冻结正文摘要
-    // 已绑定合同、标的、金额、D0 与轮引用，收件人 + 主题 + 正文摘要足以指认这一封（统筹方 2026-11-25 裁定）。
+    // 冻结正文本身可能以“Removed attachment: …”这类模板行结尾，未领取时它也会被解析成回执块，
+    // 因此整页摘要与回执前摘要都可能等于冻结摘要：未领取只认整页摘要，已领取两者其一即可。
+    let digest_matches = observation.body_digest == target.body_digest
+        || (observation.collected
+            && matches!(
+                &observation.receipt,
+                MoogleMailSentReceipt::Parsed { original_body_digest, .. }
+                    if *original_body_digest == target.body_digest
+            ));
     observation.recipient == target.recipient
         && observation.subject == target.subject
-        && observation.body_digest == target.body_digest
+        && digest_matches
         && (intact || observation.collected)
 }
 

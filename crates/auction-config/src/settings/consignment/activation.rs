@@ -7,6 +7,8 @@
 
 use std::fs::File;
 use std::io::{ErrorKind, Read};
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 
 use sha2::{Digest, Sha256};
 
@@ -60,12 +62,24 @@ fn activation_for(
 }
 
 /// 回执不存在返回 `None`，由校验报“缺少回执”；其他读取失败与超限直接拒绝。
+/// 回执固定是部署写出的普通文件：以 `O_NOFOLLOW` 打开并核对描述符类型，避免启动读取跟随
+/// 符号链接，或被 FIFO 等外部写入流无限挂起。
 fn read_receipt(path: &std::path::Path) -> Result<Option<Vec<u8>>, ConfigError> {
-    let file = match File::open(path) {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK);
+    let file = match options.open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
         Err(_error) => return Err(ConfigError::ConsignmentWebStack("无法读取 Web 栈回执")),
     };
+    let metadata = file
+        .metadata()
+        .map_err(|_error| ConfigError::ConsignmentWebStack("无法读取 Web 栈回执"))?;
+    if !metadata.file_type().is_file() {
+        return Err(ConfigError::ConsignmentWebStack("Web 栈回执不是普通文件"));
+    }
     let mut bytes = Vec::new();
     file.take(RECEIPT_MAX_BYTES + 1)
         .read_to_end(&mut bytes)

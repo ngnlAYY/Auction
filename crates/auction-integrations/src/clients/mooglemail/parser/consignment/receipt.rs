@@ -42,14 +42,19 @@ pub fn observe_take_receipt(
         && after.reported_attachment_count == Some(0);
     let assets_unavailable =
         assets_empty && after.actions_proven && !after.claimable && after.mail_state == Some(2);
+    let receipts_present = receipts.is_some();
     let receipts = receipts.unwrap_or_default();
     // 第 4 期整封接受禁止含 Credits / COD 的寄件，Take 不会遇到现金；现金回执金额核对
     // 在第 6 期现金腿出现时补。当前仍核对 COD 回执的方向与金额，并拒绝普通现金回执。
-    let receipt_direction_matches = if before.cod.unwrap_or(0) > 0 {
-        i64::try_from(before.cod.unwrap_or(0)).ok() == take_cod_receipt_amount(receipts)
-    } else {
-        !receipts.contains("CoD Paid:")
-    };
+    // 未观察到回执时所有证明位保持 false，不能把“空后缀”当作方向相符。
+    let receipt_direction_matches = receipts_present
+        && if before.cod.unwrap_or(0) > 0 {
+            i64::try_from(before.cod.unwrap_or(0))
+                .ok()
+                .is_some_and(|expected| take_cod_receipt_amount(receipts) == Some(expected))
+        } else {
+            !receipts.contains("CoD Paid:")
+        };
     let markers = parse_removed_attachment_markers(receipts, world).unwrap_or_default();
     TakeReceiptObservation {
         identity_body_matches,

@@ -46,7 +46,7 @@ impl EhentaiClient {
     ///
     /// 返回需要读取的页号（0 基）与已经单独读过的游标页偏移；游标缺失、无效、
     /// 落在固定楼层之内，或游标页不再包含该帖子（删帖使楼层前移）时返回全部页，
-    /// 也就是回退完整扫描。
+    /// 也就是回退完整扫描。已经读取校验的游标页在回退时也直接复用，不重复请求或重复计入字节预算。
     pub(super) async fn incremental_scan_plan(
         &self,
         targets: &[(u64, Url)],
@@ -84,9 +84,7 @@ impl EhentaiClient {
             .ok_or_else(|| EhentaiError::response_too_large(operation))?;
         let cursor_page_contains_post = page.post_ids().any(|post_id| post_id == cursor.post_id);
         let plan = confirm_incremental_pages(selected_pages, page_count, cursor_page_contains_post);
-        if !cursor_page_contains_post {
-            return Ok((plan, None));
-        }
+        // 回退完整扫描只扩大分页选择，不必再取同一页：已读页面直接入列，字节预算只计一次。
         pages.push((offset, page));
         Ok((plan, Some(offset)))
     }
@@ -416,7 +414,7 @@ mod incremental_tests {
 
     #[test]
     fn deleted_or_shifted_cursor_post_falls_back_to_full_scan() {
-        // 游标页不再包含该帖子：删帖、楼层前移或被移动到其他页，都必须重读全部页。
+        // 游标页不再包含该帖子：删帖、楼层前移或被移动到其他页，都必须把全部页纳入读取计划。
         assert_eq!(confirm_incremental_pages(vec![0, 3, 4, 5], 6, false), vec![0, 1, 2, 3, 4, 5]);
     }
 }

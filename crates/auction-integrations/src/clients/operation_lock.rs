@@ -170,19 +170,27 @@ mod tests {
         assert!(lock.try_acquire(next));
     }
 
+    /// 等待指定数量的等待者完成登记；用固定 sleep 猜时间会在慢机器上抖动、在快机器上空过。
+    async fn wait_until_queued(lock: &OperationLock, expected: usize) {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while lock.queued() < expected {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("waiters register");
+    }
+
     #[tokio::test]
     async fn exclusive_lock_serializes_holders() {
         let lock = Arc::new(OperationLock::new());
         let first = lock.lock(GateClass::Foreground).await;
-        let (started, wait) = tokio::sync::oneshot::channel();
         let second_lock = Arc::clone(&lock);
         let second = tokio::spawn(async move {
-            let _ = started.send(());
             let _guard = second_lock.lock(GateClass::Foreground).await;
             tokio::time::sleep(Duration::from_millis(10)).await;
         });
-        wait.await.expect("second waiter started");
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        wait_until_queued(&lock, 1).await;
         assert!(!second.is_finished(), "second holder must wait for the first guard");
         drop(first);
         tokio::time::timeout(Duration::from_secs(1), second)
@@ -203,14 +211,14 @@ mod tests {
             background_order.lock().expect("order").push("background");
         });
         // 等后台先登记，再登记前台；前台必须插到它前面。
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        wait_until_queued(&lock, 1).await;
         let foreground_lock = Arc::clone(&lock);
         let foreground_order = Arc::clone(&order);
         let foreground = tokio::spawn(async move {
             let _guard = foreground_lock.lock(GateClass::Foreground).await;
             foreground_order.lock().expect("order").push("foreground");
         });
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        wait_until_queued(&lock, 2).await;
         drop(held);
         tokio::time::timeout(Duration::from_secs(1), async {
             foreground.await.expect("foreground task");

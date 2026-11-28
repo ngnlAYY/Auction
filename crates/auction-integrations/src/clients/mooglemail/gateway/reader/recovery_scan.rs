@@ -35,7 +35,7 @@ impl MoogleMailGateway {
         }
         let deadline = tokio::time::Instant::now()
             .checked_add(self.config.fetch_budget)
-            .ok_or_else(|| configuration(world))?;
+            .ok_or_else(|| configuration(world, MoogleMailOperation::Sent))?;
         let session = tokio::time::timeout_at(
             deadline,
             self.credentials.begin_read(world, MoogleMailOperation::Sent),
@@ -48,7 +48,7 @@ impl MoogleMailGateway {
                 safe_diagnostics::project(&diagnostic_cause),
                 DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
             );
-            fetch_budget_exhausted(world)
+            fetch_budget_exhausted(world, MoogleMailOperation::Sent)
         })??;
         let result: Result<MoogleMailSentRecoveryScan, MoogleMailError> =
             tokio::time::timeout_at(deadline, async {
@@ -91,7 +91,7 @@ impl MoogleMailGateway {
                         ..Default::default()
                     },
                 );
-                fetch_budget_exhausted(world)
+                fetch_budget_exhausted(world, MoogleMailOperation::Sent)
             })?;
         match result {
             Ok(scan) => {
@@ -132,7 +132,7 @@ impl MoogleMailGateway {
         }
         let deadline = tokio::time::Instant::now()
             .checked_add(self.config.fetch_budget)
-            .ok_or_else(|| configuration(world))?;
+            .ok_or_else(|| configuration(world, MoogleMailOperation::ReadMail))?;
         let session = tokio::time::timeout_at(
             deadline,
             self.credentials.begin_read(world, MoogleMailOperation::ReadMail),
@@ -145,7 +145,7 @@ impl MoogleMailGateway {
                 safe_diagnostics::project(&diagnostic_cause),
                 DiagnosticContext { world: diagnostic_world(world.as_str()), ..Default::default() },
             );
-            fetch_budget_exhausted(world)
+            fetch_budget_exhausted(world, MoogleMailOperation::ReadMail)
         })??;
         let result: Result<MoogleMailInboundRecoveryScan, MoogleMailError> =
             tokio::time::timeout_at(deadline, async {
@@ -171,7 +171,7 @@ impl MoogleMailGateway {
                         ..Default::default()
                     },
                 );
-                fetch_budget_exhausted(world)
+                fetch_budget_exhausted(world, MoogleMailOperation::ReadMail)
             })?;
         match result {
             Ok(scan) => {
