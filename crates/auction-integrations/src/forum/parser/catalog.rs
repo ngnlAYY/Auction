@@ -100,15 +100,22 @@ fn category_heading(value: &str) -> Option<&'static str> {
 }
 
 fn custom_start_price(lower: &str) -> Option<Result<i64, ()>> {
-    let start = lower.find("start")?;
-    let tail = lower[start + "start".len()..].trim_start();
-    let tail = tail.strip_prefix(':')?.trim_start();
-    let token = tail
-        .split_whitespace()
-        .next()?
-        .trim_matches(|character: char| matches!(character, ',' | ';' | ')' | ']'));
-    // 起拍价是目录事实，可为任意正整数；只有实际竞价命令需要满足 credit 网格。
-    Some(parse_catalog_amount(token))
+    // 只识别独立词 "start"+可选空白+':'；物品名里的 "Starting…" 不能改变起拍价。
+    let mut remaining = lower;
+    while let Some(index) = remaining.find("start") {
+        let after = &remaining[index + "start".len()..];
+        let standalone = index == 0 || !remaining.as_bytes()[index - 1].is_ascii_alphanumeric();
+        if standalone && let Some(tail) = after.trim_start().strip_prefix(':') {
+            let token = tail
+                .split_whitespace()
+                .next()?
+                .trim_matches(|character: char| matches!(character, ',' | ';' | ')' | ']'));
+            // 起拍价是目录事实，可为任意正整数；只有实际竞价命令需要满足 credit 网格。
+            return Some(parse_catalog_amount(token));
+        }
+        remaining = after;
+    }
+    None
 }
 
 type SellerAndBid = (Option<String>, Option<String>, Option<i64>);

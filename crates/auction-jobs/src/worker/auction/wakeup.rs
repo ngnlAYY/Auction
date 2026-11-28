@@ -45,8 +45,8 @@ where
     C: Clock + 'static,
 {
     // 生命周期与慢速代理按其领取所用的数据库时钟计算。
-    // 提示须锚定读取时刻；后续查询和网络等待不能在最终 sleep 时重新获得一遍等待时长。
-    let database_observed_at = Instant::now();
+    // 时间锚点必须取在 database_now 返回之后：数据库样本不早于该 Instant，按此推出的
+    // 截止只会偏晚而不会提前醒来；后续查询耗时由最终 remaining 计算自然扣除。
     let database_now = match worker.schedule.database_now().await {
         Ok(now) => Some(now),
         Err(error) => {
@@ -59,6 +59,7 @@ where
             None
         }
     };
+    let database_observed_at = Instant::now();
     let mut wait = None;
     if let Some(now) = database_now {
         let lifecycle = hint(worker.schedule.next_claimable_at(now).await, "read_lifecycle_hint");

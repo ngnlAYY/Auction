@@ -136,7 +136,7 @@ pub(super) fn write_wal_upload_receipt(
     receipt: &WalUploadReceipt,
 ) -> anyhow::Result<()> {
     let path = wal_upload_path(directory, &receipt.segment_name);
-    // 沿用既有临时名 `<段名>.wal-upload.tmp`：崩溃残留会被截断复用，不在目录里累积。
+    // 沿用既有临时名 `<段名>.wal-upload.tmp`：崩溃残留先被清理再新建，不在目录里累积。
     let temporary = temp_path(directory, &receipt.segment_name, ".wal-upload");
     let bytes = serde_json::to_vec_pretty(receipt).context("序列化 WAL 上传证据失败")?;
     replace_staged_file(&path, &temporary, &bytes, WAL_UPLOAD_RECEIPT_MODE)

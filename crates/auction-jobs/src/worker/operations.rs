@@ -249,7 +249,18 @@ impl OperationsAlertRuntime {
         )
         .await
         {
-            Ok(outcome) => outcome?,
+            // 发送调用本身未返回结论时，是否已送达未知；立即持久化人工对账，
+            // 而不是等租约过期后由下一次领取改判。
+            Ok(Err(error)) => {
+                diagnostics::warn(
+                    "operations_alert",
+                    "send_webhook",
+                    error.diagnostic_kind(),
+                    DiagnosticContext::default(),
+                );
+                OperationsAlertWebhookOutcome::Unknown
+            }
+            Ok(Ok(outcome)) => outcome,
             Err(tokio::time::error::Elapsed { .. }) => OperationsAlertWebhookOutcome::Unknown,
         };
         if outcome == OperationsAlertWebhookOutcome::Retryable

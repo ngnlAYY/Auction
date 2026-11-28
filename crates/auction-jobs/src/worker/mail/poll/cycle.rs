@@ -149,7 +149,15 @@ where
     let iteration_started = std::time::Instant::now();
     // 邮件收件与维护属于批量轮次，受共享连接配额限制；许可在本轮结束时释放。
     let result = if isolated {
-        let _bulk_permit = worker.bulk_permit().await;
+        // 共享配额可能被其他 owner 长时间占用；等待许可必须响应停机，取得后再复核排空。
+        let _bulk_permit = tokio::select! {
+            biased;
+            _ = shutdown.changed() => return Ok(()),
+            bulk_permit = worker.bulk_permit() => bulk_permit,
+        };
+        if worker.control.is_draining() || *shutdown.borrow() {
+            return Ok(());
+        }
         // 新路径只等待收件；维护由 runner 的独立 JoinSet 监督，不改变 claim/证明/提交边界。
         worker
             .write_lifecycle

@@ -275,9 +275,10 @@ fn round_mail_gate(snapshot: &ScheduledRoundSnapshot, now: Timestamp) -> Option<
     {
         true
     } else if (!snapshot.active && snapshot.preview_completed_at.is_some())
-        || (snapshot.active && snapshot.open_completed_at.is_some() && now >= snapshot.open_due_at)
+        || (snapshot.active && snapshot.open_completed_at.is_some())
     {
-        // 取消/错过的轮次已经不再要求暂停；不能把本周邮箱永久留在 Preview 的暂停状态。
+        // 取消/错过或已开拍（含授权提前开拍）都不再要求暂停；提前开拍以完成事实为准，
+        // 不能等到冻结的 open_due_at 才恢复邮箱。
         false
     } else {
         return None;

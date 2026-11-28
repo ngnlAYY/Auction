@@ -98,7 +98,12 @@ where
                 ));
             }
         }
-        while claim_error.is_none() && !worker.control.is_draining() {
+        // 暂停可在批量轮次中途生效：每轮领取前复核，停止领取新项；在途任务仍按自身
+        // 围栏完成并由循环尾部统一收口。
+        while claim_error.is_none()
+            && !worker.control.is_draining()
+            && !worker.external_access_paused()
+        {
             if (tasks.len() >= effective_concurrency
                 || delivery_count >= usize::from(delivery.batch_limit))
                 && let Some(result) = tasks.join_next().await

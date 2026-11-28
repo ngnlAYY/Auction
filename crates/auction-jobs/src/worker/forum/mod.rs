@@ -54,8 +54,20 @@ pub(crate) async fn run_loop<C>(
                 continue;
             }
             let started = std::time::Instant::now();
-            // 论坛同步与回帖导入属于批量轮次，受共享连接配额限制。
-            let bulk_permit = worker.bulk_permit().await;
+            // 论坛同步与回帖导入属于批量轮次，受共享连接配额限制；等待许可期间也必须
+            // 响应停机，否则配额被其他 owner 长期占用时会拖住有界排空。
+            let bulk_permit = tokio::select! {
+                biased;
+                _ = shutdown.changed() => return,
+                bulk_permit = worker.bulk_permit() => bulk_permit,
+            };
+            // 等待期间可能进入排空或主动暂停：取得许可后立即复核，不开始新周期。
+            if worker.control.is_draining() {
+                return;
+            }
+            if worker.external_access_paused() {
+                continue;
+            }
             // 每个循环边界读取一次完整热快照；租约仍来自启动配置。
             let forum = worker.forum_runtime();
             let hot_forum = worker.hot.snapshot().forum;

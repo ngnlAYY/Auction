@@ -144,10 +144,9 @@ fn parse_stats(
             if elements.next().is_some() {
                 return Err(EquipmentParseError::InvalidAttributes);
             }
-            let name = normalize_text(name_element.text().collect::<String>());
-            let value =
-                normalize_stat_value(&normalize_text(value_element.text().collect::<String>()))
-                    .ok_or(EquipmentParseError::InvalidAttributes)?;
+            let name = element_text(name_element);
+            let value = normalize_stat_value(&element_text(value_element))
+                .ok_or(EquipmentParseError::InvalidAttributes)?;
             if let Some(unit_element) = unit_element {
                 let unit = element_text(unit_element);
                 if unit != "%" && unit != "x" {

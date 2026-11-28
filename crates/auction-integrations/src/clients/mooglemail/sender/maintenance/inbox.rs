@@ -178,12 +178,11 @@ impl MoogleMailSender {
             return Ok(None);
         };
         if let Some(summary) = summary {
-            // 历史摘要仅定位原 MID；仍执行完整详情与装备 key 校验，不从截断显示名重建身份。
-            let mut message = self
-                .client
-                .diagnose_parse(&target, &document, self.parser.parse_detail(&document, summary))
-                .await?;
-            message.clear_secrets();
+            // 历史摘要仅定位原 MID；严格详情解析只作诊断，不能覆盖已成功的 action-state 观察。
+            let parsed = self.parser.parse_detail(&document, summary);
+            if let Ok(mut message) = self.client.diagnose_parse(&target, &document, parsed).await {
+                message.clear_secrets();
+            }
         }
         self.client.check_read_round(cookie, round).await?;
         Ok(Some(state))

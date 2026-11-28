@@ -66,12 +66,21 @@ pub struct RightNoticeRuntime {
 struct Round {
     worked: bool,
     failed: bool,
+    /// 明确未发出的可重试结果：释放已成功，需要退避，但没有任何持久化失败事实。
+    retry: bool,
+}
+
+/// 单条工作的处置：继续处理、退避后重试或本轮错误。
+enum ProcessOutcome {
+    Done,
+    Retry,
+    Failed,
 }
 
 impl RightNoticeRuntime {
     /// 处理到没有可领工作、遇到可重试失败或达到单轮上限。
     async fn round(&self) -> Round {
-        let mut round = Round { worked: false, failed: false };
+        let mut round = Round { worked: false, failed: false, retry: false };
         for _ in 0..MAX_PER_ROUND {
             // 暂停在每次领取前复核：领取后才发信，暂停期间不产生新的外部写（不变量 4）。
             if (self.paused)() {
@@ -87,16 +96,23 @@ impl RightNoticeRuntime {
                 }
             };
             round.worked = true;
-            if !self.process(claimed).await {
-                round.failed = true;
-                return round;
+            match self.process(claimed).await {
+                ProcessOutcome::Done => {}
+                ProcessOutcome::Retry => {
+                    round.retry = true;
+                    return round;
+                }
+                ProcessOutcome::Failed => {
+                    round.failed = true;
+                    return round;
+                }
             }
         }
         round
     }
 
-    /// 处理一条已领取的工作；返回 `false` 表示本轮应退避。
-    async fn process(&self, claimed: ClaimedRightNotice) -> bool {
+    /// 处理一条已领取的工作；返回需要退避的重试或错误。
+    async fn process(&self, claimed: ClaimedRightNotice) -> ProcessOutcome {
         let lease = claimed.lease;
         if claimed.reclaimed {
             // 上一持有者可能已经发出：只记未知，不重发（不变量 4）。
@@ -109,26 +125,31 @@ impl RightNoticeRuntime {
                 self.finish(lease, RightNoticeDisposition::Suppressed).await
             }
             NoticeDelivery::NotSent { retryable: true } => match self.store.release(lease).await {
-                Ok(()) => false,
+                // 明确未发出且租约已释放：正常退避重试，不是本轮错误。
+                Ok(()) => ProcessOutcome::Retry,
                 Err(error) => {
                     tracing::warn!(code = store_code(error), "权利通知租约释放失败");
-                    false
+                    ProcessOutcome::Failed
                 }
             },
         }
     }
 
-    async fn finish(&self, lease: RightNoticeLease, disposition: RightNoticeDisposition) -> bool {
+    async fn finish(
+        &self,
+        lease: RightNoticeLease,
+        disposition: RightNoticeDisposition,
+    ) -> ProcessOutcome {
         match self.store.complete(lease, disposition).await {
-            Ok(()) => true,
+            Ok(()) => ProcessOutcome::Done,
             Err(RightNoticeStoreError::LeaseLost) => {
                 // 他人已重新领取或已有结果：本持有者放弃，结果以数据库为准。
                 tracing::warn!(code = "lease_lost", "权利通知租约已失效，放弃写入");
-                true
+                ProcessOutcome::Done
             }
             Err(error) => {
                 tracing::warn!(code = store_code(error), "权利通知结果写入失败");
-                false
+                ProcessOutcome::Failed
             }
         }
     }
@@ -148,7 +169,8 @@ pub async fn run(
             if round.failed { WorkerResult::Error } else { WorkerResult::Success },
             started_at.elapsed(),
         );
-        if round.failed {
+        // 可重试的明确未发出与持久化错误共用指数退避，但前者不污染错误指标。
+        if round.failed || round.retry {
             if wait_for_backoff(&mut drain, backoff).await {
                 return;
             }

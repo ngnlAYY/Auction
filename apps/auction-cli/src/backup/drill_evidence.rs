@@ -35,7 +35,13 @@ pub(crate) fn latest_restore_drill(directory: &Path) -> anyhow::Result<Option<Ti
         if !metadata.file_type().is_file() || metadata.len() > MAX_RECEIPT_BYTES {
             continue;
         }
-        let bytes = fs::read(&path).context("读取恢复演练回执失败")?;
+        // 上限必须作用在实际读取的字节上：metadata 快照之后文件仍可能增长。
+        let file = fs::File::open(&path).context("读取恢复演练回执失败")?;
+        let mut bytes = Vec::new();
+        file.take(MAX_RECEIPT_BYTES + 1).read_to_end(&mut bytes).context("读取恢复演练回执失败")?;
+        if bytes.len() as u64 > MAX_RECEIPT_BYTES {
+            continue;
+        }
         let Ok(receipt) = serde_json::from_slice::<serde_json::Value>(&bytes) else { continue };
         if let Some(completed_at) = successful_drill_time(&receipt) {
             latest = Some(latest.map_or(completed_at, |current| current.max(completed_at)));

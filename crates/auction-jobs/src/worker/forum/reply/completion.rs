@@ -1,6 +1,6 @@
 //! 论坛命令的完成、稳定 ID、错误分类和请求辅助。
 
-use auction_application::core::{ApplicationError, CompetitionTransactionError};
+use auction_application::core::{ApplicationError, MailProcessingRetryability};
 use uuid::Uuid;
 
 use super::ForumReplyRuntime;
@@ -32,16 +32,11 @@ pub(super) fn forum_command_id(
     Uuid::new_v5(&Uuid::NAMESPACE_URL, name.as_bytes())
 }
 
+/// 与会话/命令共享同一重试分类：论坛命令留在 pending 与邮件内联重试同为“暂态可重试”，
+/// 只有应用层认定的永久分类才写成拒绝。队列等待超时、装备锁暂不可用、序列化冲突和
+/// 存储失败都不得被永久记录。
 pub(super) fn is_retryable(error: &ApplicationError) -> bool {
-    matches!(
-        error,
-        ApplicationError::Repository(_)
-            | ApplicationError::CompetitionTransaction(
-                CompetitionTransactionError::Failed(_)
-                    | CompetitionTransactionError::Conflict
-                    | CompetitionTransactionError::SerializationConflict,
-            )
-    )
+    error.mail_processing_retryability() == MailProcessingRetryability::Retryable
 }
 
 pub(super) fn bounded_detail(value: String) -> String {

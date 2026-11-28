@@ -88,6 +88,11 @@ pub(super) async fn run(
         };
         if worker_ready {
             for readiness in mail_readiness {
+                // 排空开始后不再续发新的就绪：后续世界不是已开始的工作，续期会延长
+                // “可读邮件”的对外声明，而本进程正在停止。
+                if stopped(&drain) {
+                    return;
+                }
                 // 读取器未签收详情能力时保持门控关闭，不写任何有效就绪。
                 if !readiness.policy.detail_ready {
                     continue;

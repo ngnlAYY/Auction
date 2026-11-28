@@ -168,13 +168,11 @@ fn parse_boot_time(content: &str) -> Option<u64> {
 
 /// 软限制为 `unlimited` 时退回硬限制；两者都无限时没有可导出的数值。
 fn parse_max_open_files(content: &str) -> Option<u64> {
-    content
-        .lines()
-        .find_map(|line| line.strip_prefix("Max open files"))?
-        .split_whitespace()
-        .next()?
-        .parse()
-        .ok()
+    let mut fields =
+        content.lines().find_map(|line| line.strip_prefix("Max open files"))?.split_whitespace();
+    let soft = fields.next().and_then(|value| value.parse::<u64>().ok());
+    let hard = fields.next().and_then(|value| value.parse::<u64>().ok());
+    soft.or(hard)
 }
 
 /// `status` 以 kB 报告常驻内存，不依赖页大小。

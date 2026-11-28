@@ -418,9 +418,12 @@ impl ConsignmentWorker {
     }
 }
 
-/// 一次扫描的下一页游标；来源给出不严格前进的游标说明实现有误，结束本次扫描而不是空转。
+/// 一次扫描的下一页游标；来源给出的游标必须严格前进，回退或不变都说明实现有误，
+/// 结束本次扫描而不是重复读取同一页。
 fn next_scan_cursor(after: Option<ScanCursor>, next: Option<ScanCursor>) -> Option<ScanCursor> {
-    next.filter(|next| after != Some(*next))
+    next.filter(|next| {
+        after.is_none_or(|after| (next.sort_at, next.tie_id) > (after.sort_at, after.tie_id))
+    })
 }
 
 fn stopped(drain: &watch::Receiver<bool>) -> bool {

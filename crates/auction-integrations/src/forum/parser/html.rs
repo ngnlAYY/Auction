@@ -58,10 +58,14 @@ pub(super) fn canonical_post_id(value: &str) -> bool {
 }
 
 fn post_was_edited(element: ElementRef<'_>) -> bool {
-    // 只信任论坛生成的 edit 元素；普通用户正文包含相同英文句子不能成为绕过命令解析的开关。
-    static_selector!("forum_topic", "build_preview_edit_selector", ".edit")
-        .ok()
-        .is_some_and(|selector| element.select(selector).next().is_some())
+    // 只信任论坛生成的 edit 元素；引用块里被引用帖的编辑提示属于原作者，不能让整条回复被忽略。
+    let Ok(selector) = static_selector!("forum_topic", "build_preview_edit_selector", ".edit")
+    else {
+        return false;
+    };
+    element.select(selector).any(|edit| {
+        !edit.ancestors().filter_map(ElementRef::wrap).any(|node| is_quote(node.value()))
+    })
 }
 
 fn render_post_text(element: ElementRef<'_>) -> String {

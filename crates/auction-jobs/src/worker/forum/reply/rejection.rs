@@ -145,6 +145,14 @@ pub(super) fn rejection_message(
             "notification_rejected",
             "Notification request was rejected. Check the bid result separately; contact the auction administrator with the post and line number. Do not repeat a bid to request a notification.",
         ),
+        "subscription_cap" => (
+            "subscription_cap",
+            "Notify subscription was not created because this post or auction reached its watch-list limit. Check the bid result separately; contact the auction administrator if the notification is expected. Do not repeat a bid to request a notification.",
+        ),
+        "subscription_failed" => (
+            "subscription_failed",
+            "Notify subscription could not be recorded. Check the bid result separately; contact the auction administrator with the post and line number. Do not repeat a bid to request a notification.",
+        ),
         _ => (
             "command_rejected",
             "Command rejected. Check the recorded auction result and contact the auction administrator with the post and line number before trying again.",

@@ -97,9 +97,10 @@ impl MoogleMailGateway {
                 MoogleMailErrorCategory::Configuration,
             ));
         }
-        let configured_deadline = std::time::Instant::now()
-            .checked_add(self.config.fetch_budget)
-            .ok_or_else(|| configuration(request.world))?;
+        let configured_deadline =
+            std::time::Instant::now()
+                .checked_add(self.config.fetch_budget)
+                .ok_or_else(|| configuration(request.world, MoogleMailOperation::Sent))?;
         let deadline = tokio::time::Instant::from_std(request.deadline.min(configured_deadline));
         let session = tokio::time::timeout_at(
             deadline,

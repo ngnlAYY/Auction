@@ -190,6 +190,24 @@ fn valid_report_auction_lifecycle(auction: &SettlementAuctionSnapshot) -> bool {
     {
         return false;
     }
+    // 与 Admin 页面解码的闭集一致：状态决定各阶段时刻是否必须存在，防止不一致快照进入 wire。
+    let lifecycle_matches = match auction.status.as_str() {
+        "draft" => {
+            preview_opened.is_none()
+                && opened.is_none()
+                && final_phase.is_none()
+                && settled.is_none()
+        }
+        "preview" => opened.is_none() && final_phase.is_none() && settled.is_none(),
+        "live" => opened.is_some() && final_phase.is_none() && settled.is_none(),
+        "final" | "settling" => opened.is_some() && final_phase.is_some() && settled.is_none(),
+        "settled" => opened.is_some() && final_phase.is_some() && settled.is_some(),
+        "cancelled" => opened.is_none() && final_phase.is_none() && settled.is_none(),
+        _ => false,
+    };
+    if !lifecycle_matches {
+        return false;
+    }
     let cancelled = auction.status == "cancelled";
     let has_any_cancel_metadata = auction.cancelled_at.is_some()
         || auction.cancelled_reason.is_some()

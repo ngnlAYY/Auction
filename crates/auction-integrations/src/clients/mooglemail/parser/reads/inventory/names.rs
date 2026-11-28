@@ -35,9 +35,11 @@ pub(super) fn inventory_names(
             if source.contains("dynjs_equip") || source.contains("dynjs_eqstore") {
                 return Err(fail());
             }
-            if reference.contains("/dynjs/")
-                || reference.contains("equip-")
-                || reference.contains("eqstore-")
+            // 只收真正的装备/仓库元数据脚本；页面同时引用的 itemc.js 等不能进入待取清单。
+            if reference
+                .rsplit('/')
+                .next()
+                .is_some_and(|name| name.starts_with("equip-") || name.starts_with("eqstore-"))
             {
                 if sources.len() == 2
                     || sources.iter().any(|existing| existing == reference)

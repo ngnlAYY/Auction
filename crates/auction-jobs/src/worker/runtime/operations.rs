@@ -9,7 +9,7 @@ use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult};
 use super::scheduling::{poll_delay, wait_until_or_shutdown};
 use crate::WorkerControlHandle;
 use crate::worker::diagnostics;
-use crate::worker::operations::{OperationsAlertRuntime, OperationsAlertRuntimeConfig};
+use crate::worker::operations::OperationsAlertRuntime;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum OperationsAlertLoopAction {
@@ -35,14 +35,23 @@ impl OperationsAlertLoopAction {
         }
     }
 
-    const fn timeout(self, config: OperationsAlertRuntimeConfig) -> std::time::Duration {
+    /// 分发阶段的外层预算：运行时内部已按 `dispatch_timeout` 约束发送并持久化 Unknown，
+    /// 外层多留出领取与收口余量，避免在内部超时写入人工对账前取消整轮。
+    fn timeout(self, runtime: &OperationsAlertRuntime) -> std::time::Duration {
+        let config = runtime.config;
         match self {
             Self::Scan => config.scan_timeout,
-            Self::Dispatch => config.dispatch_timeout,
             Self::Reconcile => config.reconcile_timeout,
+            Self::Dispatch => config
+                .dispatch_timeout
+                .saturating_add(DISPATCH_FINISH_HEADROOM)
+                .min(runtime.policy.claim_lease),
         }
     }
 }
+
+/// 分发阶段在运行时内部发送预算之外追加的收口余量。
+const DISPATCH_FINISH_HEADROOM: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// 独立运行一个 operations alert owner；单轮错误只影响自身下一次轮询。
 pub(super) async fn run_operations_alert_loop<C>(
@@ -70,7 +79,7 @@ pub(super) async fn run_operations_alert_loop<C>(
                 None => None,
             };
             let now = clock.now();
-            let attempt = tokio::time::timeout(action.timeout(runtime.config), async {
+            let attempt = tokio::time::timeout(action.timeout(runtime.as_ref()), async {
                 match action {
                     OperationsAlertLoopAction::Scan => runtime.scan(now).await.map(|()| None),
                     OperationsAlertLoopAction::Dispatch => {

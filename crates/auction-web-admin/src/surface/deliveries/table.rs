@@ -42,7 +42,8 @@ pub(super) fn DeliveryTable(
     // 只有对话框所在行收到对话框状态；开合对话框时其余行 props 不变。行数据在 rsx 外配好，
     // 循环体根节点才能直接是带 key 的 DeliveryRow。
     let rows = deliveries.into_iter().map(|delivery| {
-        let row_dialog = pending_dialog.clone().filter(|dialog| dialog.delivery.id == delivery.id);
+        let row_dialog =
+            pending_dialog.as_ref().filter(|dialog| dialog.delivery.id == delivery.id).cloned();
         (delivery, row_dialog)
     });
     rsx! {

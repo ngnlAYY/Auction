@@ -114,6 +114,28 @@ fn publish_pointer(
     Ok(true)
 }
 
+/// `rename(2)` 的无覆盖版本：目标已存在时不替换，原样返回 `AlreadyExists`。
+fn rename_no_replace(source: &Path, target: &Path) -> std::io::Result<()> {
+    let invalid =
+        |error: std::ffi::NulError| std::io::Error::new(std::io::ErrorKind::InvalidInput, error);
+    let source = CString::new(source.as_os_str().as_bytes()).map_err(invalid)?;
+    let target = CString::new(target.as_os_str().as_bytes()).map_err(invalid)?;
+    // SAFETY：两个路径都是无 NUL 的 C 字符串；`AT_FDCWD` 表示按当前工作目录解析绝对路径。
+    if unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            source.as_ptr(),
+            libc::AT_FDCWD,
+            target.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    } != 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// 指针指向的默认 build 与独立 build 构成的记录；`independent` 必须是 Solid。
 fn pointer_for(
     surface: Surface,

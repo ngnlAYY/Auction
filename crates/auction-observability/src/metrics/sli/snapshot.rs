@@ -132,6 +132,8 @@ impl PrometheusCollector for Collector {
     }
 
     fn collect(&self) -> Vec<MetricFamily> {
+        // 模块承诺持有到采集完成：并发 gather 不能交错写入或与 remove_label_values 竞争。
+        let _gate = self.collection_gate.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let snapshot = lock(&self.snapshot).clone();
         self.enabled.set(i64::from(self.switches.sli_snapshot_enabled()));
         self.available.set(i64::from(snapshot.is_some()));
