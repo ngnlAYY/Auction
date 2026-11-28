@@ -23,10 +23,7 @@ import {
 
 import type { CatalogRow } from "../../../api/model";
 import { catalogRowFromDetail } from "../../../api/model";
-import {
-  fetchLotDetail,
-  type LotDetailFetchError,
-} from "../../../api/queries/lots";
+import { fetchLotDetail, type LotDetailFetchError } from "../../../api/queries/lots";
 import { PublicRefreshGenerationContext, useBidRefresh } from "../../board/refresh";
 import { CatalogActionIcon } from "../actions";
 import type { CatalogDetailBid, DetailWorld } from ".";

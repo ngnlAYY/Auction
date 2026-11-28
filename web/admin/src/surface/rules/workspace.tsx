@@ -236,7 +236,13 @@ export function AdminRulesWorkspace(props: AdminRulesWorkspaceProps): JSX.Elemen
         return commandDeliveryReported(sourceAlive, () => null);
       },
       (code) => {
-        setIfAlive(props.notice, { kind: "action-error", code }, () => props.pending.host.alive());
+        const current = props.pending.source.peek();
+        const live = props.pending.host.sources.peek().some((entry) => entry.deref() === current);
+        if (live) {
+          setIfAlive(props.notice, { kind: "action-error", code }, () =>
+            props.pending.host.alive(),
+          );
+        }
       },
     );
   };

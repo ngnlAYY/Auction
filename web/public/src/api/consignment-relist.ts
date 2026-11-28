@@ -155,7 +155,7 @@ export async function relistConsignmentListing(
     if (sessionChanged || (status === 401 && code === "unauthenticated"))
       onSessionGuardRejected?.();
     if (unauthorized) observePublicSessionFailure(401, "unauthenticated", userId);
-    else if (sessionChanged) observePublicSessionFailure(status, code, userId);
+    else if (sessionChanged) observePublicSessionFailure(status, code, userId, identityAtStart);
     return result;
   }
   return relistReceiptMatches(result.value, listingId, command)

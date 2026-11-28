@@ -94,10 +94,7 @@ export function NavigationLinks(props: {
       <Show
         when={authenticated()}
         fallback={
-          <Link
-            href={props.scopedHref(LOGIN_ROUTE_HREF)}
-            aria-current={isCurrent("Login") ? "page" : "false"}
-          >
+          <Link href={props.scopedHref(LOGIN_ROUTE_HREF)} aria-current="false">
             {t("session-login")}
           </Link>
         }

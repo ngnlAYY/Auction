@@ -11,7 +11,7 @@ import type { JSX } from "@solidjs/web";
 import { Match, Show, Switch } from "solid-js";
 
 import { commandErrorOutcomeUncertain } from "../../api/commands";
-import { fetchConsignmentDetailV2 } from "../../api/consignment-orders";
+import { fetchConsignmentDetailV2, purchaseBusinessRejected } from "../../api/consignment-orders";
 import type { ConsignmentPrivateError } from "../../api/consignment-private";
 import { consignmentEnabled, useConsignmentCapability } from "./capability";
 import { EquipmentPanel } from "./detail";

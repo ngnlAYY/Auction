@@ -47,8 +47,12 @@ const NAME_ERROR_ID = "public-consignment-name-error";
 type RejectedFilter = "name";
 
 function hasCredentialFragment(value: string): boolean {
-  // 不变量 7：沿用下架说明的 ASCII 片段检查，并拦截其他带协议的链接。
-  return /:\/\/|\/equip[/?]|key=/i.test(value);
+  // 不变量 7：与下架说明同口径，拦截装备链接、独立 10 位十六进制键与 43 位令牌形态。
+  return (
+    /:\/\/|\/equip[/?]|key=/i.test(value) ||
+    value.split(/[^0-9a-z_-]/iu).some((token) => token.length === 43) ||
+    value.split(/[^0-9a-z]/iu).some((token) => token.length === 10 && /^[0-9a-f]+$/iu.test(token))
+  );
 }
 
 /** 规范单行文本、整串不超过 80 个字符，再按成交历史页的口径拆词：1 至 8 个片段、每段不超过 128 字节。 */

@@ -234,9 +234,7 @@ export function AdminUserRow(props: AdminUserRowProps): JSX.Element {
                       disabled={props.busy()}
                       value={forumAccountIdValue()}
                       aria-invalid={fieldIssue() === null ? "false" : "true"}
-                      aria-describedby={
-                        fieldIssue() === null ? undefined : "admin-user-edit-forum-account-error"
-                      }
+                      aria-describedby={fieldIssue() === null ? undefined : forumAccountErrorId}
                       onInput={(event) => {
                         const value = event.currentTarget.value;
                         if (fieldIssue.peek() !== null) {
@@ -288,9 +286,7 @@ export function AdminUserRow(props: AdminUserRowProps): JSX.Element {
                     }}
                   >
                     <p>{t("admin-users-blacklist-warning")}</p>
-                    <label for="admin-user-blacklist-reason">
-                      {t("admin-users-blacklist-reason")}
-                    </label>
+                    <label for={blacklistReasonFieldId}>{t("admin-users-blacklist-reason")}</label>
                     <textarea
                       id={blacklistReasonFieldId}
                       name="public_reason"
@@ -299,9 +295,7 @@ export function AdminUserRow(props: AdminUserRowProps): JSX.Element {
                       disabled={props.busy()}
                       value={dialogReason()}
                       aria-invalid={fieldIssue() === null ? "false" : "true"}
-                      aria-describedby={
-                        fieldIssue() === null ? undefined : "admin-user-blacklist-reason-error"
-                      }
+                      aria-describedby={fieldIssue() === null ? undefined : blacklistReasonErrorId}
                       onInput={(event) => {
                         const value = event.currentTarget.value;
                         if (fieldIssue.peek() !== null) {

@@ -20,13 +20,7 @@ import { validNumberedPage } from "./auction";
 export function validCompensationPool(value: unknown): boolean {
   const pool = object(value);
   if (pool === null) return false;
-  if (
-    !jsonKeysOnly(
-      pool,
-      ["balance", "updated_at", "rounds", "page", "page_size", "total"],
-      ["cursor", "next_cursor", "has_more"],
-    )
-  ) {
+  if (!jsonKeysOnly(pool, ["balance", "updated_at", "rounds", "page", "page_size", "total"], [])) {
     return false;
   }
   const rounds = pool.rounds;

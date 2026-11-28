@@ -42,6 +42,11 @@ export const DirectListingProgressSchema = v.pipe(
     effective_reason: requiredNullable(ListingReasonSchema),
     expires_at: ConsignmentTimestampSchema,
   }),
+  // 与应用层投影同一终态归类：原因只能指向其固定终态，不出现“解析中却因服务停用终结”。
+  v.check(
+    ({ effective_state, effective_reason }) =>
+      effective_reason === null || listingReasonTerminalState(effective_reason) === effective_state,
+  ),
   v.check(({ effective_state }) => listingStateMatchesMode(effective_state, "direct")),
 );
 /** 免登录挂单的当前进度，不含卖家名、费率与可执行动作。 */

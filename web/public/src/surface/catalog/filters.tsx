@@ -125,6 +125,13 @@ export function CatalogGroupFilters(props: {
               onChange={(event) => {
                 blurApplyToken += 1;
                 const checked = event.currentTarget.checked;
+                const parsed = catalogLevelFilterParse(maximum(), checked ? "true" : "false");
+                if (!parsed.ok) {
+                  // 草稿等级无效时不写地址栏；复选框恢复为地址栏已生效的值。
+                  invalid.set(true);
+                  event.currentTarget.checked = props.includeUnleveled === "true";
+                  return;
+                }
                 include.set(checked);
                 apply(checked);
               }}
