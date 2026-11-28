@@ -122,9 +122,11 @@ pub fn render_first_dispatch(
         ) if payment.carrier_credit == 0 => {
             (ConsignmentSubjectKind::EquipmentCod, vec![facts.canonical_eid.to_owned()])
         }
-        (SettlementWorld::Isekai, SettlementObligationKind::WinnerPaymentCarrierCod) => {
-            (ConsignmentSubjectKind::PaymentCarrier, Vec::new())
-        }
+        (
+            SettlementWorld::Isekai,
+            SettlementWorld::Isekai,
+            SettlementObligationKind::WinnerPaymentCarrierCod,
+        ) if payment.carrier_credit == 1 => (ConsignmentSubjectKind::PaymentCarrier, Vec::new()),
         _ => return Err(ConsignmentError::Unavailable),
     };
     // 付款义务的本金必须就是成交价 P，否则合同与挂单不一致（不变量 6）。

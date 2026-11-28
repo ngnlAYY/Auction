@@ -55,26 +55,27 @@ fn record(info: &PanicHookInfo<'_>) {
     // String 和其他任意 payload 都不格式化；只接受编译期静态字符串类别。
     let payload = info.payload().downcast_ref::<&'static str>().copied();
     let payload = payload.unwrap_or(REDACTED_PAYLOAD);
-    let subscriber_ready =
-        tracing::dispatcher::get_default(|dispatcher| !dispatcher.is::<NoSubscriber>());
-    if subscriber_ready {
-        tracing::error!(
-            target: TARGET,
-            parent: None,
-            thread_name,
-            file,
-            line,
-            column,
-            payload,
-            "原生任务 panic"
-        );
-    } else {
-        // stderr 写入失败不能在 hook 中触发第二次 panic；只写同一组安全字段。
-        let _ = writeln!(
-            std::io::stderr().lock(),
-            "{TARGET} thread_name={thread_name:?} file={file:?} \
-             line={line} column={column} payload={payload:?}"
-        );
+    // 已安装订阅者不代表事件能输出：过滤掉该 target 时仍须写 stderr，panic 不能静默丢失。
+    let emit_to_tracing =
+        tracing::dispatcher::get_default(|dispatcher| !dispatcher.is::<NoSubscriber>())
+            && tracing::enabled!(target: TARGET, tracing::Level::ERROR);
+    if emit_to_tracing {
+        // hook 内再次 panic 会在展开期间中止进程；订阅者失败时退回 stderr。
+        let emitted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tracing::error!(
+                target: TARGET,
+                parent: None,
+                thread_name,
+                file,
+                line,
+                column,
+                payload,
+                "原生任务 panic"
+            );
+        }));
+        if emitted.is_ok() {
+            return;
+        }
     }
     // stderr 写入失败不能在 hook 中触发第二次 panic；只写同一组安全字段。
     let _ = writeln!(

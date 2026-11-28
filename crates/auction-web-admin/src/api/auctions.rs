@@ -236,8 +236,10 @@ fn valid_auction_lifecycle(value: &AdminAuction) -> bool {
     let opened = value.opened_at.as_deref().and_then(parse_admin_time);
     let final_phase = value.final_phase_at.as_deref().and_then(parse_admin_time);
     let settled = value.settled_at.as_deref().and_then(parse_admin_time);
-    let ordered = opened
-        .is_none_or(|opened| preview_opened.is_some_and(|preview| opened >= preview))
+    let created = parse_admin_time(&value.created_at);
+    let ordered = preview_opened
+        .is_none_or(|preview| created.is_some_and(|created| preview >= created))
+        && opened.is_none_or(|opened| preview_opened.is_some_and(|preview| opened >= preview))
         && final_phase.is_none_or(|final_phase| opened.is_some_and(|opened| final_phase >= opened))
         && settled
             .is_none_or(|settled| final_phase.is_some_and(|final_phase| settled >= final_phase));

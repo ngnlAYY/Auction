@@ -19,6 +19,26 @@ pub(super) struct TopicScanProgress {
     pub(super) scan_completed: bool,
 }
 
+/// 固定楼层刷新结果；`revision_advanced` 表示暂存进度已提交、claim 的内容版本已推进。
+pub(super) struct RefreshOutcome {
+    pub(super) next_scan_at: Option<auction_time::Timestamp>,
+    pub(super) revision_advanced: bool,
+}
+
+impl RefreshOutcome {
+    const fn unchanged() -> Self {
+        Self { next_scan_at: None, revision_advanced: false }
+    }
+
+    const fn progress() -> Self {
+        Self { next_scan_at: None, revision_advanced: true }
+    }
+
+    const fn completed(next_scan_at: auction_time::Timestamp) -> Self {
+        Self { next_scan_at: Some(next_scan_at), revision_advanced: false }
+    }
+}
+
 pub(super) async fn refresh_fixed_posts(
     runtime: &ForumReplyRuntime,
     mut topic: auction_application::forum::ForumReplyTopic,
@@ -26,7 +46,7 @@ pub(super) async fn refresh_fixed_posts(
     clock: &dyn auction_application::core::Clock,
     poll_interval: auction_time::Duration,
     write_progress: &ForumWriteProgress,
-) -> Result<Option<auction_time::Timestamp>, ApplicationError> {
+) -> Result<RefreshOutcome, ApplicationError> {
     let TopicScanProgress { processed_through_post_number, system_entries, scan_completed } = scan;
     let processed_through_post_number_i32 =
         i32::try_from(processed_through_post_number).map_err(|error| {
@@ -128,7 +148,7 @@ pub(super) async fn refresh_fixed_posts(
     if !catalog_changed && !continuation_changed && !system_log_changed {
         if !scan_completed {
             if !floor_changed {
-                return Ok(None);
+                return Ok(RefreshOutcome::unchanged());
             }
             let updated_at = clock.now();
             runtime
@@ -142,7 +162,7 @@ pub(super) async fn refresh_fixed_posts(
                 )
                 .await?;
             write_progress.confirm_write();
-            return Ok(None);
+            return Ok(RefreshOutcome::progress());
         }
         let (updated_at, next_scan_at) =
             completed_scan_times(runtime, &topic, clock, poll_interval).await?;
@@ -151,7 +171,7 @@ pub(super) async fn refresh_fixed_posts(
             .finish_topic_scan(topic, processed_through_post_number_i32, updated_at, next_scan_at)
             .await?;
         write_progress.confirm_write();
-        return Ok(Some(next_scan_at));
+        return Ok(RefreshOutcome::completed(next_scan_at));
     }
     if catalog_changed && !reconciliation_only && confirmed_terminal_version.is_none() {
         reconcile_or_edit_fixed_post(
@@ -191,7 +211,7 @@ pub(super) async fn refresh_fixed_posts(
             )
             .await?;
         write_progress.confirm_write();
-        return Ok(None);
+        return Ok(RefreshOutcome::progress());
     }
     let next_scan_at = next_scan_at(runtime, &topic, updated_at, poll_interval).await?;
     runtime
@@ -206,7 +226,7 @@ pub(super) async fn refresh_fixed_posts(
         )
         .await?;
     write_progress.confirm_write();
-    Ok(Some(next_scan_at))
+    Ok(RefreshOutcome::completed(next_scan_at))
 }
 
 async fn reconcile_or_edit_fixed_post(

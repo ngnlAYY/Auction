@@ -26,7 +26,7 @@ impl MailRequestGuard {
     ) -> Self {
         let world = mail_world(world);
         let operation = mail_operation(operation);
-        observer.observe(ExternalMetricsEvent::MailRequestStarted { world, operation });
+        observe_safely(&observer, ExternalMetricsEvent::MailRequestStarted { world, operation });
         Self { observer, world, operation, completed: false }
     }
 

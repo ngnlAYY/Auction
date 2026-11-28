@@ -92,7 +92,7 @@ pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     let mut file = unsafe { File::from_raw_fd(descriptor) };
     file.write_all(bytes).context("写入私有文件失败")?;
     file.sync_all().context("同步私有文件失败")?;
-    sync_parent(path)
+    parent.sync_all().with_context(|| format!("同步输出父目录失败：{}", parent_path.display()))
 }
 
 /// 同步父目录，使新建、改名或删除的目录项在崩溃后可见。

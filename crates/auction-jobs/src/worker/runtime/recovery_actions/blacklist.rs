@@ -91,7 +91,7 @@ where
         recovery_id: claim.recovery_id,
         action_id: claim.action_id,
         buyer_user_id: claim.buyer_user_id,
-        public_reason,
+        public_reason: public_reason.clone(),
         actor_id: RECOVERY_BUYER_BLACKLIST_ACTOR.to_owned(),
         occurred_at: claim.created_at,
     };
@@ -102,6 +102,8 @@ where
                 && result.recovery_id == claim.recovery_id
                 && result.action_id == claim.action_id
                 && result.buyer_user_id == claim.buyer_user_id
+                && result.public_reason == public_reason
+                && result.actor_id == RECOVERY_BUYER_BLACKLIST_ACTOR
                 && result.occurred_at == claim.created_at =>
         {
             let proof_digest = match result.legacy_proof_digest() {

@@ -166,6 +166,9 @@ where
                 SafeErrorKind::CAPABILITY_UNAVAILABLE,
                 DiagnosticContext::default(),
             );
+            // 本轮没有发起领取；凭据可能在本轮中途失效，不能沿用上一轮的 Topic 结果，
+            // 否则 finish_cycle 会按“刚领到主题”保留全部已到期提示并按下限空转。
+            final_scans.last_claim = None;
             topic_failed = true;
             break;
         }
@@ -230,7 +233,7 @@ where
                     DiagnosticContext::default(),
                 );
             })?;
-        let Some(topic) = topics.pop() else {
+        let Some(mut topic) = topics.pop() else {
             // 领取成功但为空：不晚于此刻的排期对应的主题已不可领取。
             final_scans.last_claim = Some(LastClaim::Empty(now));
             break;
@@ -328,6 +331,9 @@ where
             .write_lifecycle
             .activity(auction_application::operations::CriticalWriteKind::Forum);
         let write_progress = ForumWriteProgress::with_activity(activity.clone());
+        // process_topic 在返回错误前可能已提交暂存进度（content_revision +1）；失败收口
+        // 必须按新版本做 CAS，否则会误报 claim 失效并丢失重试时刻。
+        let mut revision_advanced = false;
         let operation = async {
             match tokio::time::timeout_at(
                 item_deadline,
@@ -337,6 +343,7 @@ where
                     worker.clock.as_ref(),
                     poll_interval,
                     &write_progress,
+                    &mut revision_advanced,
                 ),
             )
             .await
@@ -349,6 +356,9 @@ where
                     final_scans.record(diagnostic_auction_id, final_scan);
                 }
                 Ok(Err(error)) => {
+                    if revision_advanced {
+                        topic.content_revision = topic.content_revision.saturating_add(1);
+                    }
                     diagnostics::warn(
                         "forum_reply",
                         "process_topic",

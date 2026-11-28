@@ -28,6 +28,8 @@ pub(in crate::worker::forum::reply) async fn process_topic(
     clock: &dyn auction_application::core::Clock,
     poll_interval: auction_time::Duration,
     write_progress: &ForumWriteProgress,
+    // 暂存进度已提交时为 true：数据库 content_revision 已推进，失败收口须按新版本计算。
+    revision_advanced: &mut bool,
 ) -> Result<Option<auction_time::Timestamp>, ApplicationError> {
     let scan_started = std::time::Instant::now();
     // 游标只是已导入的最高楼层；固定楼层页仍必须重读，游标页再核对一次帖子身份。
@@ -324,7 +326,7 @@ pub(in crate::worker::forum::reply) async fn process_topic(
     }
     let scan_completed = command_error.is_none();
     delay_guard.finish(scan_completed);
-    let next_scan_at = refresh_fixed_posts(
+    let refreshed = refresh_fixed_posts(
         runtime,
         topic,
         TopicScanProgress { processed_through_post_number, system_entries, scan_completed },
@@ -333,7 +335,8 @@ pub(in crate::worker::forum::reply) async fn process_topic(
         write_progress,
     )
     .await?;
-    command_error.map_or(Ok(next_scan_at), Err)
+    *revision_advanced = refreshed.revision_advanced;
+    command_error.map_or(Ok(refreshed.next_scan_at), Err)
 }
 
 fn requires_bidder_identity(post: &auction_application::admin::AdminForumBidPost) -> bool {

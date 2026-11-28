@@ -14,6 +14,10 @@ where
     let Some(health) = &worker.recovery_health else {
         return;
     };
+    // 与资产对账阶段一致：暂停期间不开始新的远端余额读取；投影保持上一轮。
+    if worker.external_access_paused() {
+        return;
+    }
     match tokio::time::timeout(worker.recovery.item_timeout, health.run_once(worker.clock.now()))
         .await
     {

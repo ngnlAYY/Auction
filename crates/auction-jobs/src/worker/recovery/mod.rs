@@ -51,8 +51,19 @@ pub(super) async fn run_loop<C>(
                 continue;
             }
             let started = std::time::Instant::now();
-            // 恢复推进属于批量轮次，受共享连接配额限制；许可在本轮结束时释放。
-            let _bulk_permit = worker.bulk_permit().await;
+            // 恢复推进属于批量轮次，受共享连接配额限制；许可只覆盖本轮，sleep 前必须释放。
+            let bulk_permit = worker.bulk_permit().await;
+            // 等待许可期间可能进入排空或主动暂停：取得后复核，不开始新批次。
+            if worker.control.is_draining() {
+                return;
+            }
+            if worker.external_access_paused() {
+                drop(bulk_permit);
+                if crate::worker::runtime::wait_while_paused(&mut shutdown).await {
+                    return;
+                }
+                continue;
+            }
             let result = run_batch(worker.as_ref()).await;
             // 原因已由各阶段诊断记录；汇总只在状态转换时记录，持续失败不逐轮重复。
             match outcome_log.observe(result) {
@@ -69,6 +80,8 @@ pub(super) async fn run_loop<C>(
                 result,
                 started.elapsed(),
             );
+            // 与论坛/玩家通知循环一致：本轮数据库工作结束后释放许可，sleep 不占用配额。
+            drop(bulk_permit);
 
             let wait = poll_delay(worker.recovery.poll_interval, worker.recovery.jitter);
             let scheduled_wake = tokio::time::Instant::now() + wait;

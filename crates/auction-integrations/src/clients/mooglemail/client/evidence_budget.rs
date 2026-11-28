@@ -58,12 +58,15 @@ impl MoogleMailEvidenceBudget {
             return true;
         }
         let mut classes = self.classes();
-        if classes.len() >= MAXIMUM_TRACKED_CLASSES {
-            classes.clear();
+        let key = (error.world, error.operation, stage_label(stage), error.category.as_str());
+        // 上限只约束新增类别；清理过期窗口后仍满则放弃本次留证，绝不重置已追踪类别的配额。
+        if !classes.contains_key(&key) && classes.len() >= MAXIMUM_TRACKED_CLASSES {
+            classes.retain(|_, window| now.saturating_duration_since(window.started_at) < WINDOW);
+            if classes.len() >= MAXIMUM_TRACKED_CLASSES {
+                return false;
+            }
         }
-        let window = classes
-            .entry((error.world, error.operation, stage_label(stage), error.category.as_str()))
-            .or_insert(ClassWindow { started_at: now, retained: 0 });
+        let window = classes.entry(key).or_insert(ClassWindow { started_at: now, retained: 0 });
         if now.saturating_duration_since(window.started_at) >= WINDOW {
             *window = ClassWindow { started_at: now, retained: 0 };
         }

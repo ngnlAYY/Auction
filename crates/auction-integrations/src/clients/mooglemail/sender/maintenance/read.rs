@@ -86,7 +86,16 @@ impl MoogleMailSender {
                     );
                     return Err(error);
                 }
-                return Ok(scan.summaries);
+                let anchor_value = auction_application::mail::numeric_mail_scan_id(&anchor.mail_id)
+                    .unwrap_or_default();
+                return Ok(scan
+                    .summaries
+                    .into_iter()
+                    .filter(|summary| {
+                        auction_application::mail::numeric_mail_scan_id(&summary.external_mail_id)
+                            .is_some_and(|value| value > anchor_value)
+                    })
+                    .collect());
             }
             self.observe_scan(
                 world,

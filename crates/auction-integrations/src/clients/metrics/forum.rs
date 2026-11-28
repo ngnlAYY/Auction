@@ -25,7 +25,7 @@ impl ForumRequestGuard {
         world: ForumWorld,
         operation: ForumOperation,
     ) -> Self {
-        observer.observe(ExternalMetricsEvent::ForumRequestStarted { world, operation });
+        observe_safely(&observer, ExternalMetricsEvent::ForumRequestStarted { world, operation });
         Self { observer, world, operation, completed: false }
     }
 
@@ -110,7 +110,10 @@ pub(crate) fn forum_signal(
     operation: ForumOperation,
     signal: ForumSignal,
 ) {
-    observer.observe(ExternalMetricsEvent::ForumRequestSignal { world, operation, signal });
+    observe_dyn_safely(
+        observer,
+        ExternalMetricsEvent::ForumRequestSignal { world, operation, signal },
+    );
 }
 
 pub(crate) struct ForumPmOperationGuard {

@@ -40,7 +40,6 @@ pub(super) async fn record_failure_with_prefix<C>(
     C: Clock + 'static,
 {
     let MailPollFailureContext { schedule, config, metric_context } = context;
-    metric_context.metrics.observe_retry(metric_context.loop_kind, WorkerRetryKind::Persisted);
     let now = clock.now();
     let delay = retry_delay(config.retry_base, config.retry_maximum, claim.attempt_count);
     let Ok(delay) = TimeDelta::from_std(delay) else {
@@ -68,16 +67,23 @@ pub(super) async fn record_failure_with_prefix<C>(
         }
         None => store.fail(claim, retry_at, failure_code, safe_detail).await,
     };
-    if let Err(error) = result {
-        diagnostics::error(
-            "mail_poll",
-            "record_failure",
-            error.diagnostic_kind(),
-            DiagnosticContext {
-                disposition: Some(DiagnosticDisposition::Unpersisted),
-                ..Default::default()
-            },
-        );
+    match result {
+        // 只有 store 确认写入后，本条 claim 的退避才算已持久化；转换/溢出提前返回和
+        // 写入失败都不得计入 Persisted 重试。
+        Ok(_) => metric_context
+            .metrics
+            .observe_retry(metric_context.loop_kind, WorkerRetryKind::Persisted),
+        Err(error) => {
+            diagnostics::error(
+                "mail_poll",
+                "record_failure",
+                error.diagnostic_kind(),
+                DiagnosticContext {
+                    disposition: Some(DiagnosticDisposition::Unpersisted),
+                    ..Default::default()
+                },
+            );
+        }
     }
 }
 

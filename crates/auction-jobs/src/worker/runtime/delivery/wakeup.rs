@@ -42,10 +42,20 @@ pub(in crate::worker::runtime) async fn run(
                         biased;
                         _ = drain.changed() => return,
                         result = subscription.wait() => {
-                            if result.is_err() {
-                                break;
+                            // 订阅等待失败是生产断线路径；记录分类原因后再重连，
+                            // 否则诊断窗口只能看到“已断开”而看不到根因。
+                            match result {
+                                Ok(()) => wakeup.notify_one(),
+                                Err(error) => {
+                                    diagnostics::warn(
+                                        "delivery_wakeup",
+                                        "wait_notifications",
+                                        error.diagnostic_kind(),
+                                        DiagnosticContext::default(),
+                                    );
+                                    break;
+                                }
                             }
-                            wakeup.notify_one();
                         }
                     }
                 }

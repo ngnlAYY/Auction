@@ -44,8 +44,11 @@ pub(crate) fn resolve_public_url(
             "论坛公开地址配置无效".to_owned(),
         ))
     })?;
+    // 特殊 scheme 下 `\` 与 `/` 等价：`/\user:pass@host:port/path` 会被 join 当成新 authority，
+    // 因此参考地址必须拒绝反斜杠，解析结果也必须保持同一 origin 且不带凭据。
     if !reference.starts_with('/')
         || reference.starts_with("//")
+        || reference.contains('\\')
         || reference.contains('#')
         || reference.chars().any(char::is_control)
     {
@@ -65,7 +68,12 @@ pub(crate) fn resolve_public_url(
             "论坛公开地址引用无效".to_owned(),
         ))
     })?;
-    if resolved.scheme() != base.scheme() || resolved.host() != base.host() {
+    if resolved.scheme() != base.scheme()
+        || resolved.host() != base.host()
+        || resolved.port_or_known_default() != base.port_or_known_default()
+        || !resolved.username().is_empty()
+        || resolved.password().is_some()
+    {
         return Err(ApplicationError::Repository(
             auction_application::core::RepositoryError::Failed("论坛公开地址引用无效".to_owned()),
         ));

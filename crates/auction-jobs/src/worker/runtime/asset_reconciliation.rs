@@ -6,7 +6,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError};
+use auction_application::core::diagnostics::{DiagnosticContext, DiagnosticError, SafeErrorKind};
 use auction_application::core::{ApplicationError, RepositoryError};
 use auction_application::reconciliation::AssetReconciliationPort;
 use auction_time::{TimeDelta, Timestamp};
@@ -83,6 +83,13 @@ impl AssetReconciliationRuntime {
         }
         tokio::time::timeout(self.timeout, self.reconciler.reconcile(now)).await.map_err(
             |_: tokio::time::error::Elapsed| {
+                // 预算耗尽不是存储失败：保留 TIMEOUT 分类，避免诊断窗口把它归为 repository。
+                diagnostics::warn(
+                    "asset_reconciliation",
+                    "reconcile_timeout",
+                    SafeErrorKind::TIMEOUT,
+                    DiagnosticContext::default(),
+                );
                 ApplicationError::Repository(RepositoryError::Failed(
                     "资产对账超出单轮预算".to_owned(),
                 ))
