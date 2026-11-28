@@ -2,8 +2,8 @@
 //! 取值不在契约闭集内时回退为“不限”，不把畸形文本转发给 API。
 
 use auction_contracts::{
-    ADMIN_SETTLEMENT_RETURN_MATCH_STATES, ADMIN_SETTLEMENT_RETURN_OBLIGATION_KINDS,
-    ADMIN_SETTLEMENT_RETURN_STATUSES,
+    ADMIN_SETTLEMENT_RETURN_CLOSED_STATUSES, ADMIN_SETTLEMENT_RETURN_MATCH_STATES,
+    ADMIN_SETTLEMENT_RETURN_OBLIGATION_KINDS, ADMIN_SETTLEMENT_RETURN_STATUSES,
 };
 use auction_web_shared::{QueryState, use_query_state};
 
@@ -42,10 +42,18 @@ impl Default for ReturnsQuery {
 }
 
 impl ReturnsQuery {
+    /// 已结案状态不可能是未结案行：范围固定为全部，避免与缺省 open 组成必然空结果。
+    pub(crate) fn normalize_scope(&mut self) {
+        if ADMIN_SETTLEMENT_RETURN_CLOSED_STATUSES.contains(&self.status.as_str()) {
+            self.all = true;
+        }
+    }
+
     /// 转为 API 筛选；页码另行传入。
     pub(crate) fn filters(&self) -> SettlementReturnFilters {
         SettlementReturnFilters {
-            open_only: !self.all,
+            open_only: !self.all
+                && !ADMIN_SETTLEMENT_RETURN_CLOSED_STATUSES.contains(&self.status.as_str()),
             status: self.status.clone(),
             match_state: self.match_state.clone(),
             obligation_kind: self.obligation_kind.clone(),
@@ -55,7 +63,7 @@ impl ReturnsQuery {
 }
 
 fn parse_returns_query(pairs: &[(String, String)]) -> ReturnsQuery {
-    ReturnsQuery {
+    let mut query = ReturnsQuery {
         all: pair_value(pairs, "scope") == Some("all"),
         status: parse_choice(pairs, "status", &ADMIN_SETTLEMENT_RETURN_STATUSES),
         match_state: parse_choice(pairs, "match_state", &ADMIN_SETTLEMENT_RETURN_MATCH_STATES),
@@ -66,7 +74,9 @@ fn parse_returns_query(pairs: &[(String, String)]) -> ReturnsQuery {
         ),
         world: parse_choice(pairs, "world", WORLDS),
         page: parse_page(pairs, "page"),
-    }
+    };
+    query.normalize_scope();
+    query
 }
 
 fn returns_query_pairs(query: &ReturnsQuery) -> Vec<(String, String)> {

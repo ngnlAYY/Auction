@@ -98,6 +98,8 @@ export async function fetchHistoricalAuction(
   }
   // 结算目录沿用可复用的第一页缓存键，与 lots 并发读取，使目录命中时无需再等待一轮往返。
   const settledFirstPage = fetchAuctionPage(null, "settled", 1, SUMMARY_PAGE_SIZE, signal);
+  // 非结算分支提前返回时也吸收迟到失败，避免无人等待的预取成为未处理拒绝。
+  void settledFirstPage.catch(() => {});
   const envelopeResult = await fetchCurrentLots(
     auctionId,
     null,
@@ -198,26 +200,29 @@ async function fetchMatchingCurrentAuction(
   // 各世界的当前场次互不依赖，并行读取：任一世界命中即返回；都未命中时先报读取失败，不把读不到
   // 的世界当作“不存在目标拍卖”。世界 ID 排序保持旧 BTreeMap 的遍历顺序，便于稳定复现。
   const worldIds = Object.keys(worlds.value.worlds).sort(compareText);
-  const result = await new Promise<Result<CurrentAuctionItemResponse, string>>(
-    (resolve, reject) => {
-      const reads = worldIds.map(async (worldId) => {
-        const current = await fetchCurrentAuction(worldId, signal);
-        if (
-          current.ok &&
-          current.value !== null &&
-          isTargetCurrent(current.value, auctionId, expectedStatus)
-        ) {
-          resolve(ok(current.value));
-        }
-        return current;
-      });
-      void Promise.all(reads).then(
-        (currents) =>
-          resolve(currents.find((current) => !current.ok) ?? err("当前拍卖目录中不存在目标拍卖")),
-        reject,
-      );
-    },
+  let resolve!: (value: Result<CurrentAuctionItemResponse, string>) => void;
+  const promise = new Promise<Result<CurrentAuctionItemResponse, string>>((settle) => {
+    resolve = settle;
+  });
+  const reads = worldIds.map(async (worldId) => {
+    try {
+      const current = await fetchCurrentAuction(worldId, signal);
+      if (
+        current.ok &&
+        current.value !== null &&
+        isTargetCurrent(current.value, auctionId, expectedStatus)
+      ) {
+        resolve(ok(current.value));
+      }
+      return current;
+    } catch {
+      return err("network_error");
+    }
+  });
+  void Promise.all(reads).then((currents) =>
+    resolve(currents.find((current) => !current.ok) ?? err("当前拍卖目录中不存在目标拍卖")),
   );
+  const result = await promise;
   return signal.aborted ? err("network_error") : result;
 }
 

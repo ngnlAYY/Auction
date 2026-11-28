@@ -80,8 +80,9 @@ function parseSettlementPairs(
         break;
       }
       case "page": {
+        // 页码要转成 JS number 参与请求；超过安全整数会被静默舍入，按无效链接拒绝。
         const page = positiveInteger(value);
-        if (page === null) {
+        if (page === null || page > MAX_JSON_SAFE_INTEGER_BIGINT) {
           return err(INVALID_SETTLEMENT_LINK);
         }
         query.page = Number(page);

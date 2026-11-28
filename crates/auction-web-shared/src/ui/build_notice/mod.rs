@@ -128,9 +128,8 @@ pub(crate) fn use_build_drift() -> Signal<bool> {
     let mut stale = use_signal(build_is_stale);
     #[cfg(target_arch = "wasm32")]
     use_future(move || async move {
-        if build_is_stale() {
-            return;
-        }
+        // 不在登记前另查一次偏差：BuildDriftWait 首次 poll 已直接返回 Ready；
+        // 提前返回会让“初始化后、首次 poll 前”置位的偏差永不显示。
         wait_for_build_drift().await;
         stale.set(true);
     });

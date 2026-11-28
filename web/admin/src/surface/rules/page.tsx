@@ -125,7 +125,10 @@ export function page(kind: AdminDocumentKind): JSX.Element {
     ) {
       return null;
     }
-    return snapshot.result;
+    // 成功回执也必须属于请求的语言；否则不能与当前基线/草稿一起呈现。
+    return snapshot.result.ok && snapshot.result.value.locale !== snapshot.locale
+      ? null
+      : snapshot.result;
   });
   const baselineReady = createValueMemo((): boolean => {
     const base = baseline();

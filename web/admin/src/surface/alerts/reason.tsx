@@ -123,7 +123,8 @@ export function AlertReasonInput(props: {
             return;
           }
           if (moved) {
-            // 聚焦成功由字段描述播报，之后的失焦共用同一条已播报记录。
+            // 聚焦成功由字段描述播报；取消失焦已排的 live-region 任务，避免双重播报。
+            clearAnnouncement(announcementTask, live);
             error.set("announced");
           } else {
             announceError();

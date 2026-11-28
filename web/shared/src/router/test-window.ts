@@ -70,9 +70,11 @@ function createFakeWindow(initialUrl: string, initialState: unknown): FakeWindow
       if (failWrites) {
         throw new Error("测试拒绝 pushState");
       }
+      // 先解析地址：非法地址不能留下已推进的索引与已截断的前进记录。
+      const resolved = new URL(url ?? location.href, location).href;
       index += 1;
       entries.splice(index);
-      setEntry(nextState, url);
+      setEntry(nextState, resolved);
       writes.push({ mode: "push", url: new URL(location) });
     },
     replaceState(nextState, _title, url) {
@@ -123,9 +125,9 @@ function createFakeWindow(initialUrl: string, initialState: unknown): FakeWindow
       );
     },
     commitFrame() {
-      const callbacks = [...frames.values()];
-      frames.clear();
-      for (const callback of callbacks) {
+      // 逐个取出再执行：某个回调抛错时其余回调仍留在队列里，不会被静默丢弃。
+      for (const [handle, callback] of [...frames]) {
+        frames.delete(handle);
         callback(0);
       }
     },
@@ -179,10 +181,17 @@ export function openRouter(initialUrl: string, initialState: unknown = null): Op
   const installed = installFakeWindow(initialUrl, initialState);
   let dispose = (): void => {};
   let disposed = false;
-  const router = createRoot((disposeRoot) => {
-    dispose = disposeRoot;
-    return createRouter({ routes: ROUTES });
-  });
+  let router: Router;
+  try {
+    router = createRoot((disposeRoot) => {
+      dispose = disposeRoot;
+      return createRouter({ routes: ROUTES });
+    });
+  } catch (error) {
+    // 装配失败时立即还原全局 window，避免把假替身留给后续用例。
+    installed.restore();
+    throw error;
+  }
   return {
     router,
     ...installed,

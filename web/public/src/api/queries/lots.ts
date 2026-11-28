@@ -175,7 +175,7 @@ export async function fetchLotDetail(
   lotId: string,
   signal: AbortSignal,
 ): Promise<Result<PublicLotEnvelopeResponse, LotDetailFetchError>> {
-  const url = `/api/v1/lots/${lotId}`;
+  const url = `/api/v1/lots/${encodeURIComponent(lotId)}`;
   const requestUrl = url;
   return getOrFetch<PublicLotEnvelopeResponse, LotDetailFetchError>(
     url,

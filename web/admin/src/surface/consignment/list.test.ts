@@ -143,11 +143,26 @@ test("翻页与自填 37 保留 URL 过滤；无快照行显示长装备号、�
   });
 });
 
-test("重复筛选或无效的卖家书签失败关闭", async () => {
+test("重复筛选失败关闭且不读取列表", async () => {
   const { page } = await loadList();
-  for (const query of ["state=closed&state=resolving", "seller_user_id=partial"]) {
+  await withAdminTree("/consignment?state=closed&state=resolving&page_size=20", async (tree) => {
+    const requests = tree.requests.installFetch([]);
+    tree.mount(page);
+    await settle();
+    expect(
+      tree.find((node) => node.textContent === "请求参数无效。请检查输入内容后重试。"),
+    ).not.toBeNull();
+    expect(requests).toEqual([]);
+  });
+});
+
+test("无效的卖家或枚举书签按未设置读取，不转发畸形值", async () => {
+  const { page } = await loadList();
+  for (const query of ["seller_user_id=partial", "world=unknown", "state=bogus"]) {
     await withAdminTree(`/consignment?${query}&page_size=20`, async (tree) => {
-      const requests = tree.requests.installFetch([]);
+      const requests = tree.requests.installFetch([
+        success({ items: [], total: 0, page: 1, page_size: 20 }),
+      ]);
       tree.mount(page);
       await settle();
       expect(

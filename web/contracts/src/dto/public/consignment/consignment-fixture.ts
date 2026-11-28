@@ -15,7 +15,13 @@ export async function readFixture<TSchema extends GenericSchema>(
   file: string,
   schema: TSchema,
 ): Promise<InferOutput<TSchema>> {
-  const input: unknown = await Bun.file(new URL(file, FIXTURES)).json();
+  let input: unknown;
+  try {
+    input = await Bun.file(new URL(file, FIXTURES)).json();
+  } catch {
+    // 读取或解析失败也不得把文件系统路径、JSON 片段带进测试输出。
+    throw new Error(`夹具读取失败：${file}`);
+  }
   const decoded = decode(schema, input);
   if (!decoded.ok) throw new Error(`夹具解码失败：${file}`);
   return decoded.value;

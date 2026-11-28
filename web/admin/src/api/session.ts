@@ -175,16 +175,39 @@ const responseInvalidations = new WeakMap<TransportResponse, () => void>();
 /** 在发出请求前固定归属。回执中的代际不能从收包时的宿主反推。 */
 export function captureAdminSessionInvalidation(host: AdminSessionHost): (() => void) | null {
   const review = adminSessionWriteReview(host);
-  if (review === null || !review.isCurrent()) {
+  if (review === null) {
+    return null;
+  }
+  // 宿主能力回调可能抛错；任一步失败都只能拒绝登记，不能把异常带出发送路径。
+  let current: boolean;
+  try {
+    current = review.isCurrent();
+  } catch {
+    return null;
+  }
+  if (!current) {
     return null;
   }
   const session = confirmedAdminSession(host);
-  if (session === null || review.cookieGeneration() !== session.csrfToken) {
+  if (session === null) {
+    return null;
+  }
+  let generation: string | null;
+  try {
+    generation = review.cookieGeneration();
+  } catch {
+    return null;
+  }
+  if (generation !== session.csrfToken) {
     return null;
   }
   return () => {
     if (adminSessionHostLive(host)) {
-      review.invalidate(session);
+      try {
+        review.invalidate(session);
+      } catch {
+        // 失效回调失败同样不能改变已返回给调用方的回执。
+      }
     }
   };
 }
@@ -356,17 +379,22 @@ export async function renewAdminSession(
       retryAfterMillis: null,
     });
   }
-  const response = await sendRequest(
-    () =>
-      ok({
-        url: SESSION_ACTIVITY,
-        init: {
-          method: "POST",
-          headers: { "x-csrf-token": session.csrfToken },
-        },
-      }),
-    signal,
-  );
+  const response = await sendRequest(() => {
+    // 等待前的快照不能代替发出时的门禁；代际或写许可已变时不能借用旧 CSRF 续期。
+    if (
+      !adminSessionWritesAllowed(host) ||
+      adminSessionCookieGeneration(host) !== session.csrfToken
+    ) {
+      return err("unauthenticated");
+    }
+    return ok({
+      url: SESSION_ACTIVITY,
+      init: {
+        method: "POST",
+        headers: { "x-csrf-token": session.csrfToken },
+      },
+    });
+  }, signal);
   if (!requestStillLive(host, signal)) {
     return err({
       failure: adminApiFailureClient("network_error"),

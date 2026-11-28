@@ -310,9 +310,9 @@ fn valid_alert(alert: &AdminAlert) -> bool {
         && !alert.kind.is_empty()
         && !alert.scope.is_empty()
         && !alert.runbook_anchor.is_empty()
-        && alert.incident_generation.is_some_and(|generation| generation >= 0)
-        && alert.count >= 0
-        && alert.age_seconds >= 0
+        && alert.incident_generation.is_some_and(valid_count)
+        && valid_count(alert.count)
+        && valid_count(alert.age_seconds)
         && alert.active == alert.resolved_at.is_none()
         && !alert.first_seen_at.is_empty()
         && !alert.last_seen_at.is_empty()

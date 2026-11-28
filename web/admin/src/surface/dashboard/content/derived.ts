@@ -146,10 +146,10 @@ export function deriveDashboard(snapshot: AdminDashboardSnapshot): DashboardDeri
   let recoveryState: DashboardTone;
   if (recovery === null) {
     recoveryState = "neutral";
-  } else if (recoveryActionable) {
-    recoveryState = "error";
   } else if (recoveryEvidenceUnavailable) {
     recoveryState = "neutral";
+  } else if (recoveryActionable) {
+    recoveryState = "error";
   } else if (recoveryEvidenceWarning) {
     recoveryState = "warn";
   } else if (snapshot.recovery.status === "ok") {

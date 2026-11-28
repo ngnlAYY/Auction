@@ -201,8 +201,11 @@ function validAttempt(value: AdminDeliveryAttemptResponse): boolean {
   const credential = value.credential ?? null;
   const recipient = value.recipient ?? null;
   const subject = value.subject ?? null;
+  const bodyDigest = value.body_digest ?? null;
   const credits = value.credits ?? null;
   const cod = value.cod ?? null;
+  const externalMailId = value.external_mail_id ?? null;
+  const boundSentMailId = value.bound_sent_mail_id ?? null;
   if (
     !ATTEMPT_OPERATIONS.includes(value.operation) ||
     !validFencingVersion(value.fencing_version, 0) ||
@@ -224,9 +227,25 @@ function validAttempt(value: AdminDeliveryAttemptResponse): boolean {
     return false;
   }
   if (value.operation === "send") {
-    return recipient !== null && subject !== null && credits !== null && cod !== null;
+    return (
+      recipient !== null &&
+      subject !== null &&
+      bodyDigest !== null &&
+      credits !== null &&
+      cod !== null &&
+      externalMailId === null
+    );
   }
-  return value.external_mail_id !== null && value.external_mail_id !== undefined;
+  return (
+    externalMailId !== null &&
+    recipient === null &&
+    subject === null &&
+    bodyDigest === null &&
+    credits === null &&
+    cod === null &&
+    value.equipment_ids.length === 0 &&
+    boundSentMailId === null
+  );
 }
 
 function validEvidence(value: AdminDeliveryEvidenceResponse): boolean {

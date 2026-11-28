@@ -31,6 +31,10 @@ const RECEIPT_INTEGERS = [
 const GUARD_REJECTIONS: Readonly<Record<string, number>> = {
   invalid_expected_user_id: 400,
   unauthenticated: 401,
+  // mutation guard 与正文解码都在任何写入之前：其确定拒绝可了结首次提交。
+  origin_forbidden: 403,
+  body_too_large: 413,
+  unsupported_media_type: 415,
   session_changed: 409,
   rate_limited: 429,
 };
@@ -149,9 +153,9 @@ export async function registerConsignmentListing(
     RECEIPT_INTEGERS,
   );
   return result.ok &&
-    !consignmentReceiptMatches(result.value, command.command_id, {
+    !consignmentReceiptMatches(result.value, decoded.value.command_id, {
       operation: "register",
-      price: command.price,
+      price: decoded.value.price,
     })
     ? err({ status: 202, code: "invalid_response" })
     : result;
@@ -178,10 +182,11 @@ export async function repriceConsignmentListing(
     RECEIPT_INTEGERS,
   );
   return result.ok &&
-    !consignmentReceiptMatches(result.value, command.command_id, {
+    !consignmentReceiptMatches(result.value, decoded.value.command_id, {
       operation: "reprice",
       listing_id: listingId,
-      ...command,
+      expected_version: decoded.value.expected_version,
+      price: decoded.value.price,
     })
     ? err({ status: 200, code: "invalid_response" })
     : result;
@@ -208,10 +213,10 @@ export async function withdrawConsignmentListing(
     RECEIPT_INTEGERS,
   );
   return result.ok &&
-    !consignmentReceiptMatches(result.value, command.command_id, {
+    !consignmentReceiptMatches(result.value, decoded.value.command_id, {
       operation: "withdraw",
       listing_id: listingId,
-      ...command,
+      expected_version: decoded.value.expected_version,
     })
     ? err({ status: 200, code: "invalid_response" })
     : result;

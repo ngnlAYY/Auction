@@ -48,7 +48,10 @@ export async function fetchAdminProxyEvents(
   if (!bounds.ok) {
     return err(bounds.error);
   }
-  const url = `/api/v1/admin/lots/${lotId}/proxy-events?page=${page}&page_size=${pageSize}`;
+  if (!validUuid(lotId)) {
+    return err("invalid_request");
+  }
+  const url = `/api/v1/admin/lots/${encodeURIComponent(lotId)}/proxy-events?page=${page}&page_size=${pageSize}`;
   const response = await sendGet(host, url, signal);
   if (!response.ok) {
     return err(response.error);

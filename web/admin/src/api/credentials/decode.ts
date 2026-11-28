@@ -8,11 +8,10 @@ import type {
   AdminCredentialResponse,
 } from "@auction/contracts/dto/admin/credentials";
 import { err, ok, type Result } from "@auction/web-shared/result";
-import { utf8ByteLength } from "@auction/web-shared/text";
 import { validUuid } from "@auction/web-shared/ui/validation";
 
 import { validPageEcho } from "../pagination";
-import { MAX_JSON_SAFE_INTEGER, validAdminTime, validTrimmedText } from "../validation";
+import { MAX_JSON_SAFE_INTEGER, validAdminTime, validSafeText } from "../validation";
 
 /** 凭据安全投影的 wire 类型别名，与 Rust 的 `AdminCredential` 对应。 */
 export type AdminCredential = AdminCredentialResponse;
@@ -179,12 +178,9 @@ export function decodeCredential(value: AdminCredential): Result<AdminCredential
     !validUuid(value.id) ||
     (value.kind !== "forum_cookie" && value.kind !== "mail_cookie") ||
     (value.world !== "main" && value.world !== "isekai" && value.world !== "shared") ||
-    !validTrimmedText(value.label) ||
-    utf8ByteLength(value.label) > 256 ||
+    !validSafeText(value.label, 256) ||
     (value.player_name !== null &&
-      (value.kind !== "mail_cookie" ||
-        !validTrimmedText(value.player_name) ||
-        utf8ByteLength(value.player_name) > 256)) ||
+      (value.kind !== "mail_cookie" || !validSafeText(value.player_name, 256))) ||
     (value.status !== "active" && value.status !== "disabled" && value.status !== "invalid") ||
     !Number.isSafeInteger(value.state_version) ||
     value.state_version < 1 ||

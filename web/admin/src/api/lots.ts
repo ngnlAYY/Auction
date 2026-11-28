@@ -23,6 +23,7 @@ import {
   decodeAdminReceipt,
   invalidResponseError,
   responseError,
+  writeNotSent,
   writeOutcomeUnknown,
 } from "./failure";
 import { validate, validPageEcho } from "./pagination";
@@ -352,6 +353,10 @@ export async function updateAdminLot(
   prepare: (commandId: string) => Result<PreparedJsonCommand, AdminWriteNotSent>,
   signal: AbortSignal,
 ): Promise<Result<AdminLot, AdminWriteFailure>> {
+  // 路径段必须是规范 UUID；否则同一命令会改写不同资源或发出畸形 URL。
+  if (!validUuid(lotId)) {
+    return err(writeNotSent("invalid_request"));
+  }
   const prepared = prepare(commandId);
   if (!prepared.ok) {
     return err(prepared.error);

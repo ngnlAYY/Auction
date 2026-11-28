@@ -134,7 +134,21 @@ export function prepareAdminAuctionCreateOnce(
   scheduledOpenAt: string,
   scheduledEndAt: string,
 ): AdminAuctionCommandPreparation {
-  return prepareJsonCommandOnce((commandId) => {
+  const previewTime = parseAdminTime(previewScheduledAt);
+  const openTime = parseAdminTime(scheduledOpenAt);
+  const endTime = parseAdminTime(scheduledEndAt);
+  const validInput =
+    validUuid(auctionId) &&
+    validTrimmedText(worldId) &&
+    Number.isSafeInteger(sequence) &&
+    sequence >= 1 &&
+    sequence <= MAX_JSON_SAFE_INTEGER &&
+    previewTime !== null &&
+    openTime !== null &&
+    endTime !== null &&
+    previewTime < openTime &&
+    openTime < endTime;
+  const prepared = prepareJsonCommandOnce((commandId) => {
     const command: AdminCreateAuctionRequest = {
       command_id: commandId,
       auction_id: auctionId,
@@ -147,6 +161,9 @@ export function prepareAdminAuctionCreateOnce(
     };
     return command;
   });
+  // 与服务端同一组前置条件：非法输入在发送前失败，不能把 NaN 序号序列化成 null。
+  return (commandId) =>
+    validInput && validUuid(commandId) ? prepared(commandId) : err(writeNotSent("invalid_request"));
 }
 
 /** 提交 Admin draft 创建命令；调用组件负责在同一输入重试时复用两个稳定标识。 */
@@ -223,7 +240,8 @@ export async function updateAdminAuctionSchedule(
   if (
     !validUuid(auctionId) ||
     !Number.isSafeInteger(expectedStateVersion) ||
-    expectedStateVersion <= 0
+    expectedStateVersion <= 0 ||
+    expectedStateVersion >= MAX_JSON_SAFE_INTEGER
   ) {
     return err(writeNotSent("invalid_request"));
   }
@@ -234,8 +252,8 @@ export async function updateAdminAuctionSchedule(
     expectedPreview === null ||
     expectedOpen === null ||
     expectedEnd === null ||
-    expectedOpen < expectedPreview ||
-    expectedEnd < expectedOpen
+    expectedOpen <= expectedPreview ||
+    expectedEnd <= expectedOpen
   ) {
     return err(writeNotSent("invalid_request"));
   }
@@ -264,7 +282,7 @@ export async function updateAdminAuctionSchedule(
   if (
     auction.id !== auctionId ||
     (auction.status !== "draft" && auction.status !== "preview") ||
-    auction.state_version < expectedStateVersion ||
+    auction.state_version !== expectedStateVersion + 1 ||
     parseAdminTime(auction.preview_scheduled_at) !== expectedPreview ||
     parseAdminTime(auction.scheduled_open_at) !== expectedOpen ||
     (auction.scheduled_ends_at === null ? null : parseAdminTime(auction.scheduled_ends_at)) !==
@@ -403,6 +421,8 @@ function validAuctionLifecycle(value: AdminAuction): boolean {
   const created = parseAdminTime(value.created_at);
   if (
     created === null ||
+    (value.preview_manual_open && previewOpened === null) ||
+    (parseAdminTime(value.updated_at) ?? created) < created ||
     (previewOpened !== null && previewOpened < created) ||
     (opened !== null && previewOpened !== null && opened < previewOpened) ||
     (finalPhase !== null && opened !== null && finalPhase < opened) ||

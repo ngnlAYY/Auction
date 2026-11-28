@@ -269,6 +269,9 @@ export function prepareAdminRuntimeConfigUpdateOnce(
   expectedFingerprint: string,
   document: AdminJsonValue,
 ): AdminRuntimeConfigCommandPreparation {
+  if (!validFingerprint(expectedFingerprint)) {
+    return () => err(writeNotSent("invalid_request"));
+  }
   let frozen: AdminJsonValue;
   try {
     // 操作者编辑后的文档会原样写回服务端。`JSON.stringify` 会丢弃 `undefined`、把 `-0`

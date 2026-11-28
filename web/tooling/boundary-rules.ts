@@ -2,10 +2,9 @@
 // TypeScript 解析器，便于在受限环境里用 bun test 覆盖闭集；解析器相关的扫描在
 // check-boundaries-impl.ts。
 //
-// 说明符只接受四类形态：以 ./ 或 ../ 开头的相对路径、下面写死的包别名、web/package.json
-// 登记的第三方依赖，以及测试文件里的 node:/bun: 内置模块。其余形态一律违规；反斜杠、
-// 裸的 . / .. 也不在闭集内。需要新形态时由人扩展这张闭集，不在运行时猜测 tsconfig 的
-// 映射规则。
+// 说明符只接受四类形态：以 ./ 或 ../ 开头的相对路径（含裸的 . 与 ..）、下面写死的包别名、
+// web/package.json 登记的第三方依赖，以及测试文件里的 node:/bun: 内置模块。其余形态一律违规；
+// 反斜杠也不在闭集内。需要新形态时由人扩展这张闭集，不在运行时猜测 tsconfig 的映射规则。
 
 import { dirname, extname, relative, resolve, sep } from "node:path";
 
@@ -175,7 +174,12 @@ export function resolveSpecifierTarget(
   const sourceFile = resolve(repositoryRoot, input.sourceFile);
   const queryIndex = input.specifier.indexOf("?");
   const pathPart = queryIndex < 0 ? input.specifier : input.specifier.slice(0, queryIndex);
-  if (pathPart.startsWith("./") || pathPart.startsWith("../")) {
+  if (
+    pathPart === "." ||
+    pathPart === ".." ||
+    pathPart.startsWith("./") ||
+    pathPart.startsWith("../")
+  ) {
     return resolve(dirname(sourceFile), pathPart);
   }
   if (pathPart.startsWith("@auction/")) {

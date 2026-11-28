@@ -184,16 +184,20 @@ function mergeEvent(state: CacheState, event: RealtimeEvent): EventMerge {
     return { kind: "gap" };
   }
   const [key, value] = version;
-  const newer = value > (state.versions.get(key) ?? 0);
+  const current = state.versions.get(key) ?? 0;
+  if (value < current) {
+    // 不同事件 ID 的版本回退是事实冲突：清空局部缓存并要求权威重读。
+    return { kind: "gap" };
+  }
   state.after = event.stream_sequence;
   seenRemember(state.seen, event.event_id);
-  if (newer) {
+  if (value > current) {
     state.versions.set(key, value);
     if (event.kind === "auction.final_phase_entered") {
       state.finalAt = event.stream_sequence;
     }
   }
-  return { kind: "applied", refresh: newer };
+  return { kind: "applied", refresh: value > current };
 }
 
 function mergeAcceptedBid(state: CacheState, event: RealtimeEvent): EventMerge {

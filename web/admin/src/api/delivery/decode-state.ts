@@ -120,14 +120,17 @@ export function isZeroDeliveryTime(value: bigint): boolean {
 
 function validTimeline(
   createdAt: bigint,
+  updatedAt: bigint,
   claimedAt: bigint | null,
   sendingAt: bigint | null,
   completedAt: bigint | null,
 ): boolean {
   return (
-    (claimedAt === null || claimedAt >= createdAt) &&
-    (sendingAt === null || (claimedAt !== null && sendingAt >= claimedAt)) &&
-    (completedAt === null || (sendingAt !== null && completedAt >= sendingAt))
+    (claimedAt === null || (claimedAt >= createdAt && claimedAt <= updatedAt)) &&
+    (sendingAt === null ||
+      (claimedAt !== null && sendingAt >= claimedAt && sendingAt <= updatedAt)) &&
+    (completedAt === null ||
+      (sendingAt !== null && completedAt >= sendingAt && completedAt <= updatedAt))
   );
 }
 
@@ -323,7 +326,7 @@ export function validStateFields(
       validBeforeSend()
     );
   }
-  if (!validTimeline(createdAt, claimedAt, sendingAt, completedAt)) {
+  if (!validTimeline(createdAt, updatedAt, claimedAt, sendingAt, completedAt)) {
     return false;
   }
   switch (value.status) {

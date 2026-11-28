@@ -18,7 +18,7 @@ import { AsyncState } from "@auction/web-shared/ui/components/async-state";
 import { Time } from "@auction/web-shared/ui/components/time";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { For, Match, Show, Switch, untrack } from "solid-js";
+import { createEffect, For, Match, Show, Switch, untrack } from "solid-js";
 
 import {
   fetchAdminQuarantine,
@@ -121,12 +121,16 @@ function Quarantine(props: { readonly untrackedId: string }): JSX.Element {
 
   const submitRecheck = async () => {
     const current = projection();
-    if (current === null || preparing() || commands.anyBusy()) return;
+    if (current === null || preparing() || commands.contains(entity) || commands.anyBusy()) {
+      return;
+    }
     preparing.set(true);
     feedback.set(null);
     try {
       const operation = await prepareAdminQuarantineRecheck(host, quarantineId, current.version);
-      if (projection() === null) return;
+      // 准备期间刷新可能已替换投影；旧版本的命令不能覆盖新的权威状态。
+      const latest = projection();
+      if (latest === null || latest.version !== current.version) return;
       commands.submit(
         entity,
         t("consignment-quarantine-recheck"),
@@ -144,7 +148,9 @@ function Quarantine(props: { readonly untrackedId: string }): JSX.Element {
 
   const submitRelease = async (observationId: string, kind: QuarantineDecisionKind) => {
     const current = projection();
-    if (current === null || preparing() || commands.anyBusy()) return;
+    if (current === null || preparing() || commands.contains(entity) || commands.anyBusy()) {
+      return;
+    }
     preparing.set(true);
     feedback.set(null);
     try {
@@ -155,7 +161,15 @@ function Quarantine(props: { readonly untrackedId: string }): JSX.Element {
         observationId,
         kind,
       );
-      if (projection() === null) return;
+      // 版本或观察在准备期间变化时，旧详情构造的命令不再成立。
+      const latest = projection();
+      if (
+        latest === null ||
+        latest.version !== current.version ||
+        !latest.observations.some((item) => item.observation_id === observationId)
+      ) {
+        return;
+      }
       commands.submit(
         entity,
         t("consignment-quarantine-release"),
@@ -204,7 +218,7 @@ function Quarantine(props: { readonly untrackedId: string }): JSX.Element {
               <ObservationList detail={current()} />
               <QuarantineActions
                 detail={current()}
-                disabled={preparing() || commands.anyBusy()}
+                disabled={preparing() || commands.contains(entity) || commands.anyBusy()}
                 onRecheck={submitRecheck}
                 onRelease={submitRelease}
               />
@@ -343,6 +357,15 @@ function QuarantineActions(props: {
 }): JSX.Element {
   const observation = createCell(props.detail.observations[0]?.observation_id ?? "");
   const kind = createCell<QuarantineDecisionKind>("accept");
+  // 详情刷新后旧观察可能已不在列表；回落到首个观察，避免用旧 ID 配新版本提交。
+  createEffect(
+    () => props.detail.observations,
+    (observations) => {
+      if (!observations.some((item) => item.observation_id === observation.peek())) {
+        observation.set(observations[0]?.observation_id ?? "");
+      }
+    },
+  );
   const allowedRecheck = () => props.detail.allowed_actions.includes("recheck");
   const allowedRelease = () => props.detail.allowed_actions.includes("release");
   return (
@@ -358,8 +381,11 @@ function QuarantineActions(props: {
           class="admin-consignment-actions__form"
           onSubmit={(event) => {
             event.preventDefault();
-            if (props.disabled || observation() === "") return;
-            props.onRelease(observation(), kind());
+            const selected = props.detail.observations.find(
+              (item) => item.observation_id === observation(),
+            );
+            if (props.disabled || selected === undefined) return;
+            props.onRelease(selected.observation_id, kind());
           }}
         >
           <label>

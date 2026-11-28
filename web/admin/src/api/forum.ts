@@ -148,7 +148,12 @@ function validForumUrl(value: string): boolean {
   try {
     const url = new URL(value);
     return (
-      url.protocol === "https:" && url.hostname !== "" && url.username === "" && url.password === ""
+      url.protocol === "https:" &&
+      url.hostname === "forums.e-hentai.org" &&
+      url.pathname === "/index.php" &&
+      url.port === "" &&
+      url.username === "" &&
+      url.password === ""
     );
   } catch {
     return false;

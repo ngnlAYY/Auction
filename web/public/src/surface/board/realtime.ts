@@ -303,7 +303,8 @@ export function PublicRealtimeOwner(props: {
       }
       if (survivedMillis >= RECONNECT_HEALTHY_MILLIS) {
         consecutiveFailures = 0;
-      } else {
+      } else if (!result.ok) {
+        // 正常结束的短订阅不是失败，不能消耗重连预算。
         consecutiveFailures = Math.min(consecutiveFailures + 1, 4_294_967_295);
       }
       if (consecutiveFailures >= RECONNECT_MAX_FAILURES) {

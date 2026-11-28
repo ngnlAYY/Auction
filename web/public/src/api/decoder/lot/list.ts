@@ -1,6 +1,7 @@
 // lot 目录与详情响应的列表、投影、最终限制与分类统计校验。
 
 import { EQUIPMENT_CATEGORY_CODES } from "@auction/contracts/dto/public/catalog/lot";
+import { MAX_PUBLIC_PAGE_SIZE } from "@auction/contracts/dto/public/pagination";
 import { type JsonObject, jsonKeysOnly } from "@auction/web-shared/net/wire";
 import { validUuid } from "@auction/web-shared/ui/validation";
 
@@ -68,8 +69,14 @@ export function validLotList(
       : selectedCategoryTotal(counts, selectedCategories);
   const total = int(decoded.total);
   if (expectedTotal === null || total === null || expectedTotal !== BigInt(total)) return false;
+  // 页长必须等于该区间应有的行数：满页或末尾剩余行；越界页只能为空。
+  const pageSize = int(decoded.page_size);
+  const pageNumber = int(decoded.page);
+  if (pageSize === null || pageNumber === null || pageSize > MAX_PUBLIC_PAGE_SIZE) return false;
+  const offset = (pageNumber - 1) * pageSize;
+  const expectedLength = offset >= total ? 0 : Math.min(pageSize, total - offset);
   const lots = decoded.lots;
-  if (!Array.isArray(lots)) return false;
+  if (!Array.isArray(lots) || lots.length !== expectedLength) return false;
   return lots.every((lot) => {
     const preview = string(decoded.projection_kind) === "preview";
     const valid = preview

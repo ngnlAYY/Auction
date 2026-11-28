@@ -151,6 +151,10 @@ fn fence_start(value: &str) -> Option<(&str, Option<&str>)> {
         return None;
     }
     let language = value[length..].trim();
+    // CommonMark：反引号围栏的 info 不得含反引号，否则该行不是围栏。
+    if marker == b'`' && language.contains('`') {
+        return None;
+    }
     Some((&value[..length], (!language.is_empty()).then_some(language)))
 }
 
@@ -197,14 +201,27 @@ fn split_table_row(value: &str) -> impl Iterator<Item = &str> {
 }
 
 fn unordered_item(value: &str) -> Option<&str> {
-    value
-        .strip_prefix("- ")
-        .or_else(|| value.strip_prefix("* "))
-        .or_else(|| value.strip_prefix("+ "))
+    let marker = value.chars().next()?;
+    if !matches!(marker, '-' | '*' | '+') {
+        return None;
+    }
+    let rest = &value[marker.len_utf8()..];
+    match rest.strip_prefix(' ') {
+        Some(content) => Some(content),
+        // 只有一个标记的行是空列表项，不能退化成普通段落。
+        None if rest.is_empty() => Some(""),
+        None => None,
+    }
 }
 
 fn ordered_item(value: &str) -> Option<(usize, &str)> {
-    let separator = value.find(". ")?;
-    let start = value[..separator].parse().ok()?;
-    Some((start, &value[separator + 2..]))
+    // 序号必须从行首开始，避免把 “Version 1. 2” 这类正文误判成有序列表。
+    let digits = value.bytes().take_while(u8::is_ascii_digit).count();
+    if digits == 0 {
+        return None;
+    }
+    let rest = &value[digits..];
+    let content = rest.strip_prefix(". ").or_else(|| (rest == ".").then_some(""))?;
+    let start = value[..digits].parse().ok()?;
+    Some((start, content))
 }

@@ -3,6 +3,7 @@
 
 import type { PublicRealtimeEventResponse as RealtimeEvent } from "@auction/contracts/dto/response";
 import { err, ok, type Result } from "@auction/web-shared/result";
+import { validUuid } from "@auction/web-shared/ui/validation";
 
 /** 已通过服务端事件注册表校验的实时事件 DTO。 */
 export type { RealtimeEvent };
@@ -113,14 +114,7 @@ export function validateRealtimePageSequence(
   return ok(null);
 }
 
-/** 只接受规范的小写 UUID 文本；nil、非规范形式与其他 UUID 语法均拒绝。 */
+/** 只接受规范的小写 UUID 文本；nil、非 1–5 版本或非 RFC 4122 variant 均拒绝。 */
 export function canonicalAuctionId(value: string): Result<string, string> {
-  if (
-    value.length !== 36 ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value) ||
-    value === "00000000-0000-0000-0000-000000000000"
-  ) {
-    return err("拍卖 ID 无效");
-  }
-  return ok(value);
+  return validUuid(value) ? ok(value) : err("拍卖 ID 无效");
 }

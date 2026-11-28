@@ -380,7 +380,6 @@ export function validSettlementReturnEventDetails(kind: string, details: unknown
   const matches = (expected: string): boolean => keys === expected;
   const positiveInteger = (input: unknown): boolean =>
     typeof input === "number" && Number.isSafeInteger(input) && input > 0;
-  const stringValue = (input: unknown): input is string => typeof input === "string";
   const uuidValue = (input: unknown): boolean => v.safeParse(uuid, input).success;
   const stateValue = (input: unknown): boolean =>
     v.safeParse(v.picklist(ADMIN_SETTLEMENT_RETURN_MATCH_STATES), input).success;
@@ -435,17 +434,24 @@ export function validSettlementReturnEventDetails(kind: string, details: unknown
         (matches("delivery_id") && uuidValue(value.delivery_id)) ||
         (uuidValue(value.delivery_id) &&
           value.requeued === true &&
-          stringValue(value.reason) &&
+          typeof value.reason === "string" &&
+          // 与 Admin HTTP safe_code 同口径：1..128 字节的 [a-z0-9_]；任意文案会被服务端拒绝。
+          /^[a-z0-9_]{1,128}$/u.test(value.reason) &&
           ((matches("delivery_id,reason,requeued,restarts") && positiveInteger(value.restarts)) ||
             (matches("delivery_id,reason,requeued,sweep_retries") &&
               v.safeParse(SWEEP_RETRIES, value.sweep_retries).success)))
       );
     case "take_proven":
       return matches("dispatch_no,next,proof")
-        ? positiveInteger(value.dispatch_no) && value.next === "resend" && stringValue(value.proof)
+        ? positiveInteger(value.dispatch_no) &&
+            value.next === "resend" &&
+            // 与 Admin HTTP take_proof 的闭集一致；失败关闭的证明不接受任意字符串。
+            (value.proof === "action_removed_or_success_page" ||
+              value.proof === "action_recovered_inbox_v1")
         : matches("next,proof,resend_blocked") &&
             value.next === "hold" &&
-            stringValue(value.proof) &&
+            (value.proof === "action_removed_or_success_page" ||
+              value.proof === "action_recovered_inbox_v1") &&
             (value.resend_blocked === null ||
               v.safeParse(v.picklist(ADMIN_SETTLEMENT_RETURN_BLOCKERS), value.resend_blocked)
                 .success);

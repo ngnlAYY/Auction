@@ -16,6 +16,7 @@ import { sendRequest } from "./clock";
 import { decodeErrorCode } from "./decoder";
 import { decodeMyBids, decodeMyProxy } from "./decoder/account";
 import { observePublicSessionFailure } from "./session";
+import { publicSessionIdentityRevision } from "./session/revision";
 
 const PUBLIC_QUERY_RETRY_DELAY_MILLIS = 1_000;
 
@@ -26,7 +27,13 @@ export type OwnedBid = PublicOwnedBidResponse;
 /** 单条代理授权投影。 */
 export type OwnedProxy = PublicOwnedProxyResponse;
 
-/** 读取我的出价与代理授权；首次失败后等待一秒重试一次，等待可被取消。 */
+/** 单次账户读取：失败时附带是否值得一秒后重读；4xx 与解码失败是权威结论。 */
+interface AccountAttempt<T> {
+  readonly result: Result<T, string>;
+  readonly transient: boolean;
+}
+
+/** 读取我的出价与代理授权；传输失败或服务端暂时拒绝后等待一秒重试一次，等待可被取消。 */
 export async function fetchMyBids(
   userId: string,
   bidPage: number,
@@ -38,29 +45,29 @@ export async function fetchMyBids(
   if (signal.aborted) {
     return err("network_error");
   }
-  if (first.ok) {
-    return first;
+  if (first.result.ok || !first.transient) {
+    return first.result;
   }
   if (!(await sleep(PUBLIC_QUERY_RETRY_DELAY_MILLIS, signal))) {
     return err("network_error");
   }
   const second = await fetchMyBidsOnce(url, userId, signal);
-  return signal.aborted ? err("network_error") : second;
+  return signal.aborted ? err("network_error") : second.result;
 }
 
 async function fetchMyBidsOnce(
   url: string,
   userId: string,
   signal: AbortSignal,
-): Promise<Result<PublicMyBidsResponse, string>> {
+): Promise<AccountAttempt<PublicMyBidsResponse>> {
   const response = await accountResponse(url, userId, signal);
   if (signal.aborted) {
-    return err("network_error");
+    return { result: err("network_error"), transient: false };
   }
-  if (!response.ok) {
-    return response;
+  if (!response.result.ok) {
+    return { result: err(response.result.error), transient: response.transient };
   }
-  return decodeMyBids(response.value);
+  return { result: decodeMyBids(response.result.value), transient: false };
 }
 
 /** 读取指定 lot 上我的代理授权；首次失败后等待一秒重试一次，等待可被取消。 */
@@ -74,14 +81,14 @@ export async function fetchMyProxy(
   if (signal.aborted) {
     return err("network_error");
   }
-  if (first.ok) {
-    return first;
+  if (first.result.ok || !first.transient) {
+    return first.result;
   }
   if (!(await sleep(PUBLIC_QUERY_RETRY_DELAY_MILLIS, signal))) {
     return err("network_error");
   }
   const second = await fetchMyProxyOnce(url, userId, lotId, signal);
-  return signal.aborted ? err("network_error") : second;
+  return signal.aborted ? err("network_error") : second.result;
 }
 
 async function fetchMyProxyOnce(
@@ -89,16 +96,19 @@ async function fetchMyProxyOnce(
   userId: string,
   lotId: string,
   signal: AbortSignal,
-): Promise<Result<PublicOwnedProxyResponse | null, string>> {
+): Promise<AccountAttempt<PublicOwnedProxyResponse | null>> {
   const response = await accountResponse(url, userId, signal);
   if (signal.aborted) {
-    return err("network_error");
+    return { result: err("network_error"), transient: false };
   }
-  if (!response.ok) {
-    return response;
+  if (!response.result.ok) {
+    return { result: err(response.result.error), transient: response.transient };
   }
-  const decoded = decodeMyProxy(response.value, lotId);
-  return decoded.ok ? ok(decoded.value.authorization) : decoded;
+  const decoded = decodeMyProxy(response.result.value, lotId);
+  return {
+    result: decoded.ok ? ok(decoded.value.authorization) : decoded,
+    transient: false,
+  };
 }
 
 /** 响应不携带用户 UUID，必须由同一请求的 Cookie 与预期宿主身份校验绑定归属。 */
@@ -106,7 +116,8 @@ async function accountResponse(
   url: string,
   userId: string,
   signal: AbortSignal,
-): Promise<Result<TransportResponse, string>> {
+): Promise<AccountAttempt<TransportResponse>> {
+  const identityAtStart = publicSessionIdentityRevision();
   const sent = await sendRequest(
     () =>
       ok({
@@ -119,19 +130,22 @@ async function accountResponse(
     signal,
   );
   if (!sent.ok) {
-    return err(transportErrorCode(sent.error));
+    return {
+      result: err(transportErrorCode(sent.error)),
+      transient: sent.error.kind !== "decode",
+    };
   }
   if (signal.aborted) {
-    return err("network_error");
+    return { result: err("network_error"), transient: false };
   }
   const response = sent.value;
   if (!responseOk(response)) {
     const status = response.status;
     const code = decodeErrorCode(response);
-    observePublicSessionFailure(status, code, userId);
-    return err(code);
+    observePublicSessionFailure(status, code, userId, identityAtStart);
+    return { result: err(code), transient: status === 429 || status >= 500 };
   }
-  return ok(response);
+  return { result: ok(response), transient: false };
 }
 
 function responseOk(response: { readonly status: number }): boolean {

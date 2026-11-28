@@ -204,9 +204,14 @@ pub(crate) fn AdminPager(
                 // 数量已切换时，旧控件尚未卸载的纠偏不能覆盖新请求页码。
                 if current_size() == page_size { on_page_change.call(next); }
             },
-            on_page_size_change: move |size| {
-                if current_size() != page_size || size <= 0 || maximum.is_some_and(|maximum| size > maximum) { return; }
-                if !can_change_page_size.call(()) { return; }
+            on_page_size_commit: move |size| {
+                if current_size() != page_size
+                    || size <= 0
+                    || maximum.is_some_and(|maximum| size > maximum)
+                    || !can_change_page_size.call(())
+                {
+                    return Some(false);
+                }
                 // 先固定离开历史项的旧数量，随后由原页面 push 首页，再 replace 新数量。
                 // 各 hook 只写自己拥有的键，保留筛选、排序及未知参数。
                 if let Some(key) = pagination.keys.first() {
@@ -222,6 +227,7 @@ pub(crate) fn AdminPager(
                 let mut query = pagination.query.clone();
                 if local { query.push(size); } else { query.replace(size); }
                 preferences::save(pagination.scope, size);
+                Some(true)
             },
         }
     }

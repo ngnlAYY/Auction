@@ -50,7 +50,11 @@ fn parse_inline_at(value: &str, depth: usize) -> Vec<Inline> {
             && let Some(target) = safe_link_target(target)
         {
             flush_text(&mut nodes, &mut text);
-            nodes.push(Inline::Link { label: parse_inline_at(label, depth + 1), target });
+            // 链接标签内不能再出现链接：嵌套 <a> 会被浏览器拆分，外层目标随之丢失。
+            nodes.push(Inline::Link {
+                label: flatten_link_nodes(parse_inline_at(label, depth + 1)),
+                target,
+            });
             index += consumed;
             continue;
         }
@@ -113,6 +117,27 @@ fn parse_inline_at(value: &str, depth: usize) -> Vec<Inline> {
     }
     flush_text(&mut nodes, &mut text);
     nodes
+}
+
+/// 把标签内的链接节点替换为其可见文本，避免渲染出嵌套 `<a>`。
+fn flatten_link_nodes(nodes: Vec<Inline>) -> Vec<Inline> {
+    let mut flattened = Vec::new();
+    for node in nodes {
+        match node {
+            Inline::Link { label, .. } => flattened.extend(flatten_link_nodes(label)),
+            Inline::Strong(children) => {
+                flattened.push(Inline::Strong(flatten_link_nodes(children)));
+            }
+            Inline::Emphasis(children) => {
+                flattened.push(Inline::Emphasis(flatten_link_nodes(children)));
+            }
+            Inline::Strike(children) => {
+                flattened.push(Inline::Strike(flatten_link_nodes(children)));
+            }
+            other => flattened.push(other),
+        }
+    }
+    flattened
 }
 
 #[derive(Clone, Copy)]

@@ -17,7 +17,10 @@ impl SupportQuery {
     /// 语义校验：恰好一个非空入口，用户检索词须符合字节上限，参考编号须为规范 UUID。
     pub(crate) fn valid(&self) -> bool {
         match (self.user.is_empty(), self.reference.is_empty()) {
-            (false, true) => !player_support_user_too_long(&self.user),
+            (false, true) => {
+                !player_support_user_too_long(&self.user)
+                    && !self.user.chars().any(char::is_control)
+            }
             (true, false) => valid_uuid(&self.reference),
             _ => false,
         }

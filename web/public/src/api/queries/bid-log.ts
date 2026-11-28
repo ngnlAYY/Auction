@@ -2,6 +2,7 @@
 
 import type { AuctionSummaryResponse } from "@auction/contracts/dto/public/catalog/auction";
 import type { PublicBidLogListResponse } from "@auction/contracts/dto/public/catalog/history";
+import { MAX_PUBLIC_PAGE_SIZE } from "@auction/contracts/dto/public/pagination";
 import { err, ok, type Result } from "@auction/web-shared/result";
 import { compareText } from "@auction/web-shared/text";
 import { decodeBidLogPage } from "../decoder/catalog";
@@ -37,8 +38,17 @@ export async function fetchBidLogPage(
   pageSize: number,
   signal: AbortSignal,
 ): Promise<Result<PublicBidLogListResponse, string>> {
+  if (
+    !Number.isSafeInteger(page) ||
+    page < 1 ||
+    !Number.isSafeInteger(pageSize) ||
+    pageSize < 1 ||
+    pageSize > MAX_PUBLIC_PAGE_SIZE
+  ) {
+    return err("invalid_response");
+  }
   const query = new URLSearchParams();
-  query.append("page", String(Math.max(1, page)));
+  query.append("page", String(page));
   query.append("page_size", String(pageSize));
   query.append("include", BID_LOG_INCLUDE);
   if (worldId !== "") {
@@ -47,12 +57,12 @@ export async function fetchBidLogPage(
   if (lotId !== null) {
     query.append("lot", lotId);
   }
-  const url = `/api/v1/auctions/${auctionId}/bid-log?${query.toString()}`;
+  const url = `/api/v1/auctions/${encodeURIComponent(auctionId)}/bid-log?${query.toString()}`;
   const read = await cachedPublicGet(
     url,
     LIVE_TTL_MILLIS,
     BID_LOG_CACHE_TYPE,
-    (response) => decodeBidLogPage(response),
+    (response) => bindBidLogPage(decodeBidLogPage(response), auctionId, page, pageSize),
     signal,
   );
   return signal.aborted ? err("network_error") : read;
@@ -127,8 +137,10 @@ export async function fetchBidLogAuctionStatus(
     }
     // 其他目录调用方允许未知世界；只有不限世界的竞价日志/履约目录需要冻结闭集，避免未知世界
     // 进入跨世界合并。整页失败关闭，不返回部分目录。
+    // fetchAuctionPage 把 ""/"all" 归一为全世界目录；闭集校验必须按同一口径。
+    const allWorlds = worldId === null || worldId === "" || worldId === "all";
     if (
-      worldId === null &&
+      allWorlds &&
       !page.value.auctions.every(
         (auction) => auction.world_id === "main" || auction.world_id === "isekai",
       )
@@ -208,20 +220,44 @@ export async function fetchLotBidLog(
   pageSize: number,
   signal: AbortSignal,
 ): Promise<Result<PublicBidLogListResponse, string>> {
+  if (
+    !Number.isSafeInteger(page) ||
+    page < 1 ||
+    !Number.isSafeInteger(pageSize) ||
+    pageSize < 1 ||
+    pageSize > MAX_PUBLIC_PAGE_SIZE
+  ) {
+    return err("invalid_response");
+  }
   const query = new URLSearchParams();
   query.append("lot", lotId);
-  query.append("page", String(Math.max(1, page)));
+  query.append("page", String(page));
   query.append("page_size", String(pageSize));
   query.append("include", BID_LOG_INCLUDE);
-  const url = `/api/v1/auctions/${auctionId}/bid-log?${query.toString()}`;
+  const url = `/api/v1/auctions/${encodeURIComponent(auctionId)}/bid-log?${query.toString()}`;
   const read = await cachedPublicGet(
     url,
     LIVE_TTL_MILLIS,
     BID_LOG_CACHE_TYPE,
-    (response) => decodeBidLogPage(response),
+    (response) => bindBidLogPage(decodeBidLogPage(response), auctionId, page, pageSize),
     signal,
   );
   return signal.aborted ? err("network_error") : read;
+}
+
+/** 竞价日志页必须回答本次请求：同一场次与页码/页长，逐行绑定路径中的场次。 */
+function bindBidLogPage(
+  result: Result<PublicBidLogListResponse, string>,
+  auctionId: string,
+  page: number,
+  pageSize: number,
+): Result<PublicBidLogListResponse, string> {
+  return result.ok &&
+    (result.value.page !== page ||
+      result.value.page_size !== pageSize ||
+      result.value.bids.some((bid) => bid.auction_id !== auctionId))
+    ? err("invalid_response")
+    : result;
 }
 
 /** 三个互不依赖的读取；首个失败结果立即返回，调用方随后中止其余分支。 */

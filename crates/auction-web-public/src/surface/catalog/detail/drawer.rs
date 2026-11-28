@@ -3,6 +3,7 @@
 //! 点击后交给页面级命令弹窗。
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 use auction_web_shared::{format_credit_amount, t};
@@ -27,8 +28,8 @@ use crate::surface::{
 
 /// 属性默认展示的条数；超过时提供“显示全部（N）”。
 const COLLAPSED_STATS: usize = 6;
-const TITLE_ID: &str = "public-catalog-detail-title";
-const BID_REASON_ID: &str = "public-catalog-detail-bid-reason";
+/// 目录与只读查找可同时挂载抽屉；aria 关联的 id 必须全页唯一。
+static NEXT_DRAWER_ID: AtomicUsize = AtomicUsize::new(1);
 
 /// 抽屉之上再开弹窗（出价、完整竞价历史、价格历史）时记下入口。弹窗关闭后焦点陷阱把焦点交给
 /// 抽屉内带 autofocus 的控件，于是回到打开它的按钮；刚打开抽屉时落在关闭按钮。
@@ -84,6 +85,13 @@ pub(super) fn CatalogDetailDrawer(
     let mut price_history_open = use_signal(|| false);
     let close = use_callback(move |_: ()| on_close.call(()));
 
+    let (title_id, bid_reason_id) = use_hook(|| {
+        let id = NEXT_DRAWER_ID.fetch_add(1, Ordering::Relaxed);
+        (
+            format!("public-catalog-detail-title-{id}"),
+            format!("public-catalog-detail-bid-reason-{id}"),
+        )
+    });
     let is_pending = row.status == "pending";
     let is_live = row.status == "live";
     let title = row.name.clone();
@@ -142,7 +150,7 @@ pub(super) fn CatalogDetailDrawer(
                     aria_haspopup: "dialog",
                     disabled,
                     autofocus: focus() == DetailFocus::Bid,
-                    aria_describedby: (!bid_reason.is_empty()).then_some(BID_REASON_ID),
+                    aria_describedby: (!bid_reason.is_empty()).then_some(bid_reason_id.as_str()),
                     onclick: move |_| {
                         // 已打开的模态命令不接受另一个入口替换负载或目标；没有命令宿主时失败关闭。
                         if let Some(mut command_dialog) = command_dialog
@@ -179,7 +187,7 @@ pub(super) fn CatalogDetailDrawer(
             class: "public-catalog-detail",
             role: "dialog",
             aria_modal: "true",
-            aria_labelledby: TITLE_ID,
+            aria_labelledby: "{title_id}",
             tabindex: "-1",
             onkeydown: move |event| {
                 if event.key() == Key::Escape {
@@ -193,7 +201,7 @@ pub(super) fn CatalogDetailDrawer(
                 }
             },
             header { class: "public-catalog-detail__head",
-                div { id: TITLE_ID, class: "public-catalog-detail__heading",
+                div { id: "{title_id}", class: "public-catalog-detail__heading",
                     div { class: "public-catalog-detail__eyebrow",
                         span { {t!("catalog-detail")} }
                         span { class: "public-catalog-detail__code", "{row.code}" }
@@ -262,7 +270,7 @@ pub(super) fn CatalogDetailDrawer(
             }
             footer { class: "public-catalog-detail__foot",
                 if !bid_reason.is_empty() {
-                    p { id: BID_REASON_ID, class: "public-catalog-detail__reason", role: "note", "{bid_reason}" }
+                    p { id: "{bid_reason_id}", class: "public-catalog-detail__reason", role: "note", "{bid_reason}" }
                 }
                 div { class: "public-catalog-detail__foot-actions",
                     {bid_entry}

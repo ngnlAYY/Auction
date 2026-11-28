@@ -7,7 +7,7 @@ import { Link } from "@auction/web-shared/router";
 import { Dialog } from "@auction/web-shared/ui/components/dialog";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { For, onCleanup, Show } from "solid-js";
+import { createEffect, For, onCleanup, Show } from "solid-js";
 
 import type { AdminAuction, AdminAuctionCapabilities } from "../../../api/auctions";
 import {
@@ -233,6 +233,17 @@ export function AdminAuctionActionDialog(props: AdminAuctionActionDialogProps): 
   const focusField = useFocusField();
   const issue = createCell<LifecycleReasonIssue | null>(null);
   const feedback = createCell<DraftWriteFeedback | null>(null);
+  // 错误与写入反馈属于具体草稿；切换到另一条草稿时不能沿用上一条的错误或冲突状态。
+  const draftIdentity = createValueMemo(() => {
+    const current = props.pending();
+    return current === null
+      ? null
+      : `${current.action}|${current.target.auctionId}|${current.target.stateVersion}`;
+  });
+  createEffect(draftIdentity, () => {
+    issue.set(null);
+    feedback.set(null);
+  });
   let alive = true;
   onCleanup(() => {
     alive = false;

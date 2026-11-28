@@ -185,7 +185,13 @@ export function prepareAdminRulesPublish(
   markdown: string,
 ): AdminRulesPublishPreparation {
   // 冻结一份输入：正文与回执校验字段都由它生成，调用方不再各自传一套。
-  const frozen = Object.freeze({ expectedRevision, locale, title, markdown });
+  // 服务端在发布时裁剪标题；正文与回执期望都用同一份裁剪值，避免成功写入被误判为未知。
+  const frozen = Object.freeze({ expectedRevision, locale, title: rustTrim(title), markdown });
+  // 只允许能由回执精确 +1 的版本；越界或非整数在发送前失败，避免永远无法核对的写命令。
+  const revisionValid =
+    Number.isSafeInteger(expectedRevision) &&
+    expectedRevision >= 1 &&
+    expectedRevision < MAX_JSON_SAFE_INTEGER;
   const prepare = prepareJsonCommandOnce(
     (commandId): AdminRulesPublishRequest => ({
       command_id: commandId,
@@ -196,6 +202,9 @@ export function prepareAdminRulesPublish(
     }),
   );
   return (commandId) => {
+    if (!revisionValid) {
+      return err(writeNotSent("invalid_request"));
+    }
     const prepared = prepare(commandId);
     if (!prepared.ok) {
       return err(prepared.error);
@@ -250,8 +259,7 @@ function decodePublishReceipt(
     rules.value.locale !== request.locale ||
     rules.value.title !== request.title ||
     rules.value.markdown !== request.markdown ||
-    rules.value.revision !==
-      (request.expectedRevision < MAX_JSON_SAFE_INTEGER ? request.expectedRevision + 1 : null)
+    rules.value.revision !== request.expectedRevision + 1
   ) {
     return err(writeOutcomeUnknown("invalid_response"));
   }

@@ -19,8 +19,6 @@ const EQUIPMENT_KEY = /^[0-9a-f]{10}$/i;
 /** 运营下架说明的凭据筛查；v1 与 v2 Admin 记录共用。 */
 export const DELIST_REASON = v.pipe(
   consignmentTextSchema(256),
-  // consignmentTextSchema 已拒绝控制字符，其中包括 U+0085。
-  v.check((reason) => !/[\u2028\u2029]/u.test(reason)),
   v.check((reason) => !/\/equip[/?]|key=/i.test(reason)),
   v.check((reason) => !reason.split(/[^0-9a-z]/i).some((token) => EQUIPMENT_KEY.test(token))),
   v.check((reason) => !reason.split(/[^0-9a-z_-]/i).some((token) => token.length === 43)),

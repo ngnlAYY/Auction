@@ -8,7 +8,8 @@ import { integer, struct } from "../../wire";
 export const PublicLotWatchPreferenceResponseSchema = struct({
   user_id: v.string(),
   channel: v.string(),
-  version: integer,
+  // CAS 版本正数递增；0 或负数不是权威版本。
+  version: v.pipe(integer, v.minValue(1)),
   /** PM 渠道当前是否可用（论坛同步已启用且账号已绑定论坛账号）；不可用时启用 PM 的保存被拒绝。 */
   pm_available: v.boolean(),
 });

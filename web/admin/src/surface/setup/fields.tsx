@@ -162,15 +162,15 @@ export function SetupInput(props: {
               props.draft.set(next);
               // 输入被浏览器规范化成旧值时，也要把控件显示纠正回草稿。
               syncValue(event.currentTarget, setupDraftValue(next, field));
+              props.issues.update((currentIssues) =>
+                currentIssues.filter((submitted) => !setupFieldRelated(field, submitted.field)),
+              );
               if (field === "admin_actor") {
                 if (issue(next, field) !== null) {
                   return;
                 }
                 actorBlurIssue.set(null);
               }
-              props.issues.update((currentIssues) =>
-                currentIssues.filter((issue) => !setupFieldRelated(field, issue.field)),
-              );
             }}
             onBlur={() => {
               if (!props.busy && props.field === "admin_actor" && actorEdited()) {

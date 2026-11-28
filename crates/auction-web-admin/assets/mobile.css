@@ -435,7 +435,6 @@
     font-size: 1.125rem;
   }
 }
-}
 
 @media screen and (max-width: 48rem) {
   .admin-delivery-filter {
@@ -721,3 +720,5 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+}
+/* @layer mobile 到此结束：新增的手机规则必须写在层内，否则会越过共用样式的层叠顺序。 */

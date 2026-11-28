@@ -82,6 +82,8 @@ function validTemplateEntry(template: AdminMailTemplateDto): boolean {
     template.revision >= 0 &&
     template.body !== "" &&
     template.default_body !== "" &&
+    utf8ByteLength(template.body) <= MAX_TEMPLATE_BODY_BYTES &&
+    utf8ByteLength(template.default_body) <= MAX_TEMPLATE_BODY_BYTES &&
     (template.revision > 0 || !template.customized) &&
     template.usable === (mailTemplateBodyProblem(template, template.body) === null) &&
     (template.customized || (template.usable && template.body === template.default_body)) &&
@@ -185,6 +187,9 @@ export async function submitMailTemplate(
   signal: AbortSignal,
 ): Promise<Result<AdminMailTemplateDto, AdminWriteFailure>> {
   const attempt = prepared.attempt;
+  if (!validTemplateKey(attempt.key)) {
+    return err(writeNotSent(invalidRequestError(attempt.key)));
+  }
   const response = await sendPreparedJsonWrite(
     host,
     {

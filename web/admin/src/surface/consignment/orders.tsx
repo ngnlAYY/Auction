@@ -25,7 +25,7 @@ import { useAdminSessionHost } from "../auth/shell";
 import { AdminPager, useAdminPage, useAdminPagination } from "../pagination";
 import { advanceCommandReload, createCommandReload } from "../pending/sources";
 import { adminWorldLabel } from "../presentation";
-import { pairValue, parsePage, pushPage, pushText } from "../query/primitives";
+import { parseChoice, parsePage, pushPage, pushText } from "../query/primitives";
 import { orderKindKey, orderStateKey } from "./order-labels";
 import { consignmentErrorMessage } from "./presentation";
 
@@ -40,8 +40,8 @@ function useOrderQuery(): QueryState<OrderQuery> {
   return useQueryState(
     FILTER_KEYS,
     (pairs) => ({
-      world: pairValue(pairs, "order_world") ?? "",
-      state: pairValue(pairs, "order_state") ?? "",
+      world: parseChoice(pairs, "order_world", ListingWorldSchema.options),
+      state: parseChoice(pairs, "order_state", OrderStateV2Schema.options),
       page: parsePage(pairs, "order_page"),
       duplicate: FILTER_KEYS.some((key) => pairs.filter(([name]) => name === key).length > 1),
     }),
@@ -120,7 +120,14 @@ export function page(): JSX.Element {
               title={consignmentErrorMessage(error())}
               detail=""
               retryLabel={t("admin-retry")}
-              onRetry={() => advanceCommandReload(refresh)}
+              onRetry={() => {
+                // 重复筛选键由地址本身决定，重取同一地址只会再次失败；改写为规范地址。
+                if (loadError() === "invalid_query") {
+                  query.push({ ...query.state.peek(), page: 1n, duplicate: false });
+                  return;
+                }
+                advanceCommandReload(refresh);
+              }}
             />
           )}
         </Match>

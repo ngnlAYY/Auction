@@ -201,8 +201,8 @@ function requestedRetryDelay(response: TransportResponseMetadata): number | null
   const retryAfter = response.headers.get("Retry-After");
   if (response.status < 400 || retryAfter === null) return null;
   if (/^[0-9]+$/u.test(retryAfter)) {
-    const seconds = Number(retryAfter);
-    return Number.isSafeInteger(seconds) ? Math.min(seconds * 1_000, MAX_RETRY_AFTER_MILLIS) : null;
+    // 超过一小时的值（含无法精确表示的过长数字）按上限截断，不丢弃服务端时限。
+    return Math.min(Number(retryAfter) * 1_000, MAX_RETRY_AFTER_MILLIS);
   }
   const deadline = parseImfFixdate(retryAfter);
   if (deadline === null) return null;

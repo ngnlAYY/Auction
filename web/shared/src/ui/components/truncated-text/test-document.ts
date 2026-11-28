@@ -48,9 +48,17 @@ export class ElementFixture extends EventTarget {
       return this.tag === "dialog" && this.attributes.has("modal");
     }
     if (selector === OPEN) return this.tag === "dialog" && this.attributes.has("open");
-    if (selector === ARIA) return this.attributes.get("aria-modal") === "true";
+    if (selector === ARIA) {
+      return (
+        this.attributes.get("role") === "dialog" && this.attributes.get("aria-modal") === "true"
+      );
+    }
     if (selector === "a[href]") return this.tag === "a" && this.attributes.has("href");
-    return selector === "button:not([disabled])" && this.tag === "button";
+    return (
+      selector === "button:not([disabled])" &&
+      this.tag === "button" &&
+      !this.attributes.has("disabled")
+    );
   }
 
   closest(selector: string): ElementFixture | null {
@@ -87,11 +95,15 @@ export class ElementFixture extends EventTarget {
   }
 
   removeChild(child: ElementFixture): void {
+    const index = this.children.indexOf(child);
+    if (index < 0) {
+      // 与真实 DOM 一致：不是子节点时抛错，不能静默断开父指针留下损坏的树。
+      throw new DOMException("节点不是该父节点的子节点", "NotFoundError");
+    }
     if (this.fixture.activeElement !== null && child.contains(this.fixture.activeElement)) {
       this.fixture.activeElement = this.fixture.body;
     }
-    const index = this.children.indexOf(child);
-    if (index >= 0) this.children.splice(index, 1);
+    this.children.splice(index, 1);
     child.parentNode = null;
   }
 

@@ -37,6 +37,10 @@ pub(super) fn AdminLotTable(
     let mut lots = page.lots;
     sort_lots(&mut lots, &sort, direction);
 
+    // 选中的拍品只保留在当前渲染的页内，翻页后不再展示旧页的代理历史。
+    let selected_visible =
+        selected_lot().filter(|(lot_id, _)| lots.iter().any(|lot| &lot.id == lot_id));
+
     rsx! {
         section { class: "admin-auction-page", aria_labelledby: "auction-title",
             h1 { id: "auction-title",
@@ -131,7 +135,7 @@ pub(super) fn AdminLotTable(
                     on_page_change,
                 }
             }
-            for (lot_id, lot_code) in selected_lot() {
+            if let Some((lot_id, lot_code)) = selected_visible {
                 AdminProxyHistory { key: "{lot_id}", lot_id, lot_code, selected_lot, reload_generation }
             }
         }

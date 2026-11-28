@@ -170,6 +170,7 @@ export function SessionMenu(props: { readonly scopedHref: (path: string) => stri
                           }
                           if (!result.ok) {
                             logoutError.set(result.error);
+                            focusElementById(SESSION_TRIGGER_ID);
                           }
                           logoutBusy.set(false);
                         });

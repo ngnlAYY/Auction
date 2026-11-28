@@ -27,6 +27,8 @@ export function CatalogGroupFilters(props: {
   const invalid = createCell(
     !catalogLevelFilterParse(props.maxLevel ?? "", props.includeUnleveled).ok,
   );
+  // 复选框切换在同一任务内先触发输入框失焦：失焦提交延后到微任务，由 change 取消。
+  let blurApplyToken = 0;
   // 只在 URL 条件改变时恢复草稿；同条件后台刷新不能打断正在输入的等级。
   const levelDependency = createValueMemo(() => [props.maxLevel, props.includeUnleveled] as const);
   createEffect(levelDependency, ([maximumValue, includeValue]) => {
@@ -101,7 +103,13 @@ export function CatalogGroupFilters(props: {
                 maximum.set(event.currentTarget.value);
                 invalid.set(false);
               }}
-              onBlur={() => apply(include())}
+              onBlur={() => {
+                const token = blurApplyToken + 1;
+                blurApplyToken = token;
+                queueMicrotask(() => {
+                  if (token === blurApplyToken) apply(include());
+                });
+              }}
             />
           </label>
           <label
@@ -115,6 +123,7 @@ export function CatalogGroupFilters(props: {
               checked={include()}
               aria-description={t("filter-level-hint")}
               onChange={(event) => {
+                blurApplyToken += 1;
                 const checked = event.currentTarget.checked;
                 include.set(checked);
                 apply(checked);

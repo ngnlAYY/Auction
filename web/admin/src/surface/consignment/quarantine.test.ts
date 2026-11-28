@@ -122,25 +122,24 @@ function quarantineTranslator() {
   };
 }
 
-function observation(id: string, ordinal: number) {
+/** 一条观察：`ordinals` 必须是从 1 开始的连续序号，数量与 `attachment_count` 一致。 */
+function observation(id: string, ordinals: readonly number[]) {
   return {
     observation_id: id,
     observed_at: TIME,
     parser_version: "p4d2-v1",
     digest: "a".repeat(64),
-    attachment_count: 1,
+    attachment_count: ordinals.length,
     credits: null,
     cod: null,
     returnable: true,
     takeable: true,
-    items: [
-      {
-        ordinal,
-        kind: "equipment",
-        external_equipment_id: "42",
-        amount: null,
-      },
-    ],
+    items: ordinals.map((ordinal) => ({
+      ordinal,
+      kind: "equipment",
+      external_equipment_id: String(41 + ordinal),
+      amount: null,
+    })),
   };
 }
 
@@ -154,7 +153,7 @@ function detail(total = 3) {
     first_decision_id: "00000000-0000-4000-8000-0000000000d7",
     reason: "duplicate_raw_eid",
     observation_total: total,
-    observations: [observation(OBSERVATION, 1), observation(OBSERVATION_2, 2)],
+    observations: [observation(OBSERVATION, [1]), observation(OBSERVATION_2, [1, 2])],
     allowed_actions: ["recheck", "release"],
     release: null,
   };

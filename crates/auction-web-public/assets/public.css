@@ -4273,10 +4273,11 @@ body:has(.public-catalog-detail) .public-toast-region {
     display: none;
   }
 
-  /* 横向滚动容器放开溢出（配合单元格折行，宽表不被裁切）。 */
-  .public-blacklist-table-wrap,
-  .public-auction-rounds__table {
-    overflow-x: visible;
+  /* 横向滚动容器两轴都放开：任一轴不是 visible 会让 visible 计算成 auto，容器仍会裁切。
+     黑名单容器的卡片规则写在后面且是 overflow: hidden，这里用 body 前缀提权，保证打印声明生效。 */
+  body .public-blacklist-table-wrap,
+  body .public-auction-rounds__table {
+    overflow: visible;
   }
 
   /* 存证表格单元格打印时允许折行，避免 nowrap 撑出纸面。 */

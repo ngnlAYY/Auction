@@ -29,6 +29,8 @@ pub(super) enum ElementKind {
 #[derive(Clone)]
 pub(super) struct DomElement {
     pub(super) id: String,
+    /// 登记顺序；`querySelectorAll` 按文档顺序返回，BTreeMap 的键序不能代替它。
+    order: u64,
     identity: Rc<()>,
     kind: ElementKind,
     pub(super) parent: Option<Rc<DomElement>>,
@@ -175,6 +177,7 @@ pub struct TooltipBrowserFixture {
     #[cfg(test)]
     pub(super) open_dialog: Cell<Option<Signal<bool>>>,
     pub(super) nodes: RefCell<BTreeMap<String, DomElement>>,
+    pub(super) next_order: Cell<u64>,
     pub(super) focused: RefCell<String>,
     pub(super) keydown: RefCell<BTreeMap<u32, EscapeCallback>>,
     pub(super) next_listener: Cell<u32>,
@@ -218,13 +221,15 @@ impl TooltipBrowserFixture {
     pub fn portal_text(&self, id: &str) -> Option<String> {
         self.nodes.borrow().get(id)?.portal_text.clone()
     }
-
     pub(super) fn add_element(&self, id: &str, kind: ElementKind, parent: Option<DomElement>) {
         assert!(!self.nodes.borrow().contains_key(id), "duplicate host fixture element ID: {id}");
+        let order = self.next_order.get();
+        self.next_order.set(order.saturating_add(1));
         self.nodes.borrow_mut().insert(
             id.to_owned(),
             DomElement {
                 id: id.to_owned(),
+                order,
                 identity: Rc::new(()),
                 kind,
                 parent: parent.map(Rc::new),
@@ -260,10 +265,11 @@ impl TooltipBrowserFixture {
             .nodes
             .borrow()
             .values()
-            .rfind(|element| {
+            .filter(|element| {
                 element.matches(selector)
                     && root.is_none_or(|root| root.id != element.id && root.contains(element))
             })
+            .max_by_key(|element| element.order)
             .cloned())
     }
 
@@ -303,6 +309,22 @@ impl TooltipBrowserFixture {
             #[cfg(test)]
             writes,
         }
+    }
+
+    /// 原地复用仍挂载的浮层节点；节点已移除时返回 false，由调用方重新挂载。
+    pub(super) fn refresh_portal(
+        &self,
+        portal: &DomPortal,
+        parent: &DomElement,
+        text: &str,
+    ) -> bool {
+        let mut nodes = self.nodes.borrow_mut();
+        let Some(node) = nodes.get_mut(&portal.id) else {
+            return false;
+        };
+        node.portal_text = Some(text.to_owned());
+        node.parent = Some(Rc::new(parent.clone()));
+        true
     }
 
     pub(super) fn listen_escape(

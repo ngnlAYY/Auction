@@ -186,15 +186,21 @@ test("multi_category_requests_match_rows_and_selected_count_total：多分类按
   // 两个所选分类的计数和是 3；误用 all=4 的旧实现会把这组响应判错。
   expect(decodeCatalog(listEnvelopeWithRows(selectedRows, 3, counts), "clo,lig").ok).toBe(true);
   expect(decodeCatalog(listEnvelopeWithRows(selectedRows, 4, counts), "clo,lig").ok).toBe(false);
+  // 总数说还有一行但只给了两行：残缺页必须失败关闭，不能当作已装配的末页。
+  expect(decodeCatalog(listEnvelopeWithRows(selectedRows.slice(1), 3, counts), "clo,lig").ok).toBe(
+    false,
+  );
 
   // 未选分类时仍以 all 计数核对 total，并接受集合内的任意行。
-  expect(decodeCatalog(listEnvelopeWithRows(selectedRows, 4, counts), null).ok).toBe(true);
+  const allRows = [...selectedRows, summaryEquipment("Heavy")];
+  expect(decodeCatalog(listEnvelopeWithRows(allRows, 4, counts), null).ok).toBe(true);
 
   const single = listEnvelope(summaryEquipment(), 1, categoryCounts({ all: 1, clo: 1 }));
   expect(decodeCatalog(single, "clo").ok).toBe(true);
 
   // 第二种行属于 lig，不在请求的 clo、sta 集合内。
-  expect(decodeCatalog(listEnvelopeWithRows(selectedRows, 2, counts), "clo,sta").ok).toBe(false);
+  const crossedRows = [summaryEquipment(), summaryEquipment("Light")];
+  expect(decodeCatalog(listEnvelopeWithRows(crossedRows, 2, counts), "clo,sta").ok).toBe(false);
   for (const category of ["clo,clo", "all", "unknown"]) {
     expect(decodeCatalog(single, category).ok).toBe(false);
   }

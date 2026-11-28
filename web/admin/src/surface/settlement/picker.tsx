@@ -17,6 +17,8 @@ import type { RecoveryConfirmationDraft } from "./recovery";
 
 interface AdminSettlementPickerProps {
   readonly catalog: AdminSettlementCatalogPage | null;
+  /** 事件发生时页面仍接纳当前地址；前进/后退后的恢复 effect 可能尚未应用。 */
+  readonly isCurrent: () => boolean;
   readonly worldFilter: Cell<string>;
   readonly requestedSequence: Cell<number | null>;
   readonly selectedAuctionId: Cell<string>;
@@ -42,6 +44,9 @@ export function AdminSettlementPicker(props: AdminSettlementPickerProps): JSX.El
           id="settlement-world"
           value={props.worldFilter()}
           onChange={(event) => {
+            if (!props.isCurrent()) {
+              return;
+            }
             const nextWorld = event.currentTarget.value;
             if (nextWorld !== "all" && nextWorld !== "main" && nextWorld !== "isekai") {
               return;
@@ -73,6 +78,9 @@ export function AdminSettlementPicker(props: AdminSettlementPickerProps): JSX.El
           disabled={periodDisabled()}
           value={props.selectedAuctionId()}
           onChange={(event) => {
+            if (!props.isCurrent()) {
+              return;
+            }
             const auctionId = event.currentTarget.value;
             const selected = entries().find((entry) => entry.auctionId === auctionId);
             if (selected === undefined) {

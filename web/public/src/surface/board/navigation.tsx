@@ -30,7 +30,8 @@ export function previewHistorySwitch(
   if (state === null || state === undefined) {
     return null;
   }
-  const failed = !state.ok || state.value === null;
+  // 空成功值是有效结果（没有当前场次/可用视图），只有失败才渲染错误。
+  const failed = !state.ok;
   const current = state.ok && state.value !== null ? state.value[0] : null;
   const rounds = state.ok && state.value !== null ? state.value[1] : [];
   const latestSettled =

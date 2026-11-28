@@ -12,6 +12,7 @@ import type { GenericSchema } from "valibot";
 import { sendRequest } from "./clock";
 import { COMMAND_NOT_SENT, type CommandError } from "./commands";
 import { observePublicSessionFailure } from "./session";
+import { publicSessionIdentityRevision } from "./session/revision";
 
 const HTTP_ERRORS = new Set([
   "already_open",
@@ -80,6 +81,7 @@ export async function requestPrivateConsignment<T>(
 ): Promise<Result<T, ConsignmentPrivateError>> {
   if (!validConsignmentUuid(userId)) return err({ status: 400, code: "invalid_expected_user_id" });
 
+  const identityAtStart = publicSessionIdentityRevision();
   let dispatched = false;
   let unauthorized = false;
   const deferUnauthorized =
@@ -121,7 +123,8 @@ export async function requestPrivateConsignment<T>(
   const result = sent.ok
     ? decodePrivateResponse(sent.value, status, request.method, schema, integerPaths)
     : err({
-        status: sent.error.kind === "network" ? (sent.error.status ?? 0) : 0,
+        // 响应头已到但正文断流时没有可信错误外壳：状态归一为未知，命令结果保持不确定。
+        status: 0,
         code: transportErrorCode(sent.error),
       });
   if (!result.ok) {
@@ -137,7 +140,7 @@ export async function requestPrivateConsignment<T>(
     if (deferUnauthorized && unauthorized) {
       observePublicSessionFailure(401, "unauthenticated", userId);
     } else if (sessionChanged) {
-      observePublicSessionFailure(rejectedStatus, code, userId);
+      observePublicSessionFailure(rejectedStatus, code, userId, identityAtStart);
     }
   }
   return result;

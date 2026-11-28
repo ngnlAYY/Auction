@@ -117,6 +117,7 @@ export function prepareAdminCredentialCreateOnce(
   input: Omit<AdminCredentialCreateRequest, "command_id">,
 ): (commandId: string) => Result<PreparedAdminCredentialCreate, AdminWriteNotSent> {
   const login = input.login;
+  let cachedId: string | null = null;
   let state:
     | { kind: "input"; request: typeof input }
     | { kind: "prepared"; result: Result<PreparedAdminCredentialCreate, AdminWriteNotSent> } = {
@@ -124,12 +125,18 @@ export function prepareAdminCredentialCreateOnce(
     request: { ...input, ...(login === undefined ? {} : { login: { ...login } }) },
   };
   return (commandId) => {
-    if (state.kind === "input") {
-      const result = prepareAdminCredentialCreate({ ...state.request, command_id: commandId });
-      // 序列化后释放冻结输入，宿主只保留一份可重试的正文。
-      state = { kind: "prepared", result };
+    if (state.kind === "prepared") {
+      // 正文已绑定首次命令 ID；重试换成另一 ID 会静默复用旧正文，必须拒绝。
+      if (commandId !== cachedId) {
+        return err(writeNotSent(invalidRequestError(commandId)));
+      }
+      return state.result;
     }
-    return state.result;
+    cachedId = commandId;
+    const result = prepareAdminCredentialCreate({ ...state.request, command_id: commandId });
+    // 序列化后释放冻结输入，宿主只保留一份可重试的正文。
+    state = { kind: "prepared", result };
+    return result;
   };
 }
 

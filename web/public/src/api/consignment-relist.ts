@@ -23,6 +23,7 @@ import type * as v from "valibot";
 import { sendRequest } from "./clock";
 import { COMMAND_NOT_SENT, type CommandError, commandNotSent } from "./commands";
 import { observePublicSessionFailure } from "./session";
+import { publicSessionIdentityRevision } from "./session/revision";
 
 const LISTINGS = "/api/v2/consignment/listings";
 const ERROR_KEYS = ["code", "message", "data", "request_id"];
@@ -111,6 +112,7 @@ export async function relistConsignmentListing(
   if (!decode(ConsignmentUuidSchema, listingId).ok || !body.ok) {
     return err({ status: 400, code: "invalid_request" });
   }
+  const identityAtStart = publicSessionIdentityRevision();
   let dispatched = false;
   let unauthorized = false;
   const sent = await sendRequest(

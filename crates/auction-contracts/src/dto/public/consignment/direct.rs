@@ -64,6 +64,14 @@ impl DirectListingProgress {
         if !self.effective_state.matches_mode(ListingMode::Direct) {
             return Err("免登录挂单的状态与非寄售模式不一致");
         }
+        // 与应用层投影同一终态归类：原因只能指向其固定的终态，不能出现
+        // “解析中却因服务停用终结”一类矛盾组合。
+        if self
+            .effective_reason
+            .is_some_and(|reason| reason.terminal_state() != self.effective_state)
+        {
+            return Err("免登录挂单的终态原因与有效状态不一致");
+        }
         Ok(())
     }
 }

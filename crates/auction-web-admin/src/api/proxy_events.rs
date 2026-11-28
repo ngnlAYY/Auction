@@ -8,7 +8,7 @@ pub(crate) use auction_contracts::{
 
 use super::{
     MAX_JSON_SAFE_INTEGER, invalid_response_error, response_error, send_get, valid_admin_time,
-    valid_trimmed_text, valid_uuid,
+    valid_safe_text, valid_success_code, valid_uuid,
 };
 
 // 结构闭集由 contracts 的 `AdminProxyEventListResponse`（含 event 与混合分页，
@@ -32,6 +32,9 @@ pub(crate) async fn fetch_admin_proxy_events(
     }
     let payload: ApiResponse<AdminProxyEventPage> =
         response.json().await.map_err(invalid_response_error)?;
+    if !valid_success_code(&payload.code) || payload.message.is_empty() {
+        return Err(invalid_response_error("proxy_events"));
+    }
     decode_proxy_event_page(payload.data, &lot_id, page, page_size).map_err(invalid_response_error)
 }
 
@@ -83,7 +86,7 @@ fn decode_proxy_event(
         || !valid_uuid(&event.lot_id)
         || event.lot_id != requested_lot_id
         || !valid_uuid(&event.user_id)
-        || !valid_trimmed_text(&event.username)
+        || !valid_safe_text(&event.username, 256)
         || !matches!(event.mode.as_str(), "fast" | "slow")
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&event.maximum_amount)
         || !matches!(event.status.as_str(), "active" | "exhausted" | "frozen" | "closed")

@@ -82,8 +82,8 @@ export function LotDetail(props: { readonly lotCode: string }): JSX.Element {
     return parsed !== null && parsed !== NIL_UUID ? parsed : null;
   });
   return (
-    <Show when={lotId()} fallback={<AuctionPage />}>
-      {(id) => <LotDeepLink lotId={id()} />}
+    <Show when={lotId()} keyed fallback={<AuctionPage />}>
+      {(id) => <LotDeepLink lotId={id} />}
     </Show>
   );
 }

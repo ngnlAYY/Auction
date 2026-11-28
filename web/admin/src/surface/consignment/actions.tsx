@@ -65,7 +65,8 @@ export function DelistAction(props: {
     props.onFeedback(null);
     try {
       const operation = await prepareAdminHold(host, listingId, version, explanation);
-      if (!props.currentRead()) return;
+      // 准备期间操作员可能已经取消确认；取消后不得再提交这条已冻结的意图。
+      if (!props.currentRead() || expectedVersion.peek() !== version) return;
       // 不变量 1、6、7：确认绑定原版本，提交后私有说明只保留在会话宿主固定的命令里。
       const submitted = commands.submit(
         target,
@@ -136,7 +137,12 @@ export function DelistAction(props: {
                 )}
               </Show>
               <div class="admin-shell__dialog-actions">
-                <button class="admin-btn-secondary" type="button" onClick={cancel}>
+                <button
+                  class="admin-btn-secondary"
+                  type="button"
+                  disabled={props.commands.anyBusy() || preparing()}
+                  onClick={cancel}
+                >
                   {t("settlement-return-cancel")}
                 </button>
                 <button class="admin-btn-primary" type="submit" disabled={!canSubmit()}>

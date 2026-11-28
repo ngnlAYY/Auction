@@ -130,7 +130,7 @@ pub(crate) async fn fetch_deliveries(
     page: i64,
     page_size: i64,
 ) -> Result<DeliveryPage, String> {
-    pagination::validate(page, page_size, 100, i64::MAX)?;
+    pagination::validate(page, page_size, 100, 100_000)?;
     if !filters.validate() {
         return Err("invalid_delivery_filter".to_owned());
     }

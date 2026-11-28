@@ -1,11 +1,11 @@
 // 价格历史读取；失败统一为不带服务端细节、可重试的错误。
 
 import type { PublicPriceHistoryListResponse } from "@auction/contracts/dto/public/catalog/history";
-import { type Result, unreachable } from "@auction/web-shared/result";
+import { err, type Result } from "@auction/web-shared/result";
 import { decodePriceHistoryPage } from "../decoder/catalog";
 import type { PriceHistoryQuery } from "../model";
-import { CATALOG_TTL_MILLIS, getOrFetch } from "../swr-cache";
-import { conditionalGet, failureOutcome } from "./cached-get";
+import { CATALOG_TTL_MILLIS, deliverCacheRead } from "../swr-cache";
+import { cachedPublicRead } from "./cached-get";
 
 /** 价格历史读取失败。服务端只以 503 表示读端口不可用，不区分状态码：页面统一提示并可重试，
  * 也不把服务端 message、响应正文或底层网络错误带进组件。 */
@@ -45,39 +45,19 @@ export async function fetchPriceHistory(
   params.append("page", String(Math.max(1, query.page)));
   params.append("page_size", String(pageSize));
   const url = `/api/v1/price-history?${params.toString()}`;
-  const requestUrl = url;
-  return getOrFetch<PublicPriceHistoryListResponse, PriceHistoryFetchError>(
+  const read = await cachedPublicRead(
     url,
     CATALOG_TTL_MILLIS,
     PRICE_HISTORY_CACHE_TYPE,
-    async (etag, evictMissingSnapshot) => {
-      const conditional = await conditionalGet(requestUrl, etag, evictMissingSnapshot, signal);
-      if (signal.aborted) {
-        return { kind: "transport", error: PRICE_HISTORY_FETCH_ERROR };
-      }
-      if (!conditional.ok) {
-        return { kind: "transport", error: PRICE_HISTORY_FETCH_ERROR };
-      }
-      const outcome = conditional.value;
-      switch (outcome.kind) {
-        case "not_modified":
-          return { kind: "not_modified" };
-        case "failure":
-          return failureOutcome<PublicPriceHistoryListResponse, PriceHistoryFetchError>(
-            outcome.status,
-            PRICE_HISTORY_FETCH_ERROR,
-          );
-        case "success": {
-          const decoded = decodePriceHistoryPage(outcome.response);
-          return decoded.ok
-            ? { kind: "changed", value: decoded.value, etag: outcome.etag }
-            : { kind: "rejected", error: PRICE_HISTORY_FETCH_ERROR };
-        }
-        default:
-          return unreachable(outcome);
-      }
+    (response) => {
+      const decoded = decodePriceHistoryPage(response);
+      return decoded.ok ? decoded : err(PRICE_HISTORY_FETCH_ERROR.kind);
     },
-    PRICE_HISTORY_FETCH_ERROR,
     signal,
   );
+  if (signal.aborted) {
+    return err(PRICE_HISTORY_FETCH_ERROR);
+  }
+  const delivered = deliverCacheRead(read);
+  return delivered.ok ? delivered : err(PRICE_HISTORY_FETCH_ERROR);
 }

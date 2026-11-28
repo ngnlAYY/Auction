@@ -225,7 +225,10 @@ function DirectAccepted(props: {
       if (!context.alive()) return;
       busy.set(false);
       if (result.ok) progress.set(result.value.listing);
-      else error.set(result.error);
+      else {
+        progress.set(null);
+        error.set(result.error);
+      }
     });
   };
   // 聚合拒绝态没有独立文案，只显示原因。

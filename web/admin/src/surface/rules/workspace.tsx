@@ -178,6 +178,8 @@ export function AdminRulesWorkspace(props: AdminRulesWorkspaceProps): JSX.Elemen
         props.draft.set(result.value);
         props.notice.set({ kind: "validated" });
       } else {
+        // 未产生已校验候选：旧的校验回执不能再授权发布。
+        props.checkedCandidate.set(null);
         props.notice.set(
           adminApiFailureIsConflict(result.error)
             ? { kind: "conflict" }
@@ -223,14 +225,14 @@ export function AdminRulesWorkspace(props: AdminRulesWorkspaceProps): JSX.Elemen
       },
       (_value, sourceAlive) => {
         const alive = (): boolean => props.pending.host.alive();
-        // 清理会话草稿时废弃同世代的读取，避免重挂载的编辑器停在加载或使用旧基线。
-        setIfAlive(props.draft, null, alive);
-        setIfAlive(props.baseline, null, alive);
-        setIfAlive(props.checkedCandidate, null, alive);
-        advanceCommandReload(props.reloadGeneration);
+        // 旧编辑器卸载后的成功回执只触发重读，不能清掉新编辑器的草稿与基线。
         if (sourceAlive) {
+          setIfAlive(props.draft, null, alive);
+          setIfAlive(props.baseline, null, alive);
+          setIfAlive(props.checkedCandidate, null, alive);
           setIfAlive(props.notice, { kind: "published" }, alive);
         }
+        advanceCommandReload(props.reloadGeneration);
         return commandDeliveryReported(sourceAlive, () => null);
       },
       (code) => {

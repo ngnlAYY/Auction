@@ -359,9 +359,10 @@ export function resolveRoute(routes: readonly CompiledRoute[], href: string): Re
 
 /**
  * 判断链接是否由本站路由处理。
- * 两张现有路由表都有末尾 catch-all，因此任意以 `/` 开头的地址都能被 Dioxus 路由解析，
- * 包括协议相对地址；未命中的路径由 not-found 页面处理。绝对 URL、片段与相对地址交给浏览器。
+ * 路由表不登记 catch-all，未命中的站内路径由 not-found 页面处理；只接受以单斜杠开头的路径。
+ * 协议相对地址（`//host/x`）以及浏览器视作 `//host/x` 的 `/\host/x` 属于外部导航，
+ * 与绝对 URL、片段和相对地址一样交给浏览器。
  */
 export function isInternalHref(href: string): boolean {
-  return href.startsWith("/");
+  return href.startsWith("/") && !href.startsWith("//") && !href.startsWith("/\\");
 }

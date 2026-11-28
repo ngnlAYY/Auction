@@ -26,7 +26,7 @@ use dioxus::prelude::*;
 use wasm_bindgen::{JsCast, closure::Closure};
 
 #[cfg(target_arch = "wasm32")]
-use focus::{current_focusable, is_focusable, preferred_dialog_focus};
+use focus::{current_focusable, is_focus_target, is_focusable, preferred_dialog_focus};
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Default)]
@@ -354,10 +354,11 @@ impl DialogFocusTrapGuard {
             "keydown",
             self.keyboard_callback.as_ref().unchecked_ref(),
         );
-        if self.scroll_lock_owned.replace(false)
+        if self.scroll_lock_owned.get()
             && let Some(body) = self.document.body()
         {
             release_body_scroll_lock(&body);
+            self.scroll_lock_owned.set(false);
         }
         // focus 会同步派发焦点事件；先释放借用，再把控制权交给浏览器监听器。
         let opener = self.opener.borrow_mut().take();
@@ -428,7 +429,7 @@ fn synchronize_dialog_state(
             && !document.active_element().is_some_and(|element| {
                 dialog.contains(Some(element.as_ref()))
                     && (element.is_same_node(Some(dialog.as_ref()))
-                        || element.dyn_ref::<web_sys::HtmlElement>().is_some_and(is_focusable))
+                        || element.dyn_ref::<web_sys::HtmlElement>().is_some_and(is_focus_target))
             })
             && let Some(target) = preferred_dialog_focus(&dialog)
         {

@@ -20,10 +20,10 @@ export function supportQueryDefault(): SupportQuery {
   return { user: "", reference: "" };
 }
 
-/** 语义校验：恰好一个非空入口，用户检索词须符合字节上限，参考编号须为规范 UUID。 */
+/** 语义校验：恰好一个非空入口，用户检索词须符合字节上限且不含控制字符，参考编号须为规范 UUID。 */
 export function supportQueryValid(query: SupportQuery): boolean {
   if (query.user !== "" && query.reference === "") {
-    return !playerSupportUserTooLong(query.user);
+    return !playerSupportUserTooLong(query.user) && !/\p{Cc}/u.test(query.user);
   }
   if (query.user === "" && query.reference !== "") {
     return validUuid(query.reference);

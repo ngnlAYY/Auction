@@ -282,25 +282,31 @@ export function createWebHistory(options: WebHistoryOptions): WebHistory {
       });
     }
   };
-  const enterFromHistory = (): void => {
+  /** 浏览器自行改变地址（`popstate` 或 `hashchange`）后接管条目与落点。 */
+  const enterFromHistory = (hashNavigation: boolean): void => {
     const stored = readEntry();
     if (stored?.key === active.key && activeRoute === currentWindowRoute()) {
       return;
     }
-    const fragment = stored === null ? fragmentTarget(window.location.hash) : null;
+    // 同页锚点会新建条目并复制上一个条目的 state，不能凭 stored 判定不是片段导航；
+    // 只有 hashchange 能区分原生锚点与历史遍历（后者恢复自己记录的落点）。
+    const nativeHash = hashNavigation ? fragmentTarget(window.location.hash) : null;
+    const fragment = stored === null ? fragmentTarget(window.location.hash) : nativeHash;
     const native = fragment?.kind === "fragment" && hasFragmentTarget(fragment.id);
     const missing = fragment !== null && !native;
     // popstate 时浏览器已切换条目，来源的新落点只能先记在内存。
     saveOnDeparture(false);
-    const key = stored?.key ?? createUuidV4();
-    const next = entries.get(key) ?? {
+    // 复制来的 key 属于上一个条目；原生锚点导航要登记新条目，否则两个条目共用落点。
+    const key = nativeHash === null ? (stored?.key ?? createUuidV4()) : createUuidV4();
+    const known = nativeHash === null ? entries.get(key) : undefined;
+    const next = known ?? {
       key,
-      landing: stored?.landing ?? fragment ?? positionTarget(currentScroll()),
+      landing: nativeHash ?? stored?.landing ?? fragment ?? positionTarget(currentScroll()),
     };
     activate(next, stored !== null || missing);
     // 原生片段可能在 popstate 之后才滚动；离开前，落点仍由目标 ID 表示。
     nativeFragmentPending = native;
-    if (stored?.key == null) {
+    if (stored?.key == null || nativeHash !== null) {
       void writeEntry("replace", next);
     }
     options.onLocationChanged();
@@ -309,9 +315,11 @@ export function createWebHistory(options: WebHistoryOptions): WebHistory {
       restoreScrollAfterCommit();
     }
   };
+  const enterOnPopState = (): void => enterFromHistory(false);
   const handleHashChange = (event: HashChangeEvent): void => {
     if (event.newURL === window.location.href && activeRoute !== currentWindowRoute()) {
-      enterFromHistory();
+      // 仅 hashchange：浏览器按原生锚点新建了复制 state 的条目，落点取当前片段。
+      enterFromHistory(true);
     }
   };
   const leaveDocument = (): void => saveOnDeparture(true);
@@ -371,7 +379,7 @@ export function createWebHistory(options: WebHistoryOptions): WebHistory {
   window.addEventListener("keydown", noteScrollKey);
   window.addEventListener("scroll", trackScroll, { passive: true });
   window.addEventListener("pagehide", leaveDocument);
-  window.addEventListener("popstate", enterFromHistory);
+  window.addEventListener("popstate", enterOnPopState);
   window.addEventListener("hashchange", handleHashChange);
   onCleanup(() => {
     for (const type of scrollInputs) {
@@ -380,7 +388,7 @@ export function createWebHistory(options: WebHistoryOptions): WebHistory {
     window.removeEventListener("keydown", noteScrollKey);
     window.removeEventListener("scroll", trackScroll);
     window.removeEventListener("pagehide", leaveDocument);
-    window.removeEventListener("popstate", enterFromHistory);
+    window.removeEventListener("popstate", enterOnPopState);
     window.removeEventListener("hashchange", handleHashChange);
     stopWaiting();
     queryWriters.delete(window);

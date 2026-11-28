@@ -12,6 +12,13 @@ export function useConsignmentRefresh(enabled: () => boolean, refresh: () => voi
     if (typeof window === "undefined" || typeof document === "undefined") return;
 
     let timer: TimeoutFuture | null = null;
+    const runRefresh = () => {
+      try {
+        refresh();
+      } catch {
+        // 单次刷新失败不能终止后续轮询；页面自身的错误态由回调负责。
+      }
+    };
     const schedule = () => {
       timer?.cancel();
       timer = null;
@@ -20,12 +27,12 @@ export function useConsignmentRefresh(enabled: () => boolean, refresh: () => voi
       timer = current;
       void current.promise.then(() => {
         if (timer !== current) return;
-        if (documentIsVisible()) refresh();
+        if (documentIsVisible()) runRefresh();
         schedule();
       });
     };
     const restored = () => {
-      if (documentIsVisible()) refresh();
+      if (documentIsVisible()) runRefresh();
       schedule();
     };
     const visibilityChanged = () => {

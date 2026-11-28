@@ -232,13 +232,13 @@ export function useDirectPending(onOutcome: (result: DirectOutcome) => void) {
       }
       const record = decode(PENDING, { ...input, command_id: createUuidV4() });
       if (!record.ok || !matchesEquipment(record.value, url)) return false;
-      // 新登记取代上一次的结案结果；清不掉就不发送，避免刷新后显示过期结果。
-      if (!setSessionItem(OUTCOME_KEY, "null")) {
+      // 不变量 1、7：先写发送前严格白名单，避免清掉旧结果后未决记录写入失败而两条都丢失。
+      if (!setSessionItem(STORAGE_KEY, JSON.stringify(record.value))) {
         error.set(STORAGE_FAILURE);
         return false;
       }
-      // 不变量 1、7：发送前写入严格白名单。无法记录时不发送不可恢复的写操作。
-      if (!setSessionItem(STORAGE_KEY, JSON.stringify(record.value))) {
+      // 新登记取代上一次的结案结果；清不掉就不发送，避免刷新后显示过期结果。
+      if (!setSessionItem(OUTCOME_KEY, "null")) {
         error.set(STORAGE_FAILURE);
         return false;
       }

@@ -62,12 +62,14 @@ export function CredentialCheckAction(props: CredentialCheckActionProps): JSX.El
             props.busy,
             feedback,
             async (context) => {
-              const result = await checkAdminCredential(host, credential, context.signal);
-              if (!context.alive()) {
-                return result;
+              try {
+                return await checkAdminCredential(host, credential, context.signal);
+              } finally {
+                // 任何结束路径都必须撤下“检查中”，否则按钮会一直显示忙碌文案。
+                if (context.alive()) {
+                  checking.set(false);
+                }
               }
-              checking.set(false);
-              return result;
             },
             (result) => checked.set(result),
           );

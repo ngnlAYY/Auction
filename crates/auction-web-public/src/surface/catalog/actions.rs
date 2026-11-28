@@ -34,12 +34,16 @@ pub(crate) struct CatalogProxySnapshots(Rc<RefCell<ProxySnapshotState>>);
 
 impl CatalogProxySnapshots {
     fn begin(&self, auction_id: &str, lot_id: &str, generation: u64) {
-        self.0
-            .borrow_mut()
+        let mut state = self.0.borrow_mut();
+        state
             .latest_generation
             .entry(auction_id.to_owned())
             .or_default()
             .insert(lot_id.to_owned(), generation);
+        // 读取也刷新 LRU 次序：刚发起的读取不能因容量淘汰丢失世代，成功后再按同一键前移。
+        let key = (auction_id.to_owned(), lot_id.to_owned());
+        state.insertion_order.retain(|existing| existing != &key);
+        state.insertion_order.push_back(key);
     }
 
     fn remember(&self, auction_id: String, lot_id: String, generation: u64, result: &ProxyRead) {

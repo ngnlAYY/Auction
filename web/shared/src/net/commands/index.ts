@@ -116,11 +116,13 @@ export function useConfirmCommand<P, E>(): ConfirmCommand<P, E> {
         try {
           result = await action(submitted, context.signal);
         } catch (error) {
-          if (context.alive()) {
-            submitting.set(false);
-            confirmation.set(null);
-            uncertain.set(true);
+          // 宿主已卸载或任务被取消时的拒绝不是程序错误，与成功路径一样静默收口。
+          if (!context.alive()) {
+            return;
           }
+          submitting.set(false);
+          confirmation.set(null);
+          uncertain.set(true);
           throw error;
         }
         if (!context.alive()) {

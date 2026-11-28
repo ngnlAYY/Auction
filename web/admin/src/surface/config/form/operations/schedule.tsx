@@ -4,9 +4,11 @@ import type { Cell } from "@auction/web-shared/reactive/cell";
 import { createValueMemo } from "@auction/web-shared/reactive/memo";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
+import { Show, useContext } from "solid-js";
 
 import {
   type RuntimeConfigForm,
+  runtimeConfigFormEditedInput,
   runtimeConfigFormInput,
   runtimeConfigFormSetInput,
 } from "../../model";
@@ -242,22 +244,46 @@ function TimeField(props: {
   readonly onDirty: () => void;
 }): JSX.Element {
   const value = createValueMemo(() => runtimeConfigFormInput(props.form(), props.path));
+  const issues = useContext(FormIssuesContext);
+  const error = createValueMemo(() => {
+    if (runtimeConfigFormEditedInput(props.form(), props.path) === null) {
+      return null;
+    }
+    const issue = timeIssue(value());
+    if (issue === null || !issues().some((entry) => entry.path === props.path)) {
+      return null;
+    }
+    return timeIssueMessage(issue);
+  });
+  const errorId = `${fieldId(props.path)}-error`;
   return (
     <label class="admin-runtime-field">
       <span>{props.label}</span>
       <input
+        id={fieldId(props.path)}
         type="time"
         step="60"
         disabled={props.disabled}
         value={value()}
         name={props.path}
         autocomplete="off"
+        data-runtime-time={props.path}
+        data-runtime-label={props.label}
+        aria-invalid={error() === null ? "false" : "true"}
+        aria-describedby={error() === null ? undefined : errorId}
         onInput={(event) => {
           const next = event.currentTarget.value;
           props.form.update((current) => runtimeConfigFormSetInput(current, props.path, next));
           props.onDirty();
         }}
       />
+      <Show when={error()}>
+        {(text) => (
+          <small id={errorId} class="admin-config-field-error">
+            {text()}
+          </small>
+        )}
+      </Show>
     </label>
   );
 }

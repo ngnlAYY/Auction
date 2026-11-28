@@ -96,7 +96,11 @@ export function reportBrowserErrorWithBuildId(errorClass: BrowserErrorClass, val
   }
   const reportedBuildId = buildIdIsValid(value) ? value : "unknown";
   const url = `${BROWSER_ERROR_ROUTE}?class=${browserErrorClassCode(errorClass)}&build=${reportedBuildId}`;
-  void fetch(url, { method: "POST" }).catch(() => undefined);
+  try {
+    void fetch(url, { method: "POST" }).catch(() => undefined);
+  } catch {
+    // fetch 可能同步抛出（宿主缺少 fetch 或实现被替换）；信标失败不能反过来影响页面或递归进失败钩子。
+  }
 }
 
 /**

@@ -387,12 +387,14 @@ export function notifications(
                       </td>
                       <td>{notification().state_reason ?? ""}</td>
                       <td>
-                        <Show when={notification().delivery_id} fallback={t("value-empty")}>
-                          {(deliveryId) => (
-                            <Link href={`/deliveries/${deliveryId()}`}>
-                              {t("support-open-delivery")}
-                            </Link>
-                          )}
+                        <Show when={notification().channel === "mm"} fallback={t("value-empty")}>
+                          <Show when={notification().delivery_id} fallback={t("value-empty")}>
+                            {(deliveryId) => (
+                              <Link href={`/deliveries/${deliveryId()}`}>
+                                {t("support-open-delivery")}
+                              </Link>
+                            )}
+                          </Show>
                         </Show>
                       </td>
                       <td>{formatAdminTime(notification().created_at)}</td>

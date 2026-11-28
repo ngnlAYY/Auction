@@ -84,6 +84,11 @@ export function AdminUserRow(props: AdminUserRowProps): JSX.Element {
   });
   const forumAccountIdValue = createCell(untrack(() => props.user.forum_account_id ?? ""));
   const fieldIssue = createCell<UserFieldIssue | null>(null);
+  // 同一页可能同时打开多行的同类对话框；字段 id 必须按用户区分，聚焦与 label 才不会命中另一行。
+  const forumAccountFieldId = `admin-user-edit-forum-account-${props.user.id}`;
+  const forumAccountErrorId = `${forumAccountFieldId}-error`;
+  const blacklistReasonFieldId = `admin-user-blacklist-reason-${props.user.id}`;
+  const blacklistReasonErrorId = `${blacklistReasonFieldId}-error`;
 
   return (
     <>
@@ -192,7 +197,7 @@ export function AdminUserRow(props: AdminUserRowProps): JSX.Element {
                       const issue = forumAccountIssue(value, true);
                       fieldIssue.set(issue);
                       if (issue !== null) {
-                        focusField("admin-user-edit-forum-account");
+                        focusField(forumAccountFieldId);
                         return;
                       }
                       const prepare = prepareAdminUserMutationOnce(
@@ -215,12 +220,12 @@ export function AdminUserRow(props: AdminUserRowProps): JSX.Element {
                       if (submitted) dialog.set(null);
                     }}
                   >
-                    <label for="admin-user-edit-forum-account">
+                    <label for={forumAccountFieldId}>
                       {t("admin-users-forum-account-id")}
                       <span aria-hidden="true">{" *"}</span>
                     </label>
                     <input
-                      id="admin-user-edit-forum-account"
+                      id={forumAccountFieldId}
                       name="forum_account_id"
                       type="text"
                       inputmode="numeric"
@@ -240,7 +245,7 @@ export function AdminUserRow(props: AdminUserRowProps): JSX.Element {
                         forumAccountIdValue.set(value);
                       }}
                     />
-                    <UserFieldError id="admin-user-edit-forum-account-error" issue={fieldIssue()} />
+                    <UserFieldError id={forumAccountErrorId} issue={fieldIssue()} />
                     <AdminUserDialogActions
                       busy={props.busy()}
                       blocked={blocked()}
@@ -264,7 +269,7 @@ export function AdminUserRow(props: AdminUserRowProps): JSX.Element {
                       const issue = blacklistReasonIssue(reason);
                       fieldIssue.set(issue);
                       if (issue !== null) {
-                        focusField("admin-user-blacklist-reason");
+                        focusField(blacklistReasonFieldId);
                         return;
                       }
                       const prepare = prepareAdminUserBlacklistOnce(user, reason);
@@ -287,7 +292,7 @@ export function AdminUserRow(props: AdminUserRowProps): JSX.Element {
                       {t("admin-users-blacklist-reason")}
                     </label>
                     <textarea
-                      id="admin-user-blacklist-reason"
+                      id={blacklistReasonFieldId}
                       name="public_reason"
                       autofocus={true}
                       required={true}
@@ -305,7 +310,7 @@ export function AdminUserRow(props: AdminUserRowProps): JSX.Element {
                         dialogReason.set(value);
                       }}
                     />
-                    <UserFieldError id="admin-user-blacklist-reason-error" issue={fieldIssue()} />
+                    <UserFieldError id={blacklistReasonErrorId} issue={fieldIssue()} />
                     <AdminUserDialogActions
                       busy={props.busy()}
                       blocked={blocked()}

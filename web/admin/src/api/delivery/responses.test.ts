@@ -229,9 +229,26 @@ test("rejects_take_attempt_with_send_fields_only", () => {
     ...attempt(),
     operation: "take",
   };
+  // Send 内容与 Take 目标同时出现是矛盾投影，整页失败关闭。
   expect(decodeDetailFixture(data).ok).toBe(false);
-  requireElement(data.attempts, 0, "Take 尝试").external_mail_id = "7000001";
+  // 合法 Take 只携带目标 MID；装备、收件人、正文摘要与 Sent 绑定都必须为空。
+  data.attempts[0] = {
+    operation: "take",
+    fencing_version: 3,
+    world_id: "main",
+    sending_at: time(0),
+    external_mail_id: "7000001",
+  };
   expect(decodeDetailFixture(data).ok).toBe(true);
+  const take = requireElement(data.attempts, 0, "Take 尝试");
+  take.bound_sent_mail_id = "7000002";
+  expect(decodeDetailFixture(data).ok).toBe(false);
+  take.bound_sent_mail_id = null;
+  take.equipment_ids = ["300753957"];
+  expect(decodeDetailFixture(data).ok).toBe(false);
+  take.equipment_ids = [];
+  delete take.external_mail_id;
+  expect(decodeDetailFixture(data).ok).toBe(false);
 });
 
 function firstEvidenceInFixture(fixture: unknown): JsonRecord {

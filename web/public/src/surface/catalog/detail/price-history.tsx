@@ -13,7 +13,7 @@ import { Time } from "@auction/web-shared/ui/components/time";
 import { formatCreditAmount } from "@auction/web-shared/ui/format";
 import { t } from "@auction/web-shared/ui/i18n";
 import type { JSX } from "@solidjs/web";
-import { For, Match, Show, Switch, useContext } from "solid-js";
+import { createEffect, For, Match, Show, Switch, useContext } from "solid-js";
 import { priceHistoryQueryDefault } from "../../../api/model";
 import { fetchHistoricalAuction } from "../../../api/queries/current";
 import { fetchPriceHistory, PRICE_HISTORY_FETCH_ERROR } from "../../../api/queries/price-history";
@@ -36,22 +36,22 @@ export function DetailPriceHistoryDialog(props: {
 }): JSX.Element {
   const selectedWorld = useContext(SelectedWorldContext);
   const page = createCell(1);
-  const historyDependencies = createValueMemo(() => {
-    // 目录抽屉跟随外壳的世界选择（在此同步读取以建立订阅）；其余来源在抽屉打开期间不变。
-    const knownWorld =
-      props.world.kind === "selected"
-        ? selectedWorld()
-        : props.world.kind === "known"
-          ? props.world.world
-          : null;
-    return {
-      auctionId: props.auctionId,
-      lotName: props.lotName,
-      world: props.world,
-      knownWorld,
-      requested: page(),
-    };
-  });
+  const knownWorld = createValueMemo(() =>
+    props.world.kind === "selected"
+      ? selectedWorld()
+      : props.world.kind === "known"
+        ? props.world.world
+        : null,
+  );
+  // 世界切换后旧页码可能超出新世界末页；重置到第一页，空页才不会失去返回入口。
+  createEffect(knownWorld, () => page.set(1));
+  const historyDependencies = createValueMemo(() => ({
+    auctionId: props.auctionId,
+    lotName: props.lotName,
+    world: props.world,
+    knownWorld: knownWorld(),
+    requested: page(),
+  }));
   const history = createTaskResource(historyDependencies, async (dependencies, context) => {
     // 名称得不到可用查询词时不发请求，按没有成交记录展示。
     const name = historyEquipmentNameQuery(dependencies.lotName);
@@ -118,7 +118,14 @@ export function DetailPriceHistoryDialog(props: {
           <Match when={snapshot() === undefined}>{null}</Match>
           <Match when={failed()}>
             <p class="public-catalog-detail__status" role="alert">
-              {t("data-error")}
+              <span>{t("data-error")}</span>
+              <button
+                class="public-catalog-detail__more"
+                type="button"
+                onClick={() => history.restart()}
+              >
+                {t("data-retry")}
+              </button>
             </p>
           </Match>
           <Match when={nonEmptyPage()}>

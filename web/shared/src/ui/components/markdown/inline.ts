@@ -220,18 +220,31 @@ function byteLengthWithinLimit(value: string, start: number, end: number, limit:
   return end - start <= limit && utf8ByteLength(value.slice(start, end)) <= limit;
 }
 
-/** 主循环只向前移动；缓存的结束位置随起点前进，缺失时以字符串末尾作为哨兵。 */
+/** 主循环只向前移动；缓存跳过已确认的转义候选，缺失时以字符串末尾作为哨兵。 */
 function nextDelimiter(
   value: string,
   start: number,
   delimiter: string,
   cached: DelimiterCache,
 ): number | null {
-  if (cached.position === null || cached.position < start) {
-    const offset = value.indexOf(delimiter, start);
-    cached.position = offset < 0 ? value.length : offset;
+  let position = cached.position;
+  if (position === null || position < start) {
+    position = value.indexOf(delimiter, start);
   }
-  return cached.position < value.length ? cached.position : null;
+  while (position >= 0 && isEscapedAt(value, position)) {
+    position = value.indexOf(delimiter, position + 1);
+  }
+  cached.position = position < 0 ? value.length : position;
+  return position < 0 ? null : position;
+}
+
+/** 位置前的连续反斜杠为奇数时该字符被转义，不能作为分隔符。 */
+function isEscapedAt(value: string, index: number): boolean {
+  let backslashes = 0;
+  for (let cursor = index - 1; cursor >= 0 && value.charAt(cursor) === "\\"; cursor -= 1) {
+    backslashes += 1;
+  }
+  return backslashes % 2 === 1;
 }
 
 function safeLinkTarget(value: string): string | null {

@@ -11,7 +11,7 @@ use auction_web_shared::query::location_parts;
 use dioxus::prelude::History;
 use dioxus::router::exports::percent_encoding::percent_decode_str;
 #[cfg(target_arch = "wasm32")]
-use wasm_bindgen::{JsCast, closure::Closure};
+use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 #[cfg(target_arch = "wasm32")]
 use web_sys::{Element, Event, MutationObserver, MutationObserverInit, Window};
 
@@ -221,7 +221,12 @@ impl FragmentScroll {
         options.set_child_list(true);
         options.set_subtree(true);
         options.set_attributes(true);
-        options.set_attribute_filter(&js_sys::Array::of2(&"id".into(), &"hidden".into()));
+        // 章节也常由 class/style 切换显示；只观察 id/hidden 会错过这类出现。
+        let attributes = js_sys::Array::new();
+        for name in ["id", "hidden", "class", "style"] {
+            attributes.push(&JsValue::from_str(name));
+        }
+        options.set_attribute_filter(&attributes);
         if observer.observe_with_options(root.as_ref(), &options).is_ok() {
             self.observer.replace(Some(observer));
         }

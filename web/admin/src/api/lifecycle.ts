@@ -10,12 +10,13 @@ import {
 import type { AdminAuctionLifecycleRequest } from "@auction/contracts/dto/admin/commands";
 import { apiResponseSchema } from "@auction/contracts/dto/response";
 import { err, ok, type Result, unreachable } from "@auction/web-shared/result";
+import { validUuid } from "@auction/web-shared/ui/validation";
 import {
   type AdminAuctionCommandPreparation,
   decodeAuctionCommandResponse,
   sendAuctionEdit,
 } from "./auctions";
-import { type AdminWriteFailure, writeOutcomeUnknown } from "./failure";
+import { type AdminWriteFailure, writeNotSent, writeOutcomeUnknown } from "./failure";
 import type { AdminSessionHost } from "./session";
 import { prepareJsonCommandOnce } from "./transport";
 
@@ -53,6 +54,9 @@ export async function executeAdminAuctionLifecycle(
   prepare: AdminAuctionCommandPreparation,
   signal: AbortSignal,
 ): Promise<Result<AdminAuctionLifecycleResult, AdminWriteFailure>> {
+  if (!validUuid(auctionId)) {
+    return err(writeNotSent("invalid_request"));
+  }
   const prepared = prepare(commandId);
   if (!prepared.ok) {
     return err(prepared.error);

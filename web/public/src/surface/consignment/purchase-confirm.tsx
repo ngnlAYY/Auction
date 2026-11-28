@@ -36,7 +36,8 @@ export function PurchaseConfirm(props: RoutePageProps): JSX.Element {
 
 function purchaseErrorMessage(error: ConsignmentPrivateError): string {
   // 不变量 1：结果未知不得读成失败，页面只提示原样重放。
-  if (commandErrorOutcomeUncertain(error)) return t("consignment-purchase-unknown");
+  if (!purchaseBusinessRejected(error) && commandErrorOutcomeUncertain(error))
+    return t("consignment-purchase-unknown");
   const key = purchaseErrorKey(error.code);
   return key === null ? consignmentErrorMessage(error) : t(key);
 }

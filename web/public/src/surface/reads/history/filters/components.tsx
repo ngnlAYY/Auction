@@ -105,6 +105,7 @@ export function PriceHistoryFilters(props: {
 
   let settingsToggle: HTMLButtonElement | undefined;
   const closeSettings = () => {
+    clearAnnouncement();
     filters.settingsOpen.set(false);
     const toggle = settingsToggle;
     if (toggle !== undefined) {
@@ -163,7 +164,10 @@ export function PriceHistoryFilters(props: {
             ref={(element) => {
               settingsToggle = element;
             }}
-            onClick={() => filters.settingsOpen.update((open) => !open)}
+            onClick={() => {
+              if (filters.settingsOpen()) clearAnnouncement();
+              filters.settingsOpen.update((open) => !open);
+            }}
           >
             <span aria-hidden="true">⚙</span>
             {t("history-filter-settings")}

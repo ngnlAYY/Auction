@@ -43,9 +43,8 @@ export function parseBlocks(markdown: string): MarkdownBlock[] {
         if (candidateLine === undefined) {
           break;
         }
-        const candidate = rustTrimStart(candidateLine);
-        // 结束围栏必须与开头同类且至少同长；短标记或带正文的行仍属于代码。
-        if (isClosingFence(candidate, fence.fence)) {
+        // 结束围栏必须与开头同类、至多缩进三格且至少同长；短标记或带正文的行仍属于代码。
+        if (isClosingFence(candidateLine, fence.fence)) {
           index += 1;
           break;
         }
@@ -74,24 +73,27 @@ export function parseBlocks(markdown: string): MarkdownBlock[] {
     }
 
     const nextLine = lines[index + 1];
-    if (nextLine !== undefined && trimmed.includes("|") && isTableSeparator(rustTrim(nextLine))) {
-      const headers = splitTableRow(trimmed).map(parseInline);
-      index += 2;
-      const rows: (readonly (readonly Inline[])[])[] = [];
-      while (index < lines.length) {
-        const rowLine = lines[index];
-        if (rowLine === undefined) {
-          break;
+    if (trimmed.includes("|") && nextLine !== undefined) {
+      const headerCells = splitTableRow(trimmed);
+      if (isTableSeparator(rustTrim(nextLine), headerCells.length)) {
+        const headers = headerCells.map(parseInline);
+        index += 2;
+        const rows: (readonly (readonly Inline[])[])[] = [];
+        while (index < lines.length) {
+          const rowLine = lines[index];
+          if (rowLine === undefined) {
+            break;
+          }
+          const row = rustTrim(rowLine);
+          if (row.length === 0 || !row.includes("|")) {
+            break;
+          }
+          rows.push(splitTableRow(row).map(parseInline));
+          index += 1;
         }
-        const row = rustTrim(rowLine);
-        if (row.length === 0 || !row.includes("|")) {
-          break;
-        }
-        rows.push(splitTableRow(row).map(parseInline));
-        index += 1;
+        blocks.push({ kind: "table", headers, rows });
+        continue;
       }
-      blocks.push({ kind: "table", headers, rows });
-      continue;
     }
 
     if (trimmed.startsWith(">")) {
@@ -185,7 +187,9 @@ function startsBlock(lines: readonly string[], index: number): boolean {
     trimmed.startsWith(">") ||
     unorderedItem(trimmed) !== null ||
     orderedItem(trimmed) !== null ||
-    (nextLine !== undefined && trimmed.includes("|") && isTableSeparator(rustTrim(nextLine)))
+    (trimmed.includes("|") &&
+      nextLine !== undefined &&
+      isTableSeparator(rustTrim(nextLine), splitTableRow(trimmed).length))
   );
 }
 
@@ -215,12 +219,17 @@ function fenceStart(value: string): FenceStart | null {
   };
 }
 
-function isClosingFence(candidate: string, fence: string): boolean {
-  if (!candidate.startsWith(fence)) {
+/** 结束围栏与开头同类、至少同长，至多缩进三个空格；短标记或带正文的行仍属于代码。 */
+function isClosingFence(line: string, fence: string): boolean {
+  let start = 0;
+  while (line.charAt(start) === " ") {
+    start += 1;
+  }
+  if (start > 3 || !line.startsWith(fence, start)) {
     return false;
   }
   const marker = fence.charAt(0);
-  let rest = candidate.slice(fence.length);
+  let rest = line.slice(start + fence.length);
   while (rest.startsWith(marker)) {
     rest = rest.slice(marker.length);
   }
@@ -266,9 +275,13 @@ function isRule(value: string): boolean {
   return count >= 3;
 }
 
-function isTableSeparator(value: string): boolean {
-  // split 即使对空文本也产生一个单元格；空行仍由长度校验拒绝。
-  for (const cell of splitTableRow(value)) {
+/** 分隔行必须与表头列数一致；列数不符时整行只是普通正文。 */
+function isTableSeparator(value: string, columns: number): boolean {
+  const cells = splitTableRow(value);
+  if (cells.length !== columns) {
+    return false;
+  }
+  for (const cell of cells) {
     if (!(utf8ByteLength(cell) >= 3 && [...cell].every(isTableSeparatorCharacter))) {
       return false;
     }
@@ -280,15 +293,35 @@ function isTableSeparatorCharacter(character: string): boolean {
   return character === "-" || character === ":";
 }
 
+/** 只按未转义的 `|` 切分：`\|` 属于单元格正文，与行内解析器的转义一致。 */
 function splitTableRow(value: string): string[] {
   let row = rustTrim(value);
   if (row.startsWith("|")) {
     row = row.slice(1);
   }
-  if (row.endsWith("|")) {
+  if (row.length > 0 && row.endsWith("|") && !isEscapedAt(row, row.length - 1)) {
     row = row.slice(0, -1);
   }
-  return row.split("|").map(rustTrim);
+  const cells: string[] = [];
+  let start = 0;
+  for (let index = 0; index < row.length; index += 1) {
+    if (row.charAt(index) !== "|" || isEscapedAt(row, index)) {
+      continue;
+    }
+    cells.push(rustTrim(row.slice(start, index)));
+    start = index + 1;
+  }
+  cells.push(rustTrim(row.slice(start)));
+  return cells;
+}
+
+/** 位置前的连续反斜杠为奇数时，该字符被转义。 */
+function isEscapedAt(value: string, index: number): boolean {
+  let backslashes = 0;
+  for (let cursor = index - 1; cursor >= 0 && value.charAt(cursor) === "\\"; cursor -= 1) {
+    backslashes += 1;
+  }
+  return backslashes % 2 === 1;
 }
 
 function unorderedItem(value: string): string | null {

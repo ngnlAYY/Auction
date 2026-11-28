@@ -14,8 +14,10 @@ import {
 import { apiResponseSchema } from "@auction/contracts/dto/response";
 import type { JsonFieldPolicy } from "@auction/web-shared/net/wire";
 import { err, ok, type Result } from "@auction/web-shared/result";
+import { utf8ByteLength } from "@auction/web-shared/text";
 import { validUuid } from "@auction/web-shared/ui/validation";
 
+import { parseRustUuid, rustUuidIsNil } from "./credentials/decode";
 import {
   type AdminWriteFailure,
   type AdminWriteNotSent,
@@ -27,6 +29,7 @@ import {
   writeOutcomeUnknown,
 } from "./failure";
 import { type AdminSessionHost, adminSessionHostLive } from "./session";
+import { trimRustWhitespace } from "./session-time";
 import {
   type PreparedJsonCommand,
   prepareJsonCommandOnce,
@@ -59,6 +62,9 @@ export async function fetchAdminRecovery(
   auctionId: string,
   signal: AbortSignal,
 ): Promise<Result<AdminRecoveryReport, string>> {
+  if (!validUuid(auctionId)) {
+    return err(invalidRequestError(auctionId));
+  }
   const url = recoveryReportUrl(auctionId);
   const response = await sendGet(host, url, signal);
   if (!response.ok) {
@@ -160,10 +166,20 @@ export async function confirmAdminRecovery(
   }
   const intent = state.intent;
   // Rust 用 i64 构造该字段；NaN 会被序列化成 null，小数也不是服务端能构造的版本。
-  if (!Number.isSafeInteger(intent.expectedStateVersion)) {
-    return err(writeNotSent(invalidRequestError(intent.expectedStateVersion)));
+  if (
+    !validUuid(intent.recoveryId) ||
+    !Number.isSafeInteger(intent.expectedStateVersion) ||
+    intent.expectedStateVersion <= 0 ||
+    !validRecoveryConfirmationAction(intent.action) ||
+    !validRecoveryConfirmationReason(intent.action, intent.reason)
+  ) {
+    return err(writeNotSent(invalidRequestError(intent)));
   }
-  const prepared = state.prepare(commandId);
+  const canonicalCommandId = parseRustUuid(commandId);
+  if (canonicalCommandId === null || rustUuidIsNil(canonicalCommandId)) {
+    return err(writeNotSent(invalidRequestError(commandId)));
+  }
+  const prepared = state.prepare(canonicalCommandId);
   if (!prepared.ok) {
     return err(prepared.error);
   }
@@ -306,7 +322,7 @@ function validateRecoveryConfirmation(
   if (
     !validUuid(recovery.id) ||
     recovery.id !== requestedRecoveryId ||
-    !validRecoveryCommand(recovery.action) ||
+    !validRecoveryConfirmationAction(recovery.action) ||
     recovery.action !== requestedAction ||
     recovery.resolution !== recovery.action ||
     !validRecoveryStage(recovery.stage) ||
@@ -354,6 +370,19 @@ function validRecoveryCommand(value: string): boolean {
     ["reclaimed", "cancelled", "equipment_recovered", "returned_after_three_cod_returns"],
     value,
   );
+}
+
+/** 人工确认只接受三个动作；`returned_after_three_cod_returns` 是报告里的既有处置，不是可提交命令。 */
+function validRecoveryConfirmationAction(value: string): boolean {
+  return inClosedSet(["reclaimed", "cancelled", "equipment_recovered"], value);
+}
+
+/** 镜像 Rust 命令边界：未收回必须留空理由，其余动作必须有去空白后的非空、至多 512 字节理由。 */
+function validRecoveryConfirmationReason(action: string, reason: string): boolean {
+  if (action === "reclaimed") {
+    return trimRustWhitespace(reason) === "";
+  }
+  return validTrimmedText(reason) && utf8ByteLength(reason) <= 512;
 }
 
 function validRecoveryActionKind(value: string): boolean {

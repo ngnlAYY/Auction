@@ -81,13 +81,11 @@ export function runtimeConfigFormMoveEquipmentColor(
     return form;
   }
   const equipmentColors = [...form.equipmentColors];
-  const first = equipmentColors[index];
-  const second = equipmentColors[target];
-  if (first === undefined || second === undefined) {
+  const [moved] = equipmentColors.splice(index, 1);
+  if (moved === undefined) {
     return form;
   }
-  equipmentColors[index] = second;
-  equipmentColors[target] = first;
+  equipmentColors.splice(target, 0, moved);
   return { ...form, equipmentColors };
 }
 

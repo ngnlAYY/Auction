@@ -285,6 +285,7 @@ fn valid_mail_intake(value: &AdminMailIntake) -> bool {
         && valid_safe_text(&value.world_id, 256)
         && value.sender.as_deref().is_none_or(|sender| valid_safe_text(sender, 256))
         && value.subject.as_deref().is_none_or(|subject| valid_safe_text(subject, 512))
+        && valid_safe_text(&value.decision_code, 256)
         && AdminMailIntakeQuery::KIND_VALUES.contains(&value.kind.as_str())
         && valid_trimmed_text(&value.status)
         && processed_at >= received_at
@@ -336,6 +337,8 @@ fn decode_mail_deliveries(value: &AdminMailIntakeDetail) -> Result<(), &'static 
             || !valid_safe_text(&delivery.recipient, 512)
             || !super::valid_status(&delivery.status)
             || !(0..=MAX_JSON_SAFE_INTEGER).contains(&delivery.fencing_version)
+            || delivery.attempt_count > i32::MAX as u32
+            || !delivery.reason_code.as_deref().is_none_or(|value| valid_safe_text(value, 512))
             || (matches!(delivery.status.as_str(), "failed" | "manual_reconcile")
                 && delivery.fencing_version == 0)
             || !delivery.failure_code.as_deref().is_none_or(|value| valid_safe_text(value, 512))
@@ -392,6 +395,7 @@ fn decode_mail_equipment_diagnostic(
                 | "attributes_invalid"
                 | "tradeable_required"
         ),
+        ("snapshot_invalid" | "filter_rejected", None) => false,
         (_, None) => true,
         _ => false,
     };

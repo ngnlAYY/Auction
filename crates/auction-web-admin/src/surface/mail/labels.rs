@@ -5,6 +5,7 @@ use auction_web_shared::t;
 pub(super) fn mail_status_class(status: &str) -> &'static str {
     match status {
         "accepted" => "admin-mail__status admin-mail__status--accepted",
+        "rejected" => "admin-mail__status admin-mail__status--failed",
         "failed" => "admin-mail__status admin-mail__status--failed",
         _ => "admin-mail__status admin-mail__status--pending",
     }

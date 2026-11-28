@@ -75,10 +75,16 @@ export function Pager(props: PagerProps): JSX.Element {
   const appliedPage = createValueMemo(() =>
     Number.isSafeInteger(props.page) && props.page > 0 ? props.page : 1,
   );
-  const totalPages = createValueMemo(() => {
+  // 权威总数只在此收窄一次：非安全整数或负值按 0，缺省表示游标语义。
+  const totalCount = createValueMemo((): number | null => {
     const rawTotal = props.total ?? null;
-    const total =
-      rawTotal === null ? null : Number.isSafeInteger(rawTotal) && rawTotal >= 0 ? rawTotal : 0;
+    if (rawTotal === null) {
+      return null;
+    }
+    return Number.isSafeInteger(rawTotal) && rawTotal >= 0 ? rawTotal : 0;
+  });
+  const totalPages = createValueMemo(() => {
+    const total = totalCount();
     const raw =
       total === null
         ? props.hasMore === true
@@ -136,7 +142,7 @@ export function Pager(props: PagerProps): JSX.Element {
   const numbered = createValueMemo(() => hasSizeOptions() || props.numberedLayout === true);
   // 只有已提交的页仍在范围内，才给它显示条目序号。
   const itemRange = createValueMemo((): readonly [number, number, number] | null => {
-    const total = props.total ?? null;
+    const total = totalCount();
     if (total === null) {
       return null;
     }

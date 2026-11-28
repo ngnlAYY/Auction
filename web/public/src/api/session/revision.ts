@@ -104,10 +104,10 @@ export function startPublicSessionIdentityObservation() {
   const revision = publicSessionPrimaryRevision();
   const logout = getItem(PUBLIC_SESSION_LOGOUT_REVISION_STORAGE_KEY);
   const registration = registeredSessionCheckTrigger;
-  const localLogin = unsharedLoginRevision;
+  const login = unsharedLoginRevision ?? getItem(PUBLIC_SESSION_LOGIN_REVISION_STORAGE_KEY);
   const cookieCurrent = () =>
     registration === registeredSessionCheckTrigger &&
-    localLogin === unsharedLoginRevision &&
+    login === (unsharedLoginRevision ?? getItem(PUBLIC_SESSION_LOGIN_REVISION_STORAGE_KEY)) &&
     revision === publicSessionPrimaryRevision() &&
     logout === getItem(PUBLIC_SESSION_LOGOUT_REVISION_STORAGE_KEY);
   const current = () => identity === identityRevision && cookieCurrent();

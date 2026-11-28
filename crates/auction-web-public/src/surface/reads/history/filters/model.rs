@@ -132,6 +132,15 @@ impl HistoryField {
         }
     }
 
+    /// 日期子字段的焦点目标；月份与年份可分别定位。
+    pub(super) fn month_focus_id(self) -> &'static str {
+        match self {
+            Self::From => "public-history-from-month",
+            Self::To => "public-history-to-month",
+            _ => self.focus_id(),
+        }
+    }
+
     pub(super) fn partner(self) -> Option<Self> {
         match self {
             Self::From => Some(Self::To),

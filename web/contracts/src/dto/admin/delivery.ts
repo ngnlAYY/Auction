@@ -29,15 +29,21 @@ const ADMIN_DELIVERY_CATEGORIES = [
   "manual",
 ] as const;
 const ADMIN_DELIVERY_DISPOSITION_KINDS = [
+  // Admin 命令账本的动作名与人工 Sent 证明命令；缺省详情投影同样输出。
+  "release",
+  "retry_failed",
+  "reconcile",
+  "sent_operator_confirmed",
+  "operator_acknowledged",
   "auto_sent_proof",
   "operator_sent_confirmation",
   "admin_failed",
   "equipment_loss",
   "cod_returned",
-  "recovery_equipment_recovered",
   "legacy_self",
   "preflight_retired",
-  "operator_acknowledged",
+  // 只随 `include=settlement_returns` 输出的处置种类。
+  "recovery_equipment_recovered",
   "season_closed",
 ] as const;
 const ADMIN_DELIVERY_OBLIGATION_KINDS = [

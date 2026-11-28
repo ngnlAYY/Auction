@@ -239,7 +239,8 @@ fn valid_auction_lifecycle(value: &AdminAuction) -> bool {
     let ordered = opened
         .is_none_or(|opened| preview_opened.is_some_and(|preview| opened >= preview))
         && final_phase.is_none_or(|final_phase| opened.is_some_and(|opened| final_phase >= opened))
-        && settled.is_none_or(|settled| opened.is_some_and(|opened| settled >= opened));
+        && settled
+            .is_none_or(|settled| final_phase.is_some_and(|final_phase| settled >= final_phase));
     ordered
         && match value.status.as_str() {
             "draft" => {
@@ -248,7 +249,12 @@ fn valid_auction_lifecycle(value: &AdminAuction) -> bool {
                     && final_phase.is_none()
                     && settled.is_none()
             }
-            "preview" => opened.is_none() && final_phase.is_none() && settled.is_none(),
+            "preview" => {
+                preview_opened.is_some()
+                    && opened.is_none()
+                    && final_phase.is_none()
+                    && settled.is_none()
+            }
             "live" => opened.is_some() && final_phase.is_none() && settled.is_none(),
             "final" | "settling" => opened.is_some() && final_phase.is_some() && settled.is_none(),
             "settled" => opened.is_some() && final_phase.is_some() && settled.is_some(),

@@ -129,12 +129,10 @@ impl DashboardDerived {
                     || world.evidence_status == "stale"
             })
         });
-        let recovery_state = if recovery.is_none() {
+        let recovery_state = if recovery.is_none() || recovery_evidence_unavailable {
             "neutral"
         } else if recovery_actionable {
             "error"
-        } else if recovery_evidence_unavailable {
-            "neutral"
         } else if recovery_evidence_warning {
             "warn"
         } else if snapshot.recovery.status == "ok" {

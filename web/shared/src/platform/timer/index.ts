@@ -5,7 +5,7 @@ import { createPromiseResolvers } from "../promise";
 /** 浏览器 `setTimeout` 能可靠表达的最大延时（32 位有符号上限）。 */
 const MAX_TIMEOUT_MILLIS = 2_147_483_647;
 
-/** 把调用方延时限制到浏览器可表达的范围；负值与非法值按 0 处理。 */
+/** 把调用方延时限制到浏览器可表达的范围；负值、NaN 与 -Infinity 按 0 处理，+Infinity 取上限。 */
 function boundedDelay(milliseconds: number): number {
   if (!Number.isFinite(milliseconds)) {
     return milliseconds === Number.POSITIVE_INFINITY ? MAX_TIMEOUT_MILLIS : 0;
@@ -21,7 +21,7 @@ export interface TimeoutFuture {
   cancel(): void;
 }
 
-/** 创建一次性定时等待；超过浏览器上限的延时饱和到上限，保持“至少等这么久”。 */
+/** 创建一次性定时等待；超过浏览器上限的延时饱和到上限（上限内至少等待请求时长）。 */
 export function createTimeoutFuture(milliseconds: number): TimeoutFuture {
   let finished = false;
   const timeout = createPromiseResolvers<void>();

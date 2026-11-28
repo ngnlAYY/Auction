@@ -41,21 +41,23 @@ export function MarkdownBlocks(props: MarkdownBlocksProps): JSX.Element {
   );
 }
 
-/** 移除正文首行的一级标题，避免页面标题与 Markdown 标题重复显示。 */
+/** 移除正文首个一级标题（忽略其前的空行与缩进），避免页面标题与 Markdown 标题重复显示。 */
 export function withoutLeadingTitle(markdown: string): string {
   const source = markdown.startsWith("\uFEFF") ? markdown.slice(1) : markdown;
   const lines = rustLines(source);
-  const first = lines[0];
-  if (first === undefined) {
-    return "";
+  // 与块解析一致：标题前的空行与缩进不影响识别。
+  let titleIndex = 0;
+  while (titleIndex < lines.length && (lines[titleIndex] ?? "").trim() === "") {
+    titleIndex += 1;
   }
-  const isTitle = first.startsWith("#") && (first.charAt(1) === " " || first.charAt(1) === "\t");
+  const title = (lines[titleIndex] ?? "").trim();
+  const isTitle = title.startsWith("#") && (title.charAt(1) === " " || title.charAt(1) === "\t");
   if (!isTitle) {
     return source;
   }
   // 保留 lines 的 CRLF 归一化与末尾换行处理，只跳过标题后的第一条空行。
-  const rest = lines.slice(1);
-  if (rest[0] === "") {
+  const rest = lines.slice(titleIndex + 1);
+  if ((rest[0] ?? "").trim() === "") {
     rest.shift();
   }
   return rest.join("\n");

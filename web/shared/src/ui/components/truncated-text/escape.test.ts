@@ -341,8 +341,10 @@ test.each(["aria", "native", "fallback"] as const)(
       const background = page.tooltip();
       background.hover();
       const foreground = page.element(kind === "aria" ? "section" : "dialog");
-      if (kind === "aria") foreground.setAttribute("aria-modal", "true");
-      else {
+      if (kind === "aria") {
+        foreground.setAttribute("role", "dialog");
+        foreground.setAttribute("aria-modal", "true");
+      } else {
         foreground.setAttribute("open", "");
         foreground.setAttribute("modal", "");
       }
@@ -350,6 +352,7 @@ test.each(["aria", "native", "fallback"] as const)(
       // 原生顶层优先于文档中更晚出现的手工对话框。
       if (kind !== "aria") {
         const aria = page.element("section");
+        aria.setAttribute("role", "dialog");
         aria.setAttribute("aria-modal", "true");
         page.tooltip(aria).hover();
       }

@@ -72,7 +72,8 @@ function Instructions(props: {
   });
   const feedback = createCell<ConsignmentPrivateError | null>(null);
   const copy = createCell<"copied" | "failed" | null>(null);
-  const pending = useConsignmentPending(props.canUse, (result) => {
+  const pending = useConsignmentPending(props.canUse, (result, record) => {
+    if (record.operation === "register" || record.listing_id !== props.listingId) return;
     if (result.ok) {
       feedback.set(null);
       copy.set(null);

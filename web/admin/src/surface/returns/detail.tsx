@@ -113,8 +113,9 @@ function ReturnDetailPage(props: ReturnDetailPageProps): JSX.Element {
     return snapshot.result;
   });
   const canRefresh = createValueMemo(() => loaded()?.ok === true);
-  const invalidIdView = createValueMemo(() => loaded() === null && !validUuid(returnId));
-  const loadingView = createValueMemo(() => loaded() === null && validUuid(returnId));
+  // 非法标识不会产生可重试请求：无论读取是否完成都直接展示标识错误，不提供无意义的刷新。
+  const invalidIdView = createValueMemo(() => !validUuid(returnId));
+  const loadingView = createValueMemo(() => loaded() === null);
   const errorView = createValueMemo((): ErrorCode | null => {
     const current = loaded();
     return current !== null && !current.ok ? { code: current.error } : null;

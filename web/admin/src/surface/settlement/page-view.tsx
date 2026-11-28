@@ -44,6 +44,7 @@ export interface AdminSettlementViewState {
   readonly pickerCatalog: Accessor<AdminSettlementCatalogPage | null>;
   readonly catalogLoading: Accessor<boolean>;
   readonly contradictoryLink: Accessor<boolean>;
+  readonly locationIsCurrent: () => boolean;
   readonly catalogPageForPager: Accessor<AdminSettlementCatalogPage | null>;
   readonly catalogPagerIsCurrent: () => boolean;
   readonly reportTitle: Accessor<string>;
@@ -107,6 +108,7 @@ export function AdminSettlementPageView(props: {
             <p class="admin-auction-intro">{t("admin-settlement-selector-note")}</p>
             <AdminSettlementPicker
               catalog={state.pickerCatalog()}
+              isCurrent={state.locationIsCurrent}
               worldFilter={state.worldFilter}
               requestedSequence={state.requestedSequence}
               selectedAuctionId={state.selectedAuctionId}

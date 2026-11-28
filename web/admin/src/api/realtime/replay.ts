@@ -24,7 +24,6 @@ import {
 } from "../transport";
 import { decodeRealtimeReplayReceipt } from "./decode";
 
-const I32_MIN = -2_147_483_648;
 const I32_MAX = 2_147_483_647;
 
 /** 已冻结的重放参数与首次执行时生成的正文；正文供首次发送和原样重试共用。 */
@@ -43,7 +42,7 @@ export function prepareRealtimeReplay(
   schemaVersion: number,
   publicPayloadText: string,
 ): (commandId: string) => Result<PreparedRealtimeReplay, AdminWriteNotSent> {
-  if (!Number.isInteger(schemaVersion) || schemaVersion < I32_MIN || schemaVersion > I32_MAX) {
+  if (!Number.isInteger(schemaVersion) || schemaVersion <= 0 || schemaVersion > I32_MAX) {
     const failure = writeNotSent("invalid_request");
     return () => err(failure);
   }

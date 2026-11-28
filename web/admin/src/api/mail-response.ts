@@ -105,6 +105,7 @@ export function validMailIntake(
     validSafeText(value.world_id, 256) &&
     (value.sender === null || validSafeText(value.sender, 256)) &&
     (value.subject === null || validSafeText(value.subject, 512)) &&
+    validSafeText(value.decision_code, 256) &&
     kindValues.includes(value.kind) &&
     validTrimmedText(value.status) &&
     processedAt >= receivedAt
@@ -158,8 +159,8 @@ export function acceptedPollers(
     payload.message !== "" &&
     validUuid(receipt.command_id) &&
     receipt.command_id === commandId &&
-    receipt.pollers >= 1 &&
-    receipt.pollers <= MAX_JSON_SAFE_INTEGER
+    Number.isSafeInteger(receipt.pollers) &&
+    receipt.pollers >= 1
     ? receipt.pollers
     : null;
 }
@@ -222,6 +223,8 @@ function decodeMailDeliveries(value: AdminMailIntakeDetailResponse): Result<null
         delivery.operation === "take"
       ) ||
       !validSafeText(delivery.recipient, 512) ||
+      delivery.attempt_count > 2_147_483_647 ||
+      (delivery.reason_code !== null && !validSafeText(delivery.reason_code, 512)) ||
       !validStatus(delivery.status) ||
       delivery.fencing_version < 0 ||
       delivery.fencing_version > MAX_JSON_SAFE_INTEGER ||
@@ -285,29 +288,31 @@ function validEquipmentDetail(category: string, detailCode: string | null, stage
       detailCode === "equipment_canonical_mismatch"
     );
   }
-  if (category === "snapshot_invalid" && detailCode !== null) {
+  if (category === "snapshot_invalid") {
     return (
-      detailCode === "adapter_invalid" ||
-      detailCode === "fingerprint_invalid" ||
-      detailCode === "equipment_id_invalid" ||
-      detailCode === "name_invalid" ||
-      detailCode === "category_invalid" ||
-      detailCode === "level_invalid" ||
-      detailCode === "collected_at_invalid" ||
-      detailCode === "collected_at_future" ||
-      detailCode === "attributes_invalid"
+      detailCode !== null &&
+      (detailCode === "adapter_invalid" ||
+        detailCode === "fingerprint_invalid" ||
+        detailCode === "equipment_id_invalid" ||
+        detailCode === "name_invalid" ||
+        detailCode === "category_invalid" ||
+        detailCode === "level_invalid" ||
+        detailCode === "collected_at_invalid" ||
+        detailCode === "collected_at_future" ||
+        detailCode === "attributes_invalid")
     );
   }
-  if (category === "filter_rejected" && detailCode !== null) {
+  if (category === "filter_rejected") {
     return (
-      detailCode === "quality_not_allowed" ||
-      detailCode === "prefix_not_allowed" ||
-      detailCode === "suffix_not_allowed" ||
-      detailCode === "category_not_allowed" ||
-      detailCode === "equipment_type_not_allowed" ||
-      detailCode === "level_not_allowed" ||
-      detailCode === "attributes_invalid" ||
-      detailCode === "tradeable_required"
+      detailCode !== null &&
+      (detailCode === "quality_not_allowed" ||
+        detailCode === "prefix_not_allowed" ||
+        detailCode === "suffix_not_allowed" ||
+        detailCode === "category_not_allowed" ||
+        detailCode === "equipment_type_not_allowed" ||
+        detailCode === "level_not_allowed" ||
+        detailCode === "attributes_invalid" ||
+        detailCode === "tradeable_required")
     );
   }
   return detailCode === null;
@@ -443,7 +448,7 @@ function decodeMailMetadata(value: AdminMailIntakeMetadataResponse): Result<null
     !validOptionalMetadataText(value.owner_result_code) ||
     !validOptionalMetadataText(value.reason_code) ||
     !validMetadataList(value.warning_codes) ||
-    !validMetadataList(value.delivery_ids)
+    !validDeliveryIds(value.delivery_ids)
   ) {
     return err("mail_metadata");
   }
@@ -456,4 +461,19 @@ function validOptionalMetadataText(value: string): boolean {
 
 function validMetadataList(values: readonly string[]): boolean {
   return values.length <= 1000 && values.every((value) => validSafeText(value, 512));
+}
+
+/** 关联投递 ID：至多 1000 条、每条为 UUID 且不得重复（与 Rust `valid_delivery_ids` 一致）。 */
+function validDeliveryIds(values: readonly string[]): boolean {
+  if (values.length > 1000) {
+    return false;
+  }
+  const seen = new Set<string>();
+  return values.every((value) => {
+    if (!validUuid(value) || seen.has(value)) {
+      return false;
+    }
+    seen.add(value);
+    return true;
+  });
 }

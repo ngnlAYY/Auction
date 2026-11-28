@@ -164,7 +164,7 @@ function AdminSettlementLots(props: {
         <AsyncState kind="empty" title={t("admin-settlement-no-lots")} detail="" />
       </Show>
       <AdminSettlementPager
-        currentPage={props.lotPage()}
+        currentPage={currentLotPage()}
         totalRows={props.report.lots.length}
         pagination={lotPagination}
         page={props.lotPage}

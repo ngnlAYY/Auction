@@ -24,6 +24,7 @@ import {
   updatePublicPage,
   updatePublicPageSize,
 } from "./pagination";
+import { usePublicPageBounds } from "./pagination/bounds";
 import { updatePublicQueryState, usePublicQueryState } from "./query";
 import { usePageRouteGuard } from "./query/route-page";
 
@@ -44,9 +45,16 @@ export function page(): JSX.Element {
   const pageNumber = createValueMemo(() => Math.max(queryStateSignal().page, 1));
   const pageSize = createValueMemo(() => queryStateSignal().pageSize);
   const requested = createValueMemo(() => [pageNumber(), pageSize()] as const);
+  // 页码先按统一偏移上限纠偏；超出服务端可接受范围时只提供纠偏重试，不发注定 400 的请求。
+  const bounds = usePublicPageBounds(queryStateSignal, "Blacklist", (query) => [
+    ["page", query.pageSize],
+  ]);
   const blacklist = createTaskResource(
     () => ({ generation: refreshGeneration(), requested: requested() }),
     async (dependencies, context): Promise<LoadedBlacklist | null> => {
+      if (bounds.blocked("page")) {
+        return null;
+      }
       const [page, size] = dependencies.requested;
       const result = await fetchBlacklist(page, size, context.signal);
       if (!context.alive()) {
@@ -78,6 +86,9 @@ export function page(): JSX.Element {
   });
   // 没有当前页码的结果（含等待页码纠偏后的重读）时由顶栏提示加载，正文留空。
   useContentLoading(() => {
+    if (bounds.failed("page")) {
+      return false;
+    }
     const result = current();
     if (result === null) {
       return true;
@@ -91,6 +102,15 @@ export function page(): JSX.Element {
 
   return (
     <Switch>
+      <Match when={bounds.failed("page")}>
+        <AsyncState
+          kind="error"
+          title={t("page-blacklist-title")}
+          detail={t("data-error")}
+          retryLabel={t("data-retry")}
+          onRetry={bounds.retry}
+        />
+      </Match>
       <Match when={current() === null}>{null}</Match>
       <Match when={current()?.ok === false}>
         <AsyncState
@@ -166,7 +186,6 @@ function BlacklistTable(props: {
           total={props.page.total}
           hasMore={false}
           label={t("page-blacklist-title")}
-          maxOffset={2147483647}
           onPageChange={props.onPageChange}
           onPageClamp={props.onPageClamp}
           onPageSizeChange={props.onPageSizeChange}

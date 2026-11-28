@@ -94,10 +94,11 @@ async function staticModules(snapshot: Snapshot, entry: string) {
       const specifier = statement.moduleSpecifier;
       if (specifier === undefined || !isStringLiteral(specifier)) continue;
       const specifierText = specifier.text;
-      const target =
-        specifierText === "." || specifierText === ".."
-          ? resolve(dirname(file), specifierText)
-          : resolveSpecifierTarget({ sourceFile: file, specifier: specifierText, repositoryRoot });
+      const target = resolveSpecifierTarget({
+        sourceFile: file,
+        specifier: specifierText,
+        repositoryRoot,
+      });
       if (target === undefined || packageOfPath(target, repositoryRoot) === undefined) continue;
       const dependency = Bun.resolveSync(target, dirname(file));
       if (/\.tsx?$/u.test(dependency)) pending.push(dependency);

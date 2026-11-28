@@ -22,6 +22,7 @@ import { useAdminPagination } from "../pagination";
 import { usePendingCommandGate } from "../pending";
 import { createCommandReload, usePendingCommandsWithGate } from "../pending/sources";
 import { type AdminActionFeedback, adminApiErrorMessage, adminWorldLabel } from "../presentation";
+import { adminRoutePattern } from "../router/route";
 import {
   type CatalogLoad,
   type CatalogLookupLoad,
@@ -50,6 +51,9 @@ import {
 import type { RecoveryConfirmationDraft, RecoveryRead } from "./recovery";
 
 export { resetDetailState };
+
+/** 页面位置门禁使用的路径；与路由表同源，改路由不会留下过期字面量。 */
+const SETTLEMENT_PATH = adminRoutePattern("Settlement");
 
 /** 加载并展示已结算拍卖的多条件报表页面。 */
 export function page(): JSX.Element {
@@ -421,12 +425,13 @@ function AdminSettlementPage(props: AdminSettlementPageProps): JSX.Element {
     return page !== null && !isEmptyCatalogTail(page) ? page : null;
   });
   // 站内导航与前进后退先同步位置版本，旧控件的事件可能早于本页恢复 effect。
-  const catalogPagerIsCurrent = (): boolean =>
+  const locationIsCurrent = (): boolean =>
     alive &&
     typeof window !== "undefined" &&
-    window.location.pathname === "/settlement" &&
-    props.locationRevision.peek() === appliedLocationRevision.peek() &&
-    untrack(catalogPageForPager) !== null;
+    window.location.pathname === SETTLEMENT_PATH &&
+    props.locationRevision.peek() === appliedLocationRevision.peek();
+  const catalogPagerIsCurrent = (): boolean =>
+    locationIsCurrent() && untrack(catalogPageForPager) !== null;
   const catalogLoading = (): boolean => {
     const current = currentCatalog();
     const lookup = catalogLookupState();
@@ -547,6 +552,7 @@ function AdminSettlementPage(props: AdminSettlementPageProps): JSX.Element {
     pickerCatalog,
     catalogLoading,
     contradictoryLink: () => selection().kind === "contradictory",
+    locationIsCurrent,
     catalogPageForPager,
     catalogPagerIsCurrent,
     reportTitle,

@@ -13,12 +13,23 @@ pub(super) fn current_focusable(document: &Document) -> Option<HtmlElement> {
 pub(super) fn is_focusable(element: &HtmlElement) -> bool {
     element.matches(FOCUSABLE_SELECTOR).unwrap_or(false)
         && !element.matches(":disabled").unwrap_or(false)
-        && element.is_connected()
+        && is_visible(element)
+}
+
+/// 已显示且仍连接的节点；隐藏祖先不参与焦点循环，也不承接程序化焦点。
+pub(super) fn is_visible(element: &HtmlElement) -> bool {
+    element.is_connected()
         // 手机折叠菜单、关闭的 details 与隐藏祖先不能成为焦点循环的首尾控件。
         && element.closest("[hidden], [inert], [aria-hidden=\"true\"]").ok().flatten().is_none()
         && element.get_client_rects().length() > 0
         && web_sys::window().and_then(|window| window.get_computed_style(element).ok().flatten())
             .is_none_or(|style| !matches!(style.get_property_value("visibility").ok().as_deref(), Some("hidden" | "collapse")))
+}
+
+/// 模态内可保留的焦点目标：可聚焦控件，或显式 `tabindex`（含 -1）的容器。
+/// 校验后聚焦的摘要容器不在 Tab 顺序中，但它的焦点不应被下一次无关变更抢走。
+pub(super) fn is_focus_target(element: &HtmlElement) -> bool {
+    is_focusable(element) || (element.has_attribute("tabindex") && is_visible(element))
 }
 
 pub(super) fn preferred_dialog_focus(dialog: &Element) -> Option<HtmlElement> {

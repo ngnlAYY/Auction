@@ -33,14 +33,18 @@ export const ConsignmentTimestampSchema = v.pipe(
 /** EID 不经过 Number 转换，避免丢失长编号精度。 */
 export const ExternalEquipmentIdSchema = v.pipe(v.string(), v.regex(/^[1-9][0-9]{0,31}$/u));
 
-/** 与 Rust `checked_text` 同样按 UTF-8 字节、Unicode 空白与控制字符判定。 */
+/** 与 Rust `checked_text` 同样按 UTF-8 字节、Unicode 空白、控制字符与行分隔符判定。 */
 export function consignmentTextSchema(maxBytes: number) {
   return v.pipe(
     v.string(),
     v.nonEmpty(),
     v.maxBytes(maxBytes),
     v.check(
-      (value) => !/(?:^\p{White_Space}|\p{White_Space}$|[\p{Control}\p{Surrogate}])/u.test(value),
+      // U+2028/U+2029 不属于控制字符，但 Rust 的行内文本口径一律拒绝，不能只在首尾拒绝。
+      (value) =>
+        !/(?:^\p{White_Space}|\p{White_Space}$|[\p{Control}\p{Surrogate}\u2028\u2029])/u.test(
+          value,
+        ),
     ),
   );
 }

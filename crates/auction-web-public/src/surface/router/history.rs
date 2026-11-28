@@ -134,7 +134,9 @@ impl<R: Routable> QueryLocation for PublicHistory<R> {
             return false;
         }
         // pushState/replaceState 没有 popstate。写成功才让路由及各查询订阅者重读地址。
-        if let Some(notify) = &*self.notify.borrow() {
+        // 先复制回调并释放借用，路由重建触发 updater() 时不会碰到已借用的 RefCell。
+        let notify = self.notify.borrow().clone();
+        if let Some(notify) = notify {
             notify();
         }
         true
